@@ -1,0 +1,37 @@
+task: hellaswag_gen
+dataset_path: Rowan/hellaswag
+output_type: generate_until
+validation_split: validation
+test_split: null
+doc_to_text: >-
+  Given the following context and four possible endings, choose the best ending.
+
+  Context: {{ ctx }}
+
+  A. {{ endings[0] }}
+  B. {{ endings[1] }}
+  C. {{ endings[2] }}
+  D. {{ endings[3] }}
+
+  Answer with just the letter of the best ending (A, B, C or D).
+doc_to_target: "{{ 'ABCD'[label | int] }}"
+generation_kwargs:
+  until:
+    - "\n\n"
+  max_gen_toks: 20
+  do_sample: false
+  temperature: 0.0
+metric_list:
+  - metric: exact_match
+    aggregation: mean
+    higher_is_better: true
+    ignore_case: true
+    ignore_punctuation: true
+filter_list:
+  - name: custom-extract
+    filter:
+      - function: regex
+        regex_pattern: '(?:answer (?:is|:)|would be|option)?\s*\(?([ABCD])\b'
+      - function: take_first
+metadata:
+  version: 1.0

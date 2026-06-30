@@ -1,0 +1,47 @@
+## Klassifikation der 57 Fachgebiete aus MMU-Benchmark ##
+
+Variante A: Biologie/Medizin trennen + Geschichte/Recht trennen
+#	Gruppe				Fächer
+1	Mathematik			5
+2	Physik, Ingenieurwesen, Astronomie	5
+3	Chemie				2
+4	Biologie			5
+5	Medizin				6
+6	Informatik			4
+7	Sozialwissenschaften		10
+8	Geschichte & Politik		5
+9	Recht				3
+10	Philosophie, Ethik, Religion	5
+11	Betriebswirtschaft & Management	3
+12	Logik & Allgemeinwissen		4
+
+Variante B: Sozialwissenschaften splitten + Geschichte/Recht splitten
+#	Gruppe	Fächer
+1	Mathematik	5
+2	Physik, Ingenieurwesen, Astronomie	5
+3	Chemie	2
+4	Biologie & Medizin	11
+5	Informatik	4
+6	Psychologie & Soziologie	4
+7	Politik & Geographie	6
+8	Geschichte	4
+9	Recht	3
+10	Philosophie, Ethik, Religion	5
+11	Betriebswirtschaft & Management	3
+12	Logik & Allgemeinwissen	4
+
+MMLU 12 Groups (user's classification):
+
+1. Mathematics & Statistics (5): abstract_algebra, college_mathematics, elementary_mathematics, high_school_mathematics, high_school_statistics
+2. Physics & Engineering (4): college_physics, conceptual_physics, electrical_engineering, high_school_physics
+3. Chemistry (2): college_chemistry, high_school_chemistry
+4. Biology & Health (11): anatomy, college_biology, college_medicine, high_school_biology, human_aging, human_sexuality, medical_genetics, nutrition, professional_medicine, virology, clinical_knowledge
+5. Computer Science (4): college_computer_science, computer_security, high_school_computer_science, machine_learning
+6. Social Sciences (10): econometrics, high_school_geography, high_school_government_and_politics, high_school_macroeconomics, high_school_microeconomics, high_school_psychology, professional_psychology, public_relations, security_studies, sociology
+7. History & Geography (4): high_school_european_history, high_school_us_history, high_school_world_history, prehistory
+8. Law & Politics (4): international_law, jurisprudence, professional_law, us_foreign_policy
+9. Philosophy & Ethics (5): business_ethics, moral_disputes, moral_scenarios, philosophy, world_religions
+10. Logic & Formal Reasoning (2): formal_logic, logical_fallacies
+11. Business & Management (3): management, marketing, professional_accounting
+
+12. General/Interdisciplinary (3): astronomy, global_facts, miscellaneous

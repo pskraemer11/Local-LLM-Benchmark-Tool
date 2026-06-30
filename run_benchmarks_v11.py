@@ -1,0 +1,1044 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Unified benchmark launcher v10 – integriert:
+  [1] Custom: DS1000, CoderEval (custom_benchmark_v11.py)
+  [2] EvalPlus: HumanEval+, MBPP+ (evalplus.codegen + evalplus.evaluate)
+  [3] LM-Eval: ARC, HellaSwag, TruthfulQA, MathQA + MMLU-Pro (mod.) (lm_eval)
+  [4] Agentic: tool-eval-bench (SampleSize Szenarien, zufaellige Auswahl)
+
+── Vier-Pipelines-Architektur ──────────────────────────────────────
+  Dieses Skript ist der ZENTRALE EINSTIEGSPUNKT. Es orchestriert alle
+  vier Auswerte-Pipelines als Subprozesse. NUR HIER wird Modell-
+  Management (laden/entladen) veranlasst – die Subprozesse duerfen
+  NICHT selbst laden/entladen.
+
+  Pipeline         Skript/Tool                Datenquelle
+  ────────         ───────────                ───────────
+  Custom           custom_benchmark_v11.py    JSONL unter simple_evals/
+  EvalPlus         evalplus.codegen/evaluate  evalplus-eigene Datensaetze
+  LM-Eval          lm_eval CLI                lm-eval built-in + custom YAML
+  Agentic          tool_eval_bench (<-m)      HuggingFace tool_eval_bench
+
+  Alle Ergebnisse werden ueber csv_writer.py mit einheitlichem Schema
+  (; Delimiter, UTF-8) ausgegeben und von consolidate_results_v11.py
+  zu Ranglisten verdichtet.
+
+── Skript-Hierarchie ────────────────────────────────────────────────
+  run_benchmarks_v11.py  (Launcher, NUR HIER load/unload)
+    ├── model_manager.py         (laden/entladen/pruefen via lms CLI)
+    ├── custom_benchmark_v11.py (Subprozess: DS1000, CoderEval)
+    ├── csv_writer.py            (einheitlicher CSV-Output)
+    ├── evalplus (externe Bibliothek, via -m)
+    ├── lm_eval   (externe Bibliothek, via -m)
+    └── tool_eval_bench (externe Bibliothek, via -m)
+
+Aenderungen zu v9:
+  - PandasEval entfernt
+  - BBH entfernt (zu teuer, 8x Multiplier)
+  - MMLU-Pro modifiziert: pro Subset max 1 Aufgabe, max sample_size gesamt
+  - Agentic-Pipeline (tool-eval-bench) hinzugefuegt
+  - CSV-Output ueber csv_writer.py (einheitliches Schema, ;-Delimiter, utf-8)
+
+Features:
+  - Interaktive Auswahl oder CLI-gesteuert (--model, --benchmarks)
+  - --sample-size N fuer alle Pipelines
+  - PYTHONIOENCODING=utf-8 fuer ALLE Subprozesse (Unicode-Pfeile)
+  - Zwischenzusammenfassung pro Modell
+  - Qwen3.5-system-Message im User-Prompt
+  - Reasoning-Timeout ×2 fuer Reasoning-Modelle
+  - MoE-Erkennung
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv_writer as csv_writer
+import glob
+import json
+import math
+import os
+import random
+import re
+import subprocess
+import sys
+import time
+from datetime import datetime
+from typing import Any, Optional
+
+# ── Modell-Management aus gemeinsamem Modul ──────────────────────
+# Laden/Entladen wird NUR in main() dieses Skripts veranlasst.
+# Die Subprozesse (custom_benchmark_v11.py, evalplus, lm_eval, tool_eval_bench)
+# duerfen NICHT selbst laden/entladen – sie erhalten die Modell-ID
+# ueber model_info["_api_model"] und rufen nur die API auf.
+#
+# API-Referenz (LM Studio REST / OpenAI-Compat):
+#   https://lmstudio.ai/docs/developer/rest
+#
+# Wichtige Endpunkte:
+#   /api/v1/models              GET  – native: Modell-Liste
+#   /api/v1/models/load         POST – native: Modell laden (streamed events)
+#   /api/v1/models/unload       POST – native: Modell entladen
+#   /api/v1/chat                POST – native: Chat-Inference
+#   /v1/chat/completions        POST – OpenAI-Compat: Chat-Inference
+#   /v1/models                  GET  – OpenAI-Compat: Modell-Liste
+#
+from benchmark_config import PIPELINE_DISCOVERY, TOOL_EVAL_SCENARIO_IDS
+from model_manager import (
+    API_BASE, TIMEOUT_CLI, PIPELINE_TIMEOUTS,
+    get_current_loaded_model, unload_all_models,
+    load_model_via_lms
+)
+
+# Modell-Klassifizierungs-Hilfsfunktionen
+REASONING_KEYWORDS = ["reasoning", "think", "r1"]
+
+def _is_qwen3_6_model(model_key: str) -> bool:
+    return "qwen3.6" in model_key.lower()
+MOE_PATTERN = re.compile(r"\d+b-a\d+b", re.IGNORECASE)  # z.B. "8b-a1b", "24b-a2b"
+
+def _is_reasoning_model(model_key: str) -> bool:
+    kl = model_key.lower()
+    return any(kw in kl for kw in REASONING_KEYWORDS)
+
+def _is_moe_model(model_key: str) -> bool:
+    return bool(MOE_PATTERN.search(model_key))
+
+def _is_qwen3_5_model(model_key: str) -> bool:
+    return "qwen3.5" in model_key.lower() or "qwopus3" in model_key.lower()
+
+def _is_gptoss_model(model_key: str) -> bool:
+    return "gpt-oss" in model_key.lower()
+
+def _model_short_name(model_key: str) -> str:
+    """Erzeugt einen kurzen Dateinamen-kompatiblen Modell-Namen."""
+    s = model_key.replace("/", "_").replace("\\", "_").replace(" ", "_")
+    for sep in ("/", "\\"):
+        if sep in s:
+            s = s.rsplit(sep, 1)[-1]
+    return s[:30]
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+RESULTS_DIR = os.path.join(BASE_DIR, "ergebnisse")
+DATA_DIR = os.path.join(BASE_DIR, "simple_evals")
+os.makedirs(RESULTS_DIR, exist_ok=True)
+
+# Global: ensure all subprocesses inherit UTF-8 encoding (Windows cp1252 workaround)
+os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+# Also reconfigure this process's stdout so print() doesn't choke on Unicode arrows/symbols
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
+
+EXCLUDE_KEYWORDS = ["whisper", "vision", "ocr", "transcription", "transcribe",
+                    "translat", "audit", "audio", "embed", "vl"]
+
+LMEVAL_TASKS_DIR = os.path.join(BASE_DIR, "lm_eval_tasks")
+
+# ── Versionierte Skript-Referenzen (dynamisch) ──────────────────
+# Sucht automatisch die hoechste Version von custom_benchmark_v*.py.
+# Kein manuelles Update nach Copy-Item mehr noetig.
+_custom_scripts = glob.glob(os.path.join(BASE_DIR, "custom_benchmark_v*.py"))
+_versions = []
+for _s in _custom_scripts:
+    _m = re.search(r'_v(\d+)\.py$', _s)
+    if _m:
+        _versions.append((int(_m.group(1)), _s))
+if not _versions:
+    sys.exit("[FATAL] Keine custom_benchmark_v*.py gefunden.")
+CUSTOM_BENCHMARK_SCRIPT = max(_versions, key=lambda x: x[0])[1]
+del _custom_scripts, _versions, _m, _s
+
+# ── Benchmark-Definitionen ──────────────────────────────────────
+# Jeder Benchmark ist genau EINER Pipeline zugeordnet:
+#   Pipeline "custom"   ->  Subprozess CUSTOM_BENCHMARK_SCRIPT
+#   Pipeline "evalplus"  ->  evalplus.codegen + evalplus.evaluate
+#   Pipeline "lmeval"    ->  lm_eval --model local-chat-completions
+#   Pipeline "agentic"   ->  tool_eval_bench (Tool-Evaluation)
+#
+# Die Unterscheidung erfolgt in main() ueber Namensvergleiche:
+#   - MMLU-Pro (modified=True) -> run_mmlupro_modified()
+#   - bname in agentic_names  -> run_agentic()
+#   - bname in ep_names       -> run_evalplus()
+#   - bname in lmeval_names   -> run_lmeval()
+#   - sonst (is_custom)       -> run_custom_benchmark()
+CUSTOM_BENCHMARKS = [
+    {"key": "1", "name": "DS1000",         "file": "data_science.jsonl"},
+    {"key": "2", "name": "CoderEval",       "file": "codereval_selfcontained.jsonl"},
+]
+EVALPLUS_BENCHMARKS = [
+    {"key": "3", "name": "HumanEval+",      "dataset": "humaneval"},
+    {"key": "4", "name": "MBPP+",           "dataset": "mbpp"},
+]
+LMEVAL_BENCHMARKS = [
+    {"key": "5", "name": "ARC-Challenge",   "task": "arc_challenge_chat"},
+    {"key": "6", "name": "HellaSwag",       "task": "hellaswag_gen"},
+    {"key": "7", "name": "TruthfulQA",      "task": "truthfulqa_gen"},
+    {"key": "8", "name": "MMLU-Pro",        "task": "mmlu_pro", "modified": True},
+    {"key": "9", "name": "MathQA",          "task": "mathqa_gen", "timeout_mult": 3},
+]
+
+# MMLU-Pro 14 Subsets (lm_eval individuelle Tasks)
+MMLU_PRO_SUBSETS = [
+    "mmlu_pro_biology", "mmlu_pro_business", "mmlu_pro_chemistry",
+    "mmlu_pro_computer_science", "mmlu_pro_economics", "mmlu_pro_engineering",
+    "mmlu_pro_health", "mmlu_pro_history", "mmlu_pro_law",
+    "mmlu_pro_math", "mmlu_pro_other", "mmlu_pro_philosophy",
+    "mmlu_pro_physics", "mmlu_pro_psychology",
+]
+
+# Agentic: tool-eval-bench mit 69 Szenarien
+# (TOOL_EVAL_SCENARIO_IDS in benchmark_config.py)
+AGENTIC_BENCHMARKS = [
+    {"key": "10", "name": "Agentic", "pipeline": "agentic"},
+]
+
+ALL_BENCHMARKS = CUSTOM_BENCHMARKS + EVALPLUS_BENCHMARKS + LMEVAL_BENCHMARKS + AGENTIC_BENCHMARKS
+BENCH_LOOKUP = {b["name"].lower(): b for b in ALL_BENCHMARKS}
+ALL_BENCH_NAMES = sorted(BENCH_LOOKUP.keys())
+
+
+def _parse_selection(choice: str, max_val: int) -> Optional[list[int]]:
+    choice = choice.strip()
+    if not choice:
+        return None
+    parts = choice.replace(" ", "").split(",")
+    selected = set()
+    for part in parts:
+        if "-" in part:
+            try:
+                lo, hi = part.split("-", 1)
+                lo_i, hi_i = int(lo), int(hi)
+                if lo_i < 1 or hi_i > max_val or lo_i > hi_i:
+                    return None
+                for n in range(lo_i, hi_i + 1):
+                    selected.add(n - 1)
+            except ValueError:
+                return None
+        else:
+            try:
+                n = int(part)
+                if n < 1 or n > max_val:
+                    return None
+                selected.add(n - 1)
+            except ValueError:
+                return None
+    return sorted(selected) if selected else None
+
+
+def _model_family(model_key: str) -> str:
+    """Extrahiere Modellfamilie (ohne Publisher-Prefix) fuer Deduplizierung."""
+    return model_key.replace("\\", "/").split("/")[-1].lower()
+
+def get_available_models() -> list[dict[str, Any]]:
+    try:
+        result = subprocess.run(
+            ["lms", "ls", "--json"],
+            capture_output=True, text=True, timeout=TIMEOUT_CLI,
+            encoding="utf-8", errors="replace"
+        )
+        if result.returncode == 0:
+            data = json.loads(result.stdout)
+            models = []
+            for item in data if isinstance(data, list) else data.values():
+                if isinstance(item, dict):
+                    key = item.get("modelKey", "")
+                    if key:
+                        models.append({
+                            "key": key,
+                            "display": item.get("displayName", key),
+                            "variant": item.get("selectedVariant") or key,
+                        })
+            # Bei doppelten Display-Namen Quant-Variante anhaengen (z.B. "@iq4_xs" oder "@q3_k_m")
+            seen_displays = {}
+            for m in models:
+                d = m["display"]
+                key = m["key"]
+                if d in seen_displays:
+                    # Quant-Variante aus Key extrahieren (alles nach "@")
+                    quant_suffix = ""
+                    if "@" in key:
+                        quant_suffix = "@" + key.split("@", 1)[1]
+                    elif "/" not in key:
+                        # Fuer Keys ohne Publisher-Prefix: letzten Teil des Keys nehmen
+                        parts = key.split("_")
+                        if len(parts) > 2:
+                            quant_suffix = "_" + "_".join(parts[-2:])
+                    m["display"] = f"{d}{quant_suffix}"
+                else:
+                    seen_displays[d] = m
+            if models:
+                return models
+        print(f"[WARN] lms ls fehlgeschlagen: {result.stderr.strip()}")
+    except FileNotFoundError:
+        print("[ERROR] lms.exe nicht gefunden")
+    except Exception as e:
+        print(f"[WARN] lms ls: {e}")
+    return []
+
+
+def resolve_models(available_models: list[dict[str, Any]], model_arg: Optional[str]) -> Optional[list[dict[str, Any]]]:
+    filtered = [m for m in available_models
+                if not any(kw in m["key"].lower() for kw in EXCLUDE_KEYWORDS)]
+    if not filtered:
+        print("\n[WARN] Keine Modelle gefunden.")
+        return None
+
+    if not model_arg or model_arg == "all":
+        return filtered
+
+    # Try number or range
+    indices = _parse_selection(model_arg, len(filtered))
+    if indices is not None:
+        return [filtered[i] for i in indices]
+
+    # Try exact match first (prevent substring collision)
+    model_arg_lower = model_arg.lower()
+    exact = [m for m in filtered if m["key"].lower() == model_arg_lower
+             or m["display"].lower() == model_arg_lower]
+    if exact:
+        return exact
+
+    # Fallback to keyword match
+    matches = [m for m in filtered if model_arg_lower in m["key"].lower()
+               or model_arg_lower in m["display"].lower()]
+    if matches:
+        return matches
+
+    print(f"[ERROR] Kein Modell gefunden fuer '{model_arg}'")
+    print("  Verfuegbar: " + ", ".join(f"{m['display']}" for m in filtered))
+    return None
+
+
+def resolve_benchmarks(bench_arg: Optional[str]) -> Optional[list[dict[str, Any]]]:
+    if not bench_arg or bench_arg == "all":
+        return ALL_BENCHMARKS
+
+    # Try numbers
+    indices = _parse_selection(bench_arg, len(ALL_BENCHMARKS))
+    if indices is not None:
+        return [ALL_BENCHMARKS[i] for i in indices]
+
+    # Try comma-separated names
+    names = [n.strip().lower() for n in bench_arg.split(",")]
+    result = []
+    for n in names:
+        if n in BENCH_LOOKUP:
+            result.append(BENCH_LOOKUP[n])
+        else:
+            print(f"[ERROR] Unbekannter Benchmark '{n}'. Moegliche: {', '.join(ALL_BENCH_NAMES)}")
+            return None
+    return result
+
+
+def select_models_interactive(available_models: list[dict[str, Any]]) -> Optional[list[dict[str, Any]]]:
+    filtered = [m for m in available_models
+                if not any(kw in m["key"].lower() for kw in EXCLUDE_KEYWORDS)]
+    if not filtered:
+        print("\n[WARN] Keine Modelle gefunden.")
+        return None
+    print("\n" + "-" * 50)
+    print("  Verfuegbare Modelle:")
+    for i, m in enumerate(filtered, 1):
+        print(f"  [{i}] {m['display']}")
+    print("  [a] Alle Modelle")
+    while True:
+        choice = input("  Deine Wahl: ").strip().lower()
+        if choice == "a":
+            return filtered
+        indices = _parse_selection(choice, len(filtered))
+        if indices is not None:
+            return [filtered[i] for i in indices]
+        print("  Ungueltige Eingabe.")
+
+
+def select_benchmarks_interactive() -> Optional[list[dict[str, Any]]]:
+    print("\n" + "=" * 60)
+    print("  Benchmark-Auswahl")
+    print("=" * 60)
+    print("  --- Custom ---")
+    for b in CUSTOM_BENCHMARKS:
+        print(f"  [{b['key']}] {b['name']}")
+    print("  --- EvalPlus ---")
+    for b in EVALPLUS_BENCHMARKS:
+        print(f"  [{b['key']}] {b['name']}")
+    print("  --- LM-Eval ---")
+    for b in LMEVAL_BENCHMARKS:
+        label = f"{b['name']} (mod.)" if b.get("modified") else b['name']
+        print(f"  [{b['key']}] {label}")
+    print("  --- Agentic ---")
+    for b in AGENTIC_BENCHMARKS:
+        print(f"  [{b['key']}] {b['name']} (tool-eval-bench)")
+    print("  [a] Alle Benchmarks")
+    print("  [q] Beenden")
+    while True:
+        choice = input("\n  Deine Wahl: ").strip().lower()
+        if choice == "q":
+            print("\nBye.")
+            return None
+        if choice == "a":
+            return ALL_BENCHMARKS
+        indices = _parse_selection(choice, len(ALL_BENCHMARKS))
+        if indices is not None:
+            result = [ALL_BENCHMARKS[i] for i in indices]
+            names = ", ".join(b["name"] for b in result)
+            print(f"  -> {names}")
+            return result
+        print("  Ungueltige Eingabe.")
+
+
+def _get_lmeval_params(model_key: str) -> dict[str, Any]:
+    """Gibt LM-Eval-Parameter fuer die gegebene Modellklasse zurueck.
+    
+    ACHTUNG: Die Parameter muessen mit dem Verhalten in custom_benchmark_v11.py
+    (MODEL_CONFIG) uebereinstimmen. Besonders wichtig:
+      - Qwen3.6: enable_thinking=False UND max_tokens=8192 (beides noetig!)
+      - GPT-OSS: temperature=1.0 (sampling statt greedy)
+      - Reasoning: min_p=0.02, Timeout x2
+    """
+    gptoss = _is_gptoss_model(model_key)
+    if gptoss:
+        return {"max_tokens": 4096, "temperature": 1.0, "top_p": 1.0}
+    if _is_qwen3_6_model(model_key):
+        return {"max_tokens": 8192, "temperature": 0.0, "top_p": 1.0, "until": []}
+    if _is_qwen3_5_model(model_key):
+        return {"temperature": 0.2, "top_p": 0.9, "top_k": 20}
+    if _is_reasoning_model(model_key):
+        return {"temperature": 0.1, "top_p": 0.9, "min_p": 0.02}
+    return {"max_tokens": 1024, "temperature": 0.0, "top_p": 1.0}
+
+
+def _build_lmeval_cmd(model_key: str, api_model: str, subset_task: str, per_limit: int, output_dir: str) -> list[str]:
+    lmeval_params = _get_lmeval_params(model_key)
+    has_until = "until" in lmeval_params
+    model_args = f"base_url={API_BASE}/chat/completions,model={api_model},num_concurrent=1"
+    if not has_until:
+        model_args += ",eos_string=<|endoftext|>"
+    for k, v in lmeval_params.items():
+        model_args += f",{k}={v}"
+    cmd = [
+        sys.executable, "-m", "lm_eval",
+        "--model", "local-chat-completions",
+        "--model_args", model_args,
+        "--tasks", subset_task,
+        "--limit", str(per_limit),
+        "--output_path", output_dir,
+    ]
+    return cmd
+
+
+def _parse_subset_score(sub_output_dir: str, subset_task: str) -> Optional[float]:
+    sub_score = None
+    for item in os.listdir(sub_output_dir):
+        sub = os.path.join(sub_output_dir, item)
+        if os.path.isdir(sub):
+            for fname in sorted(os.listdir(sub)):
+                if fname.startswith("results_") and fname.endswith(".json"):
+                    with open(os.path.join(sub, fname), encoding="utf-8") as f:
+                        data = json.load(f)
+                    td = data.get("results", {}).get(subset_task, {})
+                    for metric in ["exact_match,custom-extract",
+                                   "bleu_acc,none", "rouge1_acc,none"]:
+                        if metric in td:
+                            sub_score = td[metric]
+                            break
+                if sub_score is not None:
+                    break
+        if sub_score is not None:
+            break
+    return sub_score
+
+
+# ── Pipeline 1/4: Custom (DS1000, CoderEval) ──────────────────
+# Startet custom_benchmark_v11.py als Subprozess.
+# Dieses Skript liest JSONL-Dateien aus simple_evals/, fragt das
+# Modell ueber LM-Studio-REST-API ab und wertet Code-Ausfuehrung
+# in einer Sandbox aus (exec_sandboxed).
+#
+# WICHTIG: Dieser Aufruf uebermittelt --api-model als exakte Load-ID
+# aus lms ps --json. custom_benchmark_v11.py nutzt diese ID fuer alle
+# API-Calls. Bei Mismatch antwortet LM Studio mit HTTP 400.
+#
+# Qwen3.5-Kompatibilitaet: --qwen-prompt aktiviert prompt-basierte
+# Einbettung statt System-Message (no_system_msg in MODEL_CONFIG).
+#
+# Rueckgabe: dict mit pipeline="custom", score (0-1).
+def run_custom_benchmark(model_info: dict[str, Any], bench: dict[str, Any], sample_size: int = 5) -> Optional[dict[str, Any]]:
+    model_key = model_info["key"]
+    model_display = model_info["display"]
+    fp = os.path.join(DATA_DIR, bench["file"])
+    if not os.path.exists(fp):
+        print(f"  [WARN] Fehlt: {fp}")
+        return None
+    print(f"\n  >>> Custom: {bench['name']} / {model_display}")
+    api_model = model_info.get("_api_model") or model_key
+    cmd = [
+        sys.executable, os.path.join(BASE_DIR, CUSTOM_BENCHMARK_SCRIPT),
+        "--non-interactive",
+        "--model-key", model_key,
+        "--api-model", api_model,
+        "--sample-size", str(sample_size),
+        "--benchmark", bench["name"],
+    ]
+    # Qwen3.5-Kompatibilitaet: systemlose Prompt-Einbettung aktivieren
+    if _is_qwen3_5_model(model_key):
+        cmd.append("--qwen-prompt")
+    t0 = time.time()
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=PIPELINE_TIMEOUTS["custom_subprocess"],
+                            encoding="utf-8", errors="replace")
+    elapsed = time.time() - t0
+    output = result.stdout[-2000:] if result.stdout else ""
+    if output.strip():
+        print(output)
+    if result.returncode != 0:
+        print(f"  [ERROR] Returncode {result.returncode}")
+        print(result.stderr[-500:])
+        return None
+    score = None
+    if output:
+        m = re.search(r"Score:\s*(\d+(?:\.\d+)?)%", output)
+        if m:
+            score = float(m.group(1)) / 100.0
+    print(f"  [OK] {bench['name']} done ({elapsed:.0f}s)")
+    return {"pipeline": "custom", "bench": bench["name"], "model": model_display,
+            "score": score}
+
+
+# ── Pipeline 2/4: EvalPlus (HumanEval+, MBPP+) ────────────────
+# Zweistufiger Prozess:
+#   1. evalplus.codegen  -> Modell generiert Code fuer alle Aufgaben
+#   2. evalplus.evaluate -> Differential-Testing mit plus_input
+# Nutzt evalplus-eigene Datensaetze (humanEval, mbpp).
+# Rueckgabe: dict mit pipeline="evalplus", score pass@1 (0-1).
+def run_evalplus(model_info: dict[str, Any], bench: dict[str, Any], id_range: str = "[0,5]", reasoning: bool = False) -> Optional[dict[str, Any]]:
+    model_key = model_info["key"]
+    model_display = model_info["display"]
+    dataset = bench["dataset"]
+    gptoss = _is_gptoss_model(model_key)
+    print(f"\n  >>> EvalPlus: {bench['name']} / {model_display}")
+    root_dir = os.path.join(RESULTS_DIR, f"evalplus_{model_key.replace('/', '_')}")
+    os.makedirs(root_dir, exist_ok=True)
+
+    print(f"  [codegen] {dataset} {id_range} ...")
+    t0 = time.time()
+    codegen_cmd = [
+        sys.executable, "-m", "evalplus.codegen",
+         "--model", "local-model",
+         "--dataset", dataset,
+         "--backend", "openai",
+        "--base-url", API_BASE,
+         "--id-range", id_range,
+         "--root", root_dir,
+    ]
+    m_id = re.search(r'\[0,(\d+)\]', id_range)
+    ss = int(m_id.group(1)) if m_id else 5
+    limit_scale = max(1.0, ss / 5.0)
+    eval_base = PIPELINE_TIMEOUTS["evalplus_base"]
+    eval_timeout = (eval_base * 2 if reasoning else eval_base) * limit_scale
+    if gptoss:
+        # GPT-OSS needs sampling (temp=1.0) and more tokens for reasoning
+        codegen_cmd.extend(["--temperature", "1.0"])
+    else:
+        codegen_cmd.append("--greedy")
+    r1 = subprocess.run(
+        codegen_cmd,
+        capture_output=True, text=True, timeout=eval_timeout,
+        encoding="utf-8", errors="replace"
+    )
+    out = r1.stdout[-300:] if r1.stdout else ""
+    if "Skipping" in out:
+        out = "\n".join(l for l in out.split("\n") if "100%" in l or "Skipping" not in l or "OpenAIChatDecoder" in l)
+    print(out)
+    if r1.returncode != 0:
+        print(f"  [ERROR] codegen fehlgeschlagen: {r1.stderr[-300:]}")
+        return None
+
+    temp_str = "1.0" if gptoss else "0.0"
+    samples_path = os.path.join(root_dir, dataset,
+                                f"local-model_openai_temp_{temp_str}.jsonl")
+    if not os.path.exists(samples_path):
+        print(f"  [WARN] samples nicht gefunden: {samples_path}")
+        return None
+
+    # Alte eval_results loeschen, sonst fragt evalplus interaktiv nach Ueberschreiben
+    eval_results_pattern = os.path.join(os.path.dirname(samples_path), "*.eval_results.json")
+    import glob
+    for old_result in glob.glob(eval_results_pattern):
+        try:
+            os.remove(old_result)
+        except Exception:
+            pass
+
+    print(f"  [evaluate] {dataset} ...")
+    r2 = subprocess.run(
+        [sys.executable, "-m", "evalplus.evaluate",
+         "--dataset", dataset,
+         "--samples", samples_path,
+         "--i_just_wanna_run"],
+        capture_output=True, text=True, timeout=eval_timeout,
+        encoding="utf-8", errors="replace"
+    )
+    eval_out = r2.stdout[-500:] if r2.stdout else ""
+    eval_out = "\n".join(l for l in eval_out.split("\n") if "Skipping" not in l and "WARNING" not in l)
+    print(eval_out)
+    score = None
+    if eval_out:
+        m = re.search(r"humaneval\+ \(base \+ extra tests\).*?pass@1:\s*([\d.]+)", eval_out, re.DOTALL)
+        if m:
+            score = float(m.group(1))
+        else:
+            m = re.search(r"mbpp\+ \(base \+ extra tests\).*?pass@1:\s*([\d.]+)", eval_out, re.DOTALL)
+            if m:
+                score = float(m.group(1))
+    if r2.returncode != 0:
+        print(f"  [WARN] evaluate stderr: {r2.stderr[-300:]}")
+    elapsed = time.time() - t0
+    print(f"  [OK] {bench['name']} done ({elapsed:.0f}s)")
+    return {"pipeline": "evalplus", "bench": bench["name"], "model": model_display,
+            "samples": samples_path, "score": score}
+
+
+# ── Pipeline 3/4: LM-Eval (ARC, HellaSwag, TruthfulQA, MathQA, BBH) ─
+# Nutzt lm_eval --model local-chat-completions als Subprozess.
+# Fuer MMLU-Pro gibt es eine separate modifizierte Funktion (s.u.),
+# die den Benchmark ueber 14 Subset-Tasks stratifiziert.
+# Rueckgabe: dict mit pipeline="lmeval", score (0-1).
+def run_lmeval(model_info: dict[str, Any], bench: dict[str, Any], limit: int = 5, reasoning: bool = False) -> Optional[dict[str, Any]]:
+    model_key = model_info["key"]
+    model_display = model_info["display"]
+    gptoss = _is_gptoss_model(model_key)
+    # Nutze exakte Load-ID aus lms ps, fallback variant, fallback key
+    api_model = model_info.get("_api_model") or model_info.get("variant") or model_key
+    task_name = bench["task"]
+    safe = model_key.replace("/", "_").replace("\\", "_")
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_dir = os.path.join(RESULTS_DIR, f"lmeval_{safe}")
+    os.makedirs(output_dir, exist_ok=True)
+
+    print(f"\n  >>> LM-Eval: {bench['name']} / {model_display}")
+    t0 = time.time()
+    lmeval_params = _get_lmeval_params(model_key)
+    # eos_string behebt lm_eval-Warning "Cannot determine EOS string" (api_models:378)
+    # und verhindert generate_until-Abbrueche bei Modellen ohne explizites Stop-Token.
+    #
+    # API-Referenz (OpenAI-Compat Endpunkte):
+    #   https://lmstudio.ai/docs/developer/rest
+    #
+    # lm_eval nutzt OpenAI-Compat /v1/chat/completions.
+    # WICHTIG: Der model-Parameter MUSS der exakten Load-ID aus lms ps entsprechen,
+    #           sonst antwortet LM Studio mit HTTP 400 "model not found".
+    #           Ein Test mit "model=check" (ungueltiger Name) laesst den Request HANGEN
+    #           (kein Timeout, keine Fehlerrueckmeldung) – daher IMMER api_model verwenden.
+    has_until = "until" in lmeval_params
+    model_args = f"base_url={API_BASE}/chat/completions,model={api_model},num_concurrent=1"
+    if not has_until:
+        model_args += ",eos_string=<|endoftext|>"
+    for k, v in lmeval_params.items():
+        model_args += f",{k}={v}"
+    cmd = [
+        sys.executable, "-m", "lm_eval",
+        "--model", "local-chat-completions",
+        "--model_args", model_args,
+        "--tasks", task_name,
+        "--limit", str(limit),
+        "--output_path", output_dir,
+    ]
+    yaml_path = None
+    for p in [os.path.join(LMEVAL_TASKS_DIR, f"{task_name}.yaml"),
+              os.path.join(LMEVAL_TASKS_DIR, task_name, f"{task_name}.yaml")]:
+        if os.path.exists(p):
+            yaml_path = p
+            break
+    if yaml_path:
+        cmd.extend(["--include_path", os.path.dirname(yaml_path)])
+
+    lm_env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+    limit_scale = max(1.0, limit / 5.0)
+    lmeval_base = PIPELINE_TIMEOUTS["lmeval_base"]
+    base_timeout = (lmeval_base * 2 if reasoning else lmeval_base) * limit_scale
+    timeout_mult = bench.get("timeout_mult", 1)
+    elapsed = 0
+    stdout = ""
+    stderr = ""
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=base_timeout * timeout_mult,
+                           encoding="utf-8", errors="replace", env=lm_env)
+        stdout = r.stdout or ""
+        stderr = r.stderr or ""
+        elapsed = time.time() - t0
+        out = stdout[-2000:]
+        print(out)
+        if r.returncode != 0:
+            print(f"  [WARN] lm_eval returncode={r.returncode}")
+            print(f"  [WARN] lm_eval stderr ({len(stderr)} chars):")
+            for line in stderr.split("\n"):
+                print(f"    | {line}")
+        else:
+            print(f"  [OK] {bench['name']} done ({elapsed:.0f}s)")
+    except subprocess.TimeoutExpired:
+        elapsed = time.time() - t0
+        print(f"  [WARN] {bench['name']} TIMEOUT nach {elapsed:.0f}s")
+    except Exception as e:
+        elapsed = time.time() - t0
+        print(f"  [WARN] {bench['name']} FEHLER: {e}")
+
+    # Parse results JSON from output directory (may be nested: output_dir/model_name/results_*.json)
+    score = None
+    try:
+        # Collect ALL directories to search (output_dir + all subdirectories)
+        search_dirs = [output_dir]
+        for item in os.listdir(output_dir):
+            sub = os.path.join(output_dir, item)
+            if os.path.isdir(sub):
+                search_dirs.append(sub)
+        # Search ALL JSON result files across all directories for the matching task
+        for sdir in search_dirs:
+            if not os.path.isdir(sdir):
+                continue
+            for fname in sorted(os.listdir(sdir)):
+                if fname.startswith("results_") and fname.endswith(".json"):
+                    with open(os.path.join(sdir, fname), "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    task_data = data.get("results", {}).get(task_name, {})
+                    if task_data:  # only check metrics if this file has our task
+                        for metric in ["exact_match,custom-extract",
+                                       "bleu_acc,none", "rouge1_acc,none"]:
+                            if metric in task_data:
+                                score = task_data[metric]
+                                break
+                        if score is not None:
+                            break
+            if score is not None:
+                break
+    except Exception as e:
+        print(f"  [WARN] lm_eval score parsing: {e}")
+
+    return {"pipeline": "lmeval", "bench": bench["name"], "model": model_display,
+            "score": score}
+
+
+# ── MMLU-Pro (modifiziert) – Sonderfall innerhalb Pipeline 3 ───
+# Grund: lm_eval's eingebauter "mmlu_pro" Task laedt ALLE 12.032
+# Aufgaben auf einmal und ist fuer Reasoning-Modelle extrem langsam
+# (~25s/Call). Daher splitten wir in 14 individuelle Subset-Tasks
+# und wenden stratifiziertes Subsampling an:
+#   - limit <= 14: zufaellige Auswahl von limit Subsets, je 1 Task
+#   - limit >  14: alle 14 Subsets, ceil(limit/14) Tasks pro Subset
+# Rueckgabe: dict mit pipeline="lmeval", bench="MMLU-Pro", score.
+def run_mmlupro_modified(model_info: dict[str, Any], limit: int = 5, reasoning: bool = False) -> Optional[dict[str, Any]]:
+    """MMLU-Pro modifiziert: pro Subset max 1 Aufgabe, gesamt max limit.
+    Verwendet die 14 individuellen lm_eval Subset-Tasks."""
+    model_key = model_info["key"]
+    model_display = model_info["display"]
+    api_model = model_info.get("_api_model") or model_info.get("variant") or model_key
+    safe = model_key.replace("/", "_").replace("\\", "_")
+    output_dir = os.path.join(RESULTS_DIR, f"lmeval_{safe}")
+    os.makedirs(output_dir, exist_ok=True)
+
+    num_subsets = len(MMLU_PRO_SUBSETS)
+    if limit <= num_subsets:
+        selected = random.sample(MMLU_PRO_SUBSETS, limit)
+        per_limit = 1
+    else:
+        selected = MMLU_PRO_SUBSETS
+        per_limit = math.ceil(limit / num_subsets)
+
+    print(f"\n  >>> MMLU-Pro (modifiziert): {model_display}")
+    print(f"      Subsets: {len(selected)}, pro Subset: {per_limit}, gesamt: {len(selected) * per_limit}")
+
+    lmeval_params = _get_lmeval_params(model_key)
+
+    scores = []
+    t0 = time.time()
+    lm_env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+
+    for subset_task in selected:
+        t_sub = time.time()
+        sub_output_dir = os.path.join(output_dir, subset_task)
+        os.makedirs(sub_output_dir, exist_ok=True)
+        cmd = _build_lmeval_cmd(model_key, api_model, subset_task, per_limit, sub_output_dir)
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=PIPELINE_TIMEOUTS["mmlupro_per_subset"],
+                               encoding="utf-8", errors="replace", env=lm_env)
+            if r.returncode != 0:
+                print(f"    [WARN] {subset_task} returncode={r.returncode}")
+                continue
+            sub_score = _parse_subset_score(sub_output_dir, subset_task)
+            if sub_score is not None:
+                scores.append(sub_score)
+                print(f"    [OK] {subset_task}: {sub_score:.1%} ({time.time()-t_sub:.0f}s)")
+            else:
+                print(f"    [WARN] {subset_task}: kein Score gefunden")
+        except subprocess.TimeoutExpired:
+            print(f"    [WARN] {subset_task}: timeout")
+        except Exception as e:
+            print(f"    [WARN] {subset_task}: {e}")
+
+    elapsed = time.time() - t0
+    avg_score = sum(scores) / len(scores) if scores else None
+    print(f"  [OK] MMLU-Pro (mod.) done ({elapsed:.0f}s) – Subsets: {len(scores)}/{len(selected)}, avg: {avg_score:.1%}" if avg_score is not None else f"  [WARN] MMLU-Pro (mod.) – keine Scores")
+
+    return {"pipeline": "lmeval", "bench": "MMLU-Pro", "model": model_display,
+            "score": avg_score}
+
+
+# ── Pipeline 4/4: Agentic (tool-eval-bench) ───────────────────
+# Startet tool_eval_bench als Modul (-m) mit einer zufaelligen
+# Auswahl aus 69 Szenarien (TC-01..TC-69). Jedes Szenario testet
+# Tool-Use-Faehigkeiten (Funktionsaufrufe, API-Nutzung).
+# Ergebnis wird aus JSON-Envelope extrahiert (final_score 0-100 -> 0-1).
+# Rueckgabe: dict mit pipeline="agentic", score (0-1).
+def run_agentic(model_info: dict[str, Any], limit: int = 5) -> Optional[dict[str, Any]]:
+    """Agentic: tool-eval-bench mit sample_size zufaelligen Szenarien."""
+    model_key = model_info["key"]
+    model_display = model_info["display"]
+    safe = model_key.replace("/", "_").replace("\\", "_")
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_dir = os.path.join(RESULTS_DIR, f"agentic_{safe}")
+    os.makedirs(output_dir, exist_ok=True)
+    json_path = os.path.join(output_dir, f"agentic_{model_key}_{ts}.json")
+
+    selected = random.sample(TOOL_EVAL_SCENARIO_IDS, min(limit, len(TOOL_EVAL_SCENARIO_IDS)))
+
+    print(f"\n  >>> Agentic (tool-eval-bench): {model_display}")
+    print(f"      Szenarien: {len(selected)}/{len(TOOL_EVAL_SCENARIO_IDS)} zufaellig ausgewaehlt")
+
+    t0 = time.time()
+    cmd = [
+        sys.executable, "-m", "tool_eval_bench",
+        "--base-url", "http://127.0.0.1:1234/v1",
+        "--scenarios", *selected,
+        "--json-file", json_path,
+        "--timeout", str(PIPELINE_TIMEOUTS["agentic_scenario"]),
+        "--no-live",
+    ]
+    lm_env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+    score = None
+    stdout = ""
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True,
+                           timeout=PIPELINE_TIMEOUTS["agentic_subprocess"],
+                           encoding="utf-8", errors="replace", env=lm_env)
+        stdout = r.stdout or ""
+        stderr = r.stderr or ""
+        elapsed = time.time() - t0
+        if r.returncode == 0:
+            print(f"  [OK] Agentic done ({elapsed:.0f}s)")
+        else:
+            print(f"  [WARN] tool-eval-bench returncode={r.returncode}")
+            for line in stderr.split("\n")[-5:]:
+                print(f"    | {line}")
+
+        # Parse JSON result – tool-eval-bench envelope format
+        if os.path.exists(json_path):
+            with open(json_path, encoding="utf-8") as f:
+                data = json.load(f)
+            # final_score: int 0-100 im Envelope, auf 0-1 normalisieren
+            raw = data.get("final_score") if isinstance(data, dict) else None
+            if raw is not None:
+                score = raw / 100.0
+            else:
+                # Fallback: scenario_results mitten
+                scores_meta = data.get("scores", {}) if isinstance(data, dict) else {}
+                results = scores_meta.get("scenario_results", [])
+                if results:
+                    vals = [s.get("score", 0) for s in results if isinstance(s, dict)]
+                    score = sum(vals) / len(vals) if vals else None
+    except subprocess.TimeoutExpired:
+        elapsed = time.time() - t0
+        print(f"  [WARN] Agentic TIMEOUT nach {elapsed:.0f}s")
+    except Exception as e:
+        elapsed = time.time() - t0
+        print(f"  [WARN] Agentic FEHLER: {e}")
+
+    return {"pipeline": "agentic", "bench": "Agentic", "model": model_display,
+            "score": score}
+
+
+def save_summary_csv(results: list[dict[str, Any]], model_info: Optional[dict[str, Any]] = None) -> Any:
+    """Legacy – leitet an csv_writer weiter (v9)."""
+    return csv_writer.write_accumulative_summary(
+        results, model_info or {},
+        base_dir=BASE_DIR,
+    )
+
+
+def save_model_summary_csv(results: list[dict[str, Any]], model_info: dict[str, Any]) -> Any:
+    """Legacy – leitet an csv_writer weiter (v9)."""
+    return csv_writer.write_accumulative_summary(results, model_info, base_dir=BASE_DIR)
+
+
+def main() -> None:
+    # ── Einstiegspunkt ─────────────────────────────────────────
+    # Ablauf:
+    #   1. Modelle aufloesen (CLI-Argument oder interaktiv)
+    #   2. Benchmarks aufloesen (CLI-Argument oder interaktiv)
+    #   3. Fuer jedes Modell:
+    #      a. Modell laden (via model_manager.load_model_via_lms)
+    #      b. Fuer jeden Benchmark: Pipeline-Funktion aufrufen
+    #      c. Zwischenzusammenfassung via csv_writer
+    #   4. Modell entladen
+    #   5. Konsolidierte Uebersicht via csv_writer
+    #
+    # Wichtig: Alle Pipelines nutzen model_info["_api_model"]
+    # als einheitliche Modell-ID – kein Mismatch mehr zwischen
+    # geladener ID und API-Aufruf.
+    parser = argparse.ArgumentParser(description="Unified Benchmark Launcher v10")
+    parser.add_argument("--sample-size", "-s", type=int, default=5,
+                        help="Aufgaben pro Benchmark (Default: 5)")
+    parser.add_argument("--model", "-m", type=str, default=None,
+                        help="Modell-Auswahl: Nummer(n) wie '20', '1,3,5', '1-5', Name oder 'all'")
+    parser.add_argument("--benchmarks", "-b", type=str, default=None,
+                        help="Benchmark-Auswahl: Nummer(n), Name(n) oder 'all'")
+    args = parser.parse_args()
+
+    print("=" * 60)
+    print("  Unified Benchmark Launcher v10")
+    print(f"  SampleSize: {args.sample_size}")
+    print("  Pipelines: Custom (DS1000/CoderEval), EvalPlus, LM-Eval (ARC/HS/TQA/MQA/MMLU-Pro-mod), Agentic (tool-eval-bench)")
+    print("  CSV-Format: csv_writer (; Delimiter, utf-8)")
+    print("=" * 60)
+
+    available = get_available_models()
+    if not available:
+        print("[ERROR] Keine Modelle verfuegbar. Abbruch.")
+        sys.exit(1)
+
+    if args.model:
+        models = resolve_models(available, args.model)
+    else:
+        models = select_models_interactive(available)
+    if not models:
+        print("[ERROR] Keine Modelle ausgewaehlt. Abbruch.")
+        sys.exit(1)
+    print(f"  Modelle: {', '.join(m['display'] for m in models)}")
+
+    if args.benchmarks:
+        benchmarks = resolve_benchmarks(args.benchmarks)
+    else:
+        benchmarks = select_benchmarks_interactive()
+    if not benchmarks:
+        print("[ERROR] Keine Benchmarks ausgewaehlt. Abbruch.")
+        sys.exit(1)
+    print(f"  Benchmarks: {', '.join(b['name'] for b in benchmarks)}")
+
+    all_summary = []
+    for midx, model_info in enumerate(models, 1):
+        model_key = model_info["key"]
+        model_display = model_info["display"]
+        reasoning = _is_reasoning_model(model_key) or _is_qwen3_6_model(model_key)
+        print(f"\n{'=' * 60}")
+        print(f"  Modell {midx}/{len(models)}: {model_display}")
+        if reasoning:
+            print(f"  * Reasoning-Modell (erkannt) – Timeout ×2")
+        if _is_moe_model(model_key):
+            print(f"  * MoE-Modell (erkannt)")
+        print(f"{'=' * 60}")
+
+        # ZENTRALES Modell-Management: laden + exakte Identifier ermitteln
+        loaded = get_current_loaded_model()
+        api_model = None
+
+        # Context-Length ggf. anpassen (z.B. für Modelle mit vielen Experts)
+        # Mellum: User hat Experten von 8 auf 16 erhöht, V-Cache Q8_0 – volle Länge möglich
+        ctx_len = None
+
+        if loaded:
+            li = loaded["identifier"].lower()
+            lk = loaded["model_key"].lower()
+            mk = model_key.lower()
+            # Pruefe ob dieses Modell bereits geladen ist (Key oder Identifier Match)
+            if mk in li or mk in lk or li in mk or lk in mk:
+                api_model = loaded["identifier"]
+                print(f"  [OK] '{model_display}' bereits geladen – ID: {api_model}")
+            else:
+                print(f"  [INFO] Anderes Modell geladen ({loaded['display_name']}) – entlade...")
+                unload_all_models()
+                ok, api_model = load_model_via_lms(model_key, context_length=ctx_len)
+                if not ok:
+                    print(f"  [ERROR] Laden fehlgeschlagen. Ueberspringe.")
+                    continue
+        else:
+            ok, api_model = load_model_via_lms(model_key, context_length=ctx_len)
+            if not ok:
+                print(f"  [ERROR] Laden fehlgeschlagen. Ueberspringe.")
+                continue
+        # Kurze Pause – das Modell ist via lms ps bestaetigt geladen,
+        # aber der REST-Server braucht einen Moment zum Initialisieren.
+        print("  [INFO] Warte 10s auf API-Initialisierung...")
+        time.sleep(10)
+        model_info["_api_model"] = api_model  # Einheitliche ID fuer ALLE Pipelines
+
+        # EvalPlus nutzt [low, high) exklusiv – daher sample_size (nicht sample_size-1)
+        id_range = f"[0,{args.sample_size}]"
+        model_results = []
+
+        for bench in benchmarks:
+            try:
+                bname = bench["name"]
+                ep_names = {b["name"] for b in EVALPLUS_BENCHMARKS}
+                lmeval_names = {b["name"] for b in LMEVAL_BENCHMARKS}
+                agentic_names = {b["name"] for b in AGENTIC_BENCHMARKS}
+                is_custom = bname not in ep_names and bname not in lmeval_names and bname not in agentic_names
+
+                if bname == "MMLU-Pro" and bench.get("modified"):
+                    result = run_mmlupro_modified(model_info, limit=args.sample_size, reasoning=reasoning)
+                elif bname in agentic_names:
+                    result = run_agentic(model_info, limit=args.sample_size)
+                elif bname in ep_names:
+                    result = run_evalplus(model_info, bench, id_range=id_range, reasoning=reasoning)
+                elif bname in lmeval_names:
+                    result = run_lmeval(model_info, bench, limit=args.sample_size, reasoning=reasoning)
+                else:
+                    result = run_custom_benchmark(model_info, bench, sample_size=args.sample_size)
+
+                if result:
+                    model_results.append(result)
+
+                # Nach Custom-Benchmarks (v19 Subprozess): Modell-Status pruefen
+                all_summary.append(result)
+
+                if is_custom:
+                    loaded = get_current_loaded_model()
+                    cand_key = model_key.lower()
+                    ok = False
+                    if loaded:
+                        lk = loaded["model_key"].lower()
+                        li = loaded["identifier"].lower()
+                        if cand_key in lk or cand_key in li or lk in cand_key or li in cand_key:
+                            ok = True
+                    if not ok:
+                        print(f"  [WARN] Modell nach {bname} nicht mehr geladen – lade neu...")
+                        load_model_via_lms(model_key)
+                        import time as _t
+                        _t.sleep(10)
+            except subprocess.TimeoutExpired:
+                print(f"  [ERROR] {bench['name']} timeout (Abgelaufen)")
+            except Exception as e:
+                print(f"  [ERROR] {bench['name']}: {e}")
+
+        # Zwischenzusammenfassung pro Modell (csv_writer, einheitliches Schema)
+        if model_results:
+            csv_writer.write_accumulative_summary(model_results, model_info,
+                                                  sample_size=args.sample_size,
+                                                  base_dir=BASE_DIR)
+
+    print("\n" + "=" * 60)
+    print("  FERTIG")
+    print("=" * 60)
+    for s in all_summary:
+        print(f"  [{s['pipeline']}] {s['model']} / {s['bench']}")
+
+    # Speicher freigeben: Modell entladen
+    print("\n  [INFO] Raeume auf – entlade Modell(e)...")
+    unload_all_models()
+
+    # Konsolidierte Gesamtuebersicht (csv_writer)
+    if all_summary and len(models) > 1:
+        csv_writer.write_konsolidiert_aktuell(all_summary,
+                                              sample_size=args.sample_size,
+                                              base_dir=BASE_DIR)
+
+
+if __name__ == "__main__":
+    main()

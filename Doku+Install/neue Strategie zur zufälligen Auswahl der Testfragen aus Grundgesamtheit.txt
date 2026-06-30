@@ -1,0 +1,98 @@
+### neue Strategie zur zufälligen Auswahl der Testfragen aus Grundgesamtheit ###
+
+vorab (lfd. Dokumentation):
+Fasse den bisherigen Chatverlauf strukturiert (Goal, Constraints & Preferences, Progress, Done, In Progress, Blocked, Key Decisions, Next Steps, Critical Context, Relevant Files) und im Markdown Format zum Download zusammen.
+
+---
+Als **wissenschaftlicheren** Ansatz möchte ich die Möglichkeit eröffnen, zu späterem Zeitpunkt oder auch anderen Rechner auch mehrere Durchläufe des Tests mit zufällig ausgewählten **Stichproben** zu machen. Damit ließe sich später aus Mittelwert und Standardabweichung der Scores eine Unsicherheitsspanne abschätzen, in dem der wahre Wert des Scores liegt, auch ohne die Gesamtzahle aller Testfragen durchzulaufen. 
+
+Statistisch liegt der wahre Wert (= Test auf der Grundgesamtheit) dann mit 95% Wahrscheinlichkeit innerhalb der Spanne Mittelwert +/- 2*Standardabweichung (falls näherungsweise eine symmetrische Gaußverteilung der Scores vorliegt).
+
+Dafür macht es Sinn, die Anzahl der Fragen für jede Benchmark am Anfang des Python-Skriptes als Konstante festzulegen und die Auswahl statistisch zufällig zu ziehen.
+
+Bisherige statische Auswahl: 
+HumanEval+	Erste 80 nach task_id sortiert
+GSM8K		Erste 50 aus HuggingFace
+MBPP+		Erste 50 aus GitHub-JSONL
+DS1000		Je 10 pro Library (Matplotlib, Numpy, Pandas, Scipy, Sklearn) 
+		(ohne pytorch und ... library, nur mit lms.exe lauffähige Fragen auswählen)
+BBH		18 Subsets nacheinander bis 50 erreicht (1)
+MMLU		Erste 50 aus "all"-Config
+MMLU-Pro	Erste 30 aus Test-Split
+ARC-Challenge	Erste 50 aus Challenge-Split
+TruthfulQA	Erste 50 aus Validation mit gültigem MC1-Label
+HellaSwag	Erste 50 aus Validation mit gültigem Label 0–3
+
+Wenn die Fragen aus der Grundgesamtheit zufällig gezogen werden, sind jedoch zusätzliche Anforderungen zu beachten: 
+
+Neue zufällige Auswahl:
+- HumanEval+: Abdeckung der Fragen nur aus dem zusätzlichen (schwierigeren)'+' Katalog, nicht aus dem ursprünglichen (ohne '+'). 
+- GSM8K: ggf. Klassifizierung/Gruppeneinteilung prüfen, sonst zufällig 50 aus Grundgesamtheit
+- MBPP+: ggf. Klassifizierung/Gruppeneinteilung prüfen, sonst zufällig 50 aus Grundgesamtheit
+- DS1000: je 10 zufällig ausgewählte Fragen aus jeder Library (#5 von #7: Matplotlib, Numpy, Pandas, Scipy, Sklearn; ohne PyTorch und Tensorflow wegen LM Studio als backend).
+- BBH: 18 subsets, d.h. wir wählen zufällig 3 Fragen aus jedem subset (3*18 = 54)
+- MMLU: "Pro Fach" -> Eine zufällige Frage aus jedem der 57 Fachgebiete
+- MMLU-Pro: zufällige 30 Fragen aus Test-Split, falls diese auch in Fachgebiete eingeteilt sind, alle Fachgebiete berücksichtigen
+- ARC-Challenge: zufällige 50 Fragen aus Challenge-Test-Split
+- TruthfulQA: zufällige 50 Fragen mit gültigem MC1-Label (genau eine Antwort ist richtig, alle anderen sind falsch)
+- HellaSwag: zufällige Auswahl von 50 mit gültigem Label 0–3
+
+
+---
+Erläuterungen:
+BBH - Die 18 Subsets sind eine Auswahl aus BIG-Bench, die als besonders schwer für LLMs gelten. Sie decken verschiedene Reasoning-Arten ab:...
+
+MMLU – "all"-Config
+MMLU ist organisiert als 57 Fachgebiete (z.B. astronomy, clinical_knowledge, college_biology, global_facts, machine_learning, …). Jedes Fachgebiet hat mehrere hundert Fragen.
+
+Der HuggingFace-Datensatz leiliu-710072/mmlu bietet zwei Konfigurationen:
+a) "all" (default): Alle 57 Fächer in einem großen Datensatz gemischt - die ersten 50 sind eine zufällig wirkende Mischung verschiedener Fächer
+b) Pro-Fach-Konfigurationen: Z.B. "astronomy", "clinical_knowledge", etc. – nur Fragen dieses Fachs. 
+Bisher: erste 50 aus "all"; neu: 1 zufällig ausgewählt "Pro-Fach"
+
+MMLU-Pro – "test"-Split
+ML-Datensätze werden üblicherweise in Train/Validation/Test aufgeteilt. Der Test-Split ist der Teil, der während der Entwicklung nicht angesehen wird und erst zur finalen Bewertung dient. MMLU-Pro hat:
+a) train: ~10.000 Fragen
+b) test: ~12.000 Fragen (von uns 30 verwendet)
+
+ARC –> "ARC-Challenge"-Split
+ARC (AI2 Reasoning Challenge) hat zwei Schwierigkeitsstufen:
+a) ARC-Easy: Leichte Fragen (ein Abrufwissen reicht oft) – 5197 Fragen
+b) ARC-Challenge: Schwere Fragen (logisches Kombinieren nötig) – 2590 Fragen, nur 1172 im Test-Split
+Wir verwenden nur den Challenge-Split, weil Easy zu trivial für moderne LLMs ist.
+
+TruthfulQA –> MC1-Label
+TruthfulQA hat zwei Multiple-Choice-Formate:
+a) MC1 (Multiple Choice 1): Genau eine Antwort ist richtig, alle anderen sind falsch. Das labels-Feld enthält eine Liste mit genau einer 1 und sonst 0. Aufgaben ohne eine eindeutige 1 werden übersprungen.
+b) MC2 (Multiple Choice 2): Mehrere Antworten können richtig sein → schwieriger auszuwerten, daher nicht verwendet.
+
+HellaSwag – Label 0–3
+Jede HellaSwag-Aufgabe hat 4 Antwortmöglichkeiten (Endings), indiziert als 0, 1, 2, 3. 
+Das label-Feld gibt an, welche Ending die korrekte ist.
+label = "0" → Antwort A ist richtig
+label = "1" → Antwort B
+label = "2" → Antwort C
+label = "3" → Antwort D
+Aufgaben mit label außerhalb 0–3 oder leerem Label werden übersprungen (fehlerhafte Dataset-Einträge).
+
+---
+
+Benchmark Gewichtung
+
+… neue `benchmark_lmstudio_v13.py` erstellt. Die neue `save_model_summary()` wird **nach jedem Modell** (wenn alle seine Benchmarks durchlaufen sind) aufgerufen und schreibt eine Zwischensicherung als `modell_zusammenfassung_{ts}_{modell}.csv`.
+
+**CSV-Spalten pro Modell:**
+
+| Kategorie 	 | Benchmarks 			     | Gewicht  | Score 		 | Ressourcen 			 |
+|----------------|-----------------------------------|----------|------------------------|-------------------------------|
+| Coding 	 | HumanEval+, MBPP+, DS1000 	     | **40 %** | `Score_Coding` 	 | Latenz/tok/s/CPU/GPU/RAM/VRAM |
+| Math/Reasoning | GSM8K, BBH 		     	     | **30 %** | `Score_Math/Reasoning` | (pro Kategorie gemittelt) 	 |
+| Knowledge/MC 	 | MMLU, MMLU-Pro, ARC-Challenge,    | **20 %** | `Score_Knowledge/MC`   | 				 |
+			TruthfulQA											 |
+| Commonsense 	 | HellaSwag 			     | **10 %** | `Score_Commonsense` 	 | 				 |
+| **Gesamt** 	 | – 				     | **100 %**| `Gesamt-Score` 	 | `Latenz (s)`, `tok/s`, `CPU (%)`, 
+|											   `GPU (%)`, `RAM (GB)`, `VRAM (GB)` 
+|											    (kategorien-gewichtet) 	 |
+
+**Gewichtung innerhalb der Kategorien:** gleichverteilt (z.B. Coding: 3 Benchmarks → je 13,33 %-Punkte).
+

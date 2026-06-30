@@ -1,0 +1,329 @@
+Zur Fragestellung, was der lms-Server auf der API macht/kann, siehe: https://lmstudio.ai/docs/developer/rest und https://lmstudio.ai/docs/developer/rest/list. Und für die OpenAI kompatible Varianten siehe hier: https://lmstudio.ai/docs/developer/openai-compat
+
+Dass evalplus.evaluate immer alle 164 Tasks erwartet ist unschön. Dann braucht der Testdurchlauf für alle Modelle viel zu lange. Als einmaliger Testlauf für Mathstral ok, weil das Modell ziemlich schnell ist, aber nicht generell. Die anderen Modelle benötigen deutlich mehr Zeit.  
+Finde eine Lösung, dass evalplus auch die sonst vorgegebene SampleSize berücksichtigt.
+
+---
+
+Mathstral ist schnell, weil es die GPU voll auslastet. 
+Dagegen laufen z.B. phi-4, ministral-3-14b-reasoning und gpt-oss-20b nur schwankend zu 25% bis 40% auf der GPU, aber stabil mit 40% auf der CPU. Entspricht bricht die token/s ein. 
+
+Frage: Wie kann ich in der GUI von LM Studio die Einstellungen so steuern, dass die GPU besser ausgelastet wird? 
+
+Die Modellabhängigen Einstellungen sind in json-Dateien in Unterverzeichnissen von "C:\Users\pskra\.lmstudio\.internal\user-concrete-model-default-config" abgespeichert.
+
+
+----
+Ist das Design ist jetzt doch so, dass die Stichprobenauswahl vorab beim Download der Daten mit download_real_benchmarks.py erfolgt und nicht im Benchmarktest selber?
+Das würde bedeuten, dass bei anderer Stichprobengröße (kleiner oder größer) jedes mal zunächst die Testdaten herunter geladen werden müssen?
+
+Und in rund_benchmark.py ist an einer Stelle eine SampleSize von 10 vorgebenen?
+def run_custom_benchmark(model_info, bench, sample_size=10):
+
+
+----
+Backend auf v2.22.0 fixieren (in LM Studio-GUI).
+Automatische Updates deaktivieren.
+Logs prüfen, ob v2.22.0 geladen wird.
+Problem-Modelle testen (Phi-4, Ministral-3-14B-Reasoning, GPT-OSS-20B).
+Falls nötig: Manuell via CLI mit v2.22.0 starten.
+
+Erwartetes Ergebnis
+Phi-4, Ministral-3-14B-Reasoning, GPT-OSS-20B sollten volle GPU-Auslastung (80–100%) erreichen.
+Performance (token/s) steigt deutlich.
+CPU-Last sinkt (da Attention auf GPU läuft).
+
+----
+User: "Falls nötig: Manuell via CLI mit v2.22.0 starten." - wie kann ich das machen?
+
+Um llama.cpp v2.22.0 manuell via CLI zu starten und damit deine Modelle (z. B. Phi-4, Ministral-3-14B-Reasoning, GPT-OSS-20B) mit voller GPU-Auslastung zu nutzen, folge diesen Schritten:
+
+
+----
+MoE-Modelle haben oft Schwierigkeiten in LM Studio. Herunter geladen sind mindestens diese Modelle:
+LFM 2.5-8B (obwohl dieses sehr schnell ist), LFM2-24B, Granite-4.0-tiny, Ernie 4.5-21B, DeepSeek-Coder-Lite, gpt-oss-20B
+
+=> Ecosia KI schlägt vor, bei MoE Modellen auf vLLM auszuweichen. 
+Ist per pip install installiert.
+vorher konvertieren von GGUF -> … 
+
+---
+User:
+Bitte vormerken: 
+1. Bei den nächsten Überarbeitungen der Python-Skripte wieder Versionsnummern hochzählen, um den Zwischenstand zu sichern! 
+2. Für künftige schnelle Tests nach Code-Änderungen LFM2.5-8b mit 10 Tasks statt Mathstral mit 5 Tasks verwenden: LFM ist nochmal doppelt so schnell wie Mathstral (80 statt 40 tok/s).
+3. Ausnahme von der Ausnahme: Rnj-1-8B und gpt-oss-20b sind zwar MoE- und Reasoning-Modelle, aber im Gegensatz zu den anderen Modellen dieses Typs noch gut im Mittelfeld oder oberen Drittel bei der Geschwindigkeit (20 bzw. 40 tok/s) und bei den Score-Ergebnissen eher im oberen Drittel. 
+Also: diese beiden Modelle bitte nachberechnen mit allen Benchmarks, NACHDEM der aktuell laufende Run fertig ist (NICHT parallel!). Anschließend die Ergebnisse konsolidieren mit dem vorherigen Lauf über die 15 Nicht-MoE/Reasoning/VL/OCR-Modelle. 
+4. Ergänze in allen Auswertungen einen Effizienzparameter: Gesamt-Score über alle jeweils getesteten Benchmarks dividiert durch Zeit (Kosten) in Tok/s. 
+
+---
+19.06. / 10:49
+1.) Modelle werden immer noch doppelt geladen. Das verbraucht exzessiv Speicher und verlangsamt die Benchmark. Das Problem tauchte schon wiederholt auf und ist renitent.
+Ich vermute es passiert durch die drei verschiedenen Benchmark-Pipelines. Diese sind in der Zusammenarbeit noch nicht hinreichend abgestimmt.
+Stelle durch Review aller aktuell genutzten Python-Code Skripte sicher, dass vor jedem Laden eines Modells der aktuelle Modell-Speicher leer ist. Überprüfe das immer vorher mit "lms ps". Wenn das zu testende Modell schon geladen ist, musst du nicht erneut laden. Ist ein anderes Modell schon geladen, dieses vorher laden.
+
+2.) Lese und Prüfe nach dem Lauf die letzte, nicht leere Log-Datei von LM Studio im Ordner "C:\Users\pskra\.lmstudio\server-logs\2026-06". 
+Dort finden sich zum Beispiel Meldungen wie: " [deepseek-coder-v2-lite-instruct] Running chat completion on conversation with 1 messages. 2026-06-19 10:36:38 [DEBUG]
+ 114.48.100.087 W llm_tokenizer_bpe_session::check_double_bos_eos: Added a BOS token to the prompt as specified by the model but the prompt also starts with a BOS token. So now the final prompt starts with 2 BOS tokens. Are you sure this is what you want?" 
+Prüf die Warn- und Fehler-Meldungen auf mögliche Verbesserungen im Python-Script oder bei den Modell-Parametern.
+
+3.) es gibt im Ergebnis-Ordner immer noch 4 csv-Dateien anstatt einer für jedes Modell. 
+Zwei der csv-Dateien mit generischem Namen "modell_zusammenfassung_{Date}_{time}_{model-id}  haben fast bis auf den Zeitstempel den gleichen Namen, sind aber unterschiedlich groß und haben daher wohl unterschiedlichen Inhalt. Darüber hinaus gibt es je eine csv-Datei für die Benchmark mit DS1000 und eine für PandasEval. 
+ToDo: Fasse alle Benchmarks für ein Modell am Ende zusammen in eine csv-Datei, ohne Datenverlust. 
+
+4) Es gibt in den LM-Studio Einstellungen unter Developer-Modus einen Button, der heisst: 
+"Gegebenenfalls `reasoning_content` und `content` in API-Antworten trennen" (On/Off)
+Darunter zur Erläuterung: "Diese Einstellung funktioniert nur für 'Reasoning'-Modelle wie DeepSeek R1, seine destillierten Varianten und andere Modelle, die CoT in <think>- und </think>-Tags erzeugen." 
+
+Welche Einstellung soll ich hier am Besten wählen "On" oder "Off"? Kannst Du das im Programm-Skript berücksichtigen? 
+
+5.) Unsloth gibt in der Modellbeschreibung zu LFM2.5-8B-A1B (MoE+Reasoning-Modell) folgenden Hinweis: 
+"LFM2.5 uses a ChatML-like format. See the Chat Template documentation for details. Example:
+<|startoftext|><|im_start|>system
+You are a helpful assistant trained by Liquid AI.<|im_end|>
+<|im_start|>user
+What is C. elegans?<|im_end|>
+<|im_start|>assistant
+Because LFM2.5-8B-A1B is a reasoning model, assistant turns contain an explicit chain of thought before the final answer. You can use tokenizer.apply_chat_template() to format your messages automatically."
+Weitere Hinweise: https://docs.liquid.ai/lfm/key-concepts/tool-use 
+und für Nutzung in LM Studio: https://docs.liquid.ai/deployment/on-device/lm-studio
+
+Kann die Nutzung von tokenizer.apply_chat_template() auch für andere LFM und/oder Reasoning Modelle im Benchmark hilfreich sein, um effizientere Antworten zu bekommen?
+Alternativ zur Python Funktion via .apply_chat_template() schläft LFM vor, zwei JSON Strukturen im System-Prompt zu ergänzen.
+
+---
+Du schreibst: "1) Doppeltes Laden – FIXED. Neue get_current_loaded_model() via lms ps --json prüft vor jedem Laden. Nur wenn ein anderes Modell geladen ist, wird entladen. Ist das Kandidaten-Modell bereits geladen, wird komplett übersprungen. In run_benchmarks_v2.py:155-175 (neu) und in der Main-Loop integriert." 
+Vielleicht das der Grund, warum das Problem immer wieder auftaucht: weil die Logik an mehreren Stellen in verschiedenen Python-Skripts verankert ist.
+Hier braucht es wohl eine grundsätzlichere Entscheidung zum Programmdesign: macht es vielleicht Sinn, die drei verschiedenen Benchmark-Pipelines nur von einer Stelle aus, also in einem Python-Skript zu steuern, statt auf verteilten Skripten? Das ist dann vermutlich weniger fehleranfällig.
+
+---
+
+Info: Ich habe mit JanusCoder-14B-Q5_K_M.gguf von Unsloth noch eine zusätzliches Modell mit Q5-Quantisierung herunter geladen, weil das iMatrrix Modell JanusCoder-14B.i1-Q6_K.gguf von mradermacher mit 55% Auslastung auf der CPU lief  (statt auf der GPU) und damit entsprechend langsam ist. 
+
+Ausserdem weisst Unsloth auf der HuggingFace Webseite darauf hin, dessen Unsloth Variante ein chat template fix für llama.cpp (Backend für LM Studio) enthält, vergleiche https://huggingface.co/unsloth/JanusCoder-14B-GGUF. 
+
+Es ist allerdings unklar, ob dieses JinJa template fix dann auch in der LM Studio Einstellung enthalten ist. 
+
+ToDo's:
+1.) Bitte prüfe die Jinja Templates beider Modelle wie sie in LM Studio verwendet werden sowie das Web dazu, insbesondere auf Webseiten von lmstudio, huggingface und unsloth.  
+
+2.) Lasse das neue Modell JanusCoder-14B-Q5_K_M.gguf auch mit SampleSize=8 durch alle Benchmarks laufen, zum Vergleich mit dem vorherigen imatrix Modell JanusCoder-14B.i1-Q6_K.gguf von MRadermacher.
+
+---
+User:
+Ergänze in "C:\Users\pskra\Python-Projekte\Benchmarks\Doku+Install\Modell_Steckbriefe_20260617.md" die Angaben zu KV-Heads und head_dim der Modelle und jeweils die Formel zur Berechnung des KV-Speichers. 
+Leite daraus eine Empfehlung für die maximale Anzahlt slots ab, und ergänze sie bei jedem Modell.
+LM Studio hat allerdings die Standardeinstellungen "Unified KV-Cache", so dass die KV Speicher des slots gemeinsam gespeichert werden. 
+
+---
+In der Datei "C:\Users\pskra\Python-Projekte\Benchmarks\ergebnisse\konsolidiert_20260622_210032.md" ist die Effizienz falsch berechnet. Ich hatte eine Neudefinition vorgegeben, die Effizienz nicht als Score / (token/sec) sondern als Score / Laufzeit der Benchmark auf dem Modell zu definieren. 
+In der Datei "C:\Users\pskra\Python-Projekte\Benchmarks\ergebnisse\20260619_Ergebnisse_SampleSize8.md" ist es richtig dargestellt, in den späteren Konsolidierungen nicht.
+Bitte die letzten drei konsolidierten md-Dateien entsprechend korrigieren sowohl für die Gesamteffizienz (Gesamtscore) als auch für Coding. Die TOP 5 ist mit den neuen Ergebnissen neu auszuwählen und zu sortieren. 
+
+---
+neue Benchmark: CoderEval
+
+## 1. Systematische Ursachen für die 0-12%-Scores bei PandasEval
+
+Nach Analyse der Per-Task-CSVs und des Evaluations-Codes habe ich **drei systematische Fehler identifiziert**:
+
+### **A) Setup-Code (DataFrame-Schema) wird NICHT im Prompt übermittelt**
+
+In `benchmark_lmstudio_v20.py:848-856` wird der Prompt nur aus `task["prompt"]` gebaut – der `setup_code` (der die Test-DataFrames definiert) **fehlt komplett**:
+
+```python
+request_prompt = (
+    "Complete the following Python function using pandas. "
+    "Output only the function code, no additional text.\n\n"
+    f"{prompt}"      # <-- nur die generische Beschreibung
+)
+```
+
+Beispiel Aufgabe 5 (`assign_derived`):
+- Prompt: *"Create a function that uses assign() with lambda to add multiple derived columns in a single chain."*
+- Setup-Code (dem Modell **verborgen**): `pd.DataFrame({'price': [50, 150], 'quantity': [2, 1]})`
+- Test erwartet: Spalten `'total'`, `'discounted'`, `'category'`
+- Modelle raten Spaltennamen wie `'a'`, `'b'`, `'column1'`, `'derived1'` → **0/1**
+
+Das ist der **Hauptgrund** für das systematische Scheitern. Das Modell kann die Spaltennamen nicht erraten, da sie weder im Prompt noch als Funktionsparameter übergeben werden (sondern hardgecoded in der Lösung sind).
+
+### **B) Tests prüfen auf exakte Spaltennamen statt funktionales Verhalten**
+
+Die Tests sind **implementierungsspezifisch** statt **verhaltensorientiert**. Bsp:
+
+| Aufgabe | Prompt sagt | Test prüft |
+|---------|-------------|------------|
+| 1 (explode_and_agg) | "explodes a DF column… computes mean…" | `isinstance(result, pd.DataFrame)` + columns `'categories'`, `'score'` |
+| 5 (assign_derived) | "add multiple derived columns" | columns `'total'`, `'discounted'`, `'category'` |
+| 7 (eval_expression) | "compute a new column from an expression" | column `'ratio'` |
+
+Die Kanonische Lösung für Aufgabe 1 nutzt `.reset_index()`, was einen DataFrame liefert. Modelle, die ohne `.reset_index()` nur eine Series retournieren **oder** mit `.reset_index()` aber anderem Column-Naming scheitern, auch wenn die Logik korrekt ist.
+
+### **C) Sandbox entfernt `eval` aus Builtins**
+
+In `_build_sandbox_script:551-552` werden unter anderem `eval` und `compile` aus den Builtins entfernt:
+
+```python
+"for _bd_rm in ('eval', 'exec', 'open', 'input', 'compile', 'globals', 'locals', 'vars'):",
+```
+
+DeepSeek Coder v2 Lite generiert für Aufgabe 7: `df['new_column'] = eval(expr)` → **schlägt fehl**, weil `eval` nicht existiert. Modelle die `df.eval()` verwenden sind nicht betroffen (pandas interne eval-Nutzung geht über globale Builtins, nicht die restricted namespace), aber der Fehler ist schwer nachvollziehbar.
+
+---
+
+## 2. Code-Review: `benchmark_lmstudio_v20.py` – Kritische Fundstellen
+
+| Fundstelle | Problem | Schwere |
+|-----------|---------|---------|
+| `Z.848-856` | `setup_code` fehlt im Prompt | **Hoch** |
+| `Z.551-552` | `eval`, `compile` entfernt, aber pandas intern benötigt diese ggf. | Mittel (nur bei explizitem `eval()`-Aufruf) |
+| `Z.364-368` | `extract_code()` Fallback: erfasst nur Zeilen die `_is_bare_statement` entsprechen – verpasst Code ohne Funktionsdefinition | Niedrig |
+| `Z.371-427` | `_repair_indentation()` repariert Einrückungsfehler, kann aber Syntaxfehler nicht beheben | Mittel |
+| `Z.475-510` | Sandbox blockiert `os`, `subprocess` etc. – sinnvoll, aber Debugging bei Fehlern erschwert | Niedrig |
+| `Z.51` | `SAMPLE_SIZE=8` bei nur 10 Aufgaben – statistisch schwaches Signal | Mittel |
+
+---
+
+## 3. Evaluation Guidebook – Relevante Hinweise
+
+Die [huggingface/evaluation-guidebook](https://github.com/huggingface/evaluation-guidebook) empfiehlt:
+
+1. **"Look at the data, both what you have, what the model generates, and its scores"** – Das haben wir getan.
+2. **"You need benchmarks that match your specific use case"** – PandasEval testet ob Modelle spezifische Pandas-APIs kennen, nicht ob sie "gut coden" können.
+3. **"Evaluations provide strong signal"** – 10 Aufgaben mit 0-12% liefern **kein differenzierendes Signal**. Ein Modell das 0% hat vs. 12% unterscheidet sich kaum.
+4. **"Common pitfalls: tests that are too specific, prompts that hide context"** – Beides hier zutreffend.
+
+---
+
+## 4. CoderEval – Eignung und Docker-Prüfung
+
+**CoderEval** ([GitHub](https://github.com/CoderEval/CoderEval)): 230 Python-Funktionen aus 43 realen Open-Source-Projekten mit 6 Runnable-Levels (self_contained → project_runnable).
+
+### Kann CoderEval ohne Docker laufen?
+
+**Teilweise ja, mit Einschränkungen:**
+
+- Die JSON-Daten sind standalone lesbar (`CoderEval4Python.json`): 230 Einträge mit `docstring`, `code`, `file_content`, `dependency`, `level`
+- **`self_contained`** und **`slib_runnable`** (nur Standard-Lib-Abhängigkeiten): ~60% der Aufgaben – könnten mit dem bestehenden Sandbox-Ansatz evaluiert werden, nachdem `extract_code` und das Evaluations-Framework angepasst wurden
+- **`plib_runnable` / `class_runnable` / `file_runnable` / `project_runnable`**: benötigen externe Pakete oder ganze Projekt-Repos → **ohne Docker nicht praktikabel** (müssten 43 GitHub-Repos klonen + Umgebungen aufsetzen)
+
+### CoderEval vs. PandasEval
+
+| Kriterium | PandasEval (aktuell) | CoderEval |
+|-----------|---------------------|-----------|
+| Aufgaben | 10 (selbst erstellt) | 230 (aus realen Projekten) |
+| Tests | Assertions mit harten Column-Namen | Echte Unit-Tests aus OSS-Projekten |
+| Abdeckung | Nur Pandas | Datenbanken, Web-Frameworks, Datenverarbeitung, etc. |
+| Prompt-Güte | Vage (ohne Kontext) | Docstrings + File-Context |
+| Signalstärke | Schwach (0-12% bei allen) | Stärker (differenziertere Scores) |
+| Docker-Pflicht | Nein | Ja (für vollständige Evaluation) |
+
+### Empfehlung
+
+CoderEval ist **prinzipiell besser geeignet** als die selbst erstellten PandasEval-Aufgaben, aber:
+- Für **non-Docker-Betrieb** müssten nur die `self_contained`- und `slib_runnable`-Aufgaben extrahiert werden (ca. 60% von 230 ≈ 138 Tasks)
+- Der `CoderEval4Python.json` müsste so aufbereitet werden, dass er ins bestehende `simple_evals/`-Schema passt (mit extrahierbaren Test-Assertions)
+- Docker-freie Nutzung erfordert Anpassung des Evaluations-Wrappers (derzeit auf Insert-basierte DS1000-Harness + direkte Tests ausgelegt)
+
+## Sofort-Maßnahmen
+1. ... 
+2. ... 
+3. **CoderEval evaluieren**: `level: "self_contained"` Aufgaben aus `CoderEval4Python.json` extrahieren und in Pipeline aufnehmen
+
+=============
+
+Die Modell-Steckbriefe in der Datei "C:\Users\pskra\Python-Projekte\Benchmarks\Doku+Install\Modell_Steckbriefe_20260623.md" mit den neuen Modellen ergänzen und Linkliste, KV-Cache Hinweise etc. aktualisieren. Nehme auch Web-Links zu den Modellwebseiten bei den jeweiligen Herstellern/Herausgebern mit auf (Mistral, Qwen, IBM, Microsoft, DeepSeek etc.)
+
+
+===
+24.06.2026
+
+Du schreibst weiter oben beim thinking-Prozess: "lms unload doesn't take "all" as an argument. It needs a specific model identifier. Looking at the benchmark code in model_manager.py or the benchmark script, I should check how it handles unloading. 
+Actually, for the benchmark, the script probably handles model loading/unloading internally. Let me just check what lms ps shows and whether the model is still loaded. But actually, for the benchmark, the script handles everything. Let me just start the benchmark run. 
+But wait - the benchmark script might use lms unload all which would fail. Let me check the code first. 
+I see that model_manager.py uses lms unload --all, but the actual lms CLI in this version doesn't support --all. Let me check the current model_manager.py to see the exact code. 
+ 
+The model_manager.py uses lms unload --all which doesn't work in the new lms CLI. The new CLI only accepts a specific model identifier. I need to fix this." 
+ 
+Aber das ist falsch. Die Syntax der CLI lms.exe kannst Du in der PowerShell einfach abfragen: 
+ 
+"PS C:\Windows\System32> lms unload --help 
+Usage: lms unload [options] [identifier] 
+ 
+Unload a model 
+ 
+Arguments: 
+   identifier    The identifier of the model to unload. If not provided and exactly one model is loaded, it will be unloaded automatically. Otherwise, you will be prompted to select a model interactively from a list. 
+ 
+Options: 
+   -a, --all             Unload all models" 
+ 
+Das heisst, der Befehl muss entweder lauten 'lms unload -a' oder 'lms unload --all'.
+
+-----
+Die LLM-Modelle "Mistral-3-14b-reasoning-2512" und "ministral-3-14b-instruct-2512" laufen mit einer Auslastung von typischerweise nur ca. 40 bis 45% auf dem GPU Grafikprozessor und mit 45 bis 50% auf der CPU (und dadurch langsam).  
+Woran kann das liegen?  Welche Einstellungen bei den Modellparametern in LM Studio lassen sich noch beeinflussen, um mehr Rechenlast auf die GPU zu schieben?  
+Die aktuellen Einstellungen finden sich hier: "C:\Users\pskra\.lmstudio\.internal\user-concrete-model-default-config\mistralai\Ministral-3-14B-Reasoning-2512-GGUF\Ministral-3-14B-Reasoning-2512-Q5_K_M.gguf.json" und hier: "C:\Users\pskra\.lmstudio\.internal\user-concrete-model-default-config\mistralai\Ministral-3-14B-Instruct-2512-GGUF\Ministral-3-14B-Instruct-2512-Q5_K_M.gguf.json"
+
+Der dezidierte GPU Speicher ist voll geladen (15,6 von 16 GB), der gemeinsame GPU Speicher mit 2 bis 3  von 15,8 GB eher gering ausgelastet.  Auch der RAM Bereich ist mit 11,7 GB unauffällig.
+
+---
+1. Prüfe "C:\Users\pskra\Python-Projekte\Benchmarks\lmstudio_model-list_mit_klassifikation__24-06-2026.txt": 
+a) ergänze alle neuen Modelle 
+b) ergänze in der Spalte "Modell-Typ", dort wo ein ? steht, ob das ein MoE und/oder Reasoning, VL oder einfach nur dense Modell ist. 
+
+c) Ergänze in den Erläuterungen unter der Tabelle ggf. die Anzahl der Experten bei MoE Modellen. 
+
+2. Ergänze die neuen oder modifizierten (Quantisierung) Modelle sowie die Angaben zu aktiven Experten bei MoE in den Modell-Steckbriefen in "C:\Users\pskra\Python-Projekte\Benchmarks\Doku+Install\Modell_Steckbriefe_20260623.md".
+
+---
+1. LiquidAI/LFM2-24B-A2B-GGUF mit Quant. IQ4_XS ersetzt durch: LiquidAI/LFM2-24B-A2B-REAP-GGUF mit Quant. i1-Q6_K
+
+2. LiquidAI/LFM2-8B-A1B-GGUF mit Q8_0 ersetzt durch neuere Version: LiquidAI/LFM2.5-8B-A1B-GGUF mit Q8_0
+
+3. Qwen3.6-27B-GGUF mit Quant. UD-IQ3-XXS ersetzt durch: Qwen3.6 28B REAP-I1-GGUF-Q3_K_S (a 20% expert-pruned variant of Qwen/Qwen3.6-35B-A3B using the REAP (Router-weighted Expert Activation Pruning) method)
+
+4. jackrong/qwen3.5-9b-deepseek-v4-flash ersetzt durch mradermacher/qwen3.5-9b-deepseek-v4-flash, jeweils Q8_0
+
+5. Qwen3-Coder-30B-A3B-Instruct (UD-Q3_K_XL), ersetzt durch REAP-compressed variant:  Qwen3-Coder-REAP-25B-A3B-I1-GGUF-IQ4_XS
+
+neues Modell:
+a. Gemma-4-19B-A4B-Instruct-REAP-I1-GGUF mit Q4_K_S
+
+---
+1. Qwen3.6-Modelle wegen schlechter Ergebnisse wieder gelöscht. 
+2. auch Gemma-Modelle benötigen wohl ein prompt template mit ChatML, siehe dieses Beispiel: https://huggingface.co/philschmid/gemma-tokenizer-chatml. Bitte prüfe das bei den vormals geladenen und getesteten Gemma-Modellen, bzw. bei dem noch vorhandenen gemma-4-19b-a4b-it-REAP-i1-GGUF.
+3. runde alle Benchmark-Score Ergebnisse auf ganze % Zahlen mathematisch auf oder ab, ohne Nachkommastellen.
+4. Was bedeuten diese Angaben  "CPUa | CPUm | GPUa | GPUm | RAMa | RAMm" im Spaltenkopf der vollständigen Ergebnistabelle?
+
+======================================================
+aktueller Run (25.06.2026, abends):
+
+$ python run_benchmarks_v3.py --model "1-15,17" --benchmarks all --sample-size 20 2>&1
+
+============================================================
+  Unified Benchmark Launcher v6
+  SampleSize: 20
+  Pipelines: Custom (DS1000/PandasEval), EvalPlus, LM-Eval
+============================================================
+
+  Modelle:  Qwen3 Coder REAP 25B A3B I1, Granite 4.0 H Tiny, Phi 4, Ministral 3 14B Instruct 2512, Qwen2.5 Coder 14B Instruct, Granite 4.1 8B, Deepseek Coder 6.7B Instruct, Phi 4 (unsloth), JanusCoder 14B UD, Devstral Small 2 24B Instruct 2512 UD, Falcon3 10B Instruct, ERNIE 4.5 21B A3B PT, Pandalyst 13B v1.0, Rnj 1, Starcoder2 15B Instruct v0.1, Codestral 22B v0.1
+
+  Benchmarks: DS1000, PandasEval, CoderEval, HumanEval+, MBPP+, ARC-Challenge, HellaSwag, TruthfulQA, MMLU-Pro, BBH, MathQA
+
+----
+Neue Modelle, z.Tl. mit Python-Schwerpunkt:
+
+JetBrains/Mellum2-12B-A2.5B-Instruct-GGUF-MXFP4_MOE (7GB) und/oder 
+Mellum2-12B-A2.5B-Instruct-GGUF-Q4_K_M (8GB) oder 
+JetBrains/Mellum2-12B-A2.5B-Instruct-GGUF-Q6_K (10.9 GB) herunterladen und ausprobieren. (Vorher nur Thinking-Modell getestet)
+
+dito: 
+Jackrong/Qwen3.5-9B-Python-Coder-GGUF (Q8_0 - 9.5GB)
+TheBloke/CodeLlama-13B-Python-GGUF (Q6_K - 10.7GB)
+Nerdsking/Nerdsking-python-coder-7B-i (Q8_0 - 8.1GB) "After intense refining, Nerdsking-python-coder-7B-i has achieved 86.99 in HumanEval (bf16), ranking it amongst the highest-performing Python-focused 7B models ever reported on HumanEval. Surpassing even much bigger models in that area. "
+mradermacher/Qwen3-30B-A3B-python-coder-GGUF(Q3_K_S - 13.3GB)
+mradermacher/gemma-4-19b-a4b-it-REAP-i1-GGUF (Q5_K_S - 13.3GB)
+mradermacher/gemma-4-21b-a4b-it-REAP-heretic-i1-GGUF oder barozp/gemma-4-21b-a4b-it-REAP-GGUF (Q4_K_S - 12.75GB)
+ Achtung: gemma-4 Modelle ohne KV-Quantisierung laufen lassen!
+

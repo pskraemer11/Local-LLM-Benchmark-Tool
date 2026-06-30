@@ -1,0 +1,20 @@
+Benchmark-Tests lokale LLM mit LM Studio / LMS.exe & LLMSTER.exe
+
+
+1. Lauf 14.-15.06.2026
+Auswahl: alle Tests
+Modelle: Deine Wahl: 2-15 (ohne Reasoning, abgebrochen)
+
+=>
+Run: Pandalyst-13B-v1.0, Pythia-12B, Pythia-12B-I1, Qwen3.5-9B, Rnj-1, WizardCoder-Python-13B-v1.0-I1
+Ergebnis: aggregated_Pandalyst-13B, Pythia-12B, Qwen3.5-9B, Rnj-1, WizardCoder-Python-13B_20260615_0036-0844.ods
+
+
+2. Lauf 15.06.2026, Modelle: alle (abgebrochen)
+=> Run: ...
+Ergebnis: ...
+
+
+
+
+

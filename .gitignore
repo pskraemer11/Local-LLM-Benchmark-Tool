@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+*.egg-info/
+
+# Benchmark-Daten (zu gross fuer Git)
+simple_evals/
+ergebnisse/
+logs/
+runs/
+data/
+human_eval_plus/
+
+# Drittanbieter-Code (nicht veraendert)
+human-eval/
+ds1000_official/
+
+# Archiv (lokal, nicht fuer Repo)
+Archiv/
+
+# LM Studio / System-spezifisch
+lmstudio_model-list*.json
+lmstudio_model-list*.txt
+model-list.json
+chat_test.json
+ans.png
+opencode.json
+benchmark-dirs.txt
+*.sqlite
+
+# OpenCode
+.opencode/
+
+# Temporaere Dateien
+*.tmp
+*.bak
+*.swp

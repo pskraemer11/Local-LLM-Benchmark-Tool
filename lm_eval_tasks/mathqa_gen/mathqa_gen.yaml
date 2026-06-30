@@ -1,0 +1,46 @@
+task: mathqa_gen
+dataset_path: json
+dataset_kwargs:
+  data_files:
+    test: C:/Users/pskra/Python-Projekte/Benchmarks/simple_evals/challenge_test.jsonl
+    validation: C:/Users/pskra/Python-Projekte/Benchmarks/simple_evals/dev.jsonl
+    train: C:/Users/pskra/Python-Projekte/Benchmarks/simple_evals/train.jsonl
+output_type: generate_until
+test_split: test
+validation_split: validation
+num_fewshot: 0
+process_docs: !function utils.process_docs
+doc_to_text: >-
+  Solve the following math problem:
+
+  Question: {{ Problem }}
+
+  A. {{ choices[0] }}
+  B. {{ choices[1] }}
+  C. {{ choices[2] }}
+  D. {{ choices[3] }}
+  E. {{ choices[4] }}
+
+  Answer with just the letter of the correct option (A, B, C, D or E).
+doc_to_target: "{{ correct.upper() }}"
+generation_kwargs:
+  until:
+    - "\n\n"
+    - "Question:"
+  max_gen_toks: 20
+  do_sample: false
+  temperature: 0.0
+metric_list:
+  - metric: exact_match
+    aggregation: mean
+    higher_is_better: true
+    ignore_case: true
+    ignore_punctuation: true
+filter_list:
+  - name: custom-extract
+    filter:
+      - function: regex
+        regex_pattern: '(?:answer (?:is|:)|would be|option)?\s*\(?([ABCDE])\b'
+      - function: take_first
+metadata:
+  version: 1.0
