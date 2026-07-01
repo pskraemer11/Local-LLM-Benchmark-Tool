@@ -5,7 +5,6 @@ __pycache__/
 *.pyd
 .pytest_cache/
 *.egg-info/
-tests/
 
 # Benchmark-Daten (zu gross fuer Git)
 simple_evals/
@@ -14,7 +13,6 @@ logs/
 runs/
 data/
 human_eval_plus/
-lm_eval_tasks/
 
 # Drittanbieter-Code (nicht veraendert)
 human-eval/
