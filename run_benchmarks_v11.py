@@ -495,7 +495,8 @@ def run_custom_benchmark(model_info: dict[str, Any], bench: dict[str, Any], samp
         return None
     score = None
     if output:
-        m = re.search(r"Score:\s*(\d+(?:\.\d+)?)%", output)
+        # "Durchschnitts-Score: XX%" (aggregiert) statt per-task "Score: XX%" matchen
+        m = re.search(r"Durchschnitts-Score:\s*(\d+(?:\.\d+)?)%", output)
         if m:
             score = float(m.group(1)) / 100.0
     print(f"  [OK] {bench['name']} done ({elapsed:.0f}s)")
