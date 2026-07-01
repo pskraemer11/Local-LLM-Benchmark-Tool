@@ -255,54 +255,39 @@ def write_per_model_csv(entries: list[dict], model_display: str, model_key: str 
 def write_accumulative_summary(results: list[dict], model_info: dict,
                                sample_size: int = 5,
                                base_dir: Optional[str] = None) -> str:
-    """Akkumulierende Modell-CSV (ersetzt save_model_summary_csv in run_benchmarks).
+    """Akkumulierende Modell-CSV – JEDER Aufruf erzeugt eine NEUE Datei mit Timestamp.
     
+    Dateiname: modell_<YYYYMMDD_HHMMSS>_<model_key>.csv
+    Dadurch gehen keine Ergebnisse durch Ueberschreiben/Dedup verloren.
+
     results: Liste von dicts mit pipeline, bench, model, score, detail, latency, tok_s, vram
     model_info: dict mit key, display
     """
-    # Dateiname: vollstaendiger Modell-Key (mit Quant-Variante), max 50 Zeichen
+    ts = _now_ts()
     safe_key = model_info["key"].replace("/", "_").replace("\\", "_")
     short = safe_key[:50] if len(safe_key) > 50 else safe_key
     d = _results_dir(base_dir)
-    path = os.path.join(d, f"modell_{short}.csv")
+    path = os.path.join(d, f"modell_{ts}_{short}.csv")
     iso = _now_iso()
 
-    existing = []
-    if os.path.exists(path):
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                for row in csv.DictReader(f, delimiter=";"):
-                    existing.append(row)
-        except Exception:
-            pass
-    existing_keys = {(r.get("pipeline", ""), r.get("benchmark", "")) for r in existing}
-
-    new_rows = []
+    rows = []
     for r in results:
-        key = (r.get("pipeline", ""), r.get("bench", r.get("benchmark", "")))
-        if key not in existing_keys:
-            new_rows.append({
-                "pipeline": r.get("pipeline", ""),
-                "model": r.get("model", ""),
-                "model_key": model_info["key"],
-                "benchmark": r.get("bench", r.get("benchmark", "")),
-                "timestamp": iso,
-                "sample_size": str(sample_size),
-                "score": r.get("score", ""),
-                "detail": r.get("detail", ""),
-                "latency_s": r.get("latency", ""),
-                "tokens_per_sec": r.get("tok_s", ""),
-                "vram_gb": r.get("vram", ""),
-            })
-            existing_keys.add(key)
+        rows.append({
+            "pipeline": r.get("pipeline", ""),
+            "model": r.get("model", ""),
+            "model_key": model_info["key"],
+            "benchmark": r.get("bench", r.get("benchmark", "")),
+            "timestamp": iso,
+            "sample_size": str(sample_size),
+            "score": r.get("score", ""),
+            "detail": r.get("detail", ""),
+            "latency_s": r.get("latency", ""),
+            "tokens_per_sec": r.get("tok_s", ""),
+            "vram_gb": r.get("vram", ""),
+        })
 
-    if not new_rows and existing:
-        print(f"  [OK] Bereits vollstaendig in: {path}")
-        return path
-
-    all_rows = existing + new_rows
-    _write_csv(path, SUMMARY_FIELDS, all_rows)
-    print(f"\n[INFO] Modell-Zusammenfassung: {path} ({len(all_rows)} Eintraege)")
+    _write_csv(path, SUMMARY_FIELDS, rows)
+    print(f"\n[INFO] Modell-Zusammenfassung: {path} ({len(rows)} Eintraege)")
     return path
 
 
