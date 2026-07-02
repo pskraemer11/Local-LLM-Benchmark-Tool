@@ -785,7 +785,7 @@ def main() -> None:
 
     with open(md_path, "w", encoding="utf-8") as f:
         f.write(f"# Konsolidierte Ergebnisse – Dense Run (15+ Modelle)\n")
-        f.write(f"\nStand: {datetime.now().strftime('%Y-%m-%d %H:%M')}, SampleSize=8\n\n")
+        f.write(f"\nStand: {datetime.now().strftime('%Y-%m-%d %H:%M')}, SampleSize=20\n\n")
         f.write("** Neue Gewichtung Gesamt-Score: Coding 35%, Math 25%, Agentic 25%, Knowledge 15% **\n")
         f.write("**Effizienz = Score / Laufzeit (in Stunden)** – Laufzeit basiert auf gemessener DS1000+CoderEval-Latenz.\n\n")
 
