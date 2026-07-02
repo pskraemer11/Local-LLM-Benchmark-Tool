@@ -52,6 +52,8 @@ DISPLAY_NAMES = {
     "qwen3.6-27b":                         "Qwen3.6 27B",
     "qwen3-30b-a3b-python-coder":          "Qwen3 30B A3B Python Coder",
     "gpt-oss-20b":                        "GPT-OSS 20B",
+    "gemma-4-26b-a4b-it":                "Gemma 4 26B A4B Instruct UD",
+    "qwen3.6-28b-reap-i1":               "Qwen3.6 28B REAP I1",
 }
 
 WHITELIST = list(DISPLAY_NAMES.keys())
@@ -93,6 +95,8 @@ QUANT_MAP = {
     "essentialai/rnj-1": "Q8_0",  # Rnj 1
     "starcoder2-15b-instruct-v0.1": "Q6_K",  # Starcoder2 15B Instruct v0.1
     "wizardcoder-python-13b-v1.0": "Q6_K",  # Wizardcoder Python 13B v1.0 I1
+    "gemma-4-26b-a4b-it": "IQ3_S",  # Gemma 4 26B A4B Instruct UD
+    "qwen3.6-28b-reap-i1": "IQ3_M",  # Qwen3.6 28B REAP I1
 }
 
 
@@ -130,7 +134,7 @@ CAT_WEIGHTS = {
 OVERALL_WEIGHTS = {"coding": 0.35, "math": 0.25, "agentic": 0.25, "knowledge": 0.15}
 
 PIPELINE_TIMEOUTS = {
-    "custom_subprocess": 3600,
+    "custom_subprocess": 14400,
     "evalplus_base": 600,
     "lmeval_base": 600,
     "mmlupro_per_subset": 300,

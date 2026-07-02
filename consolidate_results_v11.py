@@ -915,8 +915,7 @@ def main() -> None:
         f.write("\n---- \n")
 
         coding_top = _threshold_filtered(rows, "Coding", 60.0)
-        coding_top_full = [r for r in coding_top if r.get("DS1000") not in (None, "", "—") or r.get("CoderEval") not in (None, "", "—")]
-        coding_top_display = coding_top_full[:7]
+        coding_top_display = coding_top[:7]
         _write_tbl(f, f"TOP {len(coding_top_display)} – Coding (≥60%)",
             ["Modell", "Coding", "DS1000", "CoderEval", "HEval+", "MBPP+", "Laufzeit", "Effiz."],
             coding_top_display,
