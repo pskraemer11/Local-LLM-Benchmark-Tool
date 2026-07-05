@@ -994,7 +994,7 @@ HF: https://huggingface.co/Nerdsking/Nerdsking-python-coder-7B-i
 
 SWE-Bench Verified pass@10: 80.2% | Terminal-Bench v2 pass@10: 55.1% | AA Coding Index: 33.4
 
-**ACHTUNG: Modell verträgt keine KV-Cache Quantisierung!
+**ACHTUNG: Modell verträgt keine KV-Cache Quantisierung, lädt mit KV-Quantisierung nicht!
 
 HF: https://huggingface.co/CohereLabs/North-Mini-Code-1.0
 
@@ -1079,18 +1079,18 @@ HF-Modellkarte: https://huggingface.co/Qwen/Qwen3.5-9B
 
 ### qwen2.5-14b-instruct-1m (gelöscht)
 
-| Eigenschaft                       | Wert                                                              |
-|-----------------------------------|-------------------------------------------------------------------|
-| **Hersteller**                    | Qwen (Alibaba Cloud)                                              |
-| **Architektur**                   | Dense (Qwen2.5, 1M-kontextoptimiert), 48 Layer, GQA (40 Q / 8 KV) |
-| **Reasoning**                     | Nein                                                              |
-| **Param. Total / Active**         | 14.7B (100%)                                                      |
-| **Quantisierung/Modellgröße**     | Q6_K (12.1 GB)                                                    |
-| **Kontextlänge** (token)          | 1.010.000 (1M!) max. / hier: 98K                                  |
-| **GPU-Tauglichkeit (16 GB VRAM)** | ⚠️ Knapp (12.1 GB + Kontext x KV-Qaunt Q5_1/IQ4_NL => 15.4 GB + 2.3 GB shared GPU-mem)   |
-| **Benchmark-Typ**                 | very Long-Context + MC                                            |
-| **Lizenz**                        | Apache-2.0                                                        |
-| **Einschätzung**                  | Long-Context-Version von Qwen2.5-14B. 48 Layer, GQA (40 Q / 8 KV). Sparse Attention + Length Extrapolation. |
+| Eigenschaft                       | Wert                                                                                      |
+|-----------------------------------|-------------------------------------------------------------------------------------------|
+| **Hersteller**                    | Qwen (Alibaba Cloud)                                                                      |
+| **Architektur**                   | Dense (Qwen2.5, 1M-kontextoptimiert), 48 Layer, GQA (40 Q / 8 KV), Sparse Attention + Length Extrapolation |
+| **Reasoning**                     | Nein                                                                                      |
+| **Param. Total / Active**         | 14.7B (100%)                                                                              |
+| **Quantisierung/Modellgröße**     | Q6_K (12.1 GB)                                                                            |
+| **Kontextlänge** (token)          | 1.010.000 (1M!) max. / hier: 98K                                                          |
+| **GPU-Tauglichkeit (16 GB VRAM)** | ⚠️ Knapp (12.1 GB + Kontext x KV-Qaunt Q5_1/IQ4_NL => 15.4 GB + 2.3 GB shared GPU-mem)    |
+| **Benchmark-Typ**                 | very Long-Context + MC                                                                    |
+| **Lizenz**                        | Apache-2.0                                                                                |
+| **Einschätzung**                  | Long-Context-Version von Qwen2.5-14B. 48 Layer, GQA (40 Q / 8 KV).                        |
 
 **Achtung**: In LM Studio nur mit stark reduzierter Kontextlänge in 16 GB VRAM betreibbar (vLLM mit 320 GB empfohlen). 
 
@@ -1158,21 +1158,6 @@ HF: https://huggingface.co/Qwen/Qwen2.5-Coder-32B-Instruct
 
 ---
 
-### qwen3-14b (14B) (gelöscht)
-
-| Eigenschaft                       | Wert                                                              |
-|-----------------------------------|-------------------------------------------------------------------|
-| **Hersteller**                    | Qwen (Alibaba)                                                    |
-| **Architektur**                   | Dense (Qwen3)                                                     |
-| **Reasoning**                     | Nein                                                              |
-| **Param. Total / Active**         | 14B (100%)                                                        |
-| **Quantisierung/Modellgröße**     | Q5_K_M (10.5 GB)                                                  |
-| **Kontextlänge** (token)          | 32K                                                               |
-| **GPU-Tauglichkeit (16 GB VRAM)** | ✅ Ja (10.5 GB + KV-Cache)                                        |
-| **Benchmark-Typ**                 | Coding + MC                                                       |
-| **Einschätzung**                  | 14B dense, solides Coding+Math. Q5 spart VRAM.                    |
-
----
 
 ### qwen3-30b-a3b-python-coder - fine-tuned version of Qwen/Qwen3-30B-A3B (gelöscht)
 
@@ -1206,21 +1191,21 @@ HF: https://huggingface.co/Qwen/Qwen3-Coder-30B-A3B-Instruct
 
 ### qwen3-coder-reap-25b-a3b-i1 - gleiches Modell mit 3 Quantisierungen: Q3_K_M (12.0 GB), IQ4_XS (13.4 GB) und Q4_K_S (14.2 GB)
 
-| Eigenschaft                       | Wert                                                                      |
-|-----------------------------------|---------------------------------------------------------------------------|
-| **Hersteller**                    | Qwen (Alibaba Cloud)                                                      |
-| **Architektur**                   | **MoE**, Qwen2.5-Architektur; 48 Layer; REAP-pruned von 30B auf 25B         |
-| **Reasoning**                     | Nein                                                                      |
-| **Total / Active** Parameter      | 25B / 3B                                                                  |
-| **Experts**                       | Architektur # 103 (REAP-pruned from 128); Top-k (aktiv): 8; shared: Nein  |
-                                        => mit 16GB VRAM in LMS: #experts = max 16 (je nach Kontextlänge)       |
-| **Quantisierung/Modellgröße**     | Q3_K_M (12.0 GB), IQ4_XS (13.4 GB), Q4_K_S (14.2 GB)                      |
-| **Kontextlänge** (token)          | 262 k Token max. bei Q3_K_M möglich / hier: 131 k bei allen Modellen      |
+| Eigenschaft                       | Wert                                                                                    |
+|-----------------------------------|-----------------------------------------------------------------------------------------|
+| **Hersteller**                    | Qwen (Alibaba Cloud)                                                                    |
+| **Architektur**                   | **MoE**, Qwen2.5-Architektur; 48 Layer; REAP-pruned von 30B auf 25B                     |
+| **Reasoning**                     | Nein                                                                                    |
+| **Total / Active** Parameter      | 25B / 3B                                                                                |
+| **Experts**                       | Architektur # 103 (REAP-pruned from 128); Top-k (aktiv): 8; shared: Nein                |
+                                        => mit 16GB VRAM in LMS: #experts = max 16 (je nach Kontextlänge)                     |
+| **Quantisierung/Modellgröße**     | Q3_K_M (12.0 GB), IQ4_XS (13.4 GB), Q4_K_S (14.2 GB)                                    |
+| **Kontextlänge** (token)          | 262 k Token max. bei Q3_K_M möglich / hier: 131 k bei allen Modellen                    |
 | **GPU-Tauglichkeit (16 GB VRAM)** | Q3_K_M: ⚠️ knapp (12.0 GB + KV-Cache Quant. Q5_1/IQ4_NL => 15.6 GB + 0.6 shared GPU mem |
-|                                   | IQ4_XS: ⚠️ knapp (13.4 GB + KV-Cache Quant. Q5_1/IQ4_NL => 15.4 GB + 1.7 shared GPU mem |
-|                                   | Q4_K_S: ⚠️ knapp (14.2 GB + KV-Cache Quant. Q5_1/IQ4_NL => 15.5 GB + 2.3 shared GPU mem |
-| **Benchmark-Typ**                 | code generation, code reasoning and code fixing, Code Agents, mathematics and general |
-| **Lizenz**                        | Apache-2.0                                                          |
+|                                   | IQ4_XS: ⚠️ knapp (13.4 GB + KV-Cache Quant. Q5_1/IQ4_NL => 15.5 GB + 4.9 shared GPU mem |
+|                                   | Q4_K_S: ⚠️ knapp (14.2 GB + KV-Cache Quant. Q5_1/IQ4_NL => 14.8 GB + 3.9 shared GPU bei 98k Kontextlänge |
+| **Benchmark-Typ**                 | code generation, code reasoning and code fixing, Code Agents, mathematics and general   |
+| **Lizenz**                        | Apache-2.0                                                                              |
 
 **ACHTUNG** läuft nicht mit mehr als 24 / 32 Experten, je nach Kontextlänge und KV-Quant. (max Einstellung 103).
 

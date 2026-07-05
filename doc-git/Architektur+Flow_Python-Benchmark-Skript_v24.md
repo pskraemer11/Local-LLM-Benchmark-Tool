@@ -25,6 +25,7 @@ Nach dem Review am 28.06. wurden folgende Architekturanderungen umgesetzt:
 - **Paired Bootstrap Vergleich (v30)**: `consolidate_results_v12.py --compare "key1,key2,key3"` vergleicht alle Paare mit gepaartem Bootstrap-CI. `--seed` sorgt fur identische Task-Subsets.
 - **--seed fur Reproduzierbarkeit (v30)**: `run_benchmarks_v12.py --seed 42` und `custom_benchmark_v12.py --seed 42` ermoeglichen reproduzierbare Task-Auswahl.
 - **--bootstrap entfernt (v30)**: CIs werden immer berechnet, wenn Per-Item-Daten vorhanden sind. Keine Flag noetig.
+- **Context Length 16K (v30)**: `ctx_len=16384` wird global an `load_model_via_lms()` ubergeben – ausreichend fur alle Benchmarks (DS1000~1.2K, MMLU-Pro~9.4K, Agentic~9K), reduziert VRAM-Druck bei 128K-Modellen massiv.
 
 ```
 LM Studio (localhost:1234)
@@ -67,6 +68,7 @@ run_benchmarks_v12.py (LAUNCHER - main(), v10)
 ├── Task-Retry: MAX_RETRIES=3, exponentielles Backoff
 ├── --seed fuer reproduzierbare Task-Auswahl (an Custom-Subprozess weitergegeben)
 ├── --no-structured-output fuer Fallback in Custom-Pipeline
+├── Context Length: `ctx_len=16384` global an `load_model_via_lms()` ubergeben
 ├── Gibt Speicher am Ende frei
 ├── Exkludiert: whisper, vision, ocr, audio, embed, vl
 ├── API-Bereitschaft: time.sleep(10) statt polling-Schleife
@@ -137,7 +139,7 @@ main()
 │   │   └── api_model = loaded["identifier"]
 │   │   └── (unload + reload)                     # bei anderem Modell
 │   │       ├── unload_all_models()
-│   │       ├── ok, api_model = load_model_via_lms(key)  # -> exakte ID
+│   │       ├── ok, api_model = load_model_via_lms(key, context_length=16384)  # -> exakte ID, 16K Context
 │   │       └── time.sleep(10)                    # API-Initialisierung abwarten
 │   │
 │   ├── model_info["_api_model"] = api_model      # GLOBAL fuer alle Pipelines
@@ -173,6 +175,7 @@ main()
 - `custom_benchmark_v12.py` importiert aus `model_manager`, ruft **nie** `load/unload` auf
 - `_api_model` (exakte ID aus `lms ps`) wird konsistent in **allen** Pipelines verwendet
 - `API_BASE` wird aus `model_manager.API_BASE` bezogen (nicht hardcoded im Launcher)
+- **Context Length:** `load_model_via_lms()` wird mit `context_length=16384` aufgerufen – 16K reichen fur alle Pipelines (DS1000~1.2K, MMLU-Pro~9.4K, Agentic~9K) und reduzieren VRAM-Druck bei Modellen mit nativen 128K+ Context massiv (z.B. Qwen3 Coder Reap 25B mit 14.23 GB Gewichten + 343 MiB KV-Cache bei 128K vs. ~21 MiB bei 16K).
 
 ### 2.3 Modell-Bereitschaft (vereinfacht in v9)
 
@@ -776,7 +779,7 @@ pytest tests/ -v
 | tok/s | 19.9 (TOP 1) |
 | Laufzeit | 0.8h (48 min) |
 
-### Qwen3 Coder REAP 25B (SampleSize=5, IQ4_XS, 262K Context)
+### Qwen3 Coder REAP 25B (SampleSize=5, IQ4_XS, 16K Context – begrenzt wegen VRAM)
 
 | Benchmark | Score |
 |-----------|-------|

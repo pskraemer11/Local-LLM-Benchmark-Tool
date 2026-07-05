@@ -973,9 +973,10 @@ def main() -> None:
         loaded = get_current_loaded_model()
         api_model = None
 
-        # Adjust context length if needed (e.g., for models with many experts)
-        # Mellum: User hat Experten von 8 auf 16 erhöht, V-Cache Q8_0 – volle Länge möglich
-        ctx_len = None
+        # Context length capped at 16K for all benchmarks – sufficient for every
+        # pipeline (DS1000~1.2K, MMLU-Pro~9.4K, Agentic~9K) while reducing VRAM
+        # pressure compared to native 128K on large models.
+        ctx_len = 16384
 
         if loaded:
             li = loaded["identifier"].lower()
