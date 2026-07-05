@@ -1,50 +1,50 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Benchmark-Skript fuer lokale LLMs ueber LM Studio API – DS1000 + CoderEval (v10).
+Benchmark script for local LLMs via LM Studio API – DS1000 + CoderEval (v12).
 
-── Rolle im Gesamtsystem ───────────────────────────────────────────
-  Dieses Skript ist die "Custom"-Pipeline der Vier-Pipelines-Architektur:
-    Pipeline             Skript/Tool                Verantwortung
+── Role in the overall system ─────────────────────────────────────────
+  This script is the "Custom" pipeline of the four-pipeline architecture:
+    Pipeline             Script/Tool                Responsibility
     ────────             ───────────                ─────────────
-    Custom (DAS HIER)    custom_benchmark_v11.py    DS1000, CoderEval
+    Custom (THIS ONE)    custom_benchmark_v12.py    DS1000, CoderEval
     EvalPlus             evalplus.codegen/evaluate  HumanEval+, MBPP+
     LM-Eval              lm_eval CLI                ARC, HellaSwag, ...
-    Agentic              tool_eval_bench            Tool-Use-Szenarien
+    Agentic              tool_eval_bench            Tool-Use Scenarios
 
-── Grenzen ─────────────────────────────────────────────────────────
-  DIESES SKRIPT DARF NICHT:
-  - Modelle laden/entladen (das macht NUR run_benchmarks_v11.py)
-  - Eigene Modell-Management-Funktionen aufrufen
-  - Andere Pipelines starten
+── Boundaries ───────────────────────────────────────────────────────
+  THIS SCRIPT MUST NOT:
+  - Load/unload models (that is done ONLY by run_benchmarks_v12.py)
+  - Call own model management functions
+  - Start other pipelines
 
-── Aufruf ──────────────────────────────────────────────────────────
-  Normalerweise als Subprozess von run_benchmarks_v11.py via:
-    python custom_benchmark_v11.py --non-interactive --model-key ... --api-model ... --sample-size N --benchmark DS1000
-  Kann standalone laufen (ohne --non-interactive), warnt dann aber.
+── Invocation ──────────────────────────────────────────────────────
+  Normally as subprocess of run_benchmarks_v12.py via:
+    python custom_benchmark_v12.py --non-interactive --model-key ... --api-model ... --sample-size N --benchmark DS1000
+  Can run standalone (without --non-interactive), but then warns.
 
-── Datenquellen ────────────────────────────────────────────────────
-  JSONL-Dateien unter simple_evals/:
+── Data sources ───────────────────────────────────────────────────
+  JSONL files under simple_evals/:
     - data_science.jsonl                (DS1000: 5 Libraries)
     - codereval_selfcontained.jsonl     (CoderEval: ~138 Tasks)
 
-── Auswertung ──────────────────────────────────────────────────────
-  Pro Aufgabe: Modell generiert Code via LM-Studio-API, dann
-  Ausfuehrung in exec_sandboxed() mit 4 Evaluierungs-Modi:
+── Evaluation ───────────────────────────────────────────────────────
+  Per task: model generates code via LM Studio API, then
+  execution in exec_sandboxed() with 4 evaluation modes:
     1. DS1000-Harness (test_execution)
-    2. Namespace-Vergleich (reference_code + setup_code)
-    3. Reference als Tests
-    4. Direkte Tests
-  Systemmetriken (CPU/GPU/RAM) via Monitor-Thread waehrend API-Call.
+    2. Namespace comparison (reference_code + setup_code)
+    3. Reference as tests
+    4. Direct tests
+  System metrics (CPU/GPU/RAM) via monitor thread during API call.
 
-── CSV-Output ─────────────────────────────────────────────────────
-  Nutzt csv_writer.py fuer einheitliches Schema.
-  Der Launcher aggregiert die Ergebnisse pipeline-uebergreifend.
+── CSV Output ──────────────────────────────────────────────────────
+  Uses csv_writer.py for unified schema.
+  The launcher aggregates the results across pipelines.
 
-── Aenderungen zu v10 ──────────────────────────────────────────────
-  - CSV-Output ueber csv_writer.py (einheitliches Schema, ;-Delimiter, utf-8)
+── Changes vs v11 ──────────────────────────────────────────────────
+  - CSV output via csv_writer.py (unified schema, ;-delimiter, utf-8)
 
-Quellen: DS1000, CoderEval
+Sources: DS1000, CoderEval
 """
 
 from __future__ import annotations
@@ -69,17 +69,18 @@ from urllib.request import Request, urlopen
 
 import requests
 
-# Modell-Management aus gemeinsamem Modul (wird NICHT von hier veranlasst)
-# HINWEIS: Dieses Skript importiert die Konstanten und Hilfsfunktionen aus
-# model_manager.py, ruft aber NIEMALS load/unload auf. Das Lademanagement
-# erfolgt ausschliesslich durch run_benchmarks_v11.py als uebergeordneter
-# Launcher. Die exakte Modell-ID wird ueber --api-model uebergeben.
+# Model management from shared module (is NOT initiated from here)
+# NOTE: This script imports the constants and helper functions from
+# model_manager.py, but NEVER calls load/unload. The load management
+# is done exclusively by run_benchmarks_v12.py as the parent
+# launcher. The exact model ID is passed via --api-model.
 from model_manager import (
     API_BASE, TIMEOUT_CLI, TIMEOUT_HTTP, TIMEOUT_MODEL_READY,
     TIMEOUT_HEALTH_CHECK, TIMEOUT_UNLOAD_WAIT,
     check_api_available, get_current_loaded_model,
     unload_all_models, load_model_via_lms, wait_for_model_ready
 )
+from benchmark_config import EXCLUDE_KEYWORDS
 
 import psutil
 import pynvml
@@ -93,8 +94,25 @@ TIMEOUT_LOAD_MODEL = 180
 TIMEOUT_SAMPLER_JOIN = 3
 TIMEOUT_EXEC = 30
 
-# Qwen3.5-Kompatibilitaet: Prompt-Einbettung statt System-Message
+# Qwen3.5 compatibility: prompt embedding instead of system message
 QWEN_PROMPT_MODE = False
+THINKING_MODE = False
+STRUCTURED_OUTPUT = True
+
+STRUCTURED_OUTPUT_SCHEMA = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "code_response",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": {
+                "code": {"type": "string"}
+            },
+            "required": ["code"]
+        }
+    }
+}
 
 SAMPLE_SIZE = 10
 random.seed()
@@ -106,14 +124,12 @@ MAX_TOKENS_MC = 64
 
 MONITOR_HISTORY_MAX = 500
 
-EXCLUDE_KEYWORDS = ["whisper", "vision", "ocr", "transcription", "transcribe", "translat", "audit", "audio", "embed"]
-
-# --- Streaming / Timeout / Retry Konfiguration ---
-START_TIMEOUT = 30           # max Sekunden bis zum ersten Token
-FINISH_TIMEOUT = 25          # max Sekunden zwischen Tokens (stall detection)
-MAX_RETRIES = 3              # max Wiederholungen bei API-Fehlern
+# --- Streaming / Timeout / Retry Configuration ---
+START_TIMEOUT = 30           # max seconds until first token
+FINISH_TIMEOUT = 25          # max seconds between tokens (stall detection)
+MAX_RETRIES = 3              # max retries on API errors
 RETRY_MULTIPLIER = 1.5       # Timeout-Multiplikator pro Retry
-STOP_TOKENS_CODING = ["\n```", "\n# Aufgabe", "\n// ", "<|endoftext|>"]
+STOP_TOKENS_CODING = ["\n```", "\n# Task", "\n// ", "<|endoftext|>"]
 STOP_TOKENS_DEFAULT = ["<|endoftext|>"]
 
 BENCHMARKS = [
@@ -141,12 +157,18 @@ MODEL_CONFIG = {
         "top_p": 1.0,
         "max_tokens": 8192,
         "enable_thinking": False,
-        # ACHTUNG: Qwen3.6 nutzt Reasoning-Thinking standardmaessig.
-        # Wenn enable_thinking nicht auf False gesetzt wird, verbrauchen
-        # die Thinking-Tokens das gesamte max_tokens-Budget (2048) und
-        # es bleibt kein Platz fuer die eigentliche Antwort -> Score 0%.
-        # LM Studio GUI-Option "Parsing von Begründungsabschnitten" ist
-        # inkompatibel – muss ueber API (extra_body) deaktiviert werden.
+        # CAUTION: Qwen3.6 uses reasoning thinking by default.
+        # If enable_thinking is not set to False, the thinking tokens
+        # consume the entire max_tokens budget (2048) and
+        # there is no room left for the actual response -> Score 0%.
+        # LM Studio GUI option "Parsing of reasoning sections" is
+        # incompatible – must be disabled via API (extra_body).
+    },
+    "gemma": {
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "max_tokens": 4096,
+        "enable_thinking": False,
     },
     "deepseek": {
         "temperature": 0.1,
@@ -164,6 +186,7 @@ MODEL_CONFIG = {
     },
 }
 
+REASONING_PATTERNS = {"acemath", "deepseek", "gemma"}
 
 def parse_tests_field(tests_field: Any) -> list[str]:
     if isinstance(tests_field, list):
@@ -224,7 +247,7 @@ class Monitor:
         except Exception:
             pass
         if not self._nvml_ok:
-            print("  [WARN] GPU/VRAM-Monitoring via NVML nicht verfuegbar")
+            print("  [WARN] GPU/VRAM monitoring via NVML not available")
 
     def _read_gpu(self) -> tuple[Optional[float], Optional[float]]:
         if not self._nvml_ok:
@@ -449,7 +472,7 @@ def get_available_models() -> list[dict[str, Any]]:
                             "publisher": item.get("publisher", ""),
                             "quant": item.get("quantization", {}).get("name", ""),
                         })
-            # Bei doppelten Display-Namen Organisations-Prefix anhaengen (erster Fund bleibt)
+            # For duplicate display names, append organization prefix (first match stays)
             seen_displays = {}
             for m in models:
                 d = m["display"]
@@ -460,20 +483,20 @@ def get_available_models() -> list[dict[str, Any]]:
                     seen_displays[d] = m
             if models:
                 return models
-        print(f"[WARN] lms ls fehlgeschlagen: {result.stderr.strip()}")
+        print(f"[WARN] lms ls failed: {result.stderr.strip()}")
     except FileNotFoundError:
-        print("[ERROR] lms.exe nicht gefunden. Ist LM Studio installiert?")
+        print("[ERROR] lms.exe not found. Is LM Studio installed?")
     except (subprocess.TimeoutExpired, json.JSONDecodeError) as e:
-        print(f"[WARN] Fehler bei lms ls: {e}")
+        print(f"[WARN] Error with lms ls: {e}")
     return []
 
 
 def _stream_chat_completion(url: str, headers: dict[str, str], body: dict[str, Any], start_timeout: int = START_TIMEOUT, finish_timeout: int = FINISH_TIMEOUT, max_retries: int = MAX_RETRIES) -> tuple[Optional[str], float, int, int, float, int, Optional[str], Optional[str]]:
-    """Streaming Chat-Completion mit Dual-Timeout und Retry-Logik.
+    """Streaming chat completion with dual timeout and retry logic.
     
-    Nutzt Threading, um start_timeout (erster Token) und finish_timeout
-    (zwischen Tokens) unabhaengig vom SSE-Stream zu ueberwachen.
-    Gibt 8-Tupel zurueck: (content, elapsed, t_in, t_out, tps, thinking_tokens, error_type, error_detail)
+    Uses threading to monitor start_timeout (first token) and finish_timeout
+    (between tokens) independently from the SSE stream.
+    Returns 8-tuple: (content, elapsed, t_in, t_out, tps, thinking_tokens, error_type, error_detail)
     """
     for attempt in range(max_retries):
         current_start_timeout = start_timeout * (RETRY_MULTIPLIER ** attempt)
@@ -570,15 +593,25 @@ def _stream_chat_completion(url: str, headers: dict[str, str], body: dict[str, A
 def strip_thinking_tokens(text: Optional[str]) -> tuple[Optional[str], int]:
     if not text:
         return text, 0
-    matches = re.findall(r"<think>(.*?)</think>", text, re.DOTALL)
-    total_chars = sum(len(m) for m in matches)
+
+    # Gemma 4: <|channel>thought\n...<channel|>
+    channel_matches = re.findall(r"<\|channel>thought\n(.*?)<channel\|>", text, re.DOTALL)
+
+    # Legacy: <think>...</think>
+    think_matches = re.findall(r"<think>(.*?)</think>", text, re.DOTALL)
+
+    all_content = channel_matches + think_matches
+    total_chars = sum(len(m) for m in all_content)
     estimated_tokens = total_chars // 4
-    cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+
+    cleaned = text
+    cleaned = re.sub(r"<\|channel>thought\n.*?<channel\|>", "", cleaned, flags=re.DOTALL)
+    cleaned = re.sub(r"<think>.*?</think>", "", cleaned, flags=re.DOTALL).strip()
     return cleaned, estimated_tokens
 
 
 def _non_streaming_fallback(url: str, body: dict[str, Any], timeout: int) -> tuple[Optional[str], int, int, int]:
-    """Fallback ohne Streaming, falls Streaming fehlschlaegt."""
+    """Non-streaming fallback, if streaming fails."""
     try:
         payload = json.dumps(body).encode("utf-8")
         req = Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
@@ -591,14 +624,15 @@ def _non_streaming_fallback(url: str, body: dict[str, Any], timeout: int) -> tup
         tokens_out = usage.get("completion_tokens", 0)
         return content, tokens_in, tokens_out, thinking_tokens
     except (URLError, HTTPError, json.JSONDecodeError, KeyError, TimeoutError) as e:
-        print(f"\n[ERROR] API-Fehler (Fallback, {type(e).__name__}): {e}")
+        print(f"\n[ERROR] API error (Fallback, {type(e).__name__}): {e}")
         return None, 0, 0, 0
 
 
 def generate_answer(prompt: Optional[str] = None, model_key: Optional[str] = None, timeout: int = TIMEOUT_HTTP,
                     max_tokens: int = MAX_TOKENS_GENERAL, system_msg: Optional[str] = None, messages: Optional[list[dict[str, Any]]] = None,
                     temperature: float = 0.0, top_p: float = 1.0, top_k: Optional[int] = None, min_p: Optional[float] = None,
-                    enable_thinking: Optional[bool] = None, use_streaming: bool = True, stop: Optional[list[str]] = None) -> tuple[Optional[str], float, int, int, float, int, Optional[str], Optional[str]]:
+                    enable_thinking: Optional[bool] = None, use_streaming: bool = True, stop: Optional[list[str]] = None,
+                    response_format: Optional[dict] = None) -> tuple[Optional[str], float, int, int, float, int, Optional[str], Optional[str]]:
     if messages is None:
         messages = []
         if system_msg:
@@ -620,25 +654,35 @@ def generate_answer(prompt: Optional[str] = None, model_key: Optional[str] = Non
         body["extra_body"]["chat_template_kwargs"] = {"enable_thinking": enable_thinking}
     if stop:
         body["stop"] = stop
+    if response_format is not None:
+        body["response_format"] = response_format
     url = f"{API_BASE}/chat/completions"
     headers = {"Content-Type": "application/json"}
     if use_streaming:
         content, elapsed, t_in, t_out, tps, think_tok, err_type, err_detail = _stream_chat_completion(url, headers, body)
         if content is not None:
             return content, elapsed, t_in, t_out, tps, think_tok, err_type, err_detail
-        print(f"\n[WARN] Streaming fehlgeschlagen ({err_detail}), Fallback ohne Streaming...")
+        print(f"\n[WARN] Streaming failed ({err_detail}), fallback without streaming...")
     start = time.time()
     content, t_in, t_out, think_tok = _non_streaming_fallback(url, {**body, "stream": False}, timeout)
     elapsed = time.time() - start
     if content is not None:
         tokens_per_sec = t_out / elapsed if elapsed > 0 else 0
         return content, elapsed, t_in, t_out, tokens_per_sec, think_tok, None, None
-    return None, elapsed, t_in, t_out, 0, think_tok, "api_error", "Fallback ebenfalls fehlgeschlagen"
+    return None, elapsed, t_in, t_out, 0, think_tok, "api_error", "Fallback also failed"
 
 
-def extract_code(text: Optional[str]) -> str:
+def extract_code(text: Optional[str], structured: bool = False) -> str:
     if not text:
         return ""
+    if structured:
+        try:
+            parsed = json.loads(text)
+            code = parsed.get("code", "")
+            if code:
+                return code.strip()
+        except (json.JSONDecodeError, AttributeError, TypeError):
+            pass  # Fallback to regex
     pattern = r"```(?:python)?\s*\n(.*?)```"
     matches = re.findall(pattern, text, re.DOTALL)
     if matches:
@@ -661,7 +705,7 @@ def extract_code(text: Optional[str]) -> str:
     if result:
         joined = "\n".join(result).strip()
         return _repair_indentation(joined)
-    # Fallback: bare statements (plt.plot, df.sort_values, etc.) erkennen
+    # Fallback: detect bare statements (plt.plot, df.sort_values, etc.)
     code_lines = []
     for line in lines:
         stripped = line.strip()
@@ -715,13 +759,13 @@ def _repair_indentation(code: str, max_iter: int = 10) -> str:
                 result.append(line)
             if is_header:
                 indent_level += 1
-        # Block-Header ohne Body erkennen und pass einfuegen
+        # Detect block header without body and insert pass
         new_lines = []
         for i, line in enumerate(result):
             new_lines.append(line)
             stripped = line.strip()
             if _BLOCK_HEADER.match(stripped):
-                # Naechste Zeile(n) nach Header pruefen
+                # Check next line(s) after header
                 j = i + 1
                 while j < len(result) and not result[j].strip():
                     j += 1
@@ -735,7 +779,7 @@ def _repair_indentation(code: str, max_iter: int = 10) -> str:
 
 
 def _looks_like_block_header(line: str) -> bool:
-    """Prueft ob eine Zeile ein Block-Header ohne Body ist (def, class, if, for, etc.)"""
+    """Check whether a line is a block header without body (def, class, if, for, etc.)"""
     stripped = line.strip()
     return bool(re.match(
         r"^(?:def |class |if |elif |else:|for |while |with |try:|except(?: |:)|finally:)", stripped
@@ -776,10 +820,10 @@ def _is_bare_statement(line: str) -> bool:
     return False
 
 
-# --- Sandbox fuer sicheres Code-Ausfuehren ---
-# Fuehrt LLM-generierten Code in einem Subprozess mit eingeschraenkten Builtins aus.
-# Blockiert gefaehrliche Module (os, subprocess, shutil, socket, etc.)
-# und unerwuenschte Builtins (open, eval, exec, __import__ fuer blockierte Module).
+# --- Sandbox for safe code execution ---
+# Executes LLM-generated code in a subprocess with restricted builtins.
+# Blocks dangerous modules (os, subprocess, shutil, socket, etc.)
+# and unwanted builtins (open, eval, exec, __import__ for blocked modules).
 
 import json as _json
 import tempfile as _tempfile
@@ -817,7 +861,7 @@ _SANDBOX_BLOCKED_MODULES = frozenset({
 
 
 def _build_sandbox_script(code_string: str, capture_state: bool = False, tests: Optional[list[str]] = None) -> str:
-    """Baut ein Sandbox-Skript, das code_string in einem restricted Namespace ausfuehrt."""
+    """Build a sandbox script that executes code_string in a restricted namespace."""
     safe_list = _json.dumps(sorted(_SANDBOX_SAFE_BUILTINS))
     blocked_list = _json.dumps(sorted(_SANDBOX_BLOCKED_MODULES))
     code_json = _json.dumps(code_string)
@@ -907,7 +951,7 @@ def _build_sandbox_script(code_string: str, capture_state: bool = False, tests: 
 
 
 def _run_sandbox(script: str, timeout: int = TIMEOUT_EXEC) -> dict[str, Any]:
-    """Fuehrt ein Sandbox-Skript als Subprozess in einem temporaeren Verzeichnis aus."""
+    """Run a sandbox script as a subprocess in a temporary directory."""
     with _tempfile.TemporaryDirectory(prefix='sandbox_') as _tmpdir:
         tmppath = _os.path.join(_tmpdir, 'sandbox_script.py')
         try:
@@ -934,7 +978,7 @@ def _run_sandbox(script: str, timeout: int = TIMEOUT_EXEC) -> dict[str, Any]:
 
 
 def exec_sandboxed(code: str, timeout: int = TIMEOUT_EXEC) -> tuple[bool, Optional[str]]:
-    """Fuehrt Code im Sandbox-Subprozess aus. Returns (ok, error)."""
+    """Execute code in the sandbox subprocess. Returns (ok, error)."""
     script = _build_sandbox_script(code)
     res = _run_sandbox(script, timeout)
     return res["ok"], (res["error"] if not res["ok"] else None)
@@ -944,8 +988,8 @@ DS1000_DIR = _os.path.join(_os.path.dirname(__file__), 'ds1000_official')
 _TIMEOUT_DS1000 = 120  # offizielles DS1000-Timeout
 
 def _unwrap_solution_for_insert(solution: str, setup_code: str) -> str:
-    """Wenn exec_context [insert] in einem Funktions-Block hat,
-    und die Loesung eine Funktion definiert, dann nimm nur den Body."""
+    """If exec_context has [insert] in a function block,
+    and the solution defines a function, take only the body."""
     import re as _re
     m = _re.search(r'exec_context\s*=\s*r?"""(.*?)"""', setup_code, _re.DOTALL)
     if not m:
@@ -959,11 +1003,11 @@ def _unwrap_solution_for_insert(solution: str, setup_code: str) -> str:
     last = before.split("\n")[-1].strip()
     _BH = r"^(?:def |class |if |elif |else:|for |while |with |try:|except(?: |:)|finally:)"
     if not _re.match(_BH, last):
-        return solution  # [insert] auf oberster Ebene -> ok
-    # Funktion aus exec_context-Header extrahieren
+        return solution  # [insert] at top level -> ok
+    # Extract function from exec_context header
     ef = _re.match(r"def\s+(\w+)", last)
     exec_func = ef.group(1) if ef else None
-    # In der Loesung nach der ERSTEN def/class Zeile suchen
+    # In the solution, look for the FIRST def/class line
     sol = solution.strip()
     sol_lines = sol.split("\n")
     def_idx = None
@@ -974,14 +1018,14 @@ def _unwrap_solution_for_insert(solution: str, setup_code: str) -> str:
             def_line = line.strip()
             break
     if def_idx is not None:
-        # def/class gefunden -> Funktionsnamen vergleichen
+        # def/class found -> compare function names
         sf = _re.match(r"def\s+(\w+)", def_line)
         sol_func = sf.group(1) if sf else None
         if exec_func and sol_func and exec_func != sol_func:
-            # Anderer Funktionsname -> gesamte Loesung einruecken
+            # Different function name -> indent entire solution
             indent = "    "
             return indent + ("\n" + indent).join(sol_lines)
-        # Unwrap: alles ab der def-Zeile raus, nur den Body (eingerueckte Zeilen danach) behalten
+        # Unwrap: remove everything from the def line, keep only the body (indented lines after)
         body = []
         for line in sol_lines[def_idx + 1:]:
             body.append(line)
@@ -989,7 +1033,7 @@ def _unwrap_solution_for_insert(solution: str, setup_code: str) -> str:
             body.pop(0)
         if not body:
             return "    pass"
-        # Pruefe ob der Body nur Kommentare/Leerzeilen enthaelt
+        # Check whether the body contains only comments/blank lines
         has_real_stmt = any(
             line.strip() and not line.strip().startswith("#")
             for line in body
@@ -997,7 +1041,7 @@ def _unwrap_solution_for_insert(solution: str, setup_code: str) -> str:
         if not has_real_stmt:
             return "    pass"
         return "\n".join(body)
-    # Keine def/class in der Loesung -> gesamte Loesung einruecken
+    # No def/class in the solution -> indent entire solution
     indent = "    "
     return indent + ("\n" + indent).join(sol_lines)
 
@@ -1018,9 +1062,9 @@ def _try_ds1000_harness(generated_code: str, setup_code: str) -> Optional[tuple[
         test_program += "test_string(code)\n"
     result = check_correctness(test_program, timeout=_TIMEOUT_DS1000)
     if result["passed"]:
-        print("    [EVAL] DS1000-Harness: BESTANDEN")
+        print("    [EVAL] DS1000-Harness: PASSED")
         return 1.0, "OK (DS1000-Harness)"
-    # Fallback: falls unwrapping nicht geholfen hat, mit Original versuchen
+    # Fallback: if unwrapping did not help, try with original
     if unwrapped != generated_code:
         test_program2 = (
             setup_code + "\n"
@@ -1029,35 +1073,35 @@ def _try_ds1000_harness(generated_code: str, setup_code: str) -> Optional[tuple[
         )
         result2 = check_correctness(test_program2, timeout=_TIMEOUT_DS1000)
         if result2["passed"]:
-            print("    [EVAL] DS1000-Harness: BESTANDEN (original)")
+            print("    [EVAL] DS1000-Harness: PASSED (original)")
             return 1.0, "OK (DS1000-Harness)"
-        print(f"    [EVAL] DS1000-Harness: FEHLGESCHLAGEN -> {result['result']}")
-        return 0.0, f"Harness-Fehler: {result['result']}"
-    print(f"    [EVAL] DS1000-Harness: FEHLGESCHLAGEN -> {result['result']}")
-    return 0.0, f"Harness-Fehler: {result['result']}"
+        print(f"    [EVAL] DS1000-Harness: FAILED -> {result['result']}")
+        return 0.0, f"Harness error: {result['result']}"
+    print(f"    [EVAL] DS1000-Harness: FAILED -> {result['result']}")
+    return 0.0, f"Harness error: {result['result']}"
 
 
 def evaluate_code(generated_code: str, entry_point: str, tests_field: Any, reference_code: str = "", setup_code: str = "") -> tuple[float, str]:
     if not generated_code:
-        return 0.0, "Kein Code generiert"
+        return 0.0, "No code generated"
 
     tests = parse_tests_field(tests_field)
 
-    # --- DS1000-Harness (test_execution aus code_context) ---
+    # --- DS1000-Harness (test_execution from code_context) ---
     if not tests and setup_code and "test_execution" in setup_code:
-        print("    [EVAL] Versuche DS1000-Harness ...")
+        print("    [EVAL] Trying DS1000-Harness ...")
         result = _try_ds1000_harness(generated_code, setup_code)
         if result is not None:
             return result
-        print("    [EVAL] Harness nicht nutzbar -> Fallback auf Namespace-Vergleich")
+        print("    [EVAL] Harness not usable -> falling back to namespace comparison")
 
-    # --- Namespace-Vergleich (Reference vs Generated) ---
+    # --- Namespace comparison (Reference vs Generated) ---
     if not tests and reference_code and setup_code:
         ref_combined = setup_code + "\n" + reference_code
         script = _build_sandbox_script(ref_combined, capture_state=True)
         res = _run_sandbox(script)
         if not res["ok"]:
-            return 0.0, f"Reference-Fehler: {res['error']}"
+            return 0.0, f"Reference error: {res['error']}"
         ref_state = res.get("state", {})
         setup_keys = set(ref_state.keys()) | {'__builtins__'}
 
@@ -1065,16 +1109,16 @@ def evaluate_code(generated_code: str, entry_point: str, tests_field: Any, refer
         script = _build_sandbox_script(gen_combined, capture_state=True)
         res = _run_sandbox(script)
         if not res["ok"]:
-            return 0.0, f"Code-Fehler: {res['error']}"
+            return 0.0, f"Code error: {res['error']}"
         gen_state = res.get("state", {})
 
-        # Nur State-Keys vergleichen, die NICHT im setup_keys sind
+        # Only compare state keys that are NOT in setup_keys
         ref_only = {k: v for k, v in ref_state.items() if k not in setup_keys}
         gen_only = {k: v for k, v in gen_state.items() if k not in setup_keys}
 
         if not ref_only:
-            print("    [EVAL] Namespace-Vergleich: keine vergleichbaren Outputs -> 1.0")
-            return 1.0, "OK (Namespace: keine Outputs)"
+            print("    [EVAL] Namespace comparison: no comparable outputs -> 1.0")
+            return 1.0, "OK (Namespace: no outputs)"
 
         matched = 0
         for k, ref_val in ref_only.items():
@@ -1082,25 +1126,25 @@ def evaluate_code(generated_code: str, entry_point: str, tests_field: Any, refer
             if gen_val == ref_val:
                 matched += 1
         score = matched / len(ref_only)
-        print(f"    [EVAL] Namespace-Vergleich: {matched}/{len(ref_only)} korrekt")
+        print(f"    [EVAL] Namespace comparison: {matched}/{len(ref_only)} correct")
         return score, f"Namespace: {matched}/{len(ref_only)}"
 
     if not tests and reference_code:
         tests = [reference_code]
 
-    # --- Direkte Tests ---
+    # --- Direct tests ---
     if not tests:
-        # Nur Code ausfuehren, keine Tests
+        # Only execute code, no tests
         combined = ""
         if setup_code:
             combined += setup_code + "\n"
         combined += generated_code
         ok, err = exec_sandboxed(combined)
         if not ok:
-            return 0.0, f"Code-Fehler: {err}"
-        return 1.0, "OK (keine Tests)"
+            return 0.0, f"Code error: {err}"
+        return 1.0, "OK (no tests)"
 
-    # Mit Tests: Bundle alles in einen Sandbox-Durchlauf
+    # With tests: bundle everything into one sandbox run
     combined_code = ""
     if setup_code:
         combined_code += setup_code + "\n"
@@ -1109,26 +1153,30 @@ def evaluate_code(generated_code: str, entry_point: str, tests_field: Any, refer
     script = _build_sandbox_script(combined_code, tests=tests)
     res = _run_sandbox(script)
     if not res["ok"]:
-        return 0.0, f"Code-Fehler: {res['error']}"
+        return 0.0, f"Code error: {res['error']}"
 
     passed = res.get("passed", 0)
     total = res.get("total", 0)
-    print(f"    [EVAL] Direkte Tests: {passed}/{total} bestanden")
+    print(f"    [EVAL] Direct tests: {passed}/{total} passed")
     return passed / total if total > 0 else 1.0, f"Tests: {passed}/{total}"
 
 
-def _get_model_config(model_key: Optional[str]) -> dict[str, Any]:
+def _get_model_config(model_key: Optional[str], thinking: bool = False) -> dict[str, Any]:
     key_lower = model_key.lower() if model_key else ""
     for pattern, cfg in MODEL_CONFIG.items():
         if pattern in key_lower:
-            return cfg
-    return MODEL_CONFIG["default"]
+            cfg_copy = dict(cfg)
+            if thinking and any(p in key_lower for p in REASONING_PATTERNS):
+                cfg_copy["enable_thinking"] = True
+            return cfg_copy
+    cfg_copy = dict(MODEL_CONFIG["default"])
+    return cfg_copy
 
 
 def run_task(task: dict[str, Any], task_type: str, model_key: Optional[str] = None, api_model: Optional[str] = None, model_config: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     prompt = task["prompt"]
     if model_config is None:
-        model_config = _get_model_config(model_key)
+        model_config = _get_model_config(model_key, thinking=THINKING_MODE)
 
     gen_kwargs = {
         "model_key": api_model or model_key,
@@ -1143,7 +1191,7 @@ def run_task(task: dict[str, Any], task_type: str, model_key: Optional[str] = No
     no_system_msg = model_config.get("no_system_msg", False)
     max_tokens_task = model_config.get("max_tokens", MAX_TOKENS_GENERAL)
 
-    # Qwen3.5-Kompatibilitaet: System-Message in User-Prompt einbetten
+    # Qwen3.5 compatibility: embed system message in user prompt
     if no_system_msg and QWEN_PROMPT_MODE:
         qwen_prefix = "You are Qwen, a helpful AI assistant created by Alibaba Cloud. You are a coding expert. "
         prompt = qwen_prefix + prompt
@@ -1160,14 +1208,15 @@ def run_task(task: dict[str, Any], task_type: str, model_key: Optional[str] = No
         if entry_point:
             full_prompt += f"\n\nCreate the function `{entry_point}`."
         response, latency, t_in, t_out, tps, think_tok, err_type, err_detail = generate_answer(
-            full_prompt, **gen_kwargs
+            full_prompt, **gen_kwargs,
+            response_format=STRUCTURED_OUTPUT_SCHEMA if STRUCTURED_OUTPUT else None
         )
         if response is None:
             return {"response": None, "extracted_code": "", "score": 0.0,
-                    "score_detail": f"Timeout/API-Fehler ({latency:.1f}s)", "latency": latency,
+                    "score_detail": f"Timeout/API error ({latency:.1f}s)", "latency": latency,
                     "tokens_in": t_in, "tokens_out": t_out, "tokens_per_sec": tps,
                     "thinking_tokens": think_tok, "error_type": err_type, "error_detail": err_detail}
-        code = extract_code(response) if response else ""
+        code = extract_code(response, structured=STRUCTURED_OUTPUT) if response else ""
         score, detail = evaluate_code(code, entry_point, tests_field, "", setup_code=setup_code)
         return {
             "response": response,
@@ -1218,14 +1267,15 @@ def run_task(task: dict[str, Any], task_type: str, model_key: Optional[str] = No
             setup_code = agg_setup + setup_code
 
         response, latency, t_in, t_out, tps, think_tok, err_type, err_detail = generate_answer(
-            full_prompt, **gen_kwargs
+            full_prompt, **gen_kwargs,
+            response_format=STRUCTURED_OUTPUT_SCHEMA if STRUCTURED_OUTPUT else None
         )
         if response is None:
             return {"response": None, "extracted_code": "", "score": 0.0,
-                    "score_detail": f"Timeout/API-Fehler ({latency:.1f}s)", "latency": latency,
+                    "score_detail": f"Timeout/API error ({latency:.1f}s)", "latency": latency,
                     "tokens_in": t_in, "tokens_out": t_out, "tokens_per_sec": tps,
                     "thinking_tokens": think_tok, "error_type": err_type, "error_detail": err_detail}
-        code = extract_code(response) if response else ""
+        code = extract_code(response, structured=STRUCTURED_OUTPUT) if response else ""
         if not code and response:
             m = re.search(r"```(?:python)?\s*\n(.*?)```", response, re.DOTALL)
             if m:
@@ -1254,7 +1304,7 @@ def run_task(task: dict[str, Any], task_type: str, model_key: Optional[str] = No
         }
 
     return {"response": None, "extracted_code": "", "score": 0.0,
-            "score_detail": f"Unbekannter task_type: {task_type}", "latency": 0.0,
+            "score_detail": f"Unknown task_type: {task_type}", "latency": 0.0,
             "tokens_in": 0, "tokens_out": 0, "tokens_per_sec": 0, "thinking_tokens": 0}
 
 
@@ -1270,13 +1320,13 @@ def benchmark_model(model_info: Any, tasks: list[dict[str, Any]], task_type: str
     is_dict = isinstance(model_info, dict)
     display_name = model_info["display"] if is_dict else model_info
     model_key = model_info["key"] if is_dict else model_info
-    # Exakte API-ID bevorzugen, fallback auf model_key
+    # Prefer exact API ID, fall back to model_key
     api_model = model_info.get("_api_model") if is_dict else model_key
-    model_config = _get_model_config(model_key)
+    model_config = _get_model_config(model_key, thinking=THINKING_MODE)
     print(f"\n{'=' * 60}")
     print(f"  Benchmark: {benchmark_name}")
-    print(f"  Modell:    {display_name}")
-    print(f"  Aufgaben:  {len(tasks)}")
+    print(f"  Model:     {display_name}")
+    print(f"  Tasks:     {len(tasks)}")
     print(f"{'=' * 60}")
     collector = MetricsCollector()
     collector.start()
@@ -1297,17 +1347,17 @@ def benchmark_model(model_info: Any, tasks: list[dict[str, Any]], task_type: str
                     break
                 if result is not None and result.get("error_type"):
                     if attempt < MAX_RETRIES:
-                        print(f"  [RETRY] API-Fehler (Versuch {attempt}/{MAX_RETRIES}): {result.get('error_detail', '?')}")
+                        print(f"  [RETRY] API error (Attempt {attempt}/{MAX_RETRIES}): {result.get('error_detail', '?')}")
                         time.sleep(2 ** attempt)
             except Exception as e:
                 if attempt < MAX_RETRIES:
-                    print(f"  [RETRY] Exception (Versuch {attempt}/{MAX_RETRIES}): {e}")
+                    print(f"  [RETRY] Exception (Attempt {attempt}/{MAX_RETRIES}): {e}")
                     time.sleep(2 ** attempt)
                 else:
-                    print(f"  [ERROR] Task fehlgeschlagen ({type(e).__name__}: {e})")
+                    print(f"  [ERROR] Task failed ({type(e).__name__}: {e})")
                     result = {
                         "score": 0.0,
-                        "score_detail": f"Fehler: {e}",
+                        "score_detail": f"Error: {e}",
                         "latency": 0.0,
                         "tokens_in": 0, "tokens_out": 0, "tokens_per_sec": 0,
                         "thinking_tokens": 0,
@@ -1354,18 +1404,18 @@ def benchmark_model(model_info: Any, tasks: list[dict[str, Any]], task_type: str
     tok_outs = [r.get("tokens_out", 0) for r in results]
     sum_think = sum(think_toks)
     sum_out = sum(tok_outs)
-    think_anteil = (sum_think / sum_out * 100) if sum_out > 0 else 0
+    think_ratio = (sum_think / sum_out * 100) if sum_out > 0 else 0
     scores = [r["score"] for r in results if r["score"] is not None]
     avg_score = sum(scores) / len(scores) if scores else None
     if not quiet:
-        print(f"\n  --- Ergebnis {benchmark_name} / {model_key} ---")
+        print(f"\n  --- Result {benchmark_name} / {model_key} ---")
         if avg_score is not None:
-            print(f"  Durchschnitts-Score: {avg_score:.1%}")
-        print(f"  Durchschnitts-Latenz: {avg_lat:.1f}s")
-        print(f"  Durchschnitts-Tokens/s: {avg_tps:.1f}")
-        print(f"  \u2248{think_anteil:.0f}% Thinking-Anteil ({sum_think}/{sum_out} Tokens)")
-    # Systemmetriken: aus Per-Task-Peak-Werten (Monitor-Thread, ~5Hz waehrend Inference)
-    # statt aus MetricsCollector (nur alle 10s ueber gesamten Lauf inkl. Leerlauf)
+            print(f"  Average score: {avg_score:.1%}")
+        print(f"  Average latency: {avg_lat:.1f}s")
+        print(f"  Average tokens/s: {avg_tps:.1f}")
+        print(f"  \u2248{think_ratio:.0f}% Thinking ratio ({sum_think}/{sum_out} tokens)")
+    # System metrics: from per-task peak values (monitor thread, ~5Hz during inference)
+    # instead of MetricsCollector (only every 10s over entire run including idle)
     _ram_total_gb = psutil.virtual_memory().total / (1073741824)
     def _peak_avg_max(key: str, min_val: float = 0) -> tuple[Optional[float], Optional[float]]:
         vals = [r.get(key) for r in results if r.get(key) is not None and r[key] > min_val]
@@ -1392,12 +1442,12 @@ def benchmark_model(model_info: Any, tasks: list[dict[str, Any]], task_type: str
 
 
 def save_csv(results: list[dict[str, Any]], benchmark_name: str, model_id: str) -> Any:
-    """Legacy – leitet an csv_writer weiter (v10)."""
+    """Legacy – delegates to csv_writer (v10)."""
     return csv_writer.write_per_task_csv(results, benchmark_name, model_id)
 
 
 def save_model_summary(model_display: str, model_results: list[dict[str, Any]], bench_name: str = "", quiet: bool = False) -> Any:
-    """Legacy – leitet an csv_writer weiter (v10)."""
+    """Legacy – delegates to csv_writer (v10)."""
     return csv_writer.write_per_model_csv(model_results, model_display)
 
 
@@ -1450,14 +1500,14 @@ def _parse_selection(choice: str, max_val: int) -> Optional[list[int]]:
 
 def select_benchmark() -> list[dict[str, Any]]:
     print("\n" + "=" * 60)
-    print("  Benchmark-Auswahl")
+    print("  Benchmark selection")
     print("=" * 60)
     for b in BENCHMARKS:
         print(f"  [{b['key']}] {b['name']}")
-    print("  [a] Alle Benchmarks nacheinander")
-    print("  [q] Beenden")
+    print("  [a] All benchmarks sequentially")
+    print("  [q] Quit")
     while True:
-        choice = input("\n  Deine Wahl: ").strip().lower()
+        choice = input("\n  Your choice: ").strip().lower()
         if choice == "q":
             sys.exit(0)
         if choice == "a":
@@ -1468,17 +1518,17 @@ def select_benchmark() -> list[dict[str, Any]]:
             names = ", ".join(b["name"] for b in result)
             print(f"  -> {names}")
             return result
-        print("  Ungueltige Eingabe.")
+        print("  Invalid input.")
 
 
 def select_models(available_models: list[dict[str, Any]]) -> list[dict[str, Any]]:
     filtered = [m for m in available_models
                 if not any(kw in m["key"].lower() for kw in EXCLUDE_KEYWORDS)]
     if not filtered:
-        print("\n[WARN] Keine Modelle in LM Studio gefunden.")
+        print("\n[WARN] No models found in LM Studio.")
         sys.exit(1)
     print("\n" + "-" * 50)
-    print("  Verfuegbare Modelle:")
+    print("  Available models:")
     for i, m in enumerate(filtered, 1):
         label = m["display"]
         if m.get("params"):
@@ -1486,15 +1536,15 @@ def select_models(available_models: list[dict[str, Any]]) -> list[dict[str, Any]
         if m.get("publisher"):
             label += f" - {m['publisher']}"
         print(f"  [{i}] {label}")
-    print("  [a] Alle Modelle testen")
+    print("  [a] Test all models")
     while True:
-        choice = input("  Deine Wahl: ").strip().lower()
+        choice = input("  Your choice: ").strip().lower()
         if choice == "a":
             return filtered
         indices = _parse_selection(choice, len(filtered))
         if indices is not None:
             return [filtered[i] for i in indices]
-        print("  Ungueltige Eingabe.")
+        print("  Invalid input.")
 
 
 def main() -> None:
@@ -1504,19 +1554,25 @@ def main() -> None:
     except Exception:
         pass
     import argparse as _ap
-    _parser = _ap.ArgumentParser(description="Benchmark-Tool v10 (DS1000 + CoderEval)")
+    _parser = _ap.ArgumentParser(description="Benchmark tool v12 (DS1000 + CoderEval)")
     _parser.add_argument("--sample-size", type=int, default=SAMPLE_SIZE,
-                         help=f"Stichprobengroesse pro Benchmark (Default: {SAMPLE_SIZE})")
+                         help=f"Sample size per benchmark (default: {SAMPLE_SIZE})")
     _parser.add_argument("--non-interactive", action="store_true",
-                         help="Ueberspringe interaktive Auswahl, fuehre alle Benchmarks + Modelle aus")
+                         help="Skip interactive selection, run all benchmarks + models")
     _parser.add_argument("--model-key", type=str, default=None,
-                         help="Modell-Key fuer nicht-interaktiven Modus")
+                         help="Model key for non-interactive mode")
     _parser.add_argument("--benchmark", type=str, default=None,
-                         help="Nur diesen Benchmark ausfuehren (z.B. DS1000, CoderEval)")
+                         help="Run only this benchmark (e.g. DS1000, CoderEval)")
     _parser.add_argument("--api-model", type=str, default=None,
-                         help="Exakte Modell-ID fuer API-Aufrufe (aus lms ps)")
+                         help="Exact model ID for API calls (from lms ps)")
     _parser.add_argument("--qwen-prompt", action="store_true",
-                         help="Qwen3.5-Kompatibilitaet: systemlose Prompt-Einbettung")
+                         help="Qwen3.5 compatibility: system-less prompt embedding")
+    _parser.add_argument("--thinking", action="store_true",
+                         help="Enable thinking mode for reasoning models")
+    _parser.add_argument("--seed", type=int, default=None,
+                         help="Random seed for reproducible task selection")
+    _parser.add_argument("--no-structured-output", action="store_true",
+                         help="Disable structured JSON output (fallback to regex code extraction)")
     _args, _ = _parser.parse_known_args()
     sample_size = _args.sample_size
     non_interactive = _args.non_interactive
@@ -1524,27 +1580,33 @@ def main() -> None:
     api_model_override = _args.api_model
     benchmark_override = _args.benchmark
     qwen_prompt_mode = _args.qwen_prompt
-    global QWEN_PROMPT_MODE
+    thinking_mode = _args.thinking
+    global QWEN_PROMPT_MODE, THINKING_MODE, STRUCTURED_OUTPUT
     QWEN_PROMPT_MODE = qwen_prompt_mode
-    random.seed()
-    _seed = random.randrange(2**32)
+    THINKING_MODE = thinking_mode
+    STRUCTURED_OUTPUT = not _args.no_structured_output
+    if _args.seed is not None:
+        _seed = _args.seed
+    else:
+        random.seed()
+        _seed = random.randrange(2**32)
     random.seed(_seed)
 
     print(f"  Random-Seed: {_seed}")
     print("=" * 60)
-    print("  LM Studio Benchmark-Tool v10")
+    print("  LM Studio Benchmark Tool v12")
     print("  DS1000 + CoderEval")
-    print(f"  Subsampling: {sample_size} Aufgaben pro Benchmark")
+    print(f"  Subsampling: {sample_size} tasks per benchmark")
     print("=" * 60)
     print(f"  Python: {sys.version.split()[0]} ({sys.executable})")
     print()
     monitor = Monitor()
     if not check_api_available():
-        print(f"\n[ERROR] LM Studio API nicht erreichbar: {API_BASE}")
+        print(f"\n[ERROR] LM Studio API not reachable: {API_BASE}")
         sys.exit(1)
     print(f"\n[OK] LM Studio API: {API_BASE}")
 
-    # Pruefe DS1000-Abhaengigkeiten
+    # Check DS1000 dependencies
     ds_deps = ["numpy", "pandas", "matplotlib", "seaborn"]
     missing = []
     for pkg in ds_deps:
@@ -1553,8 +1615,8 @@ def main() -> None:
         except ImportError:
             missing.append(pkg)
     if missing:
-        print(f"\n[WARN] DS1000 benoetigt: {', '.join(missing)}")
-        print("       Installiere fehlende Pakete mit:")
+        print(f"\n[WARN] DS1000 requires: {', '.join(missing)}")
+        print("       Install missing packages with:")
         print(f"       pip install {' '.join(missing)}")
         print()
 
@@ -1564,60 +1626,60 @@ def main() -> None:
         if benchmark_override:
             benchmarks = [b for b in benchmarks if b["name"].lower() == benchmark_override.lower()]
             if not benchmarks:
-                print(f"\n[ERROR] Benchmark '{benchmark_override}' nicht gefunden. Moegliche: {', '.join(b['name'] for b in BENCHMARKS)}")
+                print(f"\n[ERROR] Benchmark '{benchmark_override}' not found. Possible: {', '.join(b['name'] for b in BENCHMARKS)}")
                 sys.exit(1)
         available = get_available_models()
         if model_key_override:
             models = [m for m in available if m["key"] == model_key_override]
             if not models:
-                print(f"\n[ERROR] Modell '{model_key_override}' nicht gefunden.")
+                print(f"\n[ERROR] Model '{model_key_override}' not found.")
                 sys.exit(1)
         else:
             models = available
     else:
-        print("\n[WARN] Interaktiver Modus wird nicht mehr unterstuetzt – nutze run_benchmarks_v11.py")
-        print("[INFO] Starte mit: python run_benchmarks_v11.py --benchmarks DS1000,CoderEval")
+        print("\n[WARN] Interactive mode is no longer supported – use run_benchmarks_v12.py")
+        print("[INFO] Start with: python run_benchmarks_v12.py --benchmarks DS1000,CoderEval")
         benchmarks = select_benchmark()
         models = select_models(get_available_models())
-        # Pruefe ob Modell bereits geladen ist (von Vorlauf)
+        # Check whether a model is already loaded (from previous run)
         loaded = get_current_loaded_model()
         if not loaded:
-            print("\n[ERROR] Kein Modell geladen. Bitte zuerst Modell via run_benchmarks_v11.py laden.")
+            print("\n[ERROR] No model loaded. Please load a model first via run_benchmarks_v12.py.")
             sys.exit(1)
 
     summary = []
     for midx, model_info in enumerate(models, 1):
         model_key = model_info["key"]
         model_display = model_info["display"]
-        # Exakte API-ID vom Parent uebernehmen (falls gesetzt)
+        # Take exact API ID from parent (if set)
         if api_model_override:
             model_info["_api_model"] = api_model_override
         model_results = []
         print(f"\n{'=' * 60}")
-        print(f"  Modell {midx}/{len(models)}: {model_display}")
+        print(f"  Model {midx}/{len(models)}: {model_display}")
         print(f"{'=' * 60}")
-        # Modell-Management (laden/entladen) wird NUR von run_benchmarks_v11.py veranlasst.
-        # Wir gehen davon aus, dass das Modell bereits geladen und bereit ist.
+        # Model management (load/unload) is initiated ONLY by run_benchmarks_v12.py.
+        # We assume that the model is already loaded and ready.
         for bench in benchmarks:
             fp = os.path.join(DATA_DIR, bench["file"])
             if not os.path.exists(fp):
-                print(f"[WARN] Fehlt: {fp}")
+                print(f"[WARN] Missing: {fp}")
                 continue
             tasks = load_jsonl(fp)
             tt = get_task_type(bench["file"])
             tasks = subsample_tasks(tasks, tt, sample_size=sample_size)
             if len(tasks) > MAX_TASKS_PER_BENCHMARK:
-                print(f"\n  Lade {bench['file']} ({len(tasks)} Aufgaben, nutze {MAX_TASKS_PER_BENCHMARK})")
+                print(f"\n  Loading {bench['file']} ({len(tasks)} tasks, using {MAX_TASKS_PER_BENCHMARK})")
                 tasks = tasks[:MAX_TASKS_PER_BENCHMARK]
             else:
-                print(f"\n  Lade {bench['file']} ({len(tasks)} Aufgaben)")
+                print(f"\n  Loading {bench['file']} ({len(tasks)} tasks)")
             try:
                 res, avg_s, avg_l, avg_t, cs = benchmark_model(
                     model_info, tasks, tt, bench["name"], monitor,
                     quiet=non_interactive
                 )
             except Exception as e:
-                print(f"\n[ERROR] Benchmark {bench['name']} komplett fehlgeschlagen: {e}")
+                print(f"\n[ERROR] Benchmark {bench['name']} completely failed: {e}")
                 traceback.print_exc()
                 res = []
                 avg_s = avg_l = avg_t = None
@@ -1652,10 +1714,10 @@ def main() -> None:
                 "vram_gb": vram_gb,
             })
             summary.append({
-                "Modell": model_display, "Benchmark": bench["name"],
-                "Aufgaben": len(tasks),
+                "Model": model_display, "Benchmark": bench["name"],
+                "Tasks": len(tasks),
                 "Score": f"{avg_s:.1%}" if avg_s is not None else "-",
-                "Latenz": f"{avg_l:.1f}s" if avg_l is not None else "-",
+                "Latency": f"{avg_l:.1f}s" if avg_l is not None else "-",
                 "tok/s": f"{avg_t:.1f}" if avg_t is not None else "-",
                 "CPU [%]": f"{avg_cpu:.0f}" if avg_cpu is not None else "-",
                 "GPU [%]": f"{avg_gpu:.0f}" if avg_gpu is not None else "-",
@@ -1680,38 +1742,38 @@ def main() -> None:
                 sample_size=sample_size,
             )
 
-    # In non-interactive-Modus: redundante ZUSAMMENFASSUNG ueberspringen
-    # (run_benchmarks_v11.py erzeugt eigene Zusammenfassungen)
+    # In non-interactive mode: skip redundant SUMMARY
+    # (run_benchmarks_v12.py generates its own summaries)
     if not non_interactive:
         print("\n" + "=" * 60)
-        print("  ZUSAMMENFASSUNG")
+        print("  SUMMARY")
         print("=" * 60)
         if summary:
             hdr = "{:<25} {:<20} {:<6} {:<8} {:<8} {:<8}".format(
-                "Modell", "Benchmark", "Aufg.", "Score", "Latenz", "tok/s")
+                "Model", "Benchmark", "Tasks", "Score", "Latency", "tok/s")
             print("  " + hdr)
             print("  " + "-" * len(hdr))
             for r in summary:
                 print("  {:<25} {:<20} {:<6} {:<8} {:<8} {:<8}".format(
-                    r["Modell"][:24], r["Benchmark"][:19], r["Aufgaben"],
-                    r["Score"], r["Latenz"], r["tok/s"]))
+                    r["Model"][:24], r["Benchmark"][:19], r["Tasks"],
+                    r["Score"], r["Latency"], r["tok/s"]))
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        sp = os.path.join(RESULTS_DIR, f"zusammenfassung_{ts}.csv")
+        sp = os.path.join(RESULTS_DIR, f"summary_{ts}.csv")
         if summary:
             with open(sp, "w", newline="", encoding="utf-8-sig") as f:
                 w = csv.DictWriter(f, fieldnames=summary[0].keys())
                 w.writeheader()
                 w.writerows(summary)
-            print(f"\n[INFO] Zusammenfassung: {sp}")
-    print("\n[INFO] Benchmark abgeschlossen.")
+            print(f"\n[INFO] Summary: {sp}")
+    print("\n[INFO] Benchmark complete.")
 
 
 if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print("\n[INFO] Abgebrochen.")
-        print("[INFO] Entlade Modelle...")
+        print("\n[INFO] Aborted.")
+        print("[INFO] Unloading models...")
         unload_all_models()
         sys.exit(0)
     except Exception as e:

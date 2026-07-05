@@ -3,7 +3,10 @@
 Local benchmark framework for LLMs via LM Studio REST API (OpenAI-compatible). Tests coding, reasoning, knowledge, and agentic capabilities across **4 pipelines** with **10 benchmarks**.
 
 **Goal:**
-While many benchmark results are available online, they typically run on large servers with abundant memory and powerful CPU/GPU resources. This project focuses on obtaining realistic values for local execution under real-world constraints where resources — especially VRAM — are limited. This means either smaller (generally weaker) models with fewer parameters, or medium-sized models with heavy quantization (which also impacts quality). The same applies to KV-cache: either heavily quantized and/or limited context length to fit in VRAM, otherwise token/s plummets and runtime skyrockets.
+While many benchmark results are available online, they typically run on large servers with abundant memory and powerful CPU/GPU resources. 
+This project focuses on obtaining realistic values for local execution under real-world constraints where resources — especially VRAM — are limited. 
+This means either smaller (generally weaker) models with fewer parameters, or medium-sized models with heavy quantization (which also impacts quality). 
+The same applies to KV-cache: either heavily quantized and/or limited context length to fit in VRAM, otherwise token/s plummets and runtime skyrockets.
 
 This test suite makes it possible to find the best models and quantizations for a given piece of hardware.
 
@@ -66,15 +69,15 @@ python consolidate_results_v12.py --bootstrap
 
 ## CLI Options
 
-| Flag | Description |
-|------|-------------|
-| `--model` | Model key (from `lms ls --json`) |
-| `--benchmarks` | Comma-separated: DS1000, CoderEval, HumanEval+, MBPP+, ARC, HellaSwag, TruthfulQA, MathQA, MMLU-Pro, Agentic |
-| `--sample-size` | Tasks per benchmark (default: 10) |
-| `--thinking` | Enable thinking mode for MathQA/MMLU-Pro (reasoning models) |
-| `--bootstrap` | Enable Bootstrap 95% CI for DS1000/CoderEval (consolidation only) |
-| `--non-interactive` | No user prompts |
-| `--output-dir` | Results directory (default: `ergebnisse/`) |
+| Flag                | Description                                                                                                  |
+|---------------------|--------------------------------------------------------------------------------------------------------------|
+| `--model`           | Model key (from `lms ls --json`)                                                                             |
+| `--benchmarks`      | Comma-separated: DS1000, CoderEval, HumanEval+, MBPP+, ARC, HellaSwag, TruthfulQA, MathQA, MMLU-Pro, Agentic |
+| `--sample-size`     | Tasks per benchmark (default: 10)                                                                            |
+| `--thinking`        | Enable thinking mode for MathQA/MMLU-Pro (reasoning models)                                                  |
+| `--bootstrap`       | Enable Bootstrap 95% CI for DS1000/CoderEval (consolidation only)                                            |
+| `--non-interactive` | No user prompts                                                                                              |
+| `--output-dir`      | Results directory (default: `ergebnisse/`)                                                                   |
 
 ## Architecture
 
@@ -93,12 +96,12 @@ consolidate_results_v12.py    (Weighted leaderboard + bootstrap CI)
 
 ### Benchmarks
 
-| Pipeline  | Benchmarks                                    | Evaluation                               |
-|-----------|-----------------------------------------------|------------------------------------------|
+| Pipeline  | Benchmarks                                    | Evaluation                                |
+|-----------|-----------------------------------------------|-------------------------------------------|
 | Custom    | DS1000, CoderEval                             | `exec_sandboxed()` + namespace comparison |
-| lm-eval   | ARC, HellaSwag, TruthfulQA, MathQA, MMLU-Pro  | `generate_until` + regex extraction      |
-| evalplus  | HumanEval+, MBPP+                             | Differential testing with plus_input     |
-| Agentic   | Agentic (69 scenarios)                        | tool-eval-bench final_score              |
+| lm-eval   | ARC, HellaSwag, TruthfulQA, MathQA, MMLU-Pro  | `generate_until` + regex extraction       |
+| evalplus  | HumanEval+, MBPP+                             | Differential testing with plus_input      |
+| Agentic   | Agentic (69 scenarios)                        | tool-eval-bench final_score               |
 
 ### Weighting (Overall Score)
 
@@ -129,14 +132,14 @@ Benchmarks/
 ├── run_benchmarks_v12.py           # Launcher
 ├── custom_benchmark_v12.py         # Custom pipeline (DS1000, CoderEval)
 ├── consolidate_results_v12.py      # Consolidation + bootstrap CI
-├── benchmark_config.py             # Weights, WHITELIST, DISPLAY_NAMES
+├── benchmark_config.py             # Weights, MMLU-Pro-Subsets, Tool-Eval-Scenarios
 ├── model_manager.py                # LM Studio load/unload
 ├── csv_writer.py                   # CSV output
 ├── simple_evals/                   # JSONL datasets
 ├── lm_eval_tasks/                  # Custom YAML tasks
 ├── ergebnisse/                     # Results + consolidation
 ├── doc-git/                        # Documentation
-│   ├── Architektur+Flow_v24.md     # Full architecture description (German)
+│   ├── Architektur+Flow_*.md        # Full architecture description (German)
 │   └── Modell_Steckbriefe*.md      # Model reference (40+ entries, German)
 └── tests/                          # Pytest tests
 ```

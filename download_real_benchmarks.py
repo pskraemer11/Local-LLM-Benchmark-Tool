@@ -4,7 +4,7 @@
 Laedt ALLE verfuegbaren Benchmark-Datensaetze von HuggingFace und anderen Quellen
 herunter und speichert sie als JSONL-Dateien im simple_evals/ Ordner.
 Jede Aufgabe erhaelt ein _group-Feld fuer die spaetere Subsampling-Logik
-in custom_benchmark_v11.py (subsample_tasks()).
+in custom_benchmark_v12.py (subsample_tasks()).
 
 Quellen: HumanEval+, MathQA, MBPP+, DS1000, BBH, MMLU, MMLU-Pro,
          ARC-Challenge, TruthfulQA, HellaSwag, PandasEval

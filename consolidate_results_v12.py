@@ -1,29 +1,29 @@
 #!/usr/bin/env python3
 """Consolidate all benchmark results from a dense run into a single table.
 
-── Rolle im Gesamtsystem ───────────────────────────────────────────
-  Dieses Skript ist der letzte Schritt der Benchmark-Pipeline.
-  Es liest die CSV-Dateien aus ergebnisse/ (geschrieben von
-  csv_writer.py in run_benchmarks_v11.py) und verdichtet sie zu:
+── Role in the Overall System ─────────────────────────────────────
+  This script is the last step of the benchmark pipeline.
+  It reads CSV files from ergebnisse/ (written by
+  csv_writer.py in run_benchmarks_v12.py) and consolidates them into:
 
-    1. Gesamt-Rangliste (CSV + MD) mit Score pro Benchmark
-    2. Kategorie-Scores: Coding (35%), Math (25%), Agentic (25%), Knowledge (15%)
-    3. Overall-Score (normalisiert)
-    4. TOP/BOTTOM 5 und Kategorie-Rankings
+    1. Overall ranking (CSV + MD) with score per benchmark
+    2. Category scores: Coding (35%), Math (25%), Agentic (25%), Knowledge (15%)
+    3. Overall score (normalized)
+    4. TOP/BOTTOM 5 and category rankings
 
-── Bezug zu anderen Skripten ──────────────────────────────────────
-  run_benchmarks_v11.py         -> schreibt modell_*.csv (pro Modell)
-  custom_benchmark_v11.py       -> schreibt tasks_*.csv (pro Task)
-  csv_writer.py                 -> einheitliches CSV-Schema
-  consolidate_results_v11.py    -> LIEST diese CSVs
+── Relationship to Other Scripts ──────────────────────────────────
+  run_benchmarks_v12.py         -> writes model_*.csv (per model)
+  custom_benchmark_v12.py       -> writes tasks_*.csv (per task)
+  csv_writer.py                 -> unified CSV schema
+  consolidate_results_v12.py    -> READS these CSVs
 
 Computes weighted category scores + efficiency.
 """
 from __future__ import annotations
 
-import csv, json, os, sys, re
+import csv, json, os, sys, re, random
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from statistics import mean, median
 from typing import Any, Dict, List, Optional, Tuple
@@ -31,9 +31,8 @@ from typing import Any, Dict, List, Optional, Tuple
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 RESULTS_DIR = os.path.join(BASE_DIR, "ergebnisse")
 
-from benchmark_config import (DISPLAY_NAMES, WHITELIST, MMLU_PRO_SUBSETS,
-                             LB_MEANS_BLACKLIST, CAT_WEIGHTS, OVERALL_WEIGHTS,
-                             QUANT_MAP)
+from benchmark_config import (MMLU_PRO_SUBSETS, LB_MEANS_BLACKLIST,
+                             CAT_WEIGHTS, OVERALL_WEIGHTS, QUANT_MAP)
 
 # --- Model info cache (from lms ls --json) ---
 _MODEL_INFO_CACHE = None
@@ -54,7 +53,9 @@ def _get_model_info() -> Dict[str, Any]:
                     if mk:
                         sz_bytes = item.get("sizeBytes", 0) or 0
                         quant = item.get("quantization", {}) or {}
+                        display = item.get("displayName", "")
                         info[mk] = {
+                            "displayName": display,
                             "vram_gb": round(sz_bytes / 1e9, 2),
                             "params": item.get("paramsString", "?"),
                             "quant": quant.get("name", "?") if isinstance(quant, dict) else str(quant),
@@ -65,51 +66,56 @@ def _get_model_info() -> Dict[str, Any]:
     return info
 
 
-def _lookup_vram(display_name: str) -> Optional[Dict[str, Any]]:
-    """Try to find VRAM + quant for a display name.
+def _get_display_name(model_key: str) -> str:
+    """Resolve model_key -> human-readable display name."""
+    info = _get_model_info()
+    if model_key in info:
+        dn = info[model_key].get("displayName")
+        if dn:
+            return dn
+    # Fuzzy: strip publisher prefix
+    import re as _re
+    mk_norm = _re.sub(r"^[a-z0-9_-]+/", "", model_key.lower())
+    for mk, meta in info.items():
+        mk_stripped = _re.sub(r"^[a-z0-9_-]+/", "", mk.lower())
+        if mk_norm == mk_stripped:
+            dn = meta.get("displayName")
+            if dn:
+                return dn
+    # Fallback: prettify key
+    return model_key.replace("/", " ").replace("_", " ").replace("-", " ").title()
+
+
+def _lookup_vram(model_key: str) -> Optional[Dict[str, Any]]:
+    """Try to find VRAM + quant for a model_key.
 
     Priority for quant: QUANT_MAP (static) > lms ls --json (dynamic)
     Priority for vram_gb: lms ls --json only (dynamic – deleted models have no file)
     """
-    # Step 1: Find the model_key for this display_name
-    model_key = None
-    for dk, dn in DISPLAY_NAMES.items():
-        if dn == display_name:
-            model_key = dk
-            break
+    # Step 1: Get quant from QUANT_MAP (primary – works for deleted models too)
+    quant_from_map = QUANT_MAP.get(model_key)
 
-    # Step 2: Get quant from QUANT_MAP (primary – works for deleted models too)
-    quant_from_map = None
-    if model_key and model_key in QUANT_MAP:
-        quant_from_map = QUANT_MAP[model_key]
-
-    # Step 3: Get VRAM + quant from lms ls --json (dynamic – only installed models)
+    # Step 2: Get VRAM + quant from lms ls --json (dynamic – only installed models)
     info = _get_model_info()
     lms_match = None
-    for mk, meta in info.items():
-        if display_name in mk or mk in display_name:
-            lms_match = meta
-            break
-    if not lms_match and model_key:
-        # Try direct key match
-        if model_key in info:
-            lms_match = info[model_key]
-        else:
-            # Fuzzy: strip publisher prefix, match normalized
-            import re as _re
-            dk_norm = _re.sub(r"[^a-z0-9]", "", model_key.lower())
-            for mk in info:
-                mk_base = _re.sub(r"@.*", "", mk)
-                mk_base_norm = _re.sub(r"[^a-z0-9]", "", mk_base.lower())
-                if dk_norm in mk_base_norm or mk_base_norm in dk_norm:
-                    lms_match = info[mk]
-                    break
-                dk_short = _re.sub(r"(ibm|google|microsoft|mistralai|essentialai)/", "", dk_norm)
-                if len(dk_short) > 5 and dk_short in mk_base_norm:
-                    lms_match = info[mk]
-                    break
+    if model_key in info:
+        lms_match = info[model_key]
+    else:
+        # Fuzzy: strip publisher prefix, match normalized
+        import re as _re
+        dk_norm = _re.sub(r"[^a-z0-9]", "", model_key.lower())
+        for mk in info:
+            mk_base = _re.sub(r"@.*", "", mk)
+            mk_base_norm = _re.sub(r"[^a-z0-9]", "", mk_base.lower())
+            if dk_norm in mk_base_norm or mk_base_norm in dk_norm:
+                lms_match = info[mk]
+                break
+            dk_short = _re.sub(r"(ibm|google|microsoft|mistralai|essentialai)/", "", dk_norm)
+            if len(dk_short) > 5 and dk_short in mk_base_norm:
+                lms_match = info[mk]
+                break
 
-    # Step 4: Merge – QUANT_MAP wins for quant, lms wins for vram_gb
+    # Step 3: Merge – QUANT_MAP wins for quant, lms wins for vram_gb
     if lms_match:
         return {
             "vram_gb": lms_match.get("vram_gb", ""),
@@ -146,6 +152,126 @@ def _percentile(values: List[float], p: float) -> float:
         return sorted_v[f]
     return sorted_v[f] * (c - k) + sorted_v[c] * (k - f)
 
+def bootstrap_ci(scores: List[float], n_resamples: int = 10000, alpha: float = 0.05) -> Tuple[float, float]:
+    """Bootstrap 95% confidence interval for the mean.
+    
+    Draws n_resamples samples with replacement from scores,
+    computes the mean each time, and returns the (alpha/2)-th and
+    (1-alpha/2)-th percentile of the distribution.
+    """
+    if len(scores) < 2:
+        return (float('nan'), float('nan'))
+    n = len(scores)
+    means = [0.0] * n_resamples
+    for i in range(n_resamples):
+        s = 0.0
+        for _ in range(n):
+            s += random.choice(scores)
+        means[i] = s / n
+    means.sort()
+    lo_idx = int(n_resamples * alpha / 2)
+    hi_idx = int(n_resamples * (1 - alpha / 2))
+    return (means[lo_idx], means[hi_idx])
+
+def paired_bootstrap_ci(scores_a: List[float], scores_b: List[float],
+                        n_resamples: int = 10000, alpha: float = 0.05,
+                        seed: Optional[int] = None) -> Tuple[float, float, float]:
+    """Paired bootstrap CI for the mean difference (A - B).
+
+    Both score lists must have the same length (same items, same order).
+    Returns (mean_diff, ci_lo, ci_hi).  Positive means A > B.
+    """
+    if len(scores_a) != len(scores_b) or len(scores_a) < 2:
+        return (float('nan'), float('nan'), float('nan'))
+    rng = random.Random(seed) if seed is not None else random.Random()
+    n = len(scores_a)
+    diffs = [0.0] * n_resamples
+    for i in range(n_resamples):
+        s = 0.0
+        for _ in range(n):
+            idx = rng.randrange(n)
+            s += scores_a[idx] - scores_b[idx]
+        diffs[i] = s / n
+    diffs.sort()
+    lo_idx = int(n_resamples * alpha / 2)
+    hi_idx = int(n_resamples * (1 - alpha / 2))
+    mean_diff = sum(scores_a[i] - scores_b[i] for i in range(n)) / n
+    return (mean_diff, diffs[lo_idx], diffs[hi_idx])
+
+
+def read_paired_scores(path_a: str, path_b: str) -> Tuple[List[float], List[float]]:
+    """Read two benchmark CSVs and return paired per-item scores.
+
+    Matches rows by task_index. Both CSVs must have been generated with
+    the same --seed so they contain the same tasks in the same order.
+    Unmatched rows are dropped.
+    """
+    def _read_scores_by_index(path):
+        out = {}
+        delim = _auto_delimiter(path)
+        with open(path, "r", encoding="utf-8") as f:
+            for row in csv.DictReader(f, delimiter=delim):
+                idx = row.get("task_index", "").strip()
+                sc = row.get("score", "").strip()
+                if idx and sc:
+                    fv = _try_float(sc)
+                    if fv is not None:
+                        out[idx] = fv
+        return out
+    sa = _read_scores_by_index(path_a)
+    sb = _read_scores_by_index(path_b)
+    common = sorted(set(sa.keys()) & set(sb.keys()))
+    if not common:
+        return ([], [])
+    return ([sa[k] for k in common], [sb[k] for k in common])
+
+
+def compare_two_quants(name_a: str, name_b: str,
+                       scores_a: List[float], scores_b: List[float],
+                       n_resamples: int = 10000, seed: int = 42) -> Dict[str, Any]:
+    """Compare two quants using paired bootstrap.
+
+    Returns a dict with:
+      mean_a, mean_b, mean_diff, ci_lo, ci_hi,
+      sign: '+' if A better, '-' if B better, '~' if overlapping,
+      n_items, p_value (proportion of bootstrap resamples where sign disagrees)
+    """
+    n = len(scores_a)
+    if n < 2:
+        return {
+            "mean_a": float('nan'), "mean_b": float('nan'),
+            "mean_diff": float('nan'), "ci_lo": float('nan'), "ci_hi": float('nan'),
+            "sign": "~", "n_items": n, "p_value": float('nan'),
+        }
+    mean_a = sum(scores_a) / n
+    mean_b = sum(scores_b) / n
+    mean_diff, ci_lo, ci_hi = paired_bootstrap_ci(scores_a, scores_b,
+                                                   n_resamples=n_resamples, seed=seed)
+    if ci_lo > 0:
+        sign = "+"
+    elif ci_hi < 0:
+        sign = "-"
+    else:
+        sign = "~"
+    # p-value: proportion of bootstrap resamples where sign disagrees
+    rng = random.Random(seed)
+    disagree = 0
+    for _ in range(n_resamples):
+        s = 0.0
+        for __ in range(n):
+            idx = rng.randrange(n)
+            s += scores_a[idx] - scores_b[idx]
+        boot_diff = s / n
+        if (boot_diff > 0 and sign == "-") or (boot_diff < 0 and sign == "+"):
+            disagree += 1
+    p_value = disagree / n_resamples
+    return {
+        "mean_a": mean_a, "mean_b": mean_b,
+        "mean_diff": mean_diff, "ci_lo": ci_lo, "ci_hi": ci_hi,
+        "sign": sign, "n_items": n, "p_value": p_value,
+    }
+
+
 def _auto_delimiter(path: str) -> str:
     with open(path, "r", encoding="utf-8") as f:
         first = f.readline()
@@ -153,7 +279,8 @@ def _auto_delimiter(path: str) -> str:
         return ";"
     return ","
 
-def read_custom_csv(path: str) -> Tuple[Optional[float], Optional[float], Optional[float], Dict[str, Any]]:
+def read_custom_csv(path: str, out_scores: Optional[List[float]] = None) -> Tuple[Optional[float], Optional[float], Optional[float], Dict[str, Any]]:
+    """Read benchmark CSV; collect per-item scores in out_scores (for Bootstrap)."""
     scores = []
     tok_speeds = []
     latencies = []
@@ -200,6 +327,8 @@ def read_custom_csv(path: str) -> Tuple[Optional[float], Optional[float], Option
         print(f"  [WARN] {os.path.basename(path)}: {e}", file=sys.stderr)
     if not scores:
         return None, None, None, {}
+    if out_scores is not None:
+        out_scores.extend(scores)
     total_latency = sum(latencies) if latencies else None
     metrics = {}
     if cpu_per_task:
@@ -232,10 +361,10 @@ def find_latest_csvs() -> Tuple[Dict[str, str], Dict[str, str]]:
     This ensures unique entries for models with same name but different quants
     (e.g. qwen3-coder-reap-25b-a3b-i1@iq4_xs vs @q3_k_m).
     
-    ACHTUNG: Der Lookup-Key ist das model_key-Feld aus dem CSV-Inhalt,
-    NICHT der Dateiname. Bei Modellen mit gleichem Basis-Key aber
-    unterschiedlicher Quant-Variante muessen die CSV-Dateien das
-    korrekte model_key-Feld enthalten (wird von csv_writer.py gesetzt).
+    NOTE: The lookup key is the model_key field from the CSV content,
+    NOT the filename. For models with the same base key but different
+    quant variant, the CSV files must contain the correct model_key
+    field (set by csv_writer.py).
     """
     ds1000 = {}
     codereval = {}
@@ -269,7 +398,7 @@ def find_latest_csvs() -> Tuple[Dict[str, str], Dict[str, str]]:
         # Use model_key if available, else fall back to display name from filename
         lookup_key = model_key_from_csv or model_name_from_file
         if lookup_key not in target or ts > target[lookup_key][0]:
-            target[lookup_key] = (ts, fname)
+            target[lookup_key] = (ts, fpath)
     return {k: v[1] for k, v in ds1000.items()}, {k: v[1] for k, v in codereval.items()}
 
 
@@ -416,15 +545,15 @@ def read_agentic(model_key: str) -> Optional[float]:
 
 
 def compute_category_scores(bench_scores: Dict[str, Optional[float]]) -> Dict[str, Optional[float]]:
-    """Berechnete gewichtete Kategorie-Scores und Overall.
+    """Compute weighted category scores and Overall.
     
-    Normalisierung: Wenn eine Kategorie nur teilweise Daten hat (z.B. nur
-    HumanEval+ aber kein MBPP+), werden die vorhandenen Benchmarks proportional
-    hochskaliert (Gesamtgewicht = 1.0). Das verhindert, dass eine Kategorie
-    mit nur einem Benchmark den gleichen Einfluss hat wie eine mit vier.
+    Normalization: If a category has only partial data (e.g., only
+    HumanEval+ but not MBPP+), available benchmarks are scaled up
+    proportionally (total weight = 1.0). This prevents a category
+    with only one benchmark from having the same impact as one with four.
     
-    Overall = summe(cat_weight * cat_score) / summe(cat_weight)
-    fuer alle Kategorien mit Daten.
+    Overall = sum(cat_weight * cat_score) / sum(cat_weight)
+    for all categories with data.
     """
     cats = {}
     for cat, bench_weights in CAT_WEIGHTS.items():
@@ -449,7 +578,11 @@ def compute_category_scores(bench_scores: Dict[str, Optional[float]]) -> Dict[st
 class ModelData:
     name: str
     ds1000: Optional[float] = None
+    ds1000_ci_lo: Optional[float] = None
+    ds1000_ci_hi: Optional[float] = None
     codereval: Optional[float] = None
+    codereval_ci_lo: Optional[float] = None
+    codereval_ci_hi: Optional[float] = None
     humaneval: Optional[float] = None
     mbpp: Optional[float] = None
     arc: Optional[float] = None
@@ -462,7 +595,7 @@ class ModelData:
     knowledge: Optional[float] = None
     math: Optional[float] = None
     overall: Optional[float] = None
-    laufzeit_min: Optional[str] = None
+    runtime_min: Optional[str] = None
     eff_score_h: Optional[str] = None
     coding_eff_score_h: Optional[str] = None
     tok_s: Optional[str] = None
@@ -478,9 +611,13 @@ class ModelData:
 
     def to_csv_dict(self) -> Dict[str, Any]:
         return {
-            "Modell": self.name,
+            "Model": self.name,
             "DS1000": self.ds1000,
+            "DS1000_CI_lo": self.ds1000_ci_lo,
+            "DS1000_CI_hi": self.ds1000_ci_hi,
             "CoderEval": self.codereval,
+            "CoderEval_CI_lo": self.codereval_ci_lo,
+            "CoderEval_CI_hi": self.codereval_ci_hi,
             "HumanEval+": self.humaneval,
             "MBPP+": self.mbpp,
             "ARC-Challenge": self.arc,
@@ -493,7 +630,7 @@ class ModelData:
             "Knowledge": self.knowledge,
             "Math": self.math,
             "Overall": self.overall,
-            "Laufzeit (min)": self.laufzeit_min,
+            "Runtime (min)": self.runtime_min,
             "Eff (Score/h)": self.eff_score_h,
             "Coding Eff (Score/h)": self.coding_eff_score_h,
             "tok/s": self.tok_s,
@@ -509,22 +646,37 @@ class ModelData:
         }
 
 
-def read_data() -> List[Dict[str, Any]]:
+def read_data(model_keys: Optional[List[str]] = None) -> List[Dict[str, Any]]:
     ds1000_files, codereval_files = find_latest_csvs()
     print(f"  DS1000 CSVs:  {len(ds1000_files)}")
     print(f"  CoderEval:    {len(codereval_files)}")
 
+    # Auto-discover model keys from result CSVs if none specified
+    if model_keys is None:
+        seen: set[str] = set()
+        model_keys = []
+        for mk in ds1000_files:
+            if mk not in seen:
+                model_keys.append(mk)
+                seen.add(mk)
+        for mk in codereval_files:
+            if mk not in seen:
+                model_keys.append(mk)
+                seen.add(mk)
+
     rows = []
-    for model_key in WHITELIST:
-        display = DISPLAY_NAMES[model_key]
+    for model_key in model_keys:
+        display = _get_display_name(model_key) if not model_key.startswith("_dummy_") else model_key
         bench_scores = {}
         tok_speeds = {}
         latencies = []
 
         # DS1000 – match by model_key
+        ds_scores: List[float] = []
         for mk, fn in ds1000_files.items():
             if mk == model_key:
-                ds_score, ds_tps, ds_lat, ds_m = read_custom_csv(os.path.join(RESULTS_DIR, fn))
+                ds_score, ds_tps, ds_lat, ds_m = read_custom_csv(os.path.join(RESULTS_DIR, fn),
+                                                                  out_scores=ds_scores)
                 if ds_score is not None:
                     bench_scores["DS1000"] = ds_score
                     tok_speeds["DS1000"] = ds_tps
@@ -535,9 +687,11 @@ def read_data() -> List[Dict[str, Any]]:
             ds_m = {}
 
         # CoderEval – match by model_key
+        ce_scores: List[float] = []
         for mk, fn in codereval_files.items():
             if mk == model_key:
-                ce_score, ce_tps, ce_lat, ce_m = read_custom_csv(os.path.join(RESULTS_DIR, fn))
+                ce_score, ce_tps, ce_lat, ce_m = read_custom_csv(os.path.join(RESULTS_DIR, fn),
+                                                                  out_scores=ce_scores)
                 if ce_score is not None:
                     bench_scores["CoderEval"] = ce_score
                     tok_speeds["CoderEval"] = ce_tps
@@ -602,20 +756,32 @@ def read_data() -> List[Dict[str, Any]]:
         print(f"    {'Math':20s} {cats['math']:.1%}" if cats.get('math') is not None else "")
         print(f"    {'Overall':20s} {cats['overall']:.1%}" if cats.get('overall') is not None else "")
         rt_min = runtime_h * 60 if runtime_h else None
-        lt_str = f"{rt_min:.1f} min" if rt_min else "—"
-        print(f"    {'Laufzeit':20s} {lt_str}")
+        runtime_str = f"{rt_min:.1f} min" if rt_min else "—"
+        print(f"    {'Runtime':20s} {runtime_str}")
         eff_str = f"{cats['overall']/runtime_h:.1f}" if cats.get('overall') is not None and runtime_h else "—"
         print(f"    {'Eff (Score/h)':20s} {eff_str} %p/h")
 
         def pct(val: Optional[float]) -> Optional[float]:
             return round(val * 100, 2) if val is not None else None
 
+        # Bootstrap CIs (only with 2+ per-item scores)
+        ds_ci_lo = ds_ci_hi = None
+        ce_ci_lo = ce_ci_hi = None
+        if len(ds_scores) > 1:
+            ds_ci_lo, ds_ci_hi = bootstrap_ci(ds_scores)
+        if len(ce_scores) > 1:
+            ce_ci_lo, ce_ci_hi = bootstrap_ci(ce_scores)
+
         coding_eff = f"{cats['coding']/runtime_h:.1f}" if cats.get('coding') is not None and runtime_h else ""
-        vram = _lookup_vram(display)
+        vram = _lookup_vram(model_key)
         rows.append(ModelData(
             name=display,
             ds1000=pct(ds_score),
+            ds1000_ci_lo=pct(ds_ci_lo),
+            ds1000_ci_hi=pct(ds_ci_hi),
             codereval=pct(ce_score),
+            codereval_ci_lo=pct(ce_ci_lo),
+            codereval_ci_hi=pct(ce_ci_hi),
             humaneval=pct(bench_scores.get('HumanEval+_plus')),
             mbpp=pct(bench_scores.get('MBPP+_plus')),
             arc=pct(bench_scores.get('ARC-Challenge')),
@@ -628,7 +794,7 @@ def read_data() -> List[Dict[str, Any]]:
             knowledge=pct(cats.get('knowledge')),
             math=pct(cats.get('math')),
             overall=pct(cats.get('overall')),
-            laufzeit_min=f"{rt_min:.1f}" if rt_min else "",
+            runtime_min=f"{rt_min:.1f}" if rt_min else "",
             eff_score_h=f"{cats['overall']/runtime_h:.1f}" if cats.get('overall') is not None and runtime_h else "",
             coding_eff_score_h=coding_eff,
             tok_s=f"{avg_tps:.1f}" if avg_tps else "",
@@ -646,24 +812,96 @@ def read_data() -> List[Dict[str, Any]]:
 
 
 def main() -> None:
+    import argparse
+    parser = argparse.ArgumentParser(description="Consolidate benchmark results")
+    parser.add_argument("--models", type=str, default=None,
+                        help="Comma-separated list of model keys to consolidate (default: auto-discover from CSVs)")
+    parser.add_argument("--compare", type=str, default=None,
+                        help="Paired bootstrap comparison: 'modelA,modelB' (both must have been run with --seed)")
+    parser.add_argument("--compare-benchmark", type=str, default=None,
+                        help="Benchmark for comparison (DS1000, CoderEval, or 'all' for both)")
+    parser.add_argument("--seed", type=int, default=42,
+                        help="Random seed for paired bootstrap (default: 42)")
+    args = parser.parse_args()
+
+    model_keys = [m.strip() for m in args.models.split(",")] if args.models else None
+
+    # --compare mode: paired bootstrap analysis (2+ models, all pairwise)
+    if args.compare:
+        parts = [p.strip() for p in args.compare.split(",")]
+        if len(parts) < 2:
+            print("[ERROR] --compare requires at least two comma-separated model keys")
+            sys.exit(1)
+        print("=" * 60)
+        print("  Paired Quant Comparison (v12)")
+        print(f"  Models: {', '.join(parts)}")
+        print(f"  Seed: {args.seed}")
+        print("=" * 60)
+        ds1000_files, codereval_files = find_latest_csvs()
+        benchmarks_to_compare = []
+        if args.compare_benchmark == "all":
+            benchmarks_to_compare = [("DS1000", ds1000_files), ("CoderEval", codereval_files)]
+        elif args.compare_benchmark in ("DS1000", "CoderEval"):
+            benchmarks_to_compare = [
+                (args.compare_benchmark, ds1000_files if args.compare_benchmark == "DS1000" else codereval_files)
+            ]
+        else:
+            benchmarks_to_compare = [("DS1000", ds1000_files), ("CoderEval", codereval_files)]
+        results = []
+        for bench_name, files_dict in benchmarks_to_compare:
+            print(f"\n  --- {bench_name} ---")
+            for key_a, key_b in __import__('itertools').combinations(parts, 2):
+                path_a = files_dict.get(key_a)
+                path_b = files_dict.get(key_b)
+                if not path_a or not path_b:
+                    missing = key_a if not path_a else key_b
+                    print(f"    [WARN] No CSV for {missing}, skipping {key_a} vs {key_b}")
+                    continue
+                scores_a, scores_b = read_paired_scores(path_a, path_b)
+                if not scores_a:
+                    print(f"    [WARN] No overlapping items for {key_a} vs {key_b}, skipping")
+                    continue
+                cmp = compare_two_quants(key_a, key_b, scores_a, scores_b, seed=args.seed)
+                cmp["benchmark"] = bench_name
+                cmp["key_a"] = key_a
+                cmp["key_b"] = key_b
+                results.append(cmp)
+                sig = "***" if cmp["p_value"] < 0.001 else "**" if cmp["p_value"] < 0.01 else "*" if cmp["p_value"] < 0.05 else "n.s."
+                print(f"    {key_a} vs {key_b}:  {cmp['mean_a']:.1f}% vs {cmp['mean_b']:.1f}%  "
+                      f"Diff={cmp['mean_diff']:+.2f}% [{cmp['ci_lo']:+.2f}, {cmp['ci_hi']:+.2f}]  p={cmp['p_value']:.4f} {sig}")
+        if results:
+            print(f"\n{'=' * 60}")
+            print("  Summary")
+            print(f"{'=' * 60}")
+            for r in results:
+                sig = "***" if r["p_value"] < 0.001 else "**" if r["p_value"] < 0.01 else "*" if r["p_value"] < 0.05 else "n.s."
+                winner = r.get("key_a", "") if r["sign"] == "+" else r.get("key_b", "") if r["sign"] == "-" else "neither"
+                print(f"  {r['benchmark']} | {r.get('key_a','')} vs {r.get('key_b','')}: "
+                      f"{winner} wins ({r['mean_diff']:+.2f}%, p={r['p_value']:.4f} {sig})")
+        sys.exit(0)
+
     print("=" * 60)
-    print("  Konsolidierung Dense-Run Ergebnisse (v10)")
+    print("  Consolidating Dense-Run Results (v12)")
+    print("  + Bootstrap 95% CI for DS1000 / CoderEval")
     print(f"  {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print("=" * 60)
 
-    rows = read_data()
+    rows = read_data(model_keys=model_keys)
 
-    # CSV
-    fn_csv = ["Modell", "Quant", "DS1000", "CoderEval", "HumanEval+", "MBPP+",
-              "ARC-Challenge", "HellaSwag", "TruthfulQA", "MMLU-Pro", "MathQA",
-              "Agentic",
-              "Coding", "Knowledge", "Math", "Overall", "Laufzeit (min)",
-              "Eff (Score/h)", "Coding Eff (Score/h)", "tok/s",
-              "VRAM (GB)",
-              "CPU_med", "CPU_p90",
-              "GPU_med", "GPU_p90",
-              "RAM_med", "RAM_p90",
-              "GPU_Temp_p90"]
+    # CSV – build columns dynamically
+    fn_csv = ["Model", "Quant"]
+    fn_csv += ["DS1000", "DS1000_CI_lo", "DS1000_CI_hi"]
+    fn_csv += ["CoderEval", "CoderEval_CI_lo", "CoderEval_CI_hi"]
+    fn_csv += ["HumanEval+", "MBPP+",
+               "ARC-Challenge", "HellaSwag", "TruthfulQA", "MMLU-Pro", "MathQA",
+               "Agentic",
+               "Coding", "Knowledge", "Math", "Overall", "Runtime (min)",
+               "Eff (Score/h)", "Coding Eff (Score/h)", "tok/s",
+               "VRAM (GB)",
+               "CPU_med", "CPU_p90",
+               "GPU_med", "GPU_p90",
+               "RAM_med", "RAM_p90",
+               "GPU_Temp_p90"]
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     csv_path = os.path.join(RESULTS_DIR, f"konsolidiert_{ts}.csv")
     with open(csv_path, "w", encoding="utf-8", newline="") as f:
@@ -729,7 +967,7 @@ def main() -> None:
                 cells_sep.append("-" * (w - 1) + ":")
         f.write("| " + " | ".join(cells_sep) + " |\n")
         for i, r in enumerate(sorted_rows, 1):
-            vals = [str(i), r['Modell']]
+            vals = [str(i), r['Model']]
             for key, pct_flag in zip(keys, pct_flags):
                 vals.append(_val(key, r, pct=pct_flag))
             cells_data = [cell(v, j) for j, v in enumerate(vals)]
@@ -737,10 +975,10 @@ def main() -> None:
 
     # Markdown
     md_path = os.path.join(RESULTS_DIR, f"konsolidiert_{ts}.md")
-    cols_md = ["Modell", "Quant", "DS1000", "CoderEval", "HumanEval+", "MBPP+",
+    cols_md = ["Model", "Quant", "DS1000", "CoderEval", "HumanEval+", "MBPP+",
                "ARC-Challenge", "HellaSwag", "TruthfulQA", "MMLU-Pro", "MathQA",
                "Agentic",
-               "Coding", "Knowledge", "Math", "Overall", "Laufzeit (min)",
+               "Coding", "Knowledge", "Math", "Overall", "Runtime (min)",
                "Eff (Score/h)", "Coding Eff (Score/h)", "tok/s",
                "VRAM (GB)",
               "CPU_med", "CPU_p90",
@@ -766,14 +1004,27 @@ def main() -> None:
 
     str_rows = []
     for r in rows:
-        vals = {"Modell": r["Modell"]}
+        vals = {"Model": r["Model"]}
         for c in cols_md[1:]:
             v = r.get(c, "")
-            if v == "" or v is None:
+            if c in ("DS1000", "CoderEval"):
+                ci_lo = r.get(f"{c}_CI_lo", "")
+                ci_hi = r.get(f"{c}_CI_hi", "")
+                if v not in (None, "", "—") and ci_lo not in (None, "", "—") and ci_hi not in (None, "", "—"):
+                    try:
+                        sv = _fmt_pct(v)
+                        clo = _fmt_pct(ci_lo)
+                        chi = _fmt_pct(ci_hi)
+                        vals[c] = f"{sv} [{clo}-{chi}]"
+                    except Exception:
+                        vals[c] = _fmt_pct(v)
+                else:
+                    vals[c] = _fmt_pct(v) if v not in (None, "", "—") else "—"
+            elif v == "" or v is None:
                 vals[c] = "—"
             elif c == "tok/s":
                 vals[c] = f"{float(v):.0f}"
-            elif c in ("Laufzeit (min)", "Eff (Score/h)", "Coding Eff (Score/h)", "VRAM (GB)", "Quant"):
+            elif c in ("Runtime (min)", "Eff (Score/h)", "Coding Eff (Score/h)", "VRAM (GB)", "Quant"):
                 vals[c] = _fmt_num(v)
             elif c in ("GPU_Temp_max", "GPU_Temp_p90"):
                 vals[c] = f"{float(v):.0f}"
@@ -781,21 +1032,21 @@ def main() -> None:
                 vals[c] = _fmt_pct(v)
         str_rows.append(vals)
 
-    str_rows.sort(key=lambda x: x["Modell"])
+    str_rows.sort(key=lambda x: x["Model"])
 
     with open(md_path, "w", encoding="utf-8") as f:
-        f.write(f"# Konsolidierte Ergebnisse – Dense Run (15+ Modelle)\n")
-        f.write(f"\nStand: {datetime.now().strftime('%Y-%m-%d %H:%M')}, SampleSize=20\n\n")
-        f.write("** Neue Gewichtung Gesamt-Score: Coding 35%, Math 25%, Agentic 25%, Knowledge 15% **\n")
-        f.write("**Effizienz = Score / Laufzeit (in Stunden)** – Laufzeit basiert auf gemessener DS1000+CoderEval-Latenz.\n\n")
+        f.write(f"# Consolidated Results – Dense Run (15+ Models)\n")
+        f.write(f"\nAs of: {datetime.now().strftime('%Y-%m-%d %H:%M')}, SampleSize=20\n\n")
+        f.write("** New Weighting Total Score: Coding 35%, Math 25%, Agentic 25%, Knowledge 15% **\n")
+        f.write("**Efficiency = Score / Runtime (in hours)** – Runtime based on measured DS1000+CoderEval latency.\n\n")
 
-        # Vollständige Ergebnistabelle (zweizeiliger Kopf: Name + Einheit)
-        f.write("## Vollständige Ergebnistabelle\n\n")
+        # Complete results table (two-line header: Name + Unit)
+        f.write("## Complete Results Table\n\n")
 
-        header_names = ["Modell", "Quant", "DS1000", "CoderEv", "HEval+", "MBPP+",
+        header_names = ["Model", "Quant", "DS1000", "CoderEv", "HEval+", "MBPP+",
                         "ARC", "HellaSw", "Truthf.", "MMLU-Pro", "MathQA",
                         "Agentic",
-                        "Coding", "Knowl.", "Math", "Overall", "Laufzeit",
+                        "Coding", "Knowl.", "Math", "Overall", "Runtime",
                         "Eff.", "Cod.Eff", "tok/s", "VRAM",
                         "CPUm", "CPUp",
                         "GPUm", "GPUp",
@@ -819,7 +1070,7 @@ def main() -> None:
 
         widths2 = {}
         for i, c in enumerate(cols_md):
-            if c == "Modell":
+            if c == "Model":
                 max_w = max(len(header_names[i]), len(header_units[i]))
                 for sr in str_rows:
                     max_w = max(max_w, len(str(sr.get(c, ""))))
@@ -830,7 +1081,7 @@ def main() -> None:
         header_cells = []
         for i, c in enumerate(cols_md):
             txt = header_names[i]
-            if c == "Modell":
+            if c == "Model":
                 L = len(txt.ljust(widths2[c]))
                 header_cells.append(" " + txt.ljust(widths2[c]) + " ")
             else:
@@ -861,20 +1112,20 @@ def main() -> None:
             for c in cols_md:
                 val = str(sr.get(c, ""))
                 fitted = _fit(val, widths2[c])
-                if c == "Modell":
+                if c == "Model":
                     parts.append(fitted.ljust(widths2[c]))
                 else:
                     parts.append(fitted.rjust(widths2[c]))
             f.write("| " + " | ".join(parts) + " |\n")
 
         f.write("\n---\n")
-        f.write("\n**Gewichtung:**\n")
+        f.write("\n**Weighting:**\n")
         f.write("- Coding (35%): HumanEval+ (25%), MBPP+ (25%), DS1000 (25%), CoderEval (25%)\n")
         f.write("- Math (25%): MathQA (100%)\n")
         f.write("- Agentic (25%): Agentic (100%)\n")
         f.write("- Knowledge (15%): ARC-Challenge (25%), HellaSwag (25%), TruthfulQA (25%), MMLU-Pro (25%)\n")
-        f.write("- Effizienz = Score / Laufzeit (h). Werte in %p/h.\n")
-        f.write("- Systemmetriken: a=arithmetischer Mittelwert, m=Median, d=Maximum, p=90%-Perzentil – für CPU/GPU/RAM. In der Tabelle dargestellt: m (Median) und p (90%-Perzentil). Tp = GPU-Temperatur P90.\n")
+        f.write("- Efficiency = Score / Runtime (h). Values in %p/h.\n")
+        f.write("- System metrics: a=arithmetic mean, m=median, d=maximum, p=90th percentile – for CPU/GPU/RAM. In the table: m (median) and p (90th percentile). Tp = GPU temperature P90.\n")
 
         # ── TOP 5 tables ──
         def _t5_named(title: str, sort_key: str, headers: List[str], keys: List[str], pct_flags: Optional[List[bool]] = None) -> None:
@@ -893,63 +1144,63 @@ def main() -> None:
             b5 = sorted(valid, key=lambda x: float(x.get(sort_key, 0)), reverse=False)[:5]
             _write_tbl(f, title, headers, b5, keys, pct_flags)
 
-        _t5_named("TOP 5 – Gesamtscore", "Overall",
-            ["Modell", "Overall", "Coding", "Knowledge", "Math", "Laufzeit", "Effiz."],
-            ["Overall", "Coding", "Knowledge", "Math", "Laufzeit (min)", "Eff (Score/h)"],
+        _t5_named("TOP 5 – Overall Score", "Overall",
+            ["Model", "Overall", "Coding", "Knowledge", "Math", "Runtime", "Eff."],
+            ["Overall", "Coding", "Knowledge", "Math", "Runtime (min)", "Eff (Score/h)"],
             [True, True, True, True, False, False])
 
-        _b5_named("BOTTOM 5 – Gesamtscore", "Overall",
-            ["Modell", "Overall", "Coding", "Knowledge", "Math", "Laufzeit", "Effiz."],
-            ["Overall", "Coding", "Knowledge", "Math", "Laufzeit (min)", "Eff (Score/h)"],
+        _b5_named("BOTTOM 5 – Overall Score", "Overall",
+            ["Model", "Overall", "Coding", "Knowledge", "Math", "Runtime", "Eff."],
+            ["Overall", "Coding", "Knowledge", "Math", "Runtime (min)", "Eff (Score/h)"],
             [True, True, True, True, False, False])
 
-        _t5_named("TOP 5 – Effizienz (Gesamtscore / Laufzeit)", "Eff (Score/h)",
-            ["Modell", "Effizienz", "Overall", "Laufzeit"],
-            ["Eff (Score/h)", "Overall", "Laufzeit (min)"],
+        _t5_named("TOP 5 – Efficiency (Overall / Runtime)", "Eff (Score/h)",
+            ["Model", "Efficiency", "Overall", "Runtime"],
+            ["Eff (Score/h)", "Overall", "Runtime (min)"],
             [False, True, False])
 
         top1 = max(rows, key=lambda x: float(x.get("Overall", 0) or 0))
-        top1_name = top1["Modell"] if top1 else ""
-        f.write(f"\n=> Modell **{top1_name}** ist Sieger im Gesamtscore und 2.bester in der Effizienz (Gesamtscore/Laufzeit)!\n")
+        top1_name = top1["Model"] if top1 else ""
+        f.write(f"\n=> Model **{top1_name}** wins the overall score and is 2nd best in efficiency (Overall/Runtime)!\n")
 
         f.write("\n---- \n")
 
         coding_top = _threshold_filtered(rows, "Coding", 60.0)
         coding_top_display = coding_top[:7]
         _write_tbl(f, f"TOP {len(coding_top_display)} – Coding (≥60%)",
-            ["Modell", "Coding", "DS1000", "CoderEval", "HEval+", "MBPP+", "Laufzeit", "Effiz."],
+            ["Model", "Coding", "DS1000", "CoderEval", "HEval+", "MBPP+", "Runtime", "Eff."],
             coding_top_display,
-            ["Coding", "DS1000", "CoderEval", "HumanEval+", "MBPP+", "Laufzeit (min)", "Coding Eff (Score/h)"],
+            ["Coding", "DS1000", "CoderEval", "HumanEval+", "MBPP+", "Runtime (min)", "Coding Eff (Score/h)"],
             [True, True, True, True, True, False, False])
 
-        _t5_named("TOP 5 – Effizienz_Coding (Coding / Laufzeit)", "Coding Eff (Score/h)",
-            ["Modell", "Effizienz", "Coding", "Laufzeit"],
-            ["Coding Eff (Score/h)", "Coding", "Laufzeit (min)"],
+        _t5_named("TOP 5 – Efficiency_Coding (Coding / Runtime)", "Coding Eff (Score/h)",
+            ["Model", "Efficiency", "Coding", "Runtime"],
+            ["Coding Eff (Score/h)", "Coding", "Runtime (min)"],
             [False, True, False])
 
-        f.write("\nCoding-Sieger *Qwen2.5 Coder 14B Instruct* ist bei der Laufzeit und Effizienz eher im Mittelfeld, aber auch nicht schlecht.\n")
-        f.write("Effizienzsieger beim Coding ist *Phi 4 (unsloth)*, mehr als dreimal so schnell wie der Coding-Sieger und einem Coding-Score von 10%-Punkten weniger.\n")
+        f.write("\nCoding winner *Qwen2.5 Coder 14B Instruct* is in the midfield in terms of runtime and efficiency, but not bad either.\n")
+        f.write("Efficiency winner in coding is *Phi 4 (unsloth)*, more than three times faster than the coding winner and with a Coding score 10 percentage points lower.\n")
 
         f.write("\n----  \n")
 
         t5_math = _top(rows, "Math")
-        _write_tbl(f, "TOP 5 – Math", ["Modell", "Math", "MathQA", "tok/s"],
+        _write_tbl(f, "TOP 5 – Math", ["Model", "Math", "MathQA", "tok/s"],
                    t5_math, ["Math", "MathQA", "tok/s"],
                    [True, True, False])
 
         t5_speed = _top(rows, "tok/s")
-        _write_tbl(f, "TOP 5 – Geschwindigkeit (tok/s)", ["Modell", "tok/s", "Overall"],
+        _write_tbl(f, "TOP 5 – Speed (tok/s)", ["Model", "tok/s", "Overall"],
                    t5_speed, ["tok/s", "Overall"],
                    [False, True])
 
         t5_agentic = _top(rows, "Agentic")
-        _write_tbl(f, "TOP 5 – Agentic", ["Modell", "Agentic", "HumanEval+", "MBPP+", "Coding"],
+        _write_tbl(f, "TOP 5 – Agentic", ["Model", "Agentic", "HumanEval+", "MBPP+", "Coding"],
                    t5_agentic, ["Agentic", "HumanEval+", "MBPP+", "Coding"],
                    [True, True, True, True])
 
     print(f"  MD:  {md_path}")
     print(f"\n{'=' * 60}")
-    print(f"  Fertig – {len(rows)} Modelle")
+    print(f"  Done – {len(rows)} Models")
     print(f"{'=' * 60}")
 
 

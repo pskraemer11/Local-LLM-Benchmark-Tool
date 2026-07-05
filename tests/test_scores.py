@@ -2,7 +2,7 @@ import os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import pytest
 from benchmark_config import CAT_WEIGHTS, OVERALL_WEIGHTS
-from consolidate_results_v11 import compute_category_scores, _percentile
+from consolidate_results_v12 import compute_category_scores, _percentile
 
 class TestComputeCategoryScores:
     def test_all_present(self):

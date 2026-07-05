@@ -1,42 +1,42 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Shared CSV writer – einheitliches Schema fuer ALLE Benchmark-Pipelines.
+Shared CSV writer – unified schema for ALL benchmark pipelines.
 
-── Rolle im Gesamtsystem ───────────────────────────────────────────
-  Dieses Modul wird von ALLEN vier Pipelines genutzt, um Ergebnisse
-  in einem einheitlichen Format auszugeben:
+── Role in the system ─────────────────────────────────────────────
+  This module is used by ALL four pipelines to output results
+  in a unified format:
 
-    Pipeline             Schreibt              Liesst (Konsolidierung)
+    Pipeline             Writes                Read by (consolidation)
     ────────             ─────────             ──────────────────────────
-    Custom               tasks_*.csv           consolidate_results_v11.py
-    EvalPlus             modell_*.csv           consolidate_results_v11.py
-    LM-Eval              modell_*.csv           consolidate_results_v11.py
-    Agentic              modell_*.csv           consolidate_results_v11.py
+    Custom               tasks_*.csv           consolidate_results_v12.py
+    EvalPlus             modell_*.csv           consolidate_results_v12.py
+    LM-Eval              modell_*.csv           consolidate_results_v12.py
+    Agentic              modell_*.csv           consolidate_results_v12.py
 
-  Der Launcher (run_benchmarks_v11.py) ruft write_accumulative_summary()
-  fuer jede Modell-Zwischenzusammenfassung und write_konsolidiert_aktuell()
-  fuer die Gesamtuebersicht am Ende.
+  The launcher (run_benchmarks_v12.py) calls write_accumulative_summary()
+  for each model's interim summary and write_konsolidiert_aktuell()
+  for the final overview at the end.
 
-── Konventionen ───────────────────────────────────────────────────
-  - Delimiter: ; (Semikolon)
-  - Encoding:  utf-8 (kein BOM)
-  - Scores:    0.0–100.0 (Prozent, float)
-  - Feldnamen: lowercase_with_underscores (Englisch)
-  - Metadaten: pipeline, model, model_key, benchmark, timestamp, sample_size
-               in JEDER Ausgabe.
+── Conventions ────────────────────────────────────────────────────
+  - Delimiter: ; (semicolon)
+  - Encoding:  utf-8 (no BOM)
+  - Scores:    0.0–100.0 (percent, float)
+  - Field names: lowercase_with_underscores (English)
+  - Metadata: pipeline, model, model_key, benchmark, timestamp, sample_size
+              in EVERY output.
 
-── CSV-Typen ──────────────────────────────────────────────────────
-  1. TASK_FIELDS    (tasks_*.csv)       – Per-Task-Rohdaten (ein Eintrag pro Aufgabe)
-  2. MODEL_FIELDS   (model_*.csv)       – Aggregierte Modell-Zusammenfassung
-  3. SUMMARY_FIELDS (modell_*.csv)      – Akkumulierte Uebersicht (vom Launcher)
-  4. CONSOLIDATED_FIELDS (konsolidiert_aktuell.csv) – Gesamtuebersicht
+── CSV types ──────────────────────────────────────────────────────
+  1. TASK_FIELDS    (tasks_*.csv)       – Per-task raw data (one entry per task)
+  2. MODEL_FIELDS   (model_*.csv)       – Aggregated model summary
+  3. SUMMARY_FIELDS (modell_*.csv)      – Accumulated overview (from launcher)
+  4. CONSOLIDATED_FIELDS (konsolidiert_aktuell.csv) – Final overview
 
-── Abwaertskompatibilitaet ────────────────────────────────────────
-  Die Aliase save_csv/save_model_summary leiten alte Aufrufe aus
-  Vorgaenger-Skripte (custom_benchmark_v25.py) an die neuen Funktionen weiter.
+── Backward compatibility ─────────────────────────────────────────
+  The aliases save_csv/save_model_summary forward old calls from
+  predecessor scripts to the new functions.
 
-Nutzung:
+Usage:
     from csv_writer import write_per_task_csv, write_per_model_csv, ...
 """
 
@@ -47,7 +47,7 @@ import sys
 from datetime import datetime
 from typing import Optional
 
-# ── Verzeichnis ──────────────────────────────────────────────────
+# ── Directory ────────────────────────────────────────────────────
 
 def _results_dir(base_dir=None):
     if base_dir:
@@ -58,13 +58,13 @@ def _results_dir(base_dir=None):
     return d
 
 
-# ── Felddefinitionen ─────────────────────────────────────────────
+# ── Field definitions ────────────────────────────────────────────
 
-# ACHTUNG: Die Spaltennamen muessen mit den Lesern in consolidate_results_v11.py
-# (read_custom_csv, read_lmeval_per_model, try_read_evalplus) uebereinstimmen.
-# Bei Aenderungen hier MUessen auch die Leser aktualisiert werden.
+# WARNING: Column names must match the readers in consolidate_results_v12.py
+# (read_custom_csv, read_lmeval_per_model, try_read_evalplus).
+# Any changes here MUST also update the readers.
 
-# Per-Task-Rohdaten (ein Eintrag pro Aufgabe)
+# Per-task raw data (one entry per task)
 TASK_FIELDS = [
     "pipeline",
     "model",
@@ -95,7 +95,7 @@ TASK_FIELDS = [
     "response",
 ]
 
-# Aggregierte Modell-Zusammenfassung (ein Eintrag pro Benchmark)
+# Aggregated model summary (one entry per benchmark)
 MODEL_FIELDS = [
     "pipeline",
     "model",
@@ -118,7 +118,7 @@ MODEL_FIELDS = [
     "gpu_temp_max",
 ]
 
-# Akkumulierte Uebersicht (run_benchmarks, ein Eintrag pro Pipeline/Benchmark)
+# Accumulated overview (run_benchmarks, one entry per pipeline/benchmark)
 SUMMARY_FIELDS = [
     "pipeline",
     "model",
@@ -126,6 +126,7 @@ SUMMARY_FIELDS = [
     "benchmark",
     "timestamp",
     "sample_size",
+    "thinking",
     "score",
     "detail",
     "latency_s",
@@ -133,7 +134,7 @@ SUMMARY_FIELDS = [
     "vram_gb",
 ]
 
-# Konsolidierte Gesamtuebersicht (alle Modelle × Benchmarks)
+# Consolidated overview (all models × benchmarks)
 CONSOLIDATED_FIELDS = [
     "pipeline",
     "model",
@@ -142,10 +143,11 @@ CONSOLIDATED_FIELDS = [
     "score",
     "timestamp",
     "sample_size",
+    "thinking",
 ]
 
 
-# ── Hilfsfunktionen ──────────────────────────────────────────────
+# ── Helper functions ─────────────────────────────────────────────
 
 def _safe_slice(text: str, n: int = 40) -> str:
     return re.sub(r"[\\/:*?\"<>|]", "_", str(text))[:n]
@@ -165,14 +167,14 @@ def _write_csv(path: str, fieldnames: list[str], rows: list[dict], delimiter: st
     return path
 
 
-# ── Oeffentliche Schreib-Funktionen ──────────────────────────────
+# ── Public write functions ───────────────────────────────────────
 
 def write_per_task_csv(results: list[dict], benchmark_name: str, model_display: str,
                        model_key: str = "", sample_size: int = 5, pipeline: str = "custom",
                        base_dir: Optional[str] = None) -> str:
-    """Schreibt Per-Task-Rohdaten (ersetzt save_csv in benchmark_lmstudio)."""
+    """Writes per-task raw data (replaces save_csv in benchmark_lmstudio)."""
     ts = _now_ts()
-    # Dateiname: vollstaendiger Modell-Key (mit Quant-Variante)
+    # Filename: full model key (including quant variant)
     safe_m = _safe_slice(model_key if model_key else model_display, 50)
     safe_b = _safe_slice(benchmark_name, 30).replace(" ", "_")
     d = _results_dir(base_dir)
@@ -210,16 +212,16 @@ def write_per_task_csv(results: list[dict], benchmark_name: str, model_display: 
             "response": r.get("response", ""),
         })
     _write_csv(path, TASK_FIELDS, rows)
-    print(f"[INFO] Task-Ergebnisse: {path}")
+    print(f"[INFO] Task results: {path}")
     return path
 
 
 def write_per_model_csv(entries: list[dict], model_display: str, model_key: str = "",
                         pipeline: str = "custom", sample_size: int = 5,
                         base_dir: Optional[str] = None) -> str:
-    """Schreibt aggregierte Modell-Zusammenfassung (ersetzt save_model_summary)."""
+    """Writes aggregated model summary (replaces save_model_summary)."""
     ts = _now_ts()
-    # Dateiname: vollstaendiger Modell-Key (mit Quant-Variante)
+    # Filename: full model key (including quant variant)
     safe_m = _safe_slice(model_key if model_key else model_display, 50)
     d = _results_dir(base_dir)
     path = os.path.join(d, f"model_{ts}_{safe_m}.csv")
@@ -248,20 +250,20 @@ def write_per_model_csv(entries: list[dict], model_display: str, model_key: str 
             "gpu_temp_max": f"{e.get('gpu_temp_max', 0):.1f}" if e.get("gpu_temp_max") is not None else "",
         })
     _write_csv(path, MODEL_FIELDS, rows)
-    print(f"[INFO] Modell-Zusammenfassung: {path}")
+    print(f"[INFO] Model summary: {path}")
     return path
 
 
 def write_accumulative_summary(results: list[dict], model_info: dict,
                                sample_size: int = 5,
                                base_dir: Optional[str] = None) -> str:
-    """Akkumulierende Modell-CSV – JEDER Aufruf erzeugt eine NEUE Datei mit Timestamp.
+    """Accumulating model CSV – EACH call creates a NEW file with timestamp.
     
-    Dateiname: modell_<YYYYMMDD_HHMMSS>_<model_key>.csv
-    Dadurch gehen keine Ergebnisse durch Ueberschreiben/Dedup verloren.
+    Filename: modell_<YYYYMMDD_HHMMSS>_<model_key>.csv
+    This prevents data loss through overwriting/dedup.
 
-    results: Liste von dicts mit pipeline, bench, model, score, detail, latency, tok_s, vram
-    model_info: dict mit key, display
+    results: list of dicts with pipeline, bench, model, score, detail, latency, tok_s, vram
+    model_info: dict with key, display
     """
     ts = _now_ts()
     safe_key = model_info["key"].replace("/", "_").replace("\\", "_")
@@ -279,6 +281,7 @@ def write_accumulative_summary(results: list[dict], model_info: dict,
             "benchmark": r.get("bench", r.get("benchmark", "")),
             "timestamp": iso,
             "sample_size": str(sample_size),
+            "thinking": r.get("thinking", ""),
             "score": r.get("score", ""),
             "detail": r.get("detail", ""),
             "latency_s": r.get("latency", ""),
@@ -287,13 +290,13 @@ def write_accumulative_summary(results: list[dict], model_info: dict,
         })
 
     _write_csv(path, SUMMARY_FIELDS, rows)
-    print(f"\n[INFO] Modell-Zusammenfassung: {path} ({len(rows)} Eintraege)")
+    print(f"\n[INFO] Model summary: {path} ({len(rows)} entries)")
     return path
 
 
 def write_konsolidiert_aktuell(results: list[dict], sample_size: int = 5,
                                base_dir: Optional[str] = None) -> str:
-    """Konsolidierte Gesamtuebersicht (ersetzt inline-Code in run_benchmarks main)."""
+    """Consolidated overview (replaces inline code in run_benchmarks main)."""
     d = _results_dir(base_dir)
     path = os.path.join(d, "konsolidiert_aktuell.csv")
     iso = _now_iso()
@@ -307,10 +310,65 @@ def write_konsolidiert_aktuell(results: list[dict], sample_size: int = 5,
             "score": str(r.get("score", "")),
             "timestamp": iso,
             "sample_size": str(sample_size),
+            "thinking": r.get("thinking", ""),
         })
     _write_csv(path, CONSOLIDATED_FIELDS, rows)
-    print(f"\n[INFO] Aktuelle Uebersicht: {path}")
+    print(f"\n[INFO] Current overview: {path}")
     return path
+
+
+# ── Quant-Vergleich (Paired Bootstrap) ──────────────────────────
+
+COMPARE_FIELDS = [
+    "benchmark", "key_a", "key_b",
+    "mean_a", "mean_b", "mean_diff",
+    "ci_lo", "ci_hi", "sign", "p_value", "n_items",
+]
+
+
+def write_quant_comparison(results: list, base_dir: str) -> str:
+    """Write paired-bootstrap comparison results to CSV + MD.
+
+    Args:
+        results: list of dicts from compare_two_quants() + 'benchmark' key
+        base_dir: project root (for results/ path)
+
+    Returns:
+        Path to written CSV file.
+    """
+    d = _results_dir(base_dir)
+    iso = _now_iso()
+    csv_rows = []
+    for r in results:
+        csv_rows.append({
+            "benchmark": r.get("benchmark", ""),
+            "key_a": r.get("key_a", ""),
+            "key_b": r.get("key_b", ""),
+            "mean_a": f"{r.get('mean_a', 0):.2f}",
+            "mean_b": f"{r.get('mean_b', 0):.2f}",
+            "mean_diff": f"{r.get('mean_diff', 0):+.2f}",
+            "ci_lo": f"{r.get('ci_lo', 0):+.2f}",
+            "ci_hi": f"{r.get('ci_hi', 0):+.2f}",
+            "sign": r.get("sign", "~"),
+            "p_value": f"{r.get('p_value', 1):.4f}",
+            "n_items": str(r.get("n_items", 0)),
+        })
+    csv_path = os.path.join(d, f"quant_comparison_{iso}.csv")
+    _write_csv(csv_path, COMPARE_FIELDS, csv_rows)
+
+    md_path = os.path.join(d, f"quant_comparison_{iso}.md")
+    with open(md_path, "w", encoding="utf-8") as f:
+        f.write(f"# Quant Comparison ({iso})\n\n")
+        f.write("| Benchmark | Model A | Model B | Diff | 95% CI | p-value | Sign | n |\n")
+        f.write("|-----------|---------|---------|------|--------|---------|------|---|\n")
+        for r in results:
+            sig = "***" if r.get("p_value", 1) < 0.001 else "**" if r.get("p_value", 1) < 0.01 else "*" if r.get("p_value", 1) < 0.05 else "n.s."
+            f.write(f"| {r.get('benchmark','')} | {r.get('key_a','')} | {r.get('key_b','')} "
+                    f"| {r.get('mean_diff',0):+.2f}% | [{r.get('ci_lo',0):+.2f}, {r.get('ci_hi',0):+.2f}] "
+                    f"| {r.get('p_value',1):.4f} | {sig} | {r.get('n_items',0)} |\n")
+    print(f"\n[INFO] Quant comparison:  {csv_path}")
+    print(f"[INFO] Quant comparison:  {md_path}")
+    return csv_path
 
 
 # ── Abwaertskompatibilitaet (Aliase) ────────────────────────────

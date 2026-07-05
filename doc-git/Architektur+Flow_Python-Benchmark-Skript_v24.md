@@ -1,4 +1,4 @@
-# Architektur & Flow – Stand 05.07.2026 (v28)
+# Architektur & Flow – Stand 05.07.2026 (v30)
 
 ## 1. Uberblick
 
@@ -10,7 +10,7 @@ Nach dem Review am 28.06. wurden folgende Architekturanderungen umgesetzt:
 - **Versionierungs-Vereinheitlichung**: Alle 3 Hauptskripte laufen jetzt unter gemeinsamer Major-Version **v10** (vorher: Launcher v7, Custom v24, Konsolidierung v8).
 - **Hilfsmodule ohne Version**: `model_manager.py`, `csv_writer.py` (vorher `_v2`).
 - **Type Hints**: Alle Funktionen in den 3 Hauptskripten (55+20+27 = 102 Funktionen) vollstandig typisiert.
-- **Zentrale Konfiguration**: `benchmark_config.py` fur Gewichte, WHITELIST, DISPLAY_NAMES, MMLU-Pro-Subsets, Tool-Eval-Szenarien.
+- **Zentrale Konfiguration**: `benchmark_config.py` fur Gewichte, MMLU-Pro-Subsets, Tool-Eval-Szenarien.
 - **Task-Retry**: `MAX_RETRIES=3` mit exponentiellem Backoff bei API-Fehlern.
 - **MMLU-Pro-Helper extrahiert**: `_get_lmeval_params()`, `_build_lmeval_cmd()`, `_parse_subset_score()` als testbare Einzelfunktionen.
 - **ModelData-Dataclass**: In `consolidate_results_v12.py` – typisierte CSV-Zeilen statt roher Dicts.
@@ -20,7 +20,11 @@ Nach dem Review am 28.06. wurden folgende Architekturanderungen umgesetzt:
 - **all_summary-Bug gefixt**: `all_summary.append()` war falschlich im `if is_custom:`-Block – alle 4 Pipelines landen jetzt im Summary.
 - **Pytest-Tests**: 15 Tests fur compute_category_scores, read_custom_csv, Percentile, CSV-Parsing.
 - **Granite 4.0 H Tiny**: Experts=64 verursacht `ggml_new_object: not enough space` bei 1M Context; erst mit Experts=16 lauffahig.
-- **Thinking-Mode per CLI**: `--thinking`-Flag aktiviert `enable_thinking=True` fur MathQA/MMLU-Pro bei **allen Reasoning-Modellen** (AceMath, DeepSeek, Gemma 4) – nicht nur Gemma 4. Gesteuert uber `REASONING_PATTERNS`-Set in `custom_benchmark_v11.py` und "Raisonierende" Modell-Erkennung in `run_benchmarks_v11.py`.
+- **Thinking-Mode per CLI**: `--thinking`-Flag aktiviert `enable_thinking=True` fur MathQA/MMLU-Pro bei **allen Reasoning-Modellen** (AceMath, DeepSeek, Gemma 4) – nicht nur Gemma 4. Gesteuert uber `REASONING_PATTERNS`-Set in `custom_benchmark_v12.py` und "Raisonierende" Modell-Erkennung in `run_benchmarks_v12.py`.
+- **Strukturierter Output (v30)**: Custom-Pipeline nutzt `response_format` mit JSON-Schema (`{"code": "..."}`) uber LM Studio API. Garantiert valides JSON, eliminiert ~12% Parsing-Fehler (leere Antworten, Markdown-Extraktion). Fallback via `--no-structured-output`.
+- **Paired Bootstrap Vergleich (v30)**: `consolidate_results_v12.py --compare "key1,key2,key3"` vergleicht alle Paare mit gepaartem Bootstrap-CI. `--seed` sorgt fur identische Task-Subsets.
+- **--seed fur Reproduzierbarkeit (v30)**: `run_benchmarks_v12.py --seed 42` und `custom_benchmark_v12.py --seed 42` ermoeglichen reproduzierbare Task-Auswahl.
+- **--bootstrap entfernt (v30)**: CIs werden immer berechnet, wenn Per-Item-Daten vorhanden sind. Keine Flag noetig.
 
 ```
 LM Studio (localhost:1234)
@@ -49,8 +53,8 @@ benchmark_config.py (ZENTRALE KONFIGURATION)
 ├── PIPELINE_DISCOVERY
 ├── TOOL_EVAL_SCENARIO_IDS
 ├── MMLU_PRO_SUBSETS
-├── WHITELIST / DISPLAY_NAMES
-└── EXCLUDE_KEYWORDS / REASONING_KEYWORDS
+├── QUANT_MAP (auto-generiert via generate_quant_map.py)
+└── EXCLUDE_KEYWORDS
 
 run_benchmarks_v12.py (LAUNCHER - main(), v10)
 ├── NUR HIER wird load/unload aufgerufen
@@ -61,6 +65,8 @@ run_benchmarks_v12.py (LAUNCHER - main(), v10)
 ├── API_BASE aus model_manager.API_BASE
 ├── MMLU-Pro-Helper: _get_lmeval_params, _build_lmeval_cmd, _parse_subset_score
 ├── Task-Retry: MAX_RETRIES=3, exponentielles Backoff
+├── --seed fuer reproduzierbare Task-Auswahl (an Custom-Subprozess weitergegeben)
+├── --no-structured-output fuer Fallback in Custom-Pipeline
 ├── Gibt Speicher am Ende frei
 ├── Exkludiert: whisper, vision, ocr, audio, embed, vl
 ├── API-Bereitschaft: time.sleep(10) statt polling-Schleife
@@ -70,8 +76,12 @@ custom_benchmark_v12.py (CUSTOM-BENCHMARKS, v10)
 ├── RUFT NIE load/unload auf
 ├── Nimmt Modell als bereit an
 ├── DS1000 + CoderEval (PandasEval entfernt)
-├── Task-Retry mit MAX_RETRIES=3 + exponentielles Backoff
+├── Task-Retry mit MAX_RETRIES=3 + exponentiellem Backoff
 ├── System-Metriken: Per-Task-Peak-Werte (Monitor ~5Hz), gespeichert mit median/p90
+├── Strukturierter Output: response_format mit JSON-Schema (Standard)
+├── extract_code() mit JSON-Parsing-Shortcut + Regex-Fallback
+├── --no-structured-output als Fallback fur kleine/inkompatible Modelle
+├── --seed fuer reproduzierbare Task-Auswahl
 ├── Speichert tasks_*.csv + modell_*.csv
 ├── Keine Legacy-Pfade (altes Format, interaktiver Modus entfernt)
 ├── Vollstandige Type Hints (55 Funktionen)
@@ -84,6 +94,11 @@ consolidate_results_v12.py (KONSOLIDIERUNG, v10)
 ├── TOP 5 / BOTTOM 5 / Kategorie-Rankings im MD
 ├── width-Duplikat entfernt (toter width-Block geloscht)
 ├── Alle Benchmarks konsolidiert (auch wenn einzelne Pipelines fehlen)
+├── Bootstrap-CIs immer berechnet (DS1000 + CoderEval)
+├── --compare: Paired Bootstrap fur2+ Modelle (alle Paarvergleiche)
+├── --seed fuer reproduzierbares Bootstrap
+├── --models: Modell-Filter
+├── Vollstandige Type Hints (27 Funktionen)
 └── Vollstandige Type Hints (27 Funktionen)
 ```
 
@@ -359,10 +374,11 @@ Median und P90 ersetzen Mean/Max als robustere Metriken gegen Ausreisser.
 4. **Direkte Tests** - falls `tests`-Array vorhanden
 
 **Wichtige Fixes:**
-- `extract_code()`: `_is_bare_statement`-Fallback, Line-by-Line-Heuristik mit Break
+- `extract_code()`: JSON-Parsing-Shortcut fur strukturierten Output, dann Regex-Fallback mit `_is_bare_statement`-Fallback, Line-by-Line-Heuristik mit Break
 - `_repair_indentation()`: iterative Heuristik fur fehlende Einruckungen + `pass`-Einfugung
 - `_unwrap_solution_for_insert()`: entfernt `def`-Header bei `[insert]` in Funktions-Body
 - Regex: `except(?: |:)` statt `except ` (bare `except:` nicht erkannt)
+- **Strukturierter Output (v30):** `response_format` mit JSON-Schema garantiert valides JSON. `extract_code()` parst zunachst JSON, dann Regex. Eliminiert ~12% Parsing-Fehler (leere Antworten, Markdown-Extraktion).
 
 **Harness-Fail:** Der DS1000-Harness fuhrt den generierten Code tatsachlich in einer Python-Sandbox aus. Ein "Harness-Fehler" bedeutet, dass der Code mit einem Laufzeitfehler (SyntaxError, NameError etc.) gecrasht ist. Kleine Modelle (Granite Tiny, Nerdsking) haben oft Syntax-Probleme bei Insertion-Aufgaben.
 
@@ -476,9 +492,18 @@ consolidate_results_v12.py
 ├── _fmt_pct() mit {:.0f}% (ganze Zahlen)
 ├── fn_csv mit median/p90-Spalten (CPU_med, CPU_p90, GPU_med, GPU_p90, ...)
 ├── thinking-Spalte (0/1) in allen Pipeline-returns, CSVs und Konsolidierung
-├── bootstrap_ci(scores, n_resamples=10000) – Bootstrap-95%-KI fuer DS1000/CoderEval aus Per-Item-Daten
+├── bootstrap_ci(scores, n_resamples=10000) – Bootstrap-95%-KI fuer DS1000/CoderEval aus Per-Item-Daten (immer aktiv)
 │   ├── ds1000_ci_lo / ds1000_ci_hi / codereval_ci_lo / codereval_ci_hi in CSV
 │   └── Format im MD: "XX% [lo–hi]"
+├── paired_bootstrap_ci() – Gepaarter Bootstrap-Vergleich fuer2+ Modelle
+│   ├── compare_two_quants() berechnet Differenz, CI, p-value
+│   └── Alle Paarvergleiche via itertools.combinations
+├── read_paired_scores() – Matcht Tasks nach task_index (gleiche Items)
+├── write_quant_comparison() in csv_writer.py – CSV + MD Output
+├── --compare "key1,key2,key3" – Automatische Paarvergleiche
+├── --seed – Reproduzierbares Bootstrap
+├── --models – Modell-Filter
+├── --compare-benchmark DS1000|CoderEval|all
 ├── width-Duplizierung entfernt (nur noch ein widths-Block)
 └── generate CSV + MD (alphabetisch sortiert)
 ```
@@ -548,15 +573,14 @@ class ModelData:
 Benchmarks/
 ├── benchmark_config.py              # Zentrale Konfiguration (Gewichte, Subsets, Szenarien)
 ├── model_manager.py                 # Modell-Management (unversioniert)
-├── csv_writer.py                    # CSV-Schema (unversioniert)
-├── custom_benchmark_v12.py          # Aktuelle Custom-Pipeline (DS1000 + CoderEval)
-├── run_benchmarks_v12.py            # Aktueller Launcher (v10), dynam. Script-Aufloesung
-├── consolidate_results_v12.py       # Aktuelle Konsolidierung
-├── run_all_dense.py                 # Wrapper -> v10
-├── rerun_ds1000_mmlu.py             # Wrapper -> v10
-├── rerun_lmeval.py                  # Wrapper -> v10
-├── quick_test.py                    # Quick-Test
+├── csv_writer.py                    # CSV-Schema (unversioniert) + write_quant_comparison()
+├── custom_benchmark_v12.py          # Aktuelle Custom-Pipeline (DS1000 + CoderEval, strukturierter Output)
+├── run_benchmarks_v12.py            # Aktueller Launcher (v12), dynam. Script-Aufloesung, --seed
+├── consolidate_results_v12.py       # Aktuelle Konsolidierung (--compare, --models, immer-CI)
+├── generate_quant_map.py            # QUANT_MAP-Generator (auto-generiert)
+├── check_agentic.py                 # Agentic-Diagnose
 ├── download_real_benchmarks.py      # Datensatz-Download
+├── download_codereval.py            # CoderEval-Download
 ├── tests/
 │   ├── __init__.py
 │   ├── test_scores.py               # 10 Tests: compute_category_scores, Percentile
@@ -569,7 +593,8 @@ Benchmarks/
 ├── Doku+Install/                    # Dokumentation
 ├── ergebnisse/                      # Ergebnisse + Konsolidierung
 ├── ds1000_official/                 # DS-1000-Framework (Windows-Patches)
-└── alte_skripte/                    # 17 historische Versionen
+├── Archiv/alte_py_skripte/          # Archivierte Skripte (alte Wrapper, One-offs)
+└── doc-git/                         # Dokumentation
 ```
 
 **Migrationspfad beim Kopieren einer neuen Version:**
@@ -612,11 +637,15 @@ Aenderungen muessen NUR in `model_manager.py` erfolgen – kein Suchen nach Hard
 | `TOOL_EVAL_SCENARIO_IDS`  | TC-01..TC-69               | Agentic-Szenarien              |
 | `EXCLUDE_KEYWORDS`        | whisper, vision, ocr, transcription, translat, audit, audio, embed, vl | Ausgeschlossene Modalitaeten |
 | `REASONING_KEYWORDS`      | ["reasoning", "think", "r1"] | Reasoning-Erkennung          |
-| `DISPLAY_NAMES`           | Dict model_key -> Anzeigename | Einheitliche Benennung      |
-| `WHITELIST`               | Erlaubte Modell-Familien (qwen2, qwen3, llama, ...) | Nur diese Modelle werden geladen |
-| `QUANT_MAP`               | Dict model_key -> Quant-Bezeichnung (statisch, 37 Eintraege) | Quant-Zuordnung fuer CSV und Anzeige. Quelle-Prioritaet: QUANT_MAP > `lms ls --json` > Config-Dateien > GGUF-Cache. Auto-generierbar via `generate_quant_map.py` |
+| `QUANT_MAP`               | Dict model_key -> Quant-Bezeichnung (statisch, ~45 Eintraege) | Quant-Zuordnung fuer CSV und Anzeige. Quelle-Prioritaet: QUANT_MAP > `lms ls --json` > Config-Dateien > GGUF-Cache. Auto-generierbar via `generate_quant_map.py` |
 | `PIPELINE_DISCOVERY`      | Glob-Pattern + Version-Regex | Dynamische Script-Erkennung  |
 | `CUSTOM_BENCHMARK_SCRIPT` | dynamisch via `glob()`     | Hochste `custom_benchmark_v*.py` |
+
+**Entfernt in v29:** `DISPLAY_NAMES` + `WHITELIST` – ersetzt durch dynamische Auto-Discovery:
+- **Modell-Auswahl** (`consolidate_results_v12.py`): Iteriert automatisch uber alle Modell-Keys aus den Ergebnis-CSVs. Optionaler Filter via `--models key1,key2`.
+- **Anzeigenamen**: Werden live aus `lms ls --json` (Feld `displayName`) abgefragt, Fallback = lesbare Key-Transformation.
+- **QUANT_MAP-Generator** (`generate_quant_map.py`): Holt alle Keys dynamisch aus `lms ls --json` + Ergebnis-CSVs, kein statischer Import mehr aus `benchmark_config.py`.
+- Hintergrund: Whitelist war redundant (Auswahl auch interaktiv/CLI moeglich), DISPLAY_NAMES durch dynamische Quellen ersetzbar.
 
 ---
 
@@ -776,28 +805,31 @@ pytest tests/ -v
 
 | Datum  | Datei                                         | Anderung                                                                        |
 |--------|-----------------------------------------------|---------------------------------------------------------------------------------|
+| 05.07. | `Architektur+Flow_v24.md`                     | v30: Strukturierter Output, Paired Bootstrap, --seed, --compare, --bootstrap entfernt |
+| 05.07. | `custom_benchmark_v12.py`                     | Strukturierter Output: response_format mit JSON-Schema, extract_code() JSON-Shortcut |
+| 05.07. | `run_benchmarks_v12.py`                       | --seed, --no-structured-output an Subprocess weitergegeben |
+| 05.07. | `consolidate_results_v12.py`                  | --compare mit2+ Modellen, --seed, --models, immer-CI (kein --bootstrap) |
+| 05.07. | `csv_writer.py`                               | write_quant_comparison() fuer CSV + MD Output |
+| 05.07. | `Architektur+Flow_v24.md`                     | v29: DISPLAY_NAMES/WHITELIST entfernt, Auto-Discovery, Bugfixes |
+| 05.07. | `benchmark_config.py`                         | ENTFERNT: DISPLAY_NAMES + WHITELIST; NEU: EXCLUDE_KEYWORDS zentralisiert |
+| 05.07. | `consolidate_results_v12.py`                  | Auto-Discovery aus Ergebnis-CSVs; `--models` CLI-Arg; Bugfixes |
+| 05.07. | `generate_quant_map.py`                       | Keys dynamisch via `lms ls --json` + Result-CSVs |
+| 05.07. | `run_benchmarks_v12.py`                       | v12 aus v11: Stale Refs gefixt, Config-Imports zentralisiert |
+| 05.07. | `custom_benchmark_v12.py`                     | v12 aus v11: Stale Refs gefixt, EXCLUDE_KEYWORDS aus Config |
+| 05.07. | `model_manager.py`                            | German/English-Mix bereinigt |
 | 04.07. | `Architektur+Flow_v24.md`                     | Thinking-Mode fur alle Reasoning-Modelle, REASONING_PATTERNS, enable_thinking-Tabelle |
-| 04.07. | `custom_benchmark_v11.py`                     | REASONING_PATTERNS-Set, `--thinking` aktiviert Thinking fur AceMath+DeepSeek+Gemma |
-| 04.07. | `run_benchmarks_v11.py`                       | `_get_lmeval_params()` Thinking fur Reasoning+Gemma bei MathQA/MMLU-Pro |
+| 04.07. | `custom_benchmark_v12.py`                     | REASONING_PATTERNS-Set, `--thinking` aktiviert Thinking fur AceMath+DeepSeek+Gemma |
+| 04.07. | `run_benchmarks_v12.py`                       | `_get_lmeval_params()` Thinking fur Reasoning+Gemma bei MathQA/MMLU-Pro |
 | 30.06. | `Architektur+Flow_v24.md`                     | Update: QUANT_MAP, qwen3.6-Klasse, konsolidiert_aktuell.csv, Qwen3/Qwen3.6-Ergebnisse |
-| 05.07. | `Architektur+Flow_v24.md`                     | v28: v12-Referenzen, Bootstrap-CI, thinking-CSV-Spalte, model.yaml-Konflikt |
-| 05.07. | `run_benchmarks_v12.py`                       | v12 aus v11: `_v11`→`_v12` in allen Dateien |
-| 05.07. | `custom_benchmark_v12.py`                     | v12 aus v11: `_v11`→`_v12` in allen Dateien |
-| 05.07. | `consolidate_results_v12.py`                  | v12 aus v11: `_v11`→`_v12` in allen Dateien; `--bootstrap`-Flag bleibt |
-| 04.07. | `Architektur+Flow_v24.md`                     | Thinking-Mode fur alle Reasoning-Modelle, REASONING_PATTERNS, enable_thinking-Tabelle |
-| 04.07. | `custom_benchmark_v11.py`                     | REASONING_PATTERNS-Set, `--thinking` aktiviert Thinking fur AceMath+DeepSeek+Gemma |
-| 04.07. | `run_benchmarks_v11.py`                       | `_get_lmeval_params()` Thinking fur Reasoning+Gemma bei MathQA/MMLU-Pro |
-| 30.06. | `Architektur+Flow_v24.md`                     | Update: QUANT_MAP, qwen3.6-Klasse, konsolidiert_aktuell.csv, Qwen3/Qwen3.6-Ergebnisse |
-| 30.06. | `custom_benchmark_v10.py`                     | qwen3.6 MODEL_CONFIG (enable_thinking=False, max_tokens=8192) |
-| 30.06. | `run_benchmarks_v10.py`                       | EvalPlus-Regex mit re.DOTALL, LM-Eval Score-Suche durchsucht alle Subdirs, LM-Eval max_tokens=8192 fuer Qwen3.6 |
-| 30.06. | `consolidate_results_v10.py`                  | QUANT_MAP-Integration, avg/max entfernt, nur med+p90 |
-| 28.06. | `Architektur+Flow_v23.md`                     | Update auf v25: v10-Architektur, Type Hints, Tests, Retry, Config, Ergebnisse   |
 | 28.06. | `run_benchmarks_v10.py`                       | Launcher v10 (vorher v7): Type Hints, all_summary-Bugfix, API_BASE aus model_manager, Task-Retry, MMLU-Pro-Helper |
 | 28.06. | `custom_benchmark_v10.py`                     | Custom v10 (vorher v24): Type Hints, Task-Retry, kein PandasEval, kein interaktiver Modus |
 | 28.06. | `consolidate_results_v10.py`                  | Konsolidierung v10 (vorher v8): Type Hints, ModelData-Dataclass, median/p90-Spalten, width-Duplizierung entfernt |
 | 28.06. | `model_manager.py`                            | Versionierung entfernt (vorher _v2); API_BASE zentral; PIPELINE_TIMEOUTS beibehalten |
 | 28.06. | `csv_writer.py`                               | Versionierung entfernt (vorher _v2); fn_csv um median/p90 erweitert             |
 | 28.06. | `benchmark_config.py`                         | NEU: Zentrale Konfiguration fur CAT_WEIGHTS, OVERALL_WEIGHTS, MMLU_PRO_SUBSETS, TOOL_EVAL_SCENARIO_IDS, DISPLAY_NAMES |
+| 05.07. | `benchmark_config.py`                         | ENTFERNT: DISPLAY_NAMES + WHITELIST – durch dynamische Auto-Discovery ersetzt |
+| 05.07. | `consolidate_results_v12.py`                  | WHITELIST-Loop -> Auto-Discovery aus Ergebnis-CSVs; `_lookup_vram(model_key)` statt DISPLAY_NAMES-Reverse-Lookup; neues `--models` CLI-Arg; `_get_display_name()` aus `lms ls --json` |
+| 05.07. | `generate_quant_map.py`                       | Kein Import aus benchmark_config mehr; Keys dynamisch via `lms ls --json` + Result-CSVs |
 | 28.06. | `tests/test_scores.py`                        | NEU: 10 Tests fur compute_category_scores, _percentile, _threshold_filtered     |
 | 28.06. | `tests/test_csv.py`                           | NEU: 5 Tests fur read_custom_csv, auto_delimiter                                |
 | 28.06. | `tests/fixtures/test_tasks.csv`               | NEU: Testdaten fur CSV-Parsing                                                  |
@@ -819,4 +851,4 @@ pytest tests/ -v
 ---
 
 *Erstellt: 28.06.2026 | Aktualisiert: 05.07.2026*
-*Basiert auf: v28-Architektur – v12-Basis + Thinking-Mode, Bootstrap-CI, thinking-CSV-Spalte, model.yaml-Konflikt-Fix*
+*Basiert auf: v30-Architektur – Strukturierter Output, Paired Bootstrap, --seed, --compare, --bootstrap entfernt*

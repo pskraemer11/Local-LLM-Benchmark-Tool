@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Gemeinsames Modul fuer LM-Studio-Modell-Management.
-Wird von run_benchmarks_v11.py UND custom_benchmark_v11.py importiert.
+Shared module for LM Studio model management.
+Imported by run_benchmarks_v12.py AND custom_benchmark_v12.py.
 
-── Rolle im Gesamtsystem ───────────────────────────────────────────
-  Dieses Modul kapselt ALLE Interaktionen mit der LM-Studio-CLI
-  (lms load / unload / ps). Es wird von zwei Seiten genutzt:
+── Role in the system ─────────────────────────────────────────────
+  This module encapsulates ALL interactions with the LM Studio CLI
+  (lms load / unload / ps). It is used from two sides:
 
-  1. run_benchmarks_v11.py (Launcher)
-     - RUFT load_model_via_lms() und unload_all_models() auf
-     - NUR HIER wird geladen/entladen
-     - Nutzt get_current_loaded_model() zur Status-Pruefung
+  1. run_benchmarks_v12.py (Launcher)
+     - CALLS load_model_via_lms() and unload_all_models()
+     - Model load/unload happens HERE ONLY
+     - Uses get_current_loaded_model() for status checking
 
-  2. custom_benchmark_v11.py (Custom-Pipeline-Subprozess)
-     - IMPORTIERT die Konstanten (API_BASE, TIMEOUT_*)
-     - RUFT NIEMALS load/unload auf (wird vom Launcher veranlasst)
-     - Nutzt check_api_available() als Health-Check (Legacy)
+  2. custom_benchmark_v12.py (Custom pipeline subprocess)
+     - IMPORTS the constants (API_BASE, TIMEOUT_*)
+     - NEVER calls load/unload (initiated by the launcher)
+     - Uses check_api_available() as health-check (legacy)
 
 ── API- vs. CLI-Zugriff ────────────────────────────────────────────
   - lms CLI:     load, unload, ps, ls (Subprozesse)
@@ -27,11 +27,11 @@ Wird von run_benchmarks_v11.py UND custom_benchmark_v11.py importiert.
 
 ── Wichtige Hinweise ───────────────────────────────────────────────
   - wait_for_model_ready() und check_api_available() werden aktuell
-    NICHT mehr vom Launcher genutzt (ersetzt durch time.sleep(10)
-    nach load_model_via_lms()). Sie bleiben fuer alte Skripte erhalten.
-  - load_model_via_lms() gibt die EXAKTE Modell-ID aus lms ps --json
-    zurueck (z.B. "microsoft/phi-4@q6_k"), die dann von ALLEN Pipelines
-    als model-Parameter im API-Call verwendet wird.
+    No longer used by the launcher (replaced by time.sleep(10)
+    after load_model_via_lms()). Kept for legacy scripts.
+  - load_model_via_lms() returns the EXACT model ID from lms ps --json
+    (e.g. "microsoft/phi-4@q6_k"), used by ALL pipelines as the
+    model parameter in API calls.
 """
 
 import json
@@ -51,21 +51,21 @@ TIMEOUT_LOAD_MODEL = 180
 TIMEOUT_HEALTH_CHECK = 5
 TIMEOUT_UNLOAD_WAIT = 2
 
-# ── Pipeline-spezifische Timeouts ───────────────────────────────
-# Die Werte werden von run_benchmarks_v11.py importiert und in den
-# jeweiligen Pipeline-Funktionen als Subprozess-/Scenario-Timeout
-# verwendet. Einige Werte (lmeval_base, evalplus_base) dienen als
-# Basis und werden bei Reasoning-Modellen automatisch verdoppelt.
+# ── Pipeline-specific timeouts ──────────────────────────────────
+# These values are imported by run_benchmarks_v12.py and used as
+# subprocess/scenario timeouts in each pipeline function.
+# Some values (lmeval_base, evalplus_base) serve as base timeouts
+# and are automatically doubled for reasoning models.
 #
-#   Key                     Standard  Verwendung
-#   ─────────────────────── ───────── ─────────────────────────────
-#   custom_subprocess        3600     Subprozess-Timeout (DS1000, CoderEval)
-#   evalplus_base             600     Basis-Timeout codegen+evaluate (×2 bei Reasoning)
-#   lmeval_base               600     Basis-Timeout lm_eval (×2 bei Reasoning, ×3 bei MathQA)
-#   mmlupro_per_subset        300     Timeout pro MMLU-Pro Subset
-#   agentic_subprocess        3600    Gesamtlaufzeit-Timeout tool_eval_bench
-#   agentic_scenario          600     Timeout pro Szenario (--timeout an tool_eval_bench)
-# (Werte in benchmark_config.py)
+#   Key                     Default  Usage
+#   ─────────────────────── ──────── ──────────────────────────────
+#   custom_subprocess        3600    Subprocess timeout (DS1000, CoderEval)
+#   evalplus_base             600    Base timeout codegen+evaluate (×2 for reasoning)
+#   lmeval_base               600    Base timeout lm_eval (×2 for reasoning, ×3 for MathQA)
+#   mmlupro_per_subset        300    Timeout per MMLU-Pro subset
+#   agentic_subprocess        3600    Total runtime timeout tool_eval_bench
+#   agentic_scenario          600    Timeout per scenario (--timeout passed to tool_eval_bench)
+# (Values in benchmark_config.py)
 
 
 def check_api_available() -> bool:
@@ -99,17 +99,17 @@ def get_current_loaded_model() -> Optional[dict[str, str]]:
 
 
 def unload_all_models() -> bool:
-    print("  [INFO] Entlade alle Modelle...")
+    print("  [INFO] Unloading all models...")
     try:
         r = subprocess.run(["lms", "unload", "--all"],
                            capture_output=True, text=True, timeout=TIMEOUT_CLI,
                            encoding="utf-8", errors="replace")
         if r.returncode == 0:
-            print("  [OK] Entlade-Kommando gesendet")
+            print("  [OK] Unload command sent")
         else:
             print(f"  [WARN] lms unload: {r.stderr.strip()[:100]}")
     except FileNotFoundError:
-        print("[ERROR] lms.exe nicht gefunden")
+        print("[ERROR] lms.exe not found")
         return False
     except subprocess.TimeoutExpired:
         print("[WARN] lms unload --all timeout")
@@ -124,17 +124,17 @@ def unload_all_models() -> bool:
                           headers={"Content-Type": "application/json"})
             with urlopen(req, timeout=3) as resp:
                 if resp.status == 200:
-                    print(f"  [WARN] Alter Modell noch aktiv (Versuch {attempt+1}/15)")
+                    print(f"  [WARN] Old model still active (attempt {attempt+1}/15)")
                     continue
         except (HTTPError, URLError, Exception):
-            print("  [OK] Alter Modell vollstaendig entladen")
+            print("  [OK] Old model fully unloaded")
             return True
-    print("  [WARN] Konnte Entladen nicht bestaetigen – fahre fort")
+    print("  [WARN] Could not confirm unload – continuing")
     return False
 
 
 def _ensure_lmstudio_running() -> bool:
-    """Starte llmster-Daemon + lms server falls nicht verfuegbar."""
+    """Start llmster daemon + lms server if not available."""
     from urllib.request import Request, urlopen
     from urllib.error import URLError
     try:
@@ -148,31 +148,31 @@ def _ensure_lmstudio_running() -> bool:
     llmster = os.path.join(os.path.dirname(os.path.dirname(__file__)),
                            ".lmstudio", "llmster", "0.0.12-1", "llmster.exe")
     if not os.path.exists(llmster):
-        print(f"  [WARN] llmster.exe nicht gefunden unter {llmster}")
+        print(f"  [WARN] llmster.exe not found at {llmster}")
         return False
     try:
         subprocess.Popen([llmster], shell=True)
         time.sleep(5)
     except Exception as e:
-        print(f"  [WARN] llmster start fehlgeschlagen: {e}")
+        print(f"  [WARN] llmster start failed: {e}")
         return False
-    print("  [INFO] Starte lms server...")
+    print("  [INFO] Starting lms server...")
     try:
         subprocess.run(["lms", "server", "start"], capture_output=True, text=True,
                        timeout=30, encoding="utf-8", errors="replace")
         time.sleep(5)
     except Exception as e:
-        print(f"  [WARN] lms server start fehlgeschlagen: {e}")
+        print(f"  [WARN] lms server start failed: {e}")
         return False
     return True
 
 
 def load_model_via_lms(model_key: str, context_length: Optional[int] = None) -> tuple[bool, Optional[str]]:
-    print(f"\n  [INFO] Lade '{model_key}'...")
+    print(f"\n  [INFO] Loading '{model_key}'...")
     cmd = ["lms", "load", model_key, "--yes"]
     if context_length is not None:
         cmd += ["-c", str(context_length)]
-        print(f"  [INFO] Context-Length auf {context_length} gesetzt")
+        print(f"  [INFO] Context-Length set to {context_length}")
     for attempt in range(2):
         try:
             result = subprocess.run(
@@ -184,30 +184,30 @@ def load_model_via_lms(model_key: str, context_length: Optional[int] = None) -> 
             print(f"  [WARN] Load timeout ({TIMEOUT_LOAD_MODEL}s)")
             return False, None
         except FileNotFoundError:
-            print("[ERROR] lms.exe nicht gefunden")
+            print("[ERROR] lms.exe not found")
             return False, None
         if result.returncode == 0:
-            print("  [OK] Geladen")
+            print("  [OK] Loaded")
             for _ in range(10):
                 time.sleep(1)
                 loaded = get_current_loaded_model()
                 if loaded:
-                    print(f"  [INFO] Exakte Modell-ID: {loaded['identifier']}")
+                    print(f"  [INFO] Exact model ID: {loaded['identifier']}")
                     return True, loaded["identifier"]
             return True, model_key
         stderr = result.stderr.strip()
         if "already loaded" in stderr.lower():
-            print("  [OK] Bereits geladen")
+            print("  [OK] Already loaded")
             loaded = get_current_loaded_model()
             if loaded:
                 return True, loaded["identifier"]
             return True, model_key
         if attempt == 0 and ("No LM Runtime" in stderr or "Runtime not found" in stderr):
-            print(f"  [WARN] Daemon-Fehler – starte LM Studio neu...")
+            print(f"  [WARN] Daemon error – restarting LM Studio...")
             if _ensure_lmstudio_running():
                 time.sleep(3)
                 continue
-        print(f"  [WARN] Load fehlgeschlagen: {stderr[:200]}")
+        print(f"  [WARN] Load failed: {stderr[:200]}")
         return False, None
     return False, None
 
@@ -217,7 +217,7 @@ def wait_for_model_ready(timeout: int = TIMEOUT_MODEL_READY) -> bool:
     from urllib.error import HTTPError, URLError
     start = time.time()
     consecutive_failures = 0
-    print("  [INFO] Warte auf Bereitschaft", end="", flush=True)
+    print("  [INFO] Waiting for readiness", end="", flush=True)
     while time.time() - start < timeout:
         time.sleep(2)
         print(".", end="", flush=True)
