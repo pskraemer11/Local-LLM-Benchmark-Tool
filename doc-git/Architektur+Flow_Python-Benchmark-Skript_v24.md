@@ -1,4 +1,4 @@
-# Architektur & Flow – Stand 30.06.2026 (v25)
+# Architektur & Flow – Stand 05.07.2026 (v28)
 
 ## 1. Uberblick
 
@@ -13,13 +13,14 @@ Nach dem Review am 28.06. wurden folgende Architekturanderungen umgesetzt:
 - **Zentrale Konfiguration**: `benchmark_config.py` fur Gewichte, WHITELIST, DISPLAY_NAMES, MMLU-Pro-Subsets, Tool-Eval-Szenarien.
 - **Task-Retry**: `MAX_RETRIES=3` mit exponentiellem Backoff bei API-Fehlern.
 - **MMLU-Pro-Helper extrahiert**: `_get_lmeval_params()`, `_build_lmeval_cmd()`, `_parse_subset_score()` als testbare Einzelfunktionen.
-- **ModelData-Dataclass**: In `consolidate_results_v10.py` – typisierte CSV-Zeilen statt roher Dicts.
+- **ModelData-Dataclass**: In `consolidate_results_v12.py` – typisierte CSV-Zeilen statt roher Dicts.
 - **System-Metriken**: Median + P90 statt Mean + Max (robuster gegen Ausreisser).
 - **CSV-Schema**: `fn_csv` um CPU_med/CPU_p90/GPU_med/GPU_p90/RAM_med/RAM_p90/GPU_Temp_p90 erweitert.
 - **API_BASE**: Nicht mehr hardcoded, sondern aus `model_manager.API_BASE` bezogen.
 - **all_summary-Bug gefixt**: `all_summary.append()` war falschlich im `if is_custom:`-Block – alle 4 Pipelines landen jetzt im Summary.
 - **Pytest-Tests**: 15 Tests fur compute_category_scores, read_custom_csv, Percentile, CSV-Parsing.
 - **Granite 4.0 H Tiny**: Experts=64 verursacht `ggml_new_object: not enough space` bei 1M Context; erst mit Experts=16 lauffahig.
+- **Thinking-Mode per CLI**: `--thinking`-Flag aktiviert `enable_thinking=True` fur MathQA/MMLU-Pro bei **allen Reasoning-Modellen** (AceMath, DeepSeek, Gemma 4) – nicht nur Gemma 4. Gesteuert uber `REASONING_PATTERNS`-Set in `custom_benchmark_v11.py` und "Raisonierende" Modell-Erkennung in `run_benchmarks_v11.py`.
 
 ```
 LM Studio (localhost:1234)
@@ -51,7 +52,7 @@ benchmark_config.py (ZENTRALE KONFIGURATION)
 ├── WHITELIST / DISPLAY_NAMES
 └── EXCLUDE_KEYWORDS / REASONING_KEYWORDS
 
-run_benchmarks_v10.py (LAUNCHER - main(), v10)
+run_benchmarks_v12.py (LAUNCHER - main(), v10)
 ├── NUR HIER wird load/unload aufgerufen
 ├── Steuert alle 4 Pipelines
 ├── Custom-Subprozess via dynamischem Glob (immer hoechste _vXX-Datei)
@@ -65,7 +66,7 @@ run_benchmarks_v10.py (LAUNCHER - main(), v10)
 ├── API-Bereitschaft: time.sleep(10) statt polling-Schleife
 └── Version intern: "Unified Benchmark Launcher v10"
 
-custom_benchmark_v10.py (CUSTOM-BENCHMARKS, v10)
+custom_benchmark_v12.py (CUSTOM-BENCHMARKS, v10)
 ├── RUFT NIE load/unload auf
 ├── Nimmt Modell als bereit an
 ├── DS1000 + CoderEval (PandasEval entfernt)
@@ -74,9 +75,9 @@ custom_benchmark_v10.py (CUSTOM-BENCHMARKS, v10)
 ├── Speichert tasks_*.csv + modell_*.csv
 ├── Keine Legacy-Pfade (altes Format, interaktiver Modus entfernt)
 ├── Vollstandige Type Hints (55 Funktionen)
-└── Standalone-Modus warnt -> Nutzung von run_benchmarks_v10.py
+└── Standalone-Modus warnt -> Nutzung von run_benchmarks_v12.py
 
-consolidate_results_v10.py (KONSOLIDIERUNG, v10)
+consolidate_results_v12.py (KONSOLIDIERUNG, v10)
 ├── ModelData-Dataclass (statt roher Dicts)
 ├── median/p90-Spalten in CSV und MD
 ├── compute_category_scores() normalisiert nach verfugbaren Benchmarks
@@ -90,7 +91,7 @@ consolidate_results_v10.py (KONSOLIDIERUNG, v10)
 
 | Pipeline                  | Skript(e)                              | Benchmarks                                     | Auswertung                                 |
 |---------------------------|----------------------------------------|------------------------------------------------|--------------------------------------------|
-| **Eigenes Skript v10**    | `custom_benchmark_v10.py`              | DS1000, CoderEval                              | `exec_sandboxed()` + Namespace-Vergleich   |
+| **Eigenes Skript v10**    | `custom_benchmark_v12.py`              | DS1000, CoderEval                              | `exec_sandboxed()` + Namespace-Vergleich   |
 | **lm-evaluation-harness** | `lm_eval` CLI                          | MathQA, ARC-Challenge, HellaSwag, TruthfulQA, MMLU-Pro (mod.) | `generate_until` + Regex-Extraktion        |
 | **evalplus**              | `evalplus.codegen`+`evalplus.evaluate` | HumanEval+, MBPP+                              | Differential-Testing mit plus_input        |
 | **Agentic**               | `tool_eval_bench` CLI                  | Agentic (69 Szenarien)                         | tool-eval-bench Envelope (final_score)     |
@@ -99,7 +100,7 @@ consolidate_results_v10.py (KONSOLIDIERUNG, v10)
 
 ---
 
-## 2. Haupt-Flow (run_benchmarks_v10.py)
+## 2. Haupt-Flow (run_benchmarks_v12.py)
 
 ### 2.1 main()-Funktion – Zentrales Modell-Management
 
@@ -137,7 +138,7 @@ main()
 │   │   ├── if lmeval (MathQA, ARC, HellaSwag, TruthfulQA):
 │   │   │   └── lm_eval --model local-chat-completions
 │   │   └── if custom (DS1000/CoderEval):
-│   │       └── custom_benchmark_v10.py --subprozess
+│   │       └── custom_benchmark_v12.py --subprozess
 │   │           (Skript via dynamischem Glob aufgeloest: CUSTOM_BENCHMARK_SCRIPT)
 │   │
 │   └── all_summary.append(result)                # alle 4 Pipelines (Bugfix 28.06.)
@@ -153,8 +154,8 @@ main()
 
 **NEU (v20+):**
 - `model_manager.py` enthalt ALLE Modell-Funktionen
-- `run_benchmarks_v10.py` importiert aus `model_manager` - einziger Aufrufer von load/unload
-- `custom_benchmark_v10.py` importiert aus `model_manager`, ruft **nie** `load/unload` auf
+- `run_benchmarks_v12.py` importiert aus `model_manager` - einziger Aufrufer von load/unload
+- `custom_benchmark_v12.py` importiert aus `model_manager`, ruft **nie** `load/unload` auf
 - `_api_model` (exakte ID aus `lms ps`) wird konsistent in **allen** Pipelines verwendet
 - `API_BASE` wird aus `model_manager.API_BASE` bezogen (nicht hardcoded im Launcher)
 
@@ -167,7 +168,7 @@ main()
 **NEU (v9 fix):** Nach `load_model_via_lms()` wird das Modell via `lms ps --json` bestatigt. Dann einfaches `time.sleep(10)` - keine Polling-Schleife mehr:
 
 ```python
-# run_benchmarks_v10.py:
+# run_benchmarks_v12.py:
 ok, api_model = load_model_via_lms(model_key)  # lms load + lms ps polling
 print("  [INFO] Warte 10s auf API-Initialisierung...")
 time.sleep(10)
@@ -203,12 +204,21 @@ Nachteil: Beide Versionen (alt + neu) mussen wahrend des Laufs existieren, da er
 REASONING_KEYWORDS = ["reasoning", "think", "r1"]
 MOE_PATTERN = re.compile(r"\d+b-a\d+b", re.IGNORECASE)  # z.B. "8b-a1b"
 
-_is_reasoning_model()   # -> Timeout x2 (2x eval_timeout)
+_is_reasoning_model()   # -> Timeout x2 (2x eval_timeout) + Thinking-Mode via --thinking
 _is_moe_model()         # -> nur Anzeige "(erkannt)"
 _is_qwen3_5_model()     # -> systemlose Prompt-Einbettung
 _is_qwen3_6_model()     # -> enable_thinking=False, max_tokens=8192
 _is_gptoss_model()      # -> temperature=1.0, max_tokens=4096
+_is_gemma_model()       # -> Thinking-Mode via --thinking (separat von _is_reasoning_model)
 ```
+
+**Zusatzlich in `custom_benchmark_v11.py`:**
+
+```python
+REASONING_PATTERNS = {"acemath", "deepseek", "gemma"}
+```
+
+Wird von `_get_model_config()` genutzt: Wenn `--thinking` aktiv ist UND der Modell-Key eines der REASONING_PATTERNS enthalt, wird `enable_thinking=True` gesetzt. `deepseek` hat standardmassig `enable_thinking=True`, `gemma` standardmassig `False` (umschaltbar via `--thinking`). Modelle mit explizitem `enable_thinking=False` (qwen3.6, qwen3.5) bleiben ausgeschlossen.
 
 ### 2.7 Task-Retry-Mechanismus (NEU in v10, nach Review)
 
@@ -291,7 +301,7 @@ MMLU_PRO_SUBSETS = [
 
 ## 5. Agentic-Pipeline
 
-`run_agentic()` in `run_benchmarks_v10.py`:
+`run_agentic()` in `run_benchmarks_v12.py`:
 
 ```
 tool_eval_bench CLI
@@ -341,7 +351,7 @@ Median und P90 ersetzen Mean/Max als robustere Metriken gegen Ausreisser.
 
 ## 7. DS1000-Evaluierung
 
-`evaluate_code()` in `custom_benchmark_v10.py` durchlauft 4 Evaluierungs-Modi:
+`evaluate_code()` in `custom_benchmark_v12.py` durchlauft 4 Evaluierungs-Modi:
 
 1. **DS1000-Harness** - falls `test_execution` im `code_context` vorhanden
 2. **Namespace-Vergleich** - falls `reference_code` + `setup_code` vorhanden
@@ -389,13 +399,16 @@ exec_sandboxed(code, timeout=30)
 
 **Parameter pro Modellklasse:**
 
-| Klasse | temperature | top_p | max_tokens | Besonderheit |
-|--------|-------------|-------|------------|--------------|
-| Default | 0.0 | 1.0 | 1024 | greedy |
-| Reasoning | 0.1 | 0.9 | - | min_p=0.02, Timeout x2 |
-| Qwen3.6 | 0.1 | 0.9 | 8192 | enable_thinking=False (API-Parameter), Thinking-Tokens blockieren Token-Budget |
-| GPT-OSS | 1.0 | 1.0 | 4096 | sampling |
-| Qwen3.5 | 0.2 | 0.9 | - | top_k=20 |
+| Klasse | temperature | top_p | max_tokens | enable_thinking | Besonderheit |
+|--------|-------------|-------|------------|-----------------|--------------|
+| Default | 0.0 | 1.0 | 1024 | None | greedy |
+| Reasoning | 0.1 | 0.9 | - | per `--thinking` | min_p=0.02, Timeout x2 |
+| Gemma 4 | 0.0 | 1.0 | 4096 | per `--thinking` | Thinking aktivierbar fur MathQA/MMLU-Pro |
+| Qwen3.6 | 0.1 | 0.9 | 8192 | False (erzwungen) | Thinking-Tokens blockieren Token-Budget |
+| GPT-OSS | 1.0 | 1.0 | 4096 | None | sampling |
+| Qwen3.5 | 0.2 | 0.9 | - | False (erzwungen) | top_k=20, no_system_msg |
+
+`enable_thinking=None` = Modell hat keinen Thinking-Mode. `enable_thinking=False` = Thinking ist deaktiviert (API-Parameter). `enable_thinking per --thinking` = Thinking wird nur fur MathQA/MMLU-Pro aktiviert wenn CLI-Flag gesetzt.
 
 ---
 
@@ -417,11 +430,11 @@ exec_sandboxed(code, timeout=30)
 Einheitliches Schema fur ALLE Pipelines:
 
 ```
-pipeline;bench;model;score;cpu_avg;cpu_med;cpu_p90;gpu_avg;gpu_med;gpu_p90;ram_avg;ram_med;ram_p90;vram_gb;gpu_temp_max;gpu_temp_p90
-custom;DS1000;Phi-4;0.45;35;33;40;42;40;46;32;30;35;12.3;67;65
-evalplus;HumanEval+;Phi-4;0.82;28;26;32;38;36;42;30;28;33;11.8;62;60
-lmeval;MMLU-Pro;Phi-4;0.67;31;29;36;40;38;44;31;29;34;12.0;64;62
-agentic;Agentic;Phi-4;0.55;33;31;38;39;37;43;30;28;32;11.9;63;61
+pipeline;bench;model;score;thinking;cpu_avg;cpu_med;cpu_p90;gpu_avg;gpu_med;gpu_p90;ram_avg;ram_med;ram_p90;vram_gb;gpu_temp_max;gpu_temp_p90
+custom;DS1000;Phi-4;0.45;0;35;33;40;42;40;46;32;30;35;12.3;67;65
+evalplus;HumanEval+;Phi-4;0.82;0;28;26;32;38;36;42;30;28;33;11.8;62;60
+lmeval;MMLU-Pro;Phi-4;0.67;1;31;29;36;40;38;44;31;29;34;12.0;64;62
+agentic;Agentic;Phi-4;0.55;0;33;31;38;39;37;43;30;28;32;11.9;63;61
 ```
 
 **Delimiter:** `;` (Semikolon, Komma-kompatibel fur deutsche Excel)
@@ -443,10 +456,10 @@ agentic;Agentic;Phi-4;0.55;33;31;38;39;37;43;30;28;32;11.9;63;61
 
 ---
 
-## 12. Konsolidierung (consolidate_results_v10.py)
+## 12. Konsolidierung (consolidate_results_v12.py)
 
 ```
-consolidate_results_v10.py
+consolidate_results_v12.py
 ├── find_latest_csv(pattern)
 ├── read_evalplus(model_key)
 ├── read_lmeval_per_model(model_key)
@@ -462,6 +475,10 @@ consolidate_results_v10.py
 ├── _b5_named() fur BOTTOM 5
 ├── _fmt_pct() mit {:.0f}% (ganze Zahlen)
 ├── fn_csv mit median/p90-Spalten (CPU_med, CPU_p90, GPU_med, GPU_p90, ...)
+├── thinking-Spalte (0/1) in allen Pipeline-returns, CSVs und Konsolidierung
+├── bootstrap_ci(scores, n_resamples=10000) – Bootstrap-95%-KI fuer DS1000/CoderEval aus Per-Item-Daten
+│   ├── ds1000_ci_lo / ds1000_ci_hi / codereval_ci_lo / codereval_ci_hi in CSV
+│   └── Format im MD: "XX% [lo–hi]"
 ├── width-Duplizierung entfernt (nur noch ein widths-Block)
 └── generate CSV + MD (alphabetisch sortiert)
 ```
@@ -532,9 +549,9 @@ Benchmarks/
 ├── benchmark_config.py              # Zentrale Konfiguration (Gewichte, Subsets, Szenarien)
 ├── model_manager.py                 # Modell-Management (unversioniert)
 ├── csv_writer.py                    # CSV-Schema (unversioniert)
-├── custom_benchmark_v10.py          # Aktuelle Custom-Pipeline (DS1000 + CoderEval)
-├── run_benchmarks_v10.py            # Aktueller Launcher (v10), dynam. Script-Aufloesung
-├── consolidate_results_v10.py       # Aktuelle Konsolidierung
+├── custom_benchmark_v12.py          # Aktuelle Custom-Pipeline (DS1000 + CoderEval)
+├── run_benchmarks_v12.py            # Aktueller Launcher (v10), dynam. Script-Aufloesung
+├── consolidate_results_v12.py       # Aktuelle Konsolidierung
 ├── run_all_dense.py                 # Wrapper -> v10
 ├── rerun_ds1000_mmlu.py             # Wrapper -> v10
 ├── rerun_lmeval.py                  # Wrapper -> v10
@@ -556,7 +573,7 @@ Benchmarks/
 ```
 
 **Migrationspfad beim Kopieren einer neuen Version:**
-Es genugt `Copy-Item custom_benchmark_v10.py custom_benchmark_v11.py`. Der Launcher erkennt dynamisch die hochste Version. Kein manuelles Update des Launchers notig.
+Es genugt `Copy-Item custom_benchmark_v12.py custom_benchmark_v13.py`. Der Launcher erkennt dynamisch die hochste Version. Kein manuelles Update des Launchers notig.
 
 ---
 
@@ -609,14 +626,14 @@ Alle 3 Hauptskripte haben vollstandige Type Hints:
 
 | Skript | Funktionen | Importe |
 |--------|-----------|---------|
-| `custom_benchmark_v10.py` | 55 Funktionen | `from collections.abc import Generator` |
-| `run_benchmarks_v10.py` | 20 Funktionen | `from collections.abc import Iterator` |
-| `consolidate_results_v10.py` | 27 Funktionen | `from dataclasses import dataclass`, `from collections.abc import Callable` |
+| `custom_benchmark_v12.py` | 55 Funktionen | `from collections.abc import Generator` |
+| `run_benchmarks_v12.py` | 20 Funktionen | `from collections.abc import Iterator` |
+| `consolidate_results_v12.py` | 27 Funktionen | `from dataclasses import dataclass`, `from collections.abc import Callable` |
 
 **Beispiele:**
 
 ```python
-# custom_benchmark_v10.py
+# custom_benchmark_v12.py
 def evaluate_generated_code(
     generated_code: str,
     entry_point: str,
@@ -626,7 +643,7 @@ def evaluate_generated_code(
 ) -> tuple[float, str]:
     ...
 
-# run_benchmarks_v10.py
+# run_benchmarks_v12.py
 def run_benchmarks(
     models: list[str],
     benchmarks: list[str],
@@ -634,7 +651,7 @@ def run_benchmarks(
 ) -> list[dict[str, Any]]:
     ...
 
-# consolidate_results_v10.py
+# consolidate_results_v12.py
 @dataclass
 class ModelData:
     model_name: str
@@ -680,6 +697,7 @@ pytest tests/ -v
 12. **Granite 4.0 H Tiny:** Experts=64 verursacht `ggml_new_object: not enough space` bei 1M Context. Workaround: Experts=16 setzen. Der `num_experts`-Parameter ist nur uber LM Studio Python SDK/REST API setzbar, nicht im GUI.
 13. **Dynamische Script-Auflosung:** Der Launcher lost den Custom-Benchmark-Pfad nur beim Start auf. Wird die Datei wahrend des Laufs ersetzt, lauft die alte Version bis zum Ende.
 14. **Agentic-Szenario-Timeout:** `PIPELINE_TIMEOUTS["agentic_scenario"]` (600s) verhindert Timeout-Abbrueche bei langen Kontexten (vorher: 120s Hardcoded -> Abbruch bei Tool-Call-Generierung).
+15. **model.yaml-Konflikt:** Ein virtuelles Modell via `hub/models/<publisher>/<model>/model.yaml` kollidiert mit einer bereits geladenen physischen Instanz derselben GGUF-Datei → llama.cpp stuerzt mit HTTP 500 ab. Workaround: model.yaml nur fuer Modelle ohne physische Instanz (z.B. mradermacher/qwen3-coder-reap).
 
 ---
 
@@ -758,6 +776,17 @@ pytest tests/ -v
 
 | Datum  | Datei                                         | Anderung                                                                        |
 |--------|-----------------------------------------------|---------------------------------------------------------------------------------|
+| 04.07. | `Architektur+Flow_v24.md`                     | Thinking-Mode fur alle Reasoning-Modelle, REASONING_PATTERNS, enable_thinking-Tabelle |
+| 04.07. | `custom_benchmark_v11.py`                     | REASONING_PATTERNS-Set, `--thinking` aktiviert Thinking fur AceMath+DeepSeek+Gemma |
+| 04.07. | `run_benchmarks_v11.py`                       | `_get_lmeval_params()` Thinking fur Reasoning+Gemma bei MathQA/MMLU-Pro |
+| 30.06. | `Architektur+Flow_v24.md`                     | Update: QUANT_MAP, qwen3.6-Klasse, konsolidiert_aktuell.csv, Qwen3/Qwen3.6-Ergebnisse |
+| 05.07. | `Architektur+Flow_v24.md`                     | v28: v12-Referenzen, Bootstrap-CI, thinking-CSV-Spalte, model.yaml-Konflikt |
+| 05.07. | `run_benchmarks_v12.py`                       | v12 aus v11: `_v11`→`_v12` in allen Dateien |
+| 05.07. | `custom_benchmark_v12.py`                     | v12 aus v11: `_v11`→`_v12` in allen Dateien |
+| 05.07. | `consolidate_results_v12.py`                  | v12 aus v11: `_v11`→`_v12` in allen Dateien; `--bootstrap`-Flag bleibt |
+| 04.07. | `Architektur+Flow_v24.md`                     | Thinking-Mode fur alle Reasoning-Modelle, REASONING_PATTERNS, enable_thinking-Tabelle |
+| 04.07. | `custom_benchmark_v11.py`                     | REASONING_PATTERNS-Set, `--thinking` aktiviert Thinking fur AceMath+DeepSeek+Gemma |
+| 04.07. | `run_benchmarks_v11.py`                       | `_get_lmeval_params()` Thinking fur Reasoning+Gemma bei MathQA/MMLU-Pro |
 | 30.06. | `Architektur+Flow_v24.md`                     | Update: QUANT_MAP, qwen3.6-Klasse, konsolidiert_aktuell.csv, Qwen3/Qwen3.6-Ergebnisse |
 | 30.06. | `custom_benchmark_v10.py`                     | qwen3.6 MODEL_CONFIG (enable_thinking=False, max_tokens=8192) |
 | 30.06. | `run_benchmarks_v10.py`                       | EvalPlus-Regex mit re.DOTALL, LM-Eval Score-Suche durchsucht alle Subdirs, LM-Eval max_tokens=8192 fuer Qwen3.6 |
@@ -772,7 +801,7 @@ pytest tests/ -v
 | 28.06. | `tests/test_scores.py`                        | NEU: 10 Tests fur compute_category_scores, _percentile, _threshold_filtered     |
 | 28.06. | `tests/test_csv.py`                           | NEU: 5 Tests fur read_custom_csv, auto_delimiter                                |
 | 28.06. | `tests/fixtures/test_tasks.csv`               | NEU: Testdaten fur CSV-Parsing                                                  |
-| 28.06. | `run_all_dense.py` / `rerun_*.py`             | Wrapper auf run_benchmarks_v10.py aktualisiert                                  |
+| 28.06. | `run_all_dense.py` / `rerun_*.py`             | Wrapper auf run_benchmarks_v12.py aktualisiert                                  |
 | 28.06. | `review_20260628.md`                          | NEU in Doku+Install: Code-Review mit 9 Kritikpunkten und Empfehlungen           |
 | 28.06. | `Doku+Install/Alte_Skripte/`                  | 17 historische Skripte verschrottet (v18-v22, v6-v7, v1-v6)                     |
 | 27.06. | `model_manager.py / csv_writer.py`            | Versioniert als _v2; PIPELINE_TIMEOUTS-Dict                                     |
@@ -789,5 +818,5 @@ pytest tests/ -v
 
 ---
 
-*Erstellt: 28.06.2026 | Aktualisiert: 30.06.2026*
-*Basiert auf: v25-Architektur mit vereinheitlichten Versionen (v10), Type Hints, Tests, zentraler Config, Task-Retry, median/p90-Metriken, QUANT_MAP, Qwen3.6-Support*
+*Erstellt: 28.06.2026 | Aktualisiert: 05.07.2026*
+*Basiert auf: v28-Architektur – v12-Basis + Thinking-Mode, Bootstrap-CI, thinking-CSV-Spalte, model.yaml-Konflikt-Fix*
