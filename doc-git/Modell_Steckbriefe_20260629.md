@@ -63,8 +63,36 @@ Hinweise: Results basieren auf SampleSize=10 (vollständig). Effizienz = Overall
 | magistral-small-24b-2509              | Modell-Steckbrief, s.o.           |       ?      |
 | nemotron-14b-opencode-reasoning       | Modell-Steckbrief, s.o.           |       ?      |
 | numinamath-7b-cot                     | Modell-Steckbrief, s.o.           |       ?      |
+---
+
+## LM Studio Reasoning-Parsing (2026-07-07)
+
+**Betrifft: ALLE Modelle**
+
+LM Studio hat eine `reasoning.parsing`-Einstellung (Default: `enabled=true`) mit `<think>`/`</think>`-Tags. Diese veranlasst das Modell, vor jeder Antwort eine Gedankenkette in `<think>`-Blöcken zu produzieren – auch bei Modellen, die kein natives Reasoning im Training haben.
+
+**Folge:** 300–500 Tokens zusätzlich pro Generation, hohe Latenz, unnötig bei Tool-Calling.
+
+**Empfehlung:** Für alle Benchmark-Modelle auf `false` setzen.
+
+**Konfiguration (pro Modell):**
+```
+C:\Users\<user>\.lmstudio\.internal\user-concrete-model-default-config\<publisher>\<model>\<model>.gguf.json
+```
+```json
+"llm.prediction.reasoning.parsing": {
+  "enabled": false,
+  "startString": "<think>",
+  "endString": "</think>"
+}
+```
+
+**LM Studio GUI:** Chat Panel → "..." → Model Settings → "Reasoning Parsing" → Enabled aus.
+
+**Zusätzlich:** `stopStrings` auf `["<|end_of_text|>", "<|endoftext|>"]` setzen, um die Generation exakt am EOS-Token zu stoppen. `contextLength` auf max. 16384 senken (reduziert KV-Cache-VRAM). Diese Einstellungen liegen in derselben JSON-Datei.
 
 ---
+
 ######## KV-Cache und Slots #########
 
 ## KV-Cache Quantisierung (größter Hebel)

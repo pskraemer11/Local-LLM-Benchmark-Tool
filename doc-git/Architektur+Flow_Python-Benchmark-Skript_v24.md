@@ -353,6 +353,26 @@ Die 600s pro Szenario verhindern das vorherige Problem, dass `tool_eval_bench` n
 
 **Bisherige Agentic-Timeout-Fälle:** Nur bei Granite-4.1-30B aufgetreten. Reasoning-Modelle (Qwen3 Coder Reap 25B, Gemma-4) durchliefen andere Pipelines (DS1000, CoderEval, lm-eval, evalplus) und waren nicht von diesem Timeout betroffen. Sollte ein weiteres Modell im Agentic timed out gehen, sind neben `max_tokens` auch die Timeout-Werte in `benchmark_config.py` (`agentic_subprocess`: 3600s, `agentic_scenario`: 600s) zu prüfen.
 
+### Reasoning-Parsing in LM Studio (2026-07-07)
+
+**Problem (Ausloser):** Granite-4.1-30B generierte 300-500 Tokens pro Response, weil LM Studios `reasoning.parsing` mit `<think>`/`</think>`-Tags aktiviert war (Default bei vielen Modellen). Das Modell schreibt eine lange Gedankenkette vor jedem Tool-Call, bevor es die eigentliche Antwort produziert.
+
+**Fix:** `reasoning.parsing.enabled` auf `false` gesetzt, globale Stop-Strings ergänzt, Context-Length an Pipeline angepasst.
+
+| Aspekt | Detail |
+|--------|--------|
+| Datei | `...\.lmstudio\.internal\user-concrete-model-default-config\<publisher>\<model>\<model>.gguf.json` |
+| Key | `llm.prediction.reasoning.parsing.enabled` |
+| Alter Wert | `true` (Default) |
+| Neuer Wert | `false` |
+| Wirkung | Keine `<think>`-Blöcke mehr → ~50-70% weniger Tokens pro Generation |
+| Stop-Strings | `["<|end_of_text|>", "<|endoftext|>"]` – stoppt Generation am EOS-Token |
+| Context-Length | Von 49152 auf 16384 gesenkt (wie Pipeline-Vorgabe) |
+
+**Betrifft ALLE Modelle in LM Studio:** Der `reasoning.parsing`-Default ist oft `true`. Bei Modellen ohne natives Reasoning (die keine `<think>`-Tags im Training haben) erzeugt dies unnötig lange Antworten. Es wird empfohlen, `reasoning.parsing.enabled` für alle Modelle auf `false` zu setzen, die in der Benchmark-Pipeline verwendet werden.
+
+**LM Studio GUI-Pfad:** Chat Panel → Rechts oben "..." → "Model Settings" → "Reasoning Parsing" → Enabled aus.
+
 ---
 
 ## 6. System-Metriken
