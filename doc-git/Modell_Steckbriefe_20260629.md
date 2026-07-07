@@ -28,15 +28,17 @@ BEACHTE: Architekturabhängigkeit der KV-Quantisierungs-Empfindlichkeit, s.u.
 
 ## Beste Kandidaten für lokale LLM-Benchmarks (16 GB VRAM) – Stand 28.06.2026
 
-|Rang| Modell                                 | MoE  | VRAM    | Overall | Effizienz     | Stärke                                              |
-|----|----------------------------------------|------|---------|---------|---------------|-----------------------------------------------------|
-| 1  | **gemma-4-19b-a4b-it-reap-i1**         |  ja  | 11.3 GB | **79%** |   15.2 %p/h   | Bester Gesamtscore, stark in Coding+Agentic         |
-| 2  | **qwen2.5-coder-14b-instruct**         | nein | 10.6 GB | **71%** |     —         | 100% HumanEval+/MBPP+, Coding-Sieger                |
-| 3  | **phi-4 (unsloth)**                    | nein |  9.5 GB | **64%** |   18.0 %p/h   | Bester Coding-Score (93%), schnell                  |
-| 4  | **granite-4.0-h-tiny**                 |  ja  |  7.4 GB | **58%** | **60.5 %p/h** | Extrem effizient, TOP 1 Effizienz, 1M Kontext       |
-| 5  | **ernie-4.5-21b-a3b-pt**               |  ja  | 12.5 GB | **57%** |     —         | Nur 3B aktiv, starkes Coding+Math (Q4_K_M)          |
+|Rang| Modell                               | MoE  | VRAM    | Overall | Effizienz     | Stärke                                              |
+|----|--------------------------------------|------|---------|---------|---------------|-----------------------------------------------------|
+| 1  | *gemma-4-19b-a4b-it-reap-i1*         |  ja  | 11.3 GB |  *79%*  |   15.2 %p/h   | Bester Gesamtscore, stark in Coding+Agentic         |
+| 2  | *qwen2.5-coder-14b-instruct*         | nein | 10.6 GB |  *71%*  |     —         | 100% HumanEval+/MBPP+, Coding-Sieger                |
+| 3  | *phi-4 (unsloth)*                    | nein |  9.5 GB |  *64%*  |   18.0 %p/h   | Bester Coding-Score (93%), schnell                  |
+| 4  | *granite-4.0-h-tiny*                 |  ja  |  7.4 GB |  *58%*  |  *60.5 %p/h*  | Extrem effizient, TOP 1 Effizienz, 1M Kontext       |
+| 5  | *ernie-4.5-21b-a3b-pt*               |  ja  | 12.5 GB |  *57%*  |     —         | Nur 3B aktiv, starkes Coding+Math (Q4_K_M)          |
 
 Hinweise: Results basieren auf SampleSize=10 (vollständig). Effizienz = Overall-Score / Laufzeit in Stunden. "--" = Modell hat keinen vollständigen 10-Pipeline-Durchlauf (fehlende Benchmarks).
+Neue Benchmark-Runs mit SampleSize=100 => Tabelle aktualisieren!
+
 
 ###### MoE-Modelle (besonders VRAM-effizient) ######
 
@@ -56,13 +58,18 @@ Hinweise: Results basieren auf SampleSize=10 (vollständig). Effizienz = Overall
 | Modell                                | Erkannt über                      |Timeout-Faktor|
 |---------------------------------------|-----------------------------------|--------------|
 | acemath-7b-instruct                   | lt. Hersteller (Math CoT)         |      ×2      |
-| ministral-3-14b-reasoning-2512        | Name enthaelt "reasoning"         |      ×2      |
+| gemma-4-19b-a4b-it-reap-i1            | Gemma-4-Familie (Thinking-Mode)   |      ×2      |
+| gemma-4-26b-a4b-it                    | Gemma-4-Familie (Thinking-Mode)   |      ×2      |
 | lfm2.5-8b-a1b                         | lt. Hersteller (kein auto-detect) | ×2 (manuell) |
-| qwen3.6-27b                           | lt. Hersteller (Thinking-Mode)    | ×2 (manuell) |
-| qwen3.6-28b-reap-i1                   | log in LM Studio                  |      -       |
 | magistral-small-24b-2509              | Modell-Steckbrief, s.o.           |       ?      |
+| ministral-3-14b-reasoning-2512        | Name enthaelt "reasoning"         |      ×2      |
 | nemotron-14b-opencode-reasoning       | Modell-Steckbrief, s.o.           |       ?      |
 | numinamath-7b-cot                     | Modell-Steckbrief, s.o.           |       ?      |
+| qwen3-coder-reap-25b-a3b              | Qwen3-basiert (Thinking-Mode)     |      ×2      |
+| qwen3.6-27b                           | lt. Hersteller (Thinking-Mode)    | ×2 (manuell) |
+| qwen3.6-28b-reap-i1                   | log in LM Studio                  |      -       |
+
+
 ---
 
 ## LM Studio Reasoning-Parsing (2026-07-07)
@@ -1398,7 +1405,6 @@ HF: https://huggingface.co/Qwen/Qwen2.5-Coder-32B-Instruct
 Quelle: https://huggingface.co/tiiuae/Falcon3-10B-Instruct-GGUF
 Blog: https://huggingface.co/blog/falcon3
 
-=========================== **Gemma-4 Modelle** ===========================
 
 ---
 
@@ -1538,20 +1544,20 @@ Dies unterscheidet sich vom modellinternen `top-k` (aktive Experten pro Token):
 
 **Empfehlungen für `num_experts`:**
 
-| Modell                    |  Experten     | Empfohlenes   | Begründung                                                    |
-|                           |   gesamt      | `num_experts` |                                                               |
-|---------------------------|---------------|---------------|---------------------------------------------------------------|
-| ernie-4.5-21b-a3b-pt      | 130 (64+64+2) | 64 (Standard) | Bei VRAM-Knappheit auf 32 reduzierbar; dann nur Text-Experten |
-| gemma-4-19b-a4b-it        |  90 (REAP)    | 90 (Standard) | Nicht reduzieren – REAP hat bereits optimiert 
-                                                                => Problem: Modell lädt nicht mit sovielen Experten! Mit 45 Experten und ohen KV-Quant. lädt es! |
-| granite-4.0-h-tiny        |  64           | **16**        | ⚠️ 64 Experts → `ggml_new_object: not enough space` bei 1M Context. Erst mit 16 Experts stabil.    |
-| lfm2.5-8b-a1b             |  32           | 32 (Standard) | Kleines Modell, kein VRAM-Druck                               |
-| lfm2-24b-a2b              |  64           | 64 (Standard) | 24B total, expertenabhängiger VRAM                            |
-| qwen3-30b-a3b-python-coder| 128           | 24 (64–128)   | Halbierung möglich, aber Qualitätseinbußen bei Coding <=> mehr als 24 experts (ohne LV-QUant.) laden nicht bei Kontextlänge 41k |
-| qwen3-coder-reap-25b-a3b  | 103 (128)     | 24 (64–128)   | Halbierung möglich, aber Qualitätseinbußen bei Coding <=> mehr als 24 experts (ohne LV-QUant.) laden nicht bei Kontextlänge 131k |
-| qwen3.6-28b (REAP)        | 205           | 128–205       | Stark pruned – Reduzierung nur wenn VRAM kritisch             |
-| deepseek-coder-v2-lite    |   8           |  8 (Standard) | Nur 8 Experten – kein Spielraum                               |
-| gpt-oss-20b               |  32           | 32 (Standard) | MXFP4-Quant. hält VRAM niedrig                                |
+| Modell                    |  Experten     | Empfohlenes   | Begründung                                                                                                                        |
+|                           |   gesamt      | `num_experts` |                                                                                                                                   |
+|---------------------------|---------------|---------------|-----------------------------------------------------------------------------------------------------------------------------------|
+| ernie-4.5-21b-a3b-pt      | 130 (64+64+2) | 64 (Standard) | Bei VRAM-Knappheit auf 32 reduzierbar; dann nur Text-Experten                                                                     |
+| gemma-4-19b-a4b-it        |  90 (REAP)    | 90 (Standard) | Nicht reduzieren – REAP hat bereits optimiert                                                                                     |
+                                                                => Problem: Modell lädt nicht mit sovielen Experten! Mit 45 Experten und ohen KV-Quant. lädt es!                                |
+| granite-4.0-h-tiny        |  64           | **16**        | ⚠️ 64 Experts → `ggml_new_object: not enough space` bei 1M Context. Erst mit 16 Experts stabil.                                   |
+| lfm2.5-8b-a1b             |  32           | 32 (Standard) | Kleines Modell, kein VRAM-Druck                                                                                                   |
+| lfm2-24b-a2b              |  64           | 64 (Standard) | 24B total, expertenabhängiger VRAM                                                                                                |
+| qwen3-30b-a3b-python-coder| 128           | 24 (64–128)   | Halbierung möglich, aber Qualitätseinbußen bei Coding <=> mehr als 24 experts (ohne LV-QUant.) laden nicht bei Kontextlänge 41k   |
+| qwen3-coder-reap-25b-a3b  | 103 (128)     | 24 (64–128)   | Halbierung möglich, aber Qualitätseinbußen bei Coding <=> mehr als 24 experts (ohne LV-QUant.) laden nicht bei Kontextlänge 131k  |
+| qwen3.6-28b (REAP)        | 205           | 128–205       | Stark pruned – Reduzierung nur wenn VRAM kritisch                                                                                 |
+| deepseek-coder-v2-lite    |   8           |  8 (Standard) | Nur 8 Experten – kein Spielraum                                                                                                   |
+| gpt-oss-20b               |  32           | 32 (Standard) | MXFP4-Quant. hält VRAM niedrig                                                                                                    |
 
 **Hinweis:** Der Parameter wird über die LM Studio Python SDK gesetzt (`numExperts`) oder im REST-API-Load-Request (`"num_experts": N`). 
 Im LM Studio GUI ist er nicht direkt einstellbar. Ein zu niedriger Wert kann die Modellqualität deutlich beeinträchtigen, da der Router nur aus den geladenen Experten wählen kann.
