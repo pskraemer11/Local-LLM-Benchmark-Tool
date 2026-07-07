@@ -22,7 +22,7 @@ Computes weighted category scores + efficiency.
 from __future__ import annotations
 
 import csv, json, os, sys, re, random
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from statistics import mean, median
@@ -354,8 +354,11 @@ def read_custom_csv(path: str, out_scores: Optional[List[float]] = None) -> Tupl
     return mean(scores), mean(tok_speeds) if tok_speeds else None, total_latency, metrics
 
 
-def find_latest_csvs() -> Tuple[Dict[str, str], Dict[str, str]]:
+def find_latest_csvs(min_sample_size: int = 0) -> Tuple[Dict[str, str], Dict[str, str]]:
     """Find latest CSV files for DS1000 and CoderEval.
+    
+    Args:
+        min_sample_size: If > 0, only include CSVs with sample_size >= this value.
     
     Returns dicts keyed by model_key (from CSV content), not display name.
     This ensures unique entries for models with same name but different quants
@@ -384,6 +387,7 @@ def find_latest_csvs() -> Tuple[Dict[str, str], Dict[str, str]]:
         # Try to extract model_key from CSV content
         fpath = os.path.join(RESULTS_DIR, fname)
         model_key_from_csv = None
+        file_sample_size = 0
         try:
             with open(fpath, "r", encoding="utf-8") as f:
                 reader = csv.DictReader(f, delimiter=";")
@@ -391,9 +395,18 @@ def find_latest_csvs() -> Tuple[Dict[str, str], Dict[str, str]]:
                     mk = row.get("model_key", "")
                     if mk:
                         model_key_from_csv = mk
-                        break
+                    ss = row.get("sample_size", "")
+                    if ss:
+                        try:
+                            file_sample_size = int(ss)
+                        except ValueError:
+                            pass
+                    break  # only need first row
         except Exception:
             pass
+        
+        if min_sample_size > 0 and file_sample_size < min_sample_size:
+            continue
         
         # Use model_key if available, else fall back to display name from filename
         lookup_key = model_key_from_csv or model_name_from_file
@@ -635,7 +648,6 @@ class ModelData:
             "Coding Eff (Score/h)": self.coding_eff_score_h,
             "tok/s": self.tok_s,
             "VRAM (GB)": self.vram_gb,
-            "Quant": self.quant,
             "CPU_med": self.cpu_med,
             "CPU_p90": self.cpu_p90,
             "GPU_med": self.gpu_med,
@@ -646,8 +658,8 @@ class ModelData:
         }
 
 
-def read_data(model_keys: Optional[List[str]] = None) -> List[Dict[str, Any]]:
-    ds1000_files, codereval_files = find_latest_csvs()
+def read_data(model_keys: Optional[List[str]] = None, min_sample_size: int = 0) -> List[Dict[str, Any]]:
+    ds1000_files, codereval_files = find_latest_csvs(min_sample_size=min_sample_size)
     print(f"  DS1000 CSVs:  {len(ds1000_files)}")
     print(f"  CoderEval:    {len(codereval_files)}")
 
@@ -808,6 +820,12 @@ def read_data(model_keys: Optional[List[str]] = None) -> List[Dict[str, Any]]:
             ram_p90=sys_metrics.get("RAM_p90"),
             gpu_temp_p90=sys_metrics.get("GPU_Temp_p90"),
         ))
+    # Embed quantization in model name (uniquely identifies models)
+    for r in rows:
+        if r.quant:
+            q = r.quant if not r.quant.startswith("@") else r.quant[1:]
+            if q.lower() not in r.name.lower():
+                r.name = f"{r.name}@{q}"
     return [r.to_csv_dict() for r in rows]
 
 
@@ -822,6 +840,8 @@ def main() -> None:
                         help="Benchmark for comparison (DS1000, CoderEval, or 'all' for both)")
     parser.add_argument("--seed", type=int, default=42,
                         help="Random seed for paired bootstrap (default: 42)")
+    parser.add_argument("--sample-size", type=int, default=0,
+                        help="Minimum sample_size filter for DS1000/CoderEval CSVs (default: no filter)")
     args = parser.parse_args()
 
     model_keys = [m.strip() for m in args.models.split(",")] if args.models else None
@@ -837,7 +857,7 @@ def main() -> None:
         print(f"  Models: {', '.join(parts)}")
         print(f"  Seed: {args.seed}")
         print("=" * 60)
-        ds1000_files, codereval_files = find_latest_csvs()
+        ds1000_files, codereval_files = find_latest_csvs(min_sample_size=args.sample_size)
         benchmarks_to_compare = []
         if args.compare_benchmark == "all":
             benchmarks_to_compare = [("DS1000", ds1000_files), ("CoderEval", codereval_files)]
@@ -883,13 +903,14 @@ def main() -> None:
     print("=" * 60)
     print("  Consolidating Dense-Run Results (v12)")
     print("  + Bootstrap 95% CI for DS1000 / CoderEval")
-    print(f"  {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    ss_str = f" (min sample_size={args.sample_size})" if args.sample_size else ""
+    print(f"  {datetime.now().strftime('%Y-%m-%d %H:%M')}{ss_str}")
     print("=" * 60)
 
-    rows = read_data(model_keys=model_keys)
+    rows = read_data(model_keys=model_keys, min_sample_size=args.sample_size)
 
     # CSV – build columns dynamically
-    fn_csv = ["Model", "Quant"]
+    fn_csv = ["Model"]
     fn_csv += ["DS1000", "DS1000_CI_lo", "DS1000_CI_hi"]
     fn_csv += ["CoderEval", "CoderEval_CI_lo", "CoderEval_CI_hi"]
     fn_csv += ["HumanEval+", "MBPP+",
@@ -975,7 +996,7 @@ def main() -> None:
 
     # Markdown
     md_path = os.path.join(RESULTS_DIR, f"konsolidiert_{ts}.md")
-    cols_md = ["Model", "Quant", "DS1000", "CoderEval", "HumanEval+", "MBPP+",
+    cols_md = ["Model", "DS1000", "CoderEval", "HumanEval+", "MBPP+",
                "ARC-Challenge", "HellaSwag", "TruthfulQA", "MMLU-Pro", "MathQA",
                "Agentic",
                "Coding", "Knowledge", "Math", "Overall", "Runtime (min)",
@@ -1024,7 +1045,7 @@ def main() -> None:
                 vals[c] = "—"
             elif c == "tok/s":
                 vals[c] = f"{float(v):.0f}"
-            elif c in ("Runtime (min)", "Eff (Score/h)", "Coding Eff (Score/h)", "VRAM (GB)", "Quant"):
+            elif c in ("Runtime (min)", "Eff (Score/h)", "Coding Eff (Score/h)", "VRAM (GB)"):
                 vals[c] = _fmt_num(v)
             elif c in ("GPU_Temp_max", "GPU_Temp_p90"):
                 vals[c] = f"{float(v):.0f}"
@@ -1043,7 +1064,7 @@ def main() -> None:
         # Complete results table (two-line header: Name + Unit)
         f.write("## Complete Results Table\n\n")
 
-        header_names = ["Model", "Quant", "DS1000", "CoderEv", "HEval+", "MBPP+",
+        header_names = ["Model", "DS1000", "CoderEv", "HEval+", "MBPP+",
                         "ARC", "HellaSw", "Truthf.", "MMLU-Pro", "MathQA",
                         "Agentic",
                         "Coding", "Knowl.", "Math", "Overall", "Runtime",
@@ -1051,7 +1072,7 @@ def main() -> None:
                         "CPUm", "CPUp",
                         "GPUm", "GPUp",
                         "RAMm", "RAMp", "Tp"]
-        header_units = ["", "", "%", "%", "%", "%",
+        header_units = ["", "%", "%", "%", "%",
                         "%", "%", "%", "%", "%",
                         "%",
                         "%", "%", "%", "%", "min",
@@ -1071,6 +1092,11 @@ def main() -> None:
         widths2 = {}
         for i, c in enumerate(cols_md):
             if c == "Model":
+                max_w = max(len(header_names[i]), len(header_units[i]))
+                for sr in str_rows:
+                    max_w = max(max_w, len(str(sr.get(c, ""))))
+                widths2[c] = max_w
+            elif c in ("DS1000", "CoderEval"):
                 max_w = max(len(header_names[i]), len(header_units[i]))
                 for sr in str_rows:
                     max_w = max(max_w, len(str(sr.get(c, ""))))

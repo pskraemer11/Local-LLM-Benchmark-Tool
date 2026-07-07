@@ -336,6 +336,23 @@ Gesamtlaufzeit pro Modell: `PIPELINE_TIMEOUTS["agentic_subprocess"]` = 3600s (60
 
 Die 600s pro Szenario verhindern das vorherige Problem, dass `tool_eval_bench` nach 120s den HTTP-Request abbrach, wahrend das Modell noch einen Tool-Call generierte. Bei sehr grossen Multi-Turn-Kontexten (>5000 Tokens) kann der Timeout bei Bedarf weiter erhoht werden.
 
+### max_tokens-Reduktion in tool_eval_bench (2026-07-07)
+
+**Problem (Ausloser):** Granite-4.1-30B (Q3_K_S) generiert 300-500 Tokens pro Tool-Call-Response (essayartige Erklarungen vor dem eigentlichen Tool-Call), bei ~5.2 tok/s. Mit 69 Szenarien und mehreren Runden pro Szenario reicht das 3600s-Gesamtlimit nicht.
+
+**Fix:** `max_tokens` in `tool_eval_bench` von 4096 auf 512 gesenkt.
+
+| Aspekt | Detail |
+|--------|--------|
+| Datei | `...\Python314\Lib\site-packages\tool_eval_bench\runner\orchestrator.py:379` |
+| Wert | `max_tokens=4096` → `max_tokens=512` |
+| Gültigkeit | **Global** – betrifft alle Modelle, die durch `tool_eval_bench` laufen |
+| Effekt | Modell wird nach ~512 Tokens abgeschnitten, verhindert lange Erklarungen |
+| Risiko | Bei Tool-Calls mit komplexen JSON/Code-Argumenten (>512 Tokens) könnten Aufrufe unvollständig sein. Die 69 TC-Szenarien nutzen aber nur einfache Calls (Name + 2-3 Argumente, weit unter 512 Tokens) |
+| Wartung | Geht bei `pip install --upgrade tool_eval_bench` verloren, muss dann erneut angewendet werden |
+
+**Bisherige Agentic-Timeout-Fälle:** Nur bei Granite-4.1-30B aufgetreten. Reasoning-Modelle (Qwen3 Coder Reap 25B, Gemma-4) durchliefen andere Pipelines (DS1000, CoderEval, lm-eval, evalplus) und waren nicht von diesem Timeout betroffen. Sollte ein weiteres Modell im Agentic timed out gehen, sind neben `max_tokens` auch die Timeout-Werte in `benchmark_config.py` (`agentic_subprocess`: 3600s, `agentic_scenario`: 600s) zu prüfen.
+
 ---
 
 ## 6. System-Metriken

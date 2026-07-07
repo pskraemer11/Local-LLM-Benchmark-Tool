@@ -77,7 +77,7 @@ MMLU_PRO_SUBSETS = [
 
 EXCLUDE_KEYWORDS = [
     "whisper", "vision", "ocr", "transcription", "transcribe",
-    "translat", "audit", "audio", "embed", "vl",
+    "translat", "audit", "audio", "embed", "vl", "flux",
 ]
 
 LB_MEANS_BLACKLIST = {"Granite 4.0 H Tiny"}

@@ -472,15 +472,19 @@ def get_available_models() -> list[dict[str, Any]]:
                             "publisher": item.get("publisher", ""),
                             "quant": item.get("quantization", {}).get("name", ""),
                         })
-            # For duplicate display names, append organization prefix (first match stays)
-            seen_displays = {}
+            # Append quant variant (e.g., "@q3_k_s") to every display name
+            # so models are uniquely identifiable in interactive selection
             for m in models:
                 d = m["display"]
-                if d in seen_displays:
-                    prefix = m["key"].split("/")[0] if "/" in m["key"] else m["key"]
-                    m["display"] = f"{d} ({prefix})"
-                else:
-                    seen_displays[d] = m
+                key = m["key"]
+                quant = m.get("quant", "")
+                quant_suffix = ""
+                if quant:
+                    quant_suffix = f"@{quant}" if not quant.startswith("@") else quant
+                elif "@" in key:
+                    quant_suffix = "@" + key.split("@", 1)[1]
+                if quant_suffix and not d.endswith(quant_suffix):
+                    m["display"] = f"{d}{quant_suffix}"
             if models:
                 return models
         print(f"[WARN] lms ls failed: {result.stderr.strip()}")

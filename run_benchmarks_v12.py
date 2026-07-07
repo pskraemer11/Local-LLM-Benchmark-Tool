@@ -238,24 +238,20 @@ def get_available_models() -> list[dict[str, Any]]:
                             "display": item.get("displayName", key),
                             "variant": item.get("selectedVariant") or key,
                         })
-            # For duplicate display names, append quant variant (e.g., "@iq4_xs" or "@q3_k_m")
-            seen_displays = {}
+            # Append quant variant (e.g., "@q3_k_s") to every display name
+            # so models are uniquely identifiable in interactive selection
             for m in models:
                 d = m["display"]
                 key = m["key"]
-                if d in seen_displays:
-                    # Extract quant variant from key (everything after "@")
-                    quant_suffix = ""
-                    if "@" in key:
-                        quant_suffix = "@" + key.split("@", 1)[1]
-                    elif "/" not in key:
-                        # For keys without publisher prefix: take last part of key
-                        parts = key.split("_")
-                        if len(parts) > 2:
-                            quant_suffix = "_" + "_".join(parts[-2:])
+                quant_suffix = ""
+                if "@" in key:
+                    quant_suffix = "@" + key.split("@", 1)[1]
+                elif "/" not in key:
+                    parts = key.split("_")
+                    if len(parts) > 2:
+                        quant_suffix = "_" + "_".join(parts[-2:])
+                if quant_suffix and not d.endswith(quant_suffix):
                     m["display"] = f"{d}{quant_suffix}"
-                else:
-                    seen_displays[d] = m
             if models:
                 return models
         print(f"[WARN] lms ls failed: {result.stderr.strip()}")
@@ -276,12 +272,32 @@ def resolve_models(available_models: list[dict[str, Any]], model_arg: Optional[s
     if not model_arg or model_arg == "all":
         return filtered
 
-    # Try number or range
+    # Try number or range (handles comma-separated numbers like "1,3,5-8")
     indices = _parse_selection(model_arg, len(filtered))
     if indices is not None:
         return [filtered[i] for i in indices]
 
-    # Try exact match first (prevent substring collision)
+    # Comma-separated model names/keys
+    parts = [p.strip() for p in model_arg.split(",") if p.strip()]
+    if len(parts) > 1:
+        result = []
+        seen = set()
+        for part in parts:
+            sub = resolve_models(available_models, part)
+            if sub:
+                for m in sub:
+                    if m["key"] not in seen:
+                        result.append(m)
+                        seen.add(m["key"])
+            else:
+                print(f"  [WARN] Could not resolve model '{part}', skipping")
+        if result:
+            return result
+        print("[ERROR] No models could be resolved from comma-separated list")
+        print("  Available: " + ", ".join(f"{m['display']}" for m in filtered))
+        return None
+
+    # Single model: try exact match first (prevent substring collision)
     model_arg_lower = model_arg.lower()
     exact = [m for m in filtered if m["key"].lower() == model_arg_lower
              or m["display"].lower() == model_arg_lower]
@@ -522,11 +538,12 @@ def run_custom_benchmark(model_info: dict[str, Any], bench: dict[str, Any], samp
 
 # ── Pipeline 2/4: EvalPlus (HumanEval+, MBPP+) ────────────────
 # Two-stage process:
-#   1. evalplus.codegen  -> model generates code for all tasks
-#   2. evalplus.evaluate -> differential testing with plus_input
+#   1. Random sampling: sample_size tasks with seed (via evalplus API)
+#   2. evalplus.codegen via direct API call (filtered to selected tasks)
+#   3. evalplus.evaluate -> differential testing with plus_input
 # Uses evalplus-native datasets (humanEval, mbpp).
 # Returns: dict with pipeline="evalplus", score pass@1 (0-1).
-def run_evalplus(model_info: dict[str, Any], bench: dict[str, Any], id_range: str = "[0,5]", reasoning: bool = False) -> Optional[dict[str, Any]]:
+def run_evalplus(model_info: dict[str, Any], bench: dict[str, Any], sample_size: int = 5, seed: Optional[int] = None, reasoning: bool = False) -> Optional[dict[str, Any]]:
     model_key = model_info["key"]
     model_display = model_info["display"]
     dataset = bench["dataset"]
@@ -535,43 +552,69 @@ def run_evalplus(model_info: dict[str, Any], bench: dict[str, Any], id_range: st
     root_dir = os.path.join(RESULTS_DIR, f"evalplus_{model_key.replace('/', '_')}")
     os.makedirs(root_dir, exist_ok=True)
 
-    print(f"  [codegen] {dataset} {id_range} ...")
+    # ── Load dataset & randomly sample tasks ─────────────────
+    from evalplus.data import get_human_eval_plus, get_mbpp_plus
+    dataset_fn = get_human_eval_plus if dataset == "humaneval" else get_mbpp_plus
+    all_tasks = dataset_fn()
+    task_ids = sorted(all_tasks.keys(), key=lambda k: int(k.split("/")[1]))
+    import random as _random
+    rng = _random.Random(seed) if seed is not None else _random
+    n_select = min(sample_size, len(task_ids))
+    selected_ids = set(rng.sample(task_ids, n_select))
+    filtered_tasks = {k: v for k, v in all_tasks.items() if k in selected_ids}
+
+    print(f"  [codegen] {dataset}: {len(filtered_tasks)}/{len(all_tasks)} tasks (seed={seed})")
     t0 = time.time()
-    codegen_cmd = [
-        sys.executable, "-m", "evalplus.codegen",
-         "--model", "local-model",
-         "--dataset", dataset,
-         "--backend", "openai",
-        "--base-url", API_BASE,
-         "--id-range", id_range,
-         "--root", root_dir,
-    ]
-    m_id = re.search(r'\[0,(\d+)\]', id_range)
-    ss = int(m_id.group(1)) if m_id else 5
-    limit_scale = max(1.0, ss / 5.0)
-    eval_base = PIPELINE_TIMEOUTS["evalplus_base"]
-    eval_timeout = (eval_base * 2 if reasoning else eval_base) * limit_scale
-    if gptoss:
-        # GPT-OSS needs sampling (temp=1.0) and more tokens for reasoning
-        codegen_cmd.extend(["--temperature", "1.0"])
-    else:
-        codegen_cmd.append("--greedy")
-    r1 = subprocess.run(
-        codegen_cmd,
-        capture_output=True, text=True, timeout=eval_timeout,
-        encoding="utf-8", errors="replace"
+
+    # ── Codegen via evalplus Python API ──────────────────────
+    from evalplus.provider import make_model
+    from evalplus.codegen import codegen as evalplus_codegen
+
+    model_obj = make_model(
+        model="local-model",
+        backend="openai",
+        dataset=dataset,
+        base_url=API_BASE,
+        temperature=0.0,
+        instruction_prefix="Please provide a self-contained Python script that solves the following problem in a markdown code block:",
+        response_prefix="Below is a Python script with a self-contained function that solves the problem and passes corresponding tests:",
     )
-    out = r1.stdout[-300:] if r1.stdout else ""
-    if "Skipping" in out:
-        out = "\n".join(l for l in out.split("\n") if "100%" in l or "Skipping" not in l or "OpenAIChatDecoder" in l)
-    print(out)
-    if r1.returncode != 0:
-        print(f"  [ERROR] codegen failed: {r1.stderr[-300:]}")
-        return None
 
     temp_str = "1.0" if gptoss else "0.0"
     samples_path = os.path.join(root_dir, dataset,
                                 f"local-model_openai_temp_{temp_str}.jsonl")
+    os.makedirs(os.path.dirname(samples_path), exist_ok=True)
+
+    limit_scale = max(1.0, n_select / 5.0)
+    eval_base = PIPELINE_TIMEOUTS["evalplus_base"]
+    eval_timeout = (eval_base * 2 if reasoning else eval_base) * limit_scale
+
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FUTimeout
+    executor = ThreadPoolExecutor(max_workers=1)
+    future = executor.submit(
+        evalplus_codegen,
+        target_path=samples_path,
+        model=model_obj,
+        dataset=filtered_tasks,
+        greedy=not gptoss,
+        n_samples=1,
+        resume=True,
+    )
+    try:
+        future.result(timeout=eval_timeout)
+        print(f"  [OK] codegen finished ({len(filtered_tasks)} tasks)")
+    except _FUTimeout:
+        print(f"  [ERROR] codegen timed out after {eval_timeout:.0f}s")
+        executor.shutdown(wait=False)
+        return None
+    except Exception as e:
+        print(f"  [ERROR] codegen failed: {e}")
+        executor.shutdown(wait=False)
+        return None
+    finally:
+        executor.shutdown(wait=False)
+    del model_obj
+
     if not os.path.exists(samples_path):
         print(f"  [WARN] samples not found: {samples_path}")
         return None
@@ -1004,8 +1047,6 @@ def main() -> None:
         time.sleep(10)
         model_info["_api_model"] = api_model  # Unified ID for ALL pipelines
 
-        # EvalPlus uses [low, high) exclusive – therefore sample_size (not sample_size-1)
-        id_range = f"[0,{args.sample_size}]"
         model_results = []
 
         for bench in benchmarks:
@@ -1021,7 +1062,7 @@ def main() -> None:
                 elif bname in agentic_names:
                     result = run_agentic(model_info, limit=args.sample_size)
                 elif bname in ep_names:
-                    result = run_evalplus(model_info, bench, id_range=id_range, reasoning=reasoning)
+                    result = run_evalplus(model_info, bench, sample_size=args.sample_size, seed=args.seed, reasoning=reasoning)
                 elif bname in lmeval_names:
                     result = run_lmeval(model_info, bench, limit=args.sample_size, reasoning=reasoning)
                 else:

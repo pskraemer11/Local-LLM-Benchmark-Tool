@@ -558,14 +558,14 @@ Bereits bei 16 Experten läuft das Modell stabil bei voller Kontextlänge.
 |-----------------------------------|-------------------------------------------------------------------|
 | **Hersteller**                    | IBM                                                               |
 | **Architektur**                   | Dense, 60 Layer, Attention heads 32, KV-heads 8, SwiGLU, RoPE     |
-| **Reasoning**                     | Nein                                                              |
+| **Reasoning**                     | Nein (?) aber sehr geschwätzig, erzeugt viele Token               |
 | **Param. Total / Active**         | 30B (100%)                                                        |
 | **Quantisierung/Modellgröße**     | Q3_K_S (12.6 GB)                                                  |
-| **Kontextlänge** (token)          | 131K                                                              |
-| **GPU-Tauglichkeit (16 GB VRAM)** | ⚠️ Knapp (12.6 GB + KV-Cache => 15.5 GB bei 98k)                |
+| **Kontextlänge** (token)          | 131K, hier 49 k                                                   |
+| **GPU-Tauglichkeit (16 GB VRAM)** | ⚠️ Knapp (12.6 GB + KV-Cache => 13.7 GB VRAM + 0.7 GB shared RAM)|
 | **Benchmark-Typ**                 | Coding + MC                                                       |
 | **Lizenz**                        | Apache-2.0                                                        |
-| **Einschätzung**                  | IBM Granite 4.1 30B. Dense. Tool-Use-fähig. Große Kontextlänge (131K). |
+| **Einschätzung**                  | IBM Granite 4.1 30B. Dense. Tool-Use-fähig. erzeugt viele Token   |
 
 **Architektur-Hinweis:** GQA (Grouped-Query Attention) mit 32 Q-Heads und 8 KV-Heads. Granite-Architektur (IBM). Apache-2.0-Lizenz.
 
@@ -1077,6 +1077,22 @@ HF-Modellkarte: https://huggingface.co/Qwen/Qwen3.5-9B
 
 ---
 
+### qwen3.5-9b-deepseek-v4-flash (9B) - gelöscht
+
+| Eigenschaft                       | Wert                                                              |
+|-----------------------------------|-------------------------------------------------------------------|
+| **Hersteller**                    | Qwen (Alibaba)                                                    |
+| **Architektur**                   | Dense (Qwen3.5)                                                   |
+| **Reasoning**                     | Nein                                                              |
+| **Param. Total / Active**         | 9B (100%)                                                         |
+| **Quantisierung/Modellgröße**     | Q8_0 (9.5 GB)                                                     |
+| **Kontextlänge** (token)          | 128K                                                              |    
+| **GPU-Tauglichkeit (16 GB VRAM)** | ✅ Ja (9.5 GB)                                                    |
+| **Benchmark-Typ**                 | Coding + MC                                                       |
+| **Einschätzung**                  | DeepSeek-v4-Flash-Version von Qwen3.5 9B. Q8 = hohe Präzision     |
+
+---
+
 ### qwen2.5-14b-instruct-1m (gelöscht)
 
 | Eigenschaft                       | Wert                                                                                      |
@@ -1129,35 +1145,124 @@ HF: https://huggingface.co/Qwen/Qwen2.5-Coder-14B
 
 ---
 
-### qwen2.5-coder-32b-instruct (gelöscht)
+### qwen3-coder-reap-25b-a3b-i1 - REAP pruned Base Model: Qwen3-Coder-30B-A3B-Instruct 
+
+| Eigenschaft                       | Wert                                                                                    |
+|-----------------------------------|-----------------------------------------------------------------------------------------|
+| **Hersteller**                    | Qwen (Alibaba Cloud)                                                                    |
+| **Architektur**                   | **MoE**, Qwen2.5-Architektur; Sparse Mixture-of-Experts (SMoE) Causal Language Model    |
+| **Reasoning**                     | Nein                                                                                    |
+| **Total / Active** Parameter      | 25B / 3B, REAP-pruned von 30B auf 25B                                                   |
+| **Layers / Heads**                | 48 Layers, Number of Attention Heads (GQA): 32 for Q and 4 for KV                       |    
+| **Experts**                       | Architektur # 103 (REAP-pruned from 128); Top-k (aktiv): 8; shared: Nein                |
+                                        => mit 16GB VRAM in LMS: #experts = max 16 (je nach Kontextlänge)                     |
+| **Quantisierung/Modellgröße**     | Q3_K_M (12.0 GB), IQ4_XS (13.4 GB), Q4_K_S (14.2 GB), imatrix und static                |
+| **Kontextlänge** (token)          | 262 k Token max. bei Q3_K_M möglich / hier: 131 k bei allen Modellen                    |
+| **GPU-Tauglichkeit (16 GB VRAM)** | Q3_K_M: ⚠️ knapp (12.0 GB + KV-Cache Quant. Q5_1/IQ4_NL => 15.6 GB + 0.6 shared GPU mem |
+|                                   | IQ4_XS: ⚠️ knapp (13.4 GB + KV-Cache Quant. Q5_1/IQ4_NL => 15.5 GB + 4.9 shared GPU mem |
+|                                   | Q4_K_S: ⚠️ knapp (14.2 GB + KV-Cache Quant. Q5_1/IQ4_NL => 14.8 GB + 3.9 shared GPU bei 98k Kontextlänge |
+| **Benchmark-Typ**                 | code generation, code reasoning and code fixing, Code Agents, mathematics and general   |
+| **Lizenz**                        | Apache-2.0                                                                              |
+
+**ACHTUNG** läuft nicht mit mehr als 24 / 32 Experten, je nach Kontextlänge und KV-Quant. (max Einstellung 103).
+
+Qwen3 bietet folgende Hauptmerkmale:
+- Unterstützung für nahtlosen Wechsel zwischen dem „Denkmodus“ [Reasoning] (für komplexe logische Schlussfolgerungen, Mathematik und Programmierung) und dem „Nicht-Denkmodus“ (für effiziente, allgemeine Dialoge) innerhalb eines einzigen Modells, 
+    wodurch eine optimale Leistung in verschiedenen Szenarien gewährleistet wird.
+- Schlussfolgerungsfähigkeiten, die die bisherigen Modelle QwQ (im Denkmodus) und Qwen2.5 (im Nicht-Denkmodus) in den Bereichen Mathematik, Codegenerierung und logisches Schlussfolgern auf der Grundlage von Allgemeinwissen übertreffen.
+- Anpassung an menschliche Präferenzen, insbesondere bei kreativem Schreiben, Rollenspielen, mehrrundigen Dialogen und der Befolgung von Anweisungen, um ein natürlicheres, fesselndes und immersives Gesprächserlebnis zu bieten.
+- Fachkompetenz im Bereich der Agentenfähigkeiten, die eine präzise Integration mit externen Tools sowohl im Denk- als auch im Nicht-Denk-Modus ermöglicht.
+- Unterstützung von über 100 Sprachen und Dialekten mit starken Fähigkeiten zur mehrsprachigen Befehlsausführung und Übersetzung.
+
+(https://huggingface.co/cerebras/Qwen3-Coder-REAP-25B-A3B
+
+---
+
+### qwen3.6-27b (gelöscht)
 
 | Eigenschaft                       | Wert                                                              |
 |-----------------------------------|-------------------------------------------------------------------|
 | **Hersteller**                    | Qwen (Alibaba Cloud)                                              |
-| **Architektur**                   | Dense (Qwen2.5, 64 Layer)                                        |
-| **Reasoning**                     | Nein                                                              |
-| **Param. Total / Active**         | 32.5B (100%)                                                      |
-| **Quantisierung/Modellgröße**     | Q3_K_S (14.40 GB)                                                 |
-| **Kontextlänge** (token)          | 32K (128K via YaRN)                                               |
-| **GPU-Tauglichkeit (16 GB VRAM)** | ⚠️ Knapp (14.4 GB + KV-Cache Quant. Q8/IQ4_NL => 16.1 GB)        |
-| **Benchmark-Typ**                 | Coding                                                            |
+| **Architektur**                   | Dense (Qwen3.6, Hybrid Gated DeltaNet + Attention)                |
+| **Reasoning**                     | **Ja** (Thinking-Mode via CoT)                                    |
+| **Param. Total / Active**         | 27.8B (100%)                                                      |
+| **Layers / Heads**                | 64 Layers                                                         |    
+|                                   |  Gated DeltaNet: # Linear Attention Heads 48 for V + 16 for QK    |
+|                                   |  Gated Attention # Heads 24 for Q and 4 for KV                    |
+| **Quantisierung/Modellgröße**     | Q3_K_S (12.4 GB)                                                  |
+| **Kontextlänge** (token)          | 262K natively, extensible up to 1M / hier: 98K                    | 
+| **GPU-Tauglichkeit (16 GB VRAM)** | ⚠️ Knapp (12.4 GB + Kontext x KV-Cache Q8/IQ4_NL => 15.8 GB)     |
+| **Timeout ×2**                    | ✅ Aktivieren (Thinking)                                         |
+| **Benchmark-Typ**                 | Coding + MC (Flagship-Level)                                      |
 | **Lizenz**                        | Apache-2.0                                                        |
-| **Einschätzung**                  | Größter Qwen2.5-Coder. 64 Layer, 32.5B. Hohe Coding-Qualität.    |
 
-**Architektur-Hinweis:** 64 Layer, Hidden Size 5120, 40 Query-Heads, 8 KV-Heads, Intermediate Size 27648. Kein Embedding Tying.
 
-**KV-Cache:** ~160 KB/Tok. → bei 32K ~5.1 GB rechnerisch.
+**New cpabilities**
+This release delivers substantial upgrades, particularly in:
+- *Agentic Coding*: the model now handles frontend workflows and repository-level reasoning with greater fluency and precision.
+- *Thinking Preservation*: there is a new option to retain reasoning context from historical messages, streamlining iterative development and reducing overhead.
 
-**Achtung:** Q3_K_S = starke Quantisierung. Qualitätsverluste möglich. Idealer Q5_K_M (~22 GB) passt nicht auf 16 GB.
+**Critical issue** Benchmark-Test für Coding: The model generates reasoning tokens instead of code. "0.0 tok/s" and "≈0% Thinking" 
+indicates the model is producing thinking tokens that aren't being counted. The model is a reasoning model that outputs thinking first,  
+then the actual answer. The benchmark harness can't parse the code because it's buried in reasoning.
 
-instruction-tuned 32B Qwen2.5-Coder model, which has the following features:
-    Type: Causal Language Models
-    Training Stage: Pretraining & Post-training
+Parameter: "max_tokens": 8192,       # ← Erhöht von 2048
+           "enable_thinking": False,  # ← Thinking (für Coding) deaktivieren; wo???
 
-HF: https://huggingface.co/Qwen/Qwen2.5-Coder-32B-Instruct
+**Architektur-Details:**
+- Language Model: 27B, Hidden Size 5120, Token Embedding 248320, 64 Layer
+- Hidden Layout: 16 × (3 × (Gated DeltaNet → FFN) → 1 × (Gated Attention → FFN))
+- Gated DeltaNet: 48 V-Heads / 16 QK-Heads, Head Dim 128
+- Gated Attention: 24 Q-Heads / 4 KV-Heads, Head Dim 256, RoPE Dim 64
+- FFN: Intermediate Size 17408
+- MTP: trained with multi-steps
+
+**KV-Cache:** ~128 KB/Tok. (nur 4 KV-Heads bei Attention-Blöcken × 16 Attention-Layer) → bei 262K ~33 GB (mit KV-Quant). Nur mit stark reduziertem Kontext auf 16 GB.
+
+**Achtung:** Q3_K_S = starke Quantisierung. Für volle Qualität Q5_K_M empfohlen (~19 GB), dann nicht auf 16 GB VRAM.
+
+Blog: https://qwen.ai/blog?id=qwen3.6-27b
+HF: https://huggingface.co/Qwen/Qwen3.6-27B
 
 ---
 
+### qwen3.6-28b-reap-i1 (28B) - REAP-pruned from Qwen/Qwen3.6-35B-A3B (gelöscht) => 2 Quantisierungen!
+
+| Eigenschaft                       | Wert                                                                              |
+|-----------------------------------|-----------------------------------------------------------------------------------|
+| **Hersteller**                    | Qwen (Alibaba Cloud)                                                              |
+| **Architektur**                   | **MoE**, qwen35moe, A3B-Active-Architektur, REAP-pruned from Qwen3.6-35B-A3B      |
+| **Reasoning**                     | Ja                                                                                |
+| **Layers / Heads**                | Hybrid Gated DeltaNet + Attention; 40 Layer.                                      |
+| **Experts**                       | original 256 Experten/Layer auf 205 pruned (REAP-Methode)                         |      
+                                        Experten, aktiv: 8 (+ 1 shared) => #experts >= 9                                |
+                                        LMS: #205 laden auch, selbst mit 262k Kontext, aber dann extrem langsam!        |
+| **Param. Total / Active**         | 28B (pruned from 35B)                                                             |
+| **Quantisierung/Modellgröße**     | IQ3_K_M (12.63 GB) und Q3_K_S (12.4 GB)                                           |
+| **Kontextlänge** (token)          | 262K max.; hier: 131 k                                                            |
+| **Lizenz**                        | Apache-2.0                                                                        |
+| **GPU-Tauglichkeit (16 GB VRAM)** | ⚠️ knapp mit 262k Kontext u. 205 experts (sehr langsam):                         |
+                                        VRAM = 12.6 GB + KV-Cache Q8_0/IQ4_NL => 15.6 GB VRAM + 3.1 GB shared GPU-RAM   |
+                                      ✅ ja mit 131k Kontext u. 18 experts (sehr viel schneller!):                     |
+                                        VRAM = 12.6 GB + KV-Cache Q5_1/IQ4_NL => 13.8 GB VRAM + 0.5 GB shared GPU-RAM   |
+| **Benchmark-Typ**                 | Coding + MC                                                                       |
+| **Einschätzung**                  | Große Kontextlänge 262 k möglich & selbst mit 205 experts lädt das Modell.        | 
+                                        ABER: dann sehr langsam ~5 t/s / besser: 18 experts => 30-250 t/s               |
+                                        Known limitations
+**Bekannte Einschränkungen**:
+    Refusal behavior follows the base model plus Opus SFT; no explicit abliteration was applied in this release. 
+    The model will refuse straight adversarial probes at roughly base-model rates.
+    Reasoning quality on GSM8K-style problems depends on the <think> chain-of-thought; short max-tokens limits hurt accuracy.
+    Structured-output calibration is oversampled vs. base mix (JSON/Mermaid experts preferentially retained).
+                                        
+**Critical issue** Benchmark-Test für Coding: The model generates reasoning tokens instead of code. "0.0 tok/s" and "≈0% Thinking" 
+indicates the model is producing thinking tokens that aren't being counted. The model is a reasoning model that outputs thinking first,  
+then the actual answer. The benchmark harness can't parse the code because it's buried in reasoning.
+
+Parameter: "max_tokens": 8192,       # ← Erhöht von 2048
+           "enable_thinking": False,  # ← Thinking (für Coding) deaktivieren
+           
+---
 
 ### qwen3-30b-a3b-python-coder - fine-tuned version of Qwen/Qwen3-30B-A3B (gelöscht)
 
@@ -1189,129 +1294,34 @@ HF: https://huggingface.co/Qwen/Qwen3-Coder-30B-A3B-Instruct
 
 ---
 
-### qwen3-coder-reap-25b-a3b-i1 - gleiches Modell mit 3 Quantisierungen: Q3_K_M (12.0 GB), IQ4_XS (13.4 GB) und Q4_K_S (14.2 GB)
-
-| Eigenschaft                       | Wert                                                                                    |
-|-----------------------------------|-----------------------------------------------------------------------------------------|
-| **Hersteller**                    | Qwen (Alibaba Cloud)                                                                    |
-| **Architektur**                   | **MoE**, Qwen2.5-Architektur; 48 Layer; REAP-pruned von 30B auf 25B                     |
-| **Reasoning**                     | Nein                                                                                    |
-| **Total / Active** Parameter      | 25B / 3B                                                                                |
-| **Experts**                       | Architektur # 103 (REAP-pruned from 128); Top-k (aktiv): 8; shared: Nein                |
-                                        => mit 16GB VRAM in LMS: #experts = max 16 (je nach Kontextlänge)                     |
-| **Quantisierung/Modellgröße**     | Q3_K_M (12.0 GB), IQ4_XS (13.4 GB), Q4_K_S (14.2 GB)                                    |
-| **Kontextlänge** (token)          | 262 k Token max. bei Q3_K_M möglich / hier: 131 k bei allen Modellen                    |
-| **GPU-Tauglichkeit (16 GB VRAM)** | Q3_K_M: ⚠️ knapp (12.0 GB + KV-Cache Quant. Q5_1/IQ4_NL => 15.6 GB + 0.6 shared GPU mem |
-|                                   | IQ4_XS: ⚠️ knapp (13.4 GB + KV-Cache Quant. Q5_1/IQ4_NL => 15.5 GB + 4.9 shared GPU mem |
-|                                   | Q4_K_S: ⚠️ knapp (14.2 GB + KV-Cache Quant. Q5_1/IQ4_NL => 14.8 GB + 3.9 shared GPU bei 98k Kontextlänge |
-| **Benchmark-Typ**                 | code generation, code reasoning and code fixing, Code Agents, mathematics and general   |
-| **Lizenz**                        | Apache-2.0                                                                              |
-
-**ACHTUNG** läuft nicht mit mehr als 24 / 32 Experten, je nach Kontextlänge und KV-Quant. (max Einstellung 103).
-
-Qwen3 bietet folgende Hauptmerkmale:
-- Unterstützung für nahtlosen Wechsel zwischen dem „Denkmodus“ [Reasoning] (für komplexe logische Schlussfolgerungen, Mathematik und Programmierung) und dem „Nicht-Denkmodus“ (für effiziente, allgemeine Dialoge) innerhalb eines einzigen Modells, 
-    wodurch eine optimale Leistung in verschiedenen Szenarien gewährleistet wird.
-- Schlussfolgerungsfähigkeiten, die die bisherigen Modelle QwQ (im Denkmodus) und Qwen2.5 (im Nicht-Denkmodus) in den Bereichen Mathematik, Codegenerierung und logisches Schlussfolgern auf der Grundlage von Allgemeinwissen übertreffen.
-- Anpassung an menschliche Präferenzen, insbesondere bei kreativem Schreiben, Rollenspielen, mehrrundigen Dialogen und der Befolgung von Anweisungen, um ein natürlicheres, fesselndes und immersives Gesprächserlebnis zu bieten.
-- Fachkompetenz im Bereich der Agentenfähigkeiten, die eine präzise Integration mit externen Tools sowohl im Denk- als auch im Nicht-Denk-Modus ermöglicht.
-- Unterstützung von über 100 Sprachen und Dialekten mit starken Fähigkeiten zur mehrsprachigen Befehlsausführung und Übersetzung.
-
----
-
-### qwen3.5-9b-deepseek-v4-flash (9B) - gelöscht
-
-| Eigenschaft                       | Wert                                                              |
-|-----------------------------------|-------------------------------------------------------------------|
-| **Hersteller**                    | Qwen (Alibaba)                                                    |
-| **Architektur**                   | Dense (Qwen3.5)                                                   |
-| **Reasoning**                     | Nein                                                              |
-| **Param. Total / Active**         | 9B (100%)                                                         |
-| **Quantisierung/Modellgröße**     | Q8_0 (9.5 GB)                                                     |
-| **Kontextlänge** (token)          | 128K                                                              |    
-| **GPU-Tauglichkeit (16 GB VRAM)** | ✅ Ja (9.5 GB)                                                    |
-| **Benchmark-Typ**                 | Coding + MC                                                       |
-| **Einschätzung**                  | DeepSeek-v4-Flash-Version von Qwen3.5 9B. Q8 = hohe Präzision     |
-
----
-
-### qwen3.6-27b (gelöscht)
+### qwen2.5-coder-32b-instruct (gelöscht)
 
 | Eigenschaft                       | Wert                                                              |
 |-----------------------------------|-------------------------------------------------------------------|
 | **Hersteller**                    | Qwen (Alibaba Cloud)                                              |
-| **Architektur**                   | Dense (Qwen3.6, Hybrid Gated DeltaNet + Attention)                |
-| **Reasoning**                     | **Ja** (Thinking-Mode via CoT)                                    |
-| **Param. Total / Active**         | 27.8B (100%)                                                      |
-| **Layers / Heads**                | 64 Layers                                                         |    
-|                                     |  Gated DeltaNet: # Linear Attention Heads 48 for V + 16 for QK    |
-|                                     |  Gated Attention # Heads 24 for Q and 4 for KV                    |
-| **Quantisierung/Modellgröße**     | Q3_K_S (12.4 GB)                                                  |
-| **Kontextlänge** (token)          | 262K natively, extensible up to 1M / hier: 98K                    | 
-| **GPU-Tauglichkeit (16 GB VRAM)** | ⚠️ Knapp (12.4 GB + Kontext x KV-Cache Q8/IQ4_NL => 15.8 GB)     |
-| **Timeout ×2**                    | ✅ Aktivieren (Thinking)                                         |
-| **Benchmark-Typ**                 | Coding + MC (Flagship-Level)                                      |
+| **Architektur**                   | Dense (Qwen2.5, 64 Layer)                                        |
+| **Reasoning**                     | Nein                                                              |
+| **Param. Total / Active**         | 32.5B (100%)                                                      |
+| **Quantisierung/Modellgröße**     | Q3_K_S (14.40 GB)                                                 |
+| **Kontextlänge** (token)          | 32K (128K via YaRN)                                               |
+| **GPU-Tauglichkeit (16 GB VRAM)** | ⚠️ Knapp (14.4 GB + KV-Cache Quant. Q8/IQ4_NL => 16.1 GB)        |
+| **Benchmark-Typ**                 | Coding                                                            |
 | **Lizenz**                        | Apache-2.0                                                        |
+| **Einschätzung**                  | Größter Qwen2.5-Coder. 64 Layer, 32.5B. Hohe Coding-Qualität.    |
 
-**Critical issue** Benchmark-Test für Coding: The model generates reasoning tokens instead of code. "0.0 tok/s" and "≈0% Thinking" 
-indicates the model is producing thinking tokens that aren't being counted. The model is a reasoning model that outputs thinking first,  
-then the actual answer. The benchmark harness can't parse the code because it's buried in reasoning.
+**Architektur-Hinweis:** 64 Layer, Hidden Size 5120, 40 Query-Heads, 8 KV-Heads, Intermediate Size 27648. Kein Embedding Tying.
 
-Parameter: "max_tokens": 8192,       # ← Erhöht von 2048
-           "enable_thinking": False,  # ← Thinking (für Coding) deaktivieren
+**KV-Cache:** ~160 KB/Tok. → bei 32K ~5.1 GB rechnerisch.
 
-**Architektur-Details:**
-- Language Model: 27B, Hidden Size 5120, Token Embedding 248320, 64 Layer
-- Hidden Layout: 16 × (3 × (Gated DeltaNet → FFN) → 1 × (Gated Attention → FFN))
-- Gated DeltaNet: 48 V-Heads / 16 QK-Heads, Head Dim 128
-- Gated Attention: 24 Q-Heads / 4 KV-Heads, Head Dim 256, RoPE Dim 64
-- FFN: Intermediate Size 17408
-- MTP: trained with multi-steps
+**Achtung:** Q3_K_S = starke Quantisierung. Qualitätsverluste möglich. Idealer Q5_K_M (~22 GB) passt nicht auf 16 GB.
 
-**KV-Cache:** ~128 KB/Tok. (nur 4 KV-Heads bei Attention-Blöcken × 16 Attention-Layer) → bei 262K ~33 GB (mit KV-Quant). Nur mit stark reduziertem Kontext auf 16 GB.
+instruction-tuned 32B Qwen2.5-Coder model, which has the following features:
+    Type: Causal Language Models
+    Training Stage: Pretraining & Post-training
 
-**Achtung:** Q3_K_S = starke Quantisierung. Für volle Qualität Q5_K_M empfohlen (~19 GB), dann nicht auf 16 GB VRAM.
+HF: https://huggingface.co/Qwen/Qwen2.5-Coder-32B-Instruct
 
-Blog: https://qwen.ai/blog?id=qwen3.6-27b
-HF: https://huggingface.co/Qwen/Qwen3.6-27B
 
----
-
-### qwen3.6-28b-reap-i1 (28B) - REAP-pruned from Qwen/Qwen3.6-35B-A3B (gelöscht)
-
-| Eigenschaft                       | Wert                                                                              |
-|-----------------------------------|-----------------------------------------------------------------------------------|
-| **Hersteller**                    | Qwen (Alibaba Cloud)                                                              |
-| **Architektur**                   | **MoE**, qwen35moe, A3B-Active-Architektur, REAP-pruned from Qwen3.6-35B-A3B      |
-| **Reasoning**                     | Ja                                                                                |
-| **Layers / Heads**                | Hybrid Gated DeltaNet + Attention; 40 Layer.                                      |
-| **Experts**                       | original 256 Experten/Layer auf 205 pruned (REAP-Methode)                         |      
-                                        Experten, aktiv: 8 (+ 1 shared) => #experts >= 9                                |
-                                        LMS: #205 laden auch, selbst mit 262k Kontext, aber dann extrem langsam!        |
-| **Param. Total / Active**         | 28B (pruned from 35B)                                                             |
-| **Quantisierung/Modellgröße**     | IQ3_K_M (12.63 GB)                                                                |
-| **Kontextlänge** (token)          | 262K max.                                                                         |
-| **Lizenz**                        | Apache-2.0                                                                        |
-| **GPU-Tauglichkeit (16 GB VRAM)** | ⚠️ knapp mit 262k Kontext u. 205 experts (sehr langsam):                         |
-                                        VRAM = 12.6 GB + KV-Cache Q8_0/IQ4_NL => 15.6 GB VRAM + 3.1 GB shared GPU-RAM   |
-                                      ✅ ja mit 131k Kontext u. 18 experts (sehr viel schneller!):                     |
-                                        VRAM = 12.6 GB + KV-Cache Q5_1/IQ4_NL => 13.8 GB VRAM + 0.5 GB shared GPU-RAM   |
-| **Benchmark-Typ**                 | Coding + MC                                                                       |
-| **Einschätzung**                  | Große Kontextlänge 262 k möglich & selbst mit 205 experts lädt das Modell.        | 
-                                        ABER: dann sehr langsam ~5 t/s / besser: 18 experts => 30-250 t/s               |
-                                        Known limitations
-**Bekannte Einschränkungen**:
-    Refusal behavior follows the base model plus Opus SFT; no explicit abliteration was applied in this release. 
-    The model will refuse straight adversarial probes at roughly base-model rates.
-    Reasoning quality on GSM8K-style problems depends on the <think> chain-of-thought; short max-tokens limits hurt accuracy.
-    Structured-output calibration is oversampled vs. base mix (JSON/Mermaid experts preferentially retained).
-                                        
-**Critical issue** Benchmark-Test für Coding: The model generates reasoning tokens instead of code. "0.0 tok/s" and "≈0% Thinking" 
-indicates the model is producing thinking tokens that aren't being counted. The model is a reasoning model that outputs thinking first,  
-then the actual answer. The benchmark harness can't parse the code because it's buried in reasoning.
-
-Parameter: "max_tokens": 8192,       # ← Erhöht von 2048
-           "enable_thinking": False,  # ← Thinking (für Coding) deaktivieren
 ---
 
 ### starcoder2-15b-instruct-v0.1 (15B) - (gelöscht)
