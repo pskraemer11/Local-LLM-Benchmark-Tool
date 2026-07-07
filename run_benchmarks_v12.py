@@ -231,27 +231,26 @@ def get_available_models() -> list[dict[str, Any]]:
             models = []
             for item in data if isinstance(data, list) else data.values():
                 if isinstance(item, dict):
-                    key = item.get("modelKey", "")
-                    if key:
-                        models.append({
-                            "key": key,
-                            "display": item.get("displayName", key),
-                            "variant": item.get("selectedVariant") or key,
-                        })
-            # Append quant variant (e.g., "@q3_k_s") to every display name
-            # so models are uniquely identifiable in interactive selection
-            for m in models:
-                d = m["display"]
-                key = m["key"]
-                quant_suffix = ""
-                if "@" in key:
-                    quant_suffix = "@" + key.split("@", 1)[1]
-                elif "/" not in key:
-                    parts = key.split("_")
-                    if len(parts) > 2:
-                        quant_suffix = "_" + "_".join(parts[-2:])
-                if quant_suffix and not d.endswith(quant_suffix):
-                    m["display"] = f"{d}{quant_suffix}"
+                    base_key = item.get("modelKey", "")
+                    if not base_key:
+                        continue
+                    quant = item.get("quantization", {}) or {}
+                    quant_name = quant.get("name", "") if isinstance(quant, dict) else ""
+                    sv = item.get("selectedVariant") or ""
+                    # Unique key per variant: selectedVariant or baseKey@quant
+                    unique_key = sv if sv and sv != base_key else (f"{base_key}@{quant_name}" if quant_name else base_key)
+                    display = item.get("displayName", base_key)
+                    # Append quant suffix for unique identification
+                    if quant_name and not display.endswith(f"@{quant_name}"):
+                        display = f"{display}@{quant_name}"
+                    models.append({
+                        "key": unique_key,
+                        "model_key": base_key,
+                        "display": display,
+                        "variant": sv or base_key,
+                        "quant": quant_name,
+                        "variants": item.get("variants") or [],
+                    })
             if models:
                 return models
         print(f"[WARN] lms ls failed: {result.stderr.strip()}")
@@ -598,7 +597,7 @@ def run_evalplus(model_info: dict[str, Any], bench: dict[str, Any], sample_size:
         dataset=filtered_tasks,
         greedy=not gptoss,
         n_samples=1,
-        resume=True,
+        resume=False,
     )
     try:
         future.result(timeout=eval_timeout)
@@ -1002,6 +1001,7 @@ def main() -> None:
     all_summary = []
     for midx, model_info in enumerate(models, 1):
         model_key = model_info["key"]
+        load_key = model_info.get("model_key", model_key)   # base key for lms load
         model_display = model_info["display"]
         reasoning = _is_reasoning_model(model_key) or _is_qwen3_6_model(model_key)
         print(f"\n{'=' * 60}")
@@ -1032,12 +1032,12 @@ def main() -> None:
             else:
                 print(f"  [INFO] Different model loaded ({loaded['display_name']}) – unloading...")
                 unload_all_models()
-                ok, api_model = load_model_via_lms(model_key, context_length=ctx_len)
+                ok, api_model = load_model_via_lms(load_key, context_length=ctx_len)
                 if not ok:
                     print(f"  [ERROR] Loading failed. Skipping.")
                     continue
         else:
-            ok, api_model = load_model_via_lms(model_key, context_length=ctx_len)
+            ok, api_model = load_model_via_lms(load_key, context_length=ctx_len)
             if not ok:
                 print(f"  [ERROR] Loading failed. Skipping.")
                 continue
@@ -1046,6 +1046,15 @@ def main() -> None:
         print("  [INFO] Waiting 10s for API initialization...")
         time.sleep(10)
         model_info["_api_model"] = api_model  # Unified ID for ALL pipelines
+
+        # Warn if loaded variant differs from requested quant
+        all_variants = model_info.get("variants") or []
+        if len(all_variants) > 1 and api_model:
+            desired_quant = model_info.get("quant", "").lower()
+            if desired_quant and desired_quant not in api_model.lower():
+                print(f"  [WARN] Requested '@{desired_quant}' but '{api_model}' loaded")
+                print(f"  [WARN] Available variants: {', '.join(v.split('@')[-1] for v in all_variants)}")
+                print(f"  [WARN] Load specific quant via LM Studio GUI or install only the desired variant")
 
         model_results = []
 
@@ -1086,7 +1095,7 @@ def main() -> None:
                             ok = True
                     if not ok:
                         print(f"  [WARN] Model after {bname} no longer loaded – reloading...")
-                        load_model_via_lms(model_key)
+                        load_model_via_lms(load_key)
                         import time as _t
                         _t.sleep(10)
             except subprocess.TimeoutExpired:

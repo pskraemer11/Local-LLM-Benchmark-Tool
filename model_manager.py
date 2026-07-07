@@ -169,7 +169,7 @@ def _ensure_lmstudio_running() -> bool:
 
 def load_model_via_lms(model_key: str, context_length: Optional[int] = None) -> tuple[bool, Optional[str]]:
     print(f"\n  [INFO] Loading '{model_key}'...")
-    cmd = ["lms", "load", model_key, "--yes"]
+    cmd = ["lms", "load", model_key, "--yes", "--gpu", "max"]           # --gpu max ist wichtig, um Laufzeit zu minimieren.
     if context_length is not None:
         cmd += ["-c", str(context_length)]
         print(f"  [INFO] Context-Length set to {context_length}")

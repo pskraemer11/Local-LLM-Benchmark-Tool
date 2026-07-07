@@ -462,29 +462,26 @@ def get_available_models() -> list[dict[str, Any]]:
             models = []
             for item in data if isinstance(data, list) else data.values():
                 if isinstance(item, dict):
-                    key = item.get("modelKey", "")
-                    if key:
-                        models.append({
-                            "key": key,
-                            "display": item.get("displayName", key),
-                            "identifier": item.get("indexedModelIdentifier", key),
-                            "params": item.get("paramsString", ""),
-                            "publisher": item.get("publisher", ""),
-                            "quant": item.get("quantization", {}).get("name", ""),
-                        })
-            # Append quant variant (e.g., "@q3_k_s") to every display name
-            # so models are uniquely identifiable in interactive selection
-            for m in models:
-                d = m["display"]
-                key = m["key"]
-                quant = m.get("quant", "")
-                quant_suffix = ""
-                if quant:
-                    quant_suffix = f"@{quant}" if not quant.startswith("@") else quant
-                elif "@" in key:
-                    quant_suffix = "@" + key.split("@", 1)[1]
-                if quant_suffix and not d.endswith(quant_suffix):
-                    m["display"] = f"{d}{quant_suffix}"
+                    base_key = item.get("modelKey", "")
+                    if not base_key:
+                        continue
+                    quant = item.get("quantization", {}) or {}
+                    quant_name = quant.get("name", "") if isinstance(quant, dict) else ""
+                    sv = item.get("selectedVariant") or ""
+                    unique_key = sv if sv and sv != base_key else (f"{base_key}@{quant_name}" if quant_name else base_key)
+                    display = item.get("displayName", base_key)
+                    if quant_name and not display.endswith(f"@{quant_name}"):
+                        display = f"{display}@{quant_name}"
+                    models.append({
+                        "key": unique_key,
+                        "model_key": base_key,
+                        "display": display,
+                        "identifier": item.get("indexedModelIdentifier", base_key),
+                        "params": item.get("paramsString", ""),
+                        "publisher": item.get("publisher", ""),
+                        "quant": quant_name,
+                        "variants": item.get("variants") or [],
+                    })
             if models:
                 return models
         print(f"[WARN] lms ls failed: {result.stderr.strip()}")

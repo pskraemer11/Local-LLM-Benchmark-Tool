@@ -50,16 +50,22 @@ def _get_model_info() -> Dict[str, Any]:
             for item in data if isinstance(data, list) else data.values():
                 if isinstance(item, dict):
                     mk = item.get("modelKey", "")
-                    if mk:
-                        sz_bytes = item.get("sizeBytes", 0) or 0
-                        quant = item.get("quantization", {}) or {}
-                        display = item.get("displayName", "")
-                        info[mk] = {
-                            "displayName": display,
-                            "vram_gb": round(sz_bytes / 1e9, 2),
-                            "params": item.get("paramsString", "?"),
-                            "quant": quant.get("name", "?") if isinstance(quant, dict) else str(quant),
-                        }
+                    if not mk:
+                        continue
+                    sz_bytes = item.get("sizeBytes", 0) or 0
+                    quant = item.get("quantization", {}) or {}
+                    quant_name = quant.get("name", "?") if isinstance(quant, dict) else str(quant)
+                    sv = item.get("selectedVariant") or ""
+                    # Build unique key per variant
+                    unique_key = sv if sv and sv != mk else f"{mk}@{quant_name}"
+                    display = item.get("displayName", "")
+                    info[unique_key] = {
+                        "displayName": display,
+                        "vram_gb": round(sz_bytes / 1e9, 2),
+                        "params": item.get("paramsString", "?"),
+                        "quant": quant_name,
+                        "modelKey": mk,
+                    }
     except Exception:
         pass
     _MODEL_INFO_CACHE = info
@@ -73,6 +79,12 @@ def _get_display_name(model_key: str) -> str:
         dn = info[model_key].get("displayName")
         if dn:
             return dn
+    # Search by stored modelKey field (variant-aware)
+    for mk, meta in info.items():
+        if meta.get("modelKey") == model_key:
+            dn = meta.get("displayName")
+            if dn:
+                return dn
     # Fuzzy: strip publisher prefix
     import re as _re
     mk_norm = _re.sub(r"^[a-z0-9_-]+/", "", model_key.lower())
@@ -100,7 +112,13 @@ def _lookup_vram(model_key: str) -> Optional[Dict[str, Any]]:
     lms_match = None
     if model_key in info:
         lms_match = info[model_key]
-    else:
+    elif not lms_match:
+        # Search by stored modelKey field (variant-aware)
+        for mk, meta in info.items():
+            if meta.get("modelKey") == model_key:
+                lms_match = meta
+                break
+    if not lms_match:
         # Fuzzy: strip publisher prefix, match normalized
         import re as _re
         dk_norm = _re.sub(r"[^a-z0-9]", "", model_key.lower())
@@ -419,7 +437,14 @@ def try_read_evalplus(model_key: str) -> Optional[Dict[str, float]]:
     safe = model_key.replace("/", "_")
     root = os.path.join(RESULTS_DIR, f"evalplus_{safe}")
     if not os.path.isdir(root):
-        return None
+        # Backward compat: try base key (without @ variant)
+        base = model_key.split("@")[0].replace("/", "_")
+        if base != safe:
+            root = os.path.join(RESULTS_DIR, f"evalplus_{base}")
+            if not os.path.isdir(root):
+                return None
+        else:
+            return None
     results = {}
     for dataset in ["humaneval", "mbpp"]:
         dpath = os.path.join(root, dataset)
@@ -465,7 +490,13 @@ def read_lmeval_per_model(model_key: str) -> Optional[Dict[str, float]]:
     safe = model_key.replace("/", "_")
     root = os.path.join(RESULTS_DIR, f"lmeval_{safe}")
     if not os.path.isdir(root):
-        return None
+        base = model_key.split("@")[0].replace("/", "_")
+        if base != safe:
+            root = os.path.join(RESULTS_DIR, f"lmeval_{base}")
+            if not os.path.isdir(root):
+                return None
+        else:
+            return None
     results = {}
 
     METRICS = ["exact_match,custom-extract", "exact_match,remove_whitespace",
@@ -523,7 +554,13 @@ def read_agentic(model_key: str) -> Optional[float]:
     safe = model_key.replace("/", "_")
     root = os.path.join(RESULTS_DIR, f"agentic_{safe}")
     if not os.path.isdir(root):
-        return None
+        base = model_key.split("@")[0].replace("/", "_")
+        if base != safe:
+            root = os.path.join(RESULTS_DIR, f"agentic_{base}")
+            if not os.path.isdir(root):
+                return None
+        else:
+            return None
     # Recursively find all .json files
     all_json = []
     for dirpath, _, filenames in os.walk(root):

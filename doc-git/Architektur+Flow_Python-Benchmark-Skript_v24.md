@@ -1,44 +1,42 @@
-# Architektur & Flow – Stand 05.07.2026 (v30)
+# Architektur & Flow – Stand 07.07.2026 (v31)
 
 ## 1. Uberblick
 
-Das Benchmark-System besteht aus **vier unabhangigen Evaluierungs-Pipelines**, gesteuert uber einen zentralen Launcher. **Modell-Management (Laden/Entladen) wird NUR vom Launcher in `main()` veranlasst.**
+Das Benchmark-System besteht aus **vier unabhangigen Evaluierungs-Pipelines**, gesteuert uber einen zentralen Launcher. 
+**Modell-Management (Laden/Entladen) wird NUR vom Launcher in `main()` veranlasst.**
 
-Pandaseval und BBH wurden entfernt (zu teuer/zeitaufwandig). Dafur neu: **Agentic-Pipeline** (tool-eval-bench) und **MMLU-Pro modifiziert** (14 Subsets, stratifiziertes Subsampling).
+### Vier Evaluierungs-Pipelines (10 Benchmarks)
 
-Nach dem Review am 28.06. wurden folgende Architekturanderungen umgesetzt:
-- **Versionierungs-Vereinheitlichung**: Alle 3 Hauptskripte laufen jetzt unter gemeinsamer Major-Version **v10** (vorher: Launcher v7, Custom v24, Konsolidierung v8).
-- **Hilfsmodule ohne Version**: `model_manager.py`, `csv_writer.py` (vorher `_v2`).
-- **Type Hints**: Alle Funktionen in den 3 Hauptskripten (55+20+27 = 102 Funktionen) vollstandig typisiert.
-- **Zentrale Konfiguration**: `benchmark_config.py` fur Gewichte, MMLU-Pro-Subsets, Tool-Eval-Szenarien.
-- **Task-Retry**: `MAX_RETRIES=3` mit exponentiellem Backoff bei API-Fehlern.
-- **MMLU-Pro-Helper extrahiert**: `_get_lmeval_params()`, `_build_lmeval_cmd()`, `_parse_subset_score()` als testbare Einzelfunktionen.
-- **ModelData-Dataclass**: In `consolidate_results_v12.py` – typisierte CSV-Zeilen statt roher Dicts.
-- **System-Metriken**: Median + P90 statt Mean + Max (robuster gegen Ausreisser).
-- **CSV-Schema**: `fn_csv` um CPU_med/CPU_p90/GPU_med/GPU_p90/RAM_med/RAM_p90/GPU_Temp_p90 erweitert.
-- **API_BASE**: Nicht mehr hardcoded, sondern aus `model_manager.API_BASE` bezogen.
-- **all_summary-Bug gefixt**: `all_summary.append()` war falschlich im `if is_custom:`-Block – alle 4 Pipelines landen jetzt im Summary.
-- **Pytest-Tests**: 15 Tests fur compute_category_scores, read_custom_csv, Percentile, CSV-Parsing.
-- **Granite 4.0 H Tiny**: Experts=64 verursacht `ggml_new_object: not enough space` bei 1M Context; erst mit Experts=16 lauffahig.
-- **Thinking-Mode per CLI**: `--thinking`-Flag aktiviert `enable_thinking=True` fur MathQA/MMLU-Pro bei **allen Reasoning-Modellen** (AceMath, DeepSeek, Gemma 4) – nicht nur Gemma 4. Gesteuert uber `REASONING_PATTERNS`-Set in `custom_benchmark_v12.py` und "Raisonierende" Modell-Erkennung in `run_benchmarks_v12.py`.
-- **Strukturierter Output (v30)**: Custom-Pipeline nutzt `response_format` mit JSON-Schema (`{"code": "..."}`) uber LM Studio API. Garantiert valides JSON, eliminiert ~12% Parsing-Fehler (leere Antworten, Markdown-Extraktion). Fallback via `--no-structured-output`.
-- **Paired Bootstrap Vergleich (v30)**: `consolidate_results_v12.py --compare "key1,key2,key3"` vergleicht alle Paare mit gepaartem Bootstrap-CI. `--seed` sorgt fur identische Task-Subsets.
-- **--seed fur Reproduzierbarkeit (v30)**: `run_benchmarks_v12.py --seed 42` und `custom_benchmark_v12.py --seed 42` ermoeglichen reproduzierbare Task-Auswahl.
-- **--bootstrap entfernt (v30)**: CIs werden immer berechnet, wenn Per-Item-Daten vorhanden sind. Keine Flag noetig.
-- **Context Length 16K (v30)**: `ctx_len=16384` wird global an `load_model_via_lms()` ubergeben – ausreichend fur alle Benchmarks (DS1000~1.2K, MMLU-Pro~9.4K, Agentic~9K), reduziert VRAM-Druck bei 128K-Modellen massiv.
+| Pipeline                  | Skript(e)                              | Benchmarks                                     | Auswertung                                 |
+|---------------------------|----------------------------------------|------------------------------------------------|--------------------------------------------|
+| **Eigenes Skript v10**    | `custom_benchmark_v12.py`              | DS1000, CoderEval                              | `exec_sandboxed()` + Namespace-Vergleich   |
+| **lm-evaluation-harness** | `lm_eval` CLI                          | MathQA, ARC-Challenge, HellaSwag, TruthfulQA, MMLU-Pro (mod.) | `generate_until` + Regex-Extraktion        |
+| **evalplus**              | `evalplus.codegen`+`evalplus.evaluate` | HumanEval+, MBPP+                              | Differential-Testing mit plus_input        |
+| **Agentic**               | `tool_eval_bench` CLI                  | Agentic (69 Szenarien)                         | tool-eval-bench Envelope (final_score)     |
 
+**Entfernt:** BBH (zu teuer, 8x Multiplier), PandasEval (zu wenig Aufgaben, wenig Differenzierungspotential).
+
+Dafur neu: **Agentic-Pipeline** (tool-eval-bench) und **MMLU-Pro modifiziert** (14 Subsets, stratifiziertes Subsampling).
+
+## Struktur 
 ```
 LM Studio (localhost:1234)
 ├── REST API: POST /v1/chat/completions
 ├── Modell-Verwaltung: lms load / unload / ps (CLI)
-├── ls --json  -> modelKey + selectedVariant (z.B. @q4_k_m)
+├── lms ls --json  -> modelKey + selectedVariant + variants[] + quantization.name
+│   → modelKey = base key (z.B. essentialai/rnj-1)
+│   → variants[] = @-qualifizierte IDs (z.B. ["essentialai/rnj-1@q8_0"])
+│   → lms load akzeptiert NUR modelKey (ohne @) – kein CLI-Flag für Varianten-Selektion
 └── Kein logprobs, kein /v1/completions
 
 model_manager.py (GEMEINSAM, unversioniert)
-├── load_model_via_lms()       -> (bool, exact_identifier)
+├── load_model_via_lms(key)    -> (bool, exact_identifier)
+│   ├── key = base modelKey (ohne @) – lms load akzeptiert keine @-Varianten
+│   ├── --gpu max für vollständiges GPU-Offloading (sonst CPU-only bei grossen Modellen)
+│   └── --identifier wird nicht gesetzt (nicht für Varianten-Selektion)
 ├── unload_all_models()
 ├── wait_for_model_ready()     [ungenutzt]
-├── get_current_loaded_model()
+├── get_current_loaded_model() -> dict mit identifier, model_key, display_name
 ├── check_api_available()      [ungenutzt]
 ├── API_BASE                   (zentral, nicht hardcoded im Launcher)
 └── PIPELINE_TIMEOUTS          (zentral definiert)
@@ -72,6 +70,16 @@ run_benchmarks_v12.py (LAUNCHER - main(), v10)
 ├── Gibt Speicher am Ende frei
 ├── Exkludiert: whisper, vision, ocr, audio, embed, vl
 ├── API-Bereitschaft: time.sleep(10) statt polling-Schleife
+├── Varianten-Aufloesung (v31):
+│   ├── model_info["key"] = variant-eindeutig (selectedVariant oder modelKey@quant)
+│   ├── model_info["model_key"] = base modelKey (fuer lms load)
+│   ├── model_info["quant"] = quantization.name aus JSON
+│   ├── model_info["variants"] = vollstaendige variants[]-Liste aus lms ls --json
+│   ├── load_key = model_info["model_key"] (base Key, ohne @)
+│   ├── Nach Laden: Warnung wenn geladene Variante ≠ gewuenschtem Quant
+│   └── lms load hat KEIN CLI-Flag fuer Varianten-Selektion -> Workaround via Warning
+├── EvalPlus resume=False (v31): resume=True entfernt, da alte Samples akkumuliert wurden
+│   → evalplus_codegen generiert jetzt exakt sample_size Tasks, keine Altlasten
 └── Version intern: "Unified Benchmark Launcher v10"
 
 custom_benchmark_v12.py (CUSTOM-BENCHMARKS, v10)
@@ -97,23 +105,42 @@ consolidate_results_v12.py (KONSOLIDIERUNG, v10)
 ├── width-Duplikat entfernt (toter width-Block geloscht)
 ├── Alle Benchmarks konsolidiert (auch wenn einzelne Pipelines fehlen)
 ├── Bootstrap-CIs immer berechnet (DS1000 + CoderEval)
-├── --compare: Paired Bootstrap fur2+ Modelle (alle Paarvergleiche)
+├── --compare: Paired Bootstrap fuer2+ Modelle (alle Paarvergleiche)
 ├── --seed fuer reproduzierbares Bootstrap
 ├── --models: Modell-Filter
+├── Varianten-bewusste Modell-Info (v31):
+│   ├── _get_model_info(): Keys jetzt variant-eindeutig (selectedVariant oder modelKey@quant)
+│   │   → Kein Ueberschreiben mehr bei mehreren Quants des gleichen Modells
+│   ├── _get_display_name(): Sucht auch ueber gespeichertes modelKey-Feld
+│   ├── _lookup_vram(): Sucht ueber modelKey-Feld vor Fuzzy-Match
+│   ├── try_read_evalplus(): Fallback auf base-Key (ohne @) fuer alte Ergebnisverzeichnisse
+│   ├── read_lmeval_per_model(): Gleicher Fallback
+│   └── read_agentic(): Gleicher Fallback
 ├── Vollstandige Type Hints (27 Funktionen)
 └── Vollstandige Type Hints (27 Funktionen)
 ```
 
-### Vier Evaluierungs-Pipelines (10 Benchmarks)
-
-| Pipeline                  | Skript(e)                              | Benchmarks                                     | Auswertung                                 |
-|---------------------------|----------------------------------------|------------------------------------------------|--------------------------------------------|
-| **Eigenes Skript v10**    | `custom_benchmark_v12.py`              | DS1000, CoderEval                              | `exec_sandboxed()` + Namespace-Vergleich   |
-| **lm-evaluation-harness** | `lm_eval` CLI                          | MathQA, ARC-Challenge, HellaSwag, TruthfulQA, MMLU-Pro (mod.) | `generate_until` + Regex-Extraktion        |
-| **evalplus**              | `evalplus.codegen`+`evalplus.evaluate` | HumanEval+, MBPP+                              | Differential-Testing mit plus_input        |
-| **Agentic**               | `tool_eval_bench` CLI                  | Agentic (69 Szenarien)                         | tool-eval-bench Envelope (final_score)     |
-
-**Entfernt:** BBH (zu teuer, 8x Multiplier), PandasEval (zu wenig Aufgaben), Knowledge-Benchmarks zeitweise deaktiviert gewesen (ARC, HellaSwag, TruthfulQA zwischenzeitlich ausgesetzt, jetzt wieder aktiv).
+## Review am 28.06.2026
+Nach dem Review am 28.06. wurden folgende Architekturanderungen umgesetzt:
+- **Versionierungs-Vereinheitlichung**: Alle 3 Hauptskripte laufen jetzt unter gemeinsamer Major-Version **v10** (vorher: Launcher v7, Custom v24, Konsolidierung v8).
+- **Hilfsmodule ohne Version**: `model_manager.py`, `csv_writer.py` (vorher `_v2`).
+- **Type Hints**: Alle Funktionen in den 3 Hauptskripten (55+20+27 = 102 Funktionen) vollstandig typisiert.
+- **Zentrale Konfiguration**: `benchmark_config.py` fur Gewichte, MMLU-Pro-Subsets, Tool-Eval-Szenarien.
+- **Task-Retry**: `MAX_RETRIES=3` mit exponentiellem Backoff bei API-Fehlern.
+- **MMLU-Pro-Helper extrahiert**: `_get_lmeval_params()`, `_build_lmeval_cmd()`, `_parse_subset_score()` als testbare Einzelfunktionen.
+- **ModelData-Dataclass**: In `consolidate_results_v12.py` – typisierte CSV-Zeilen statt roher Dicts.
+- **System-Metriken**: Median + P90 statt Mean + Max (robuster gegen Ausreisser).
+- **CSV-Schema**: `fn_csv` um CPU_med/CPU_p90/GPU_med/GPU_p90/RAM_med/RAM_p90/GPU_Temp_p90 erweitert.
+- **API_BASE**: Nicht mehr hardcoded, sondern aus `model_manager.API_BASE` bezogen.
+- **all_summary-Bug gefixt**: `all_summary.append()` war falschlich im `if is_custom:`-Block – alle 4 Pipelines landen jetzt im Summary.
+- **Pytest-Tests**: 15 Tests fur compute_category_scores, read_custom_csv, Percentile, CSV-Parsing.
+- **Granite 4.0 H Tiny**: Experts=64 verursacht `ggml_new_object: not enough space` bei 1M Context; erst mit Experts=16 lauffahig.
+- **Thinking-Mode per CLI**: `--thinking`-Flag aktiviert `enable_thinking=True` fur MathQA/MMLU-Pro bei **allen Reasoning-Modellen** (AceMath, DeepSeek, Gemma 4) – nicht nur Gemma 4. Gesteuert uber `REASONING_PATTERNS`-Set in `custom_benchmark_v12.py` und "Raisonierende" Modell-Erkennung in `run_benchmarks_v12.py`.
+- **Strukturierter Output (v30)**: Custom-Pipeline nutzt `response_format` mit JSON-Schema (`{"code": "..."}`) uber LM Studio API. Garantiert valides JSON, eliminiert ~12% Parsing-Fehler (leere Antworten, Markdown-Extraktion). Fallback via `--no-structured-output`.
+- **Paired Bootstrap Vergleich (v30)**: `consolidate_results_v12.py --compare "key1,key2,key3"` vergleicht alle Paare mit gepaartem Bootstrap-CI. `--seed` sorgt fur identische Task-Subsets.
+- **--seed fur Reproduzierbarkeit (v30)**: `run_benchmarks_v12.py --seed 42` und `custom_benchmark_v12.py --seed 42` ermoeglichen reproduzierbare Task-Auswahl.
+- **--bootstrap entfernt (v30)**: CIs werden immer berechnet, wenn Per-Item-Daten vorhanden sind. Keine Flag noetig.
+- **Context Length 16K (v30)**: `ctx_len=16384` wird global an `load_model_via_lms()` ubergeben – ausreichend fur alle Benchmarks (DS1000~1.2K, MMLU-Pro~9.4K, Agentic~9K), reduziert VRAM-Druck bei 128K-Modellen massiv.
 
 ---
 
@@ -752,6 +779,7 @@ pytest tests/ -v
 
 ## 18. Bekannte Einschrankungen
 
+1. **Varianten-Selektion via CLI:** `lms load` hat KEIN Flag, um eine bestimmte Quantisierung zu laden. `--yes` laedt immer die erste/bevorzugte Variante. Bei 2+ Quants des gleichen Modells wird eine Warnung ausgegeben, die Variante muss via LM Studio GUI oder Deinstallation der unerwuenschten Variante gewaehlt werden.
 1. **DS1000-Score konservativ:** ~50% der Tasks nicht standalone ausfuhrbar (Harness-Fail).
 2. **evalplus ohne Docker:** Gleiches Sicherheitsrisiko wie eigene Sandbox.
 3. **Kein logprobs:** LM Studio bietet keinen Zugriff auf Token-Wahrscheinlichkeiten.
@@ -845,6 +873,12 @@ pytest tests/ -v
 
 | Datum  | Datei                                         | Anderung                                                                        |
 |--------|-----------------------------------------------|---------------------------------------------------------------------------------|
+| 07.07. | `Architektur+Flow_v24.md`                     | v31: Varianten-eindeutige Keys, resume=False, load_key/lms load Fix, Warnung bei Varianten-Mismatch |
+| 07.07. | `run_benchmarks_v12.py`                       | model_info["key"] variant-eindeutig, load_key getrennt, Warnung bei Varianten-Mismatch |
+| 07.07. | `custom_benchmark_v12.py`                     | get_available_models() variant-eindeutige Keys + variants[] |
+| 07.07. | `model_manager.py`                            | load_model_via_lms() mit --gpu max (CPU-Offloading-Fix) |
+| 07.07. | `consolidate_results_v12.py`                  | _get_model_info() variant-eindeutig; Fallback auf base-Key fuer alte Ergebnisse |
+| 07.07. | `csv_writer.py`                               | model_key in Dateinamen jetzt variant-eindeutig |
 | 05.07. | `Architektur+Flow_v24.md`                     | v30: Strukturierter Output, Paired Bootstrap, --seed, --compare, --bootstrap entfernt |
 | 05.07. | `custom_benchmark_v12.py`                     | Strukturierter Output: response_format mit JSON-Schema, extract_code() JSON-Shortcut |
 | 05.07. | `run_benchmarks_v12.py`                       | --seed, --no-structured-output an Subprocess weitergegeben |
@@ -890,5 +924,5 @@ pytest tests/ -v
 
 ---
 
-*Erstellt: 28.06.2026 | Aktualisiert: 05.07.2026*
-*Basiert auf: v30-Architektur – Strukturierter Output, Paired Bootstrap, --seed, --compare, --bootstrap entfernt*
+*Erstellt: 28.06.2026 | Aktualisiert: 07.07.2026*
+*Basiert auf: v31-Architektur – Varianten-eindeutige Keys, resume=False, lms load --gpu max*

@@ -22,8 +22,6 @@ BEACHTE: Architekturabhängigkeit der KV-Quantisierungs-Empfindlichkeit, s.u.
 
 ---
 
-## Modelle (alphabetisch)
-
 ## ========================= Zusammenfassung & Empfehlungen ========================================================== ##
 
 ## Beste Kandidaten für lokale LLM-Benchmarks (16 GB VRAM) – Stand 28.06.2026
@@ -40,7 +38,22 @@ Hinweise: Results basieren auf SampleSize=10 (vollständig). Effizienz = Overall
 Neue Benchmark-Runs mit SampleSize=100 => Tabelle aktualisieren!
 
 
-###### MoE-Modelle (besonders VRAM-effizient) ######
+###### MoE-Modelle (besonders VRAM-effizient) -  Architektur-Parameter ######
+
+| Modell                          | Total | Aktiv | Faktor  | Experten/Layer              | Top-k (aktiv)          | Shared| Besonderheit                                                              |
+|---------------------------------|-------|-------|---------|-----------------------------|------------------------|-------|---------------------------------------------------------------------------|
+| deepseek-coder-v2-lite-instruct | 16B   |  2.4B |  6.7:1  |           8                 |    2                   | Nein  | DeepSeekMoE-Framework; 40 Layer; 128K Kontext                             |
+| granite-4.0-h-tiny              |  7B   |  1B   |  7:1    |          64                 | 6 (4 routed + 2 shared)|  2    | Hybrid Mamba2+Attention (9:1); 4 von 40 Layern mit KV-Cache               |
+| lfm2.5-8b-a1b                   |  8.3B |  1.5B |  5.5:1  |          32                 |    4                   | Nein  | Hybrid Conv+GQA (3:1); Reasoning-Modell; 6 Attention-Blöcke               |
+| lfm2-24b-a2b-reap-i1            | 24B   |  2.3B | 10.4:1  |          64                 |    4                   | Nein  | Hybrid Conv+GQA (3:1); 40 Layer (10 Attention); REAP-compressed           |
+| ernie-4.5-21b-a3b-pt            | 21B   |  3B   |  7:1    |   64 (Text) + 64 (Vision)   |    6 (+2 shared)       |  2    | Multimodal Heterogeneous MoE; 28 Layer; Text+Vision-Experten getrennt     |
+| qwen3-coder-reap-25b-a3b-i1     | 25B   | ~3B   |  8.3:1  |  103 (REAP-pruned from 128) |    8                   | Nein  | Qwen3-Architektur; 48 Layer; 262K Kontext; REAP-pruned von 30B            |
+| qwen3.6-28b-reap-i1             | 28B   | ~3B   |  9.3:1  |  205 (REAP-pruned from 256) |    8 (+1 shared)       |  1    | Hybrid Gated DeltaNet + Attention; 40 Layer; originale 256 Experten/Layer |
+| qwen3-30b-a3b-python-coder      | 30.5B |  3.3B |  9.2:1  |         128                 |    8                   | Nein  | Qwen3-MoE; 48 Layer; Python-spezialisiert; 262K Kontext                   |
+| gemma-4-19b-a4b-it-reap-i1      | 19B   | ~4B   |  4.75:1 |   90 (REAP-pruned from 128) |    8 (+1 shared)       |  1    | Hybrid Sliding/Full Attention; 30 Layer; ursprünglich 128 Experten/Layer  |
+| gemma-4-26b-a4b                 | 26B   | ~4B   |  4.75:1 |         128                 |    8 (+1 shared)       |  1    | Hybrid Sliding/Full Attention; 30 Layer                                   |  
+| gpt-oss-20b                     | 20.9B |  3.6B |  5.8:1  |          32                 |    4                   | Nein  | MXFP4-Quant. der MoE-Gewichte; 24 Layer; Alternating Dense+Banded Sparse Attention |
+
 
 ---
 
@@ -76,7 +89,8 @@ Neue Benchmark-Runs mit SampleSize=100 => Tabelle aktualisieren!
 
 **Betrifft: ALLE Modelle**
 
-LM Studio hat eine `reasoning.parsing`-Einstellung (Default: `enabled=true`) mit `<think>`/`</think>`-Tags. Diese veranlasst das Modell, vor jeder Antwort eine Gedankenkette in `<think>`-Blöcken zu produzieren – auch bei Modellen, die kein natives Reasoning im Training haben.
+LM Studio hat eine `reasoning.parsing`-Einstellung (Default: `enabled=true`) mit `<think>`/`</think>`-Tags. 
+Diese veranlasst das Modell, vor jeder Antwort eine Gedankenkette in `<think>`-Blöcken zu produzieren – auch bei Modellen, die kein natives Reasoning im Training haben.
 
 **Folge:** 300–500 Tokens zusätzlich pro Generation, hohe Latenz, unnötig bei Tool-Calling.
 
@@ -96,9 +110,29 @@ C:\Users\<user>\.lmstudio\.internal\user-concrete-model-default-config\<publishe
 
 **LM Studio GUI:** Chat Panel → "..." → Model Settings → "Reasoning Parsing" → Enabled aus.
 
-**Zusätzlich:** `stopStrings` auf `["<|end_of_text|>", "<|endoftext|>"]` setzen, um die Generation exakt am EOS-Token zu stoppen. `contextLength` auf max. 16384 senken (reduziert KV-Cache-VRAM). Diese Einstellungen liegen in derselben JSON-Datei.
+**Zusätzlich:** 
+`stopStrings` auf `["<|end_of_text|>", "<|endoftext|>"]` setzen, um die Generation exakt am EOS-Token zu stoppen. 
+`contextLength` auf max. 16384 senken (reduziert KV-Cache-VRAM). Diese Einstellungen liegen in derselben JSON-Datei.
 
 ---
+
+### CPU statt GPU-Usage, langsame Laufzeiten 
+
+**Ursache: 
+lms load ohne --gpu max lädt Modelle standardmäßig auf CPU. Die user-concrete-model-default-config-Dateien mit llm.load.llama.gpuOffloadLayers werden von der LM Studio Version nicht an llama.cpp durchgereicht 
+ – der KV-Config-Stack übersetzt diese Keys nicht in n_gpu_layers.
+
+Beweis aus den Logs: Jeder Modell-Load zeigte LlamaV4::load config: n_parallel=4 n_ctx=16384 kv_unified=true – nie ein n_gpu_layers. Load dauerte <2s (RAM-only). Erst mit --gpu max (47s, 11,71 GiB VRAM) wurde die GPU genutzt.
+
+**Fix: 
+model_manager.py:172 – --gpu max zum lms load-Kommando hinzugefügt.
+
+**Auswirkungen auf den Benchmark: 
+Ab jetzt lädt jedes Modell mit GPU-Beschleunigung. Die anderen Änderungen (gpuStrictVramCap: false, contextLength: 8192 in der Config) bleiben bestehen, sind aber sekundär.
+
+Einziger Vorbehalt: Falls ein Modell nicht vollständig in den 16 GB VRAM passt, kann --gpu max fehlschlagen. In dem Fall müsste man --gpu 0.8 oder einen niedrigeren Wert verwenden. 
+Für Granite 4.1 30B Q3_K_S passt es (laut Estimate 12,36 GiB).
+
 
 ######## KV-Cache und Slots #########
 
@@ -122,7 +156,8 @@ model = lms.llm("modell-key", config={
 **Hintergrund (Asymmetric K/V):** Der K-Cache bestimmt das Attention-Routing via Softmax – kleine Fehler werden exponentiell verstärkt. Der V-Cache skaliert linear. 
  Daher: K-Cache in hoher Präzision halten (q8_0 oder FP16), V-Cache aggressiv quantisieren (q4_0/turbo3). Das gilt besonders für Qwen2.5 und Modelle mit Q4_K_M-Gewichten.
 
----
+
+################### Modellbeschreibungen (alphabetisch) #####################
 
 ### acemath-7b-instruct (gelöscht)
 
@@ -447,8 +482,6 @@ Verwenden Sie die folgenden Steuerungstokens, um den Denkprozess richtig zu verw
 
 https://ai.google.dev/gemma/docs/core/model_card_4?hl=de
 HF: https://huggingface.co/google/gemma-4-31B
-
-=======================================================
 
 ---
 
@@ -1072,6 +1105,28 @@ HF: https://huggingface.co/CohereLabs/North-Mini-Code-1.0
 
 ---
 
+### unsloth/phi-4  (anstelle microsoft/phi-4, das läuft schlechter)
+
+| Eigenschaft                       | Wert                                                              |
+|-----------------------------------|-------------------------------------------------------------------|
+| **Hersteller**                    | Microsoft / Unsloth / cutoff date June 2024                       |
+| **Architektur**                   | Dense (Phi-3)                                                     |
+| **Reasoning**                     | Nein                                                              |
+| **Param. Total / Active**         | 15B (100%)                                                        |
+| **Quantisierung/Modellgröße**     | Q5_K_M (10.4 GB)                                                  |
+| **Kontextlänge** (token)          | 16K token                                                         |
+| **GPU-Tauglichkeit (16 GB VRAM)** | ✅ Ja (10.4 GB + ohne KV-Cache Quant. => 13.6 GB gesamt)         |
+| **Benchmark-Typ**                 | Coding + MC                                                       |
+| **Einschätzung**                  | Unsloth-Quant von Phi 4. Q5_K_M spart VRAM ggü. Microsoft Variante Q6_K |
+
+Läuft mit geringfügig besseren Benchmark-Ergebnissen als die Microsoft-Variante, Grund dafür unklar. 
+Evtl. Finetuning durch Unsloth? Oder fehlende KV-Quant., weil Modell selber kleiner?
+Hinsichtlich der Quantisierung müsste das Microsoft Modell mit Q6_K eigentlich besser sein.
+
+Achtung: BugFixes s.a. https://unsloth.ai/blog/phi4 
+
+---
+
 ### pythia-12b (12B) - (gelöscht)
 
 | Eigenschaft                       | Wert                                                               |
@@ -1192,8 +1247,8 @@ HF: https://huggingface.co/Qwen/Qwen2.5-Coder-14B
 | **Experts**                       | Architektur # 103 (REAP-pruned from 128); Top-k (aktiv): 8; shared: Nein                |
                                         => mit 16GB VRAM in LMS: #experts = max 16 (je nach Kontextlänge)                     |
 | **Quantisierung/Modellgröße**     | Q3_K_M (12.0 GB), IQ4_XS (13.4 GB), Q4_K_S (14.2 GB), imatrix und static                |
-| **Kontextlänge** (token)          | 262 k Token max. bei Q3_K_M möglich / hier: 131 k bei allen Modellen                    |
-| **GPU-Tauglichkeit (16 GB VRAM)** | Q3_K_M: ⚠️ knapp (12.0 GB + KV-Cache Quant. Q5_1/IQ4_NL => 15.6 GB + 0.6 shared GPU mem |
+| **Kontextlänge** (token)          | 262 k Token max. bei Q3_K_M möglich / hier: 131 k bei allen Modellen bzw. in Benchmark: 16k             |
+| **GPU-Tauglichkeit (16 GB VRAM)** | Q3_K_M: ⚠️ knapp (12.0 GB + KV-Cache Quant. Q5_1/IQ4_NL => 12.9 GB (16 k Kontext) + 0.2 shared GPU mem  |
 |                                   | IQ4_XS: ⚠️ knapp (13.4 GB + KV-Cache Quant. Q5_1/IQ4_NL => 15.5 GB + 4.9 shared GPU mem |
 |                                   | Q4_K_S: ⚠️ knapp (14.2 GB + KV-Cache Quant. Q5_1/IQ4_NL => 14.8 GB + 3.9 shared GPU bei 98k Kontextlänge |
 | **Benchmark-Typ**                 | code generation, code reasoning and code fixing, Code Agents, mathematics and general   |
@@ -1442,29 +1497,6 @@ Blog: https://huggingface.co/blog/falcon3
 
 **Hinweis:** Übersetzungs-Modell – kein allgemeiner Coding/MC-Benchmark.
 
-===========================
-
----
-
-### unsloth/phi-4
-
-| Eigenschaft                       | Wert                                                              |
-|-----------------------------------|-------------------------------------------------------------------|
-| **Hersteller**                    | Microsoft / Unsloth / cutoff date June 2024                       |
-| **Architektur**                   | Dense (Phi-3)                                                     |
-| **Reasoning**                     | Nein                                                              |
-| **Param. Total / Active**         | 15B (100%)                                                        |
-| **Quantisierung/Modellgröße**     | Q5_K_M (10.4 GB)                                                  |
-| **Kontextlänge** (token)          | 16K token                                                         |
-| **GPU-Tauglichkeit (16 GB VRAM)** | ✅ Ja (10.4 GB + ohne KV-Cache Quant. => 13.6 GB gesamt)         |
-| **Benchmark-Typ**                 | Coding + MC                                                       |
-| **Einschätzung**                  | Unsloth-Quant von Phi 4. Q5_K_M spart VRAM ggü. Microsoft Variante Q6_K |
-
-Läuft mit geringfügig besseren Benchmark-Ergebnissen als die Microsoft-Variante, Grund dafür unklar. 
-Evtl. Finetuning durch Unsloth? Oder fehlende KV-Quant., weil Modell selber kleiner?
-Hinsichtlich der Quantisierung müsste das Microsoft Modell mit Q6_K eigentlich besser sein.
-
-Achtung: BugFixes s.a. https://unsloth.ai/blog/phi4 
 
 ---
 
@@ -1481,6 +1513,10 @@ Achtung: BugFixes s.a. https://unsloth.ai/blog/phi4
 | **Benchmark-Typ**                 | Coding                                                            |
 | **Einschätzung**                  | WizardLM, 09/2023. Code Llama Basis. Veraltet aber solide.        |
                                         i1-optimierte Quantisierung.                                    |
+
+======================================================================================================================
+
+## Anhang mit allgemeinen Hinweisen LMS-Einstellungen, Quellen, etc.
 
 ### Blacklist - von Benchmark ausgeschlossen (Vision/OCR/Embedding) 
 
@@ -1582,23 +1618,7 @@ Empfehlung: Zuerst enable_thinking=false + max_tokens=8192 testen. Structured Ou
 
 ---
 
-### Vollständige Architektur-Parameter 
 
-| Modell                          | Total | Aktiv | Faktor  | Experten/Layer              | Top-k (aktiv)          | Shared| Besonderheit                                                              |
-|---------------------------------|-------|-------|---------|-----------------------------|------------------------|-------|---------------------------------------------------------------------------|
-| deepseek-coder-v2-lite-instruct | 16B   |  2.4B |  6.7:1  |           8                 |    2                   | Nein  | DeepSeekMoE-Framework; 40 Layer; 128K Kontext                             |
-| granite-4.0-h-tiny              |  7B   |  1B   |  7:1    |          64                 | 6 (4 routed + 2 shared)|  2    | Hybrid Mamba2+Attention (9:1); 4 von 40 Layern mit KV-Cache               |
-| lfm2.5-8b-a1b                   |  8.3B |  1.5B |  5.5:1  |          32                 |    4                   | Nein  | Hybrid Conv+GQA (3:1); Reasoning-Modell; 6 Attention-Blöcke               |
-| lfm2-24b-a2b-reap-i1            | 24B   |  2.3B | 10.4:1  |          64                 |    4                   | Nein  | Hybrid Conv+GQA (3:1); 40 Layer (10 Attention); REAP-compressed           |
-| ernie-4.5-21b-a3b-pt            | 21B   |  3B   |  7:1    |   64 (Text) + 64 (Vision)   |    6 (+2 shared)       |  2    | Multimodal Heterogeneous MoE; 28 Layer; Text+Vision-Experten getrennt     |
-| qwen3-coder-reap-25b-a3b-i1     | 25B   | ~3B   |  8.3:1  |  103 (REAP-pruned from 128) |    8                   | Nein  | Qwen3-Architektur; 48 Layer; 262K Kontext; REAP-pruned von 30B            |
-| qwen3.6-28b-reap-i1             | 28B   | ~3B   |  9.3:1  |  205 (REAP-pruned from 256) |    8 (+1 shared)       |  1    | Hybrid Gated DeltaNet + Attention; 40 Layer; originale 256 Experten/Layer |
-| qwen3-30b-a3b-python-coder      | 30.5B |  3.3B |  9.2:1  |         128                 |    8                   | Nein  | Qwen3-MoE; 48 Layer; Python-spezialisiert; 262K Kontext                   |
-| gemma-4-19b-a4b-it-reap-i1      | 19B   | ~4B   |  4.75:1 |   90 (REAP-pruned from 128) |    8 (+1 shared)       |  1    | Hybrid Sliding/Full Attention; 30 Layer; ursprünglich 128 Experten/Layer  |
-| gemma-4-26b-a4b                 | 26B   | ~4B   |  4.75:1 |         128                 |    8 (+1 shared)       |  1    | Hybrid Sliding/Full Attention; 30 Layer                                   |  
-| gpt-oss-20b                     | 20.9B |  3.6B |  5.8:1  |          32                 |    4                   | Nein  | MXFP4-Quant. der MoE-Gewichte; 24 Layer; Alternating Dense+Banded Sparse Attention |
-
----
 
 ## Modell-Quellen
 
