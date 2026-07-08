@@ -1588,9 +1588,10 @@ Dies unterscheidet sich vom modellinternen `top-k` (aktive Experten pro Token):
                                                                 => Problem: Modell lädt nicht mit sovielen Experten! Mit 45 Experten und ohen KV-Quant. lädt es!                                |
 | granite-4.0-h-tiny        |  64           | **16**        | ⚠️ 64 Experts → `ggml_new_object: not enough space` bei 1M Context. Erst mit 16 Experts stabil.                                   |
 | lfm2.5-8b-a1b             |  32           | 32 (Standard) | Kleines Modell, kein VRAM-Druck                                                                                                   |
-| lfm2-24b-a2b              |  64           | 64 (Standard) | 24B total, expertenabhängiger VRAM                                                                                                |
+| lfm2-24b-a2b              |  64           | 64 (Standard) | 24B total, expertenabhängiger VRAM        
+| mellum2-12b-a2.5b-instruct| 64            | aktiv 16      |                                                                                               |
 | qwen3-30b-a3b-python-coder| 128           | 24 (64–128)   | Halbierung möglich, aber Qualitätseinbußen bei Coding <=> mehr als 24 experts (ohne LV-QUant.) laden nicht bei Kontextlänge 41k   |
-| qwen3-coder-reap-25b-a3b  | 103 (128)     | 24 (64–128)   | Halbierung möglich, aber Qualitätseinbußen bei Coding <=> mehr als 24 experts (ohne LV-QUant.) laden nicht bei Kontextlänge 131k  |
+| qwen3-coder-reap-25b-a3b  | 103 (128)     | 16 (64–128)   | Halbierung möglich, aber Qualitätseinbußen bei Coding <=> mehr als 24 experts (ohne LV-QUant.) laden nicht bei Kontextlänge 131k  |
 | qwen3.6-28b (REAP)        | 205           | 128–205       | Stark pruned – Reduzierung nur wenn VRAM kritisch                                                                                 |
 | deepseek-coder-v2-lite    |   8           |  8 (Standard) | Nur 8 Experten – kein Spielraum                                                                                                   |
 | gpt-oss-20b               |  32           | 32 (Standard) | MXFP4-Quant. hält VRAM niedrig                                                                                                    |

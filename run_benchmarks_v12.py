@@ -959,6 +959,8 @@ def main() -> None:
                         help="Enable thinking mode for MathQA/MMLU-Pro (reasoning models)")
     parser.add_argument("--seed", type=int, default=None,
                         help="Random seed for reproducible task selection (passed to custom benchmarks)")
+    parser.add_argument("--exclude-benchmarks", "-x", type=str, default=None,
+                        help="Comma-separated benchmark names to exclude (e.g. 'MMLU-Pro,MathQA')")
     parser.add_argument("--no-structured-output", action="store_true",
                         help="Disable structured JSON output in custom benchmarks (fallback to regex)")
     args = parser.parse_args()
@@ -996,6 +998,18 @@ def main() -> None:
     if not benchmarks:
         print("[ERROR] No benchmarks selected. Aborting.")
         sys.exit(1)
+
+    # Apply --exclude-benchmarks filter
+    if args.exclude_benchmarks:
+        exclude_names = {n.strip().lower() for n in args.exclude_benchmarks.split(",")}
+        excluded = [b for b in benchmarks if b["name"].lower() in exclude_names]
+        benchmarks = [b for b in benchmarks if b["name"].lower() not in exclude_names]
+        if excluded:
+            print(f"  Excluded: {', '.join(b['name'] for b in excluded)}")
+        if not benchmarks:
+            print("[ERROR] All benchmarks excluded. Aborting.")
+            sys.exit(1)
+
     print(f"  Benchmarks: {', '.join(b['name'] for b in benchmarks)}")
 
     all_summary = []

@@ -73,18 +73,23 @@ def _get_model_info() -> Dict[str, Any]:
 
 
 def _get_display_name(model_key: str) -> str:
-    """Resolve model_key -> human-readable display name."""
+    """Resolve model_key -> human-readable display name, appending @variant if present."""
+    variant = ""
+    if "@" in model_key:
+        base_key, variant = model_key.split("@", 1)
+    else:
+        base_key = model_key
     info = _get_model_info()
     if model_key in info:
         dn = info[model_key].get("displayName")
         if dn:
-            return dn
+            return f"{dn}@{variant}" if variant else dn
     # Search by stored modelKey field (variant-aware)
     for mk, meta in info.items():
         if meta.get("modelKey") == model_key:
             dn = meta.get("displayName")
             if dn:
-                return dn
+                return f"{dn}@{variant}" if variant else dn
     # Fuzzy: strip publisher prefix
     import re as _re
     mk_norm = _re.sub(r"^[a-z0-9_-]+/", "", model_key.lower())
@@ -93,9 +98,10 @@ def _get_display_name(model_key: str) -> str:
         if mk_norm == mk_stripped:
             dn = meta.get("displayName")
             if dn:
-                return dn
+                return f"{dn}@{variant}" if variant else dn
     # Fallback: prettify key
-    return model_key.replace("/", " ").replace("_", " ").replace("-", " ").title()
+    display = model_key.replace("/", " ").replace("_", " ").replace("-", " ").title()
+    return f"{display}@{variant}" if variant else display
 
 
 def _lookup_vram(model_key: str) -> Optional[Dict[str, Any]]:
@@ -695,7 +701,8 @@ class ModelData:
         }
 
 
-def read_data(model_keys: Optional[List[str]] = None, min_sample_size: int = 0) -> List[Dict[str, Any]]:
+def read_data(model_keys: Optional[List[str]] = None, min_sample_size: int = 0,
+              exclude_benchmarks: Optional[List[str]] = None) -> List[Dict[str, Any]]:
     ds1000_files, codereval_files = find_latest_csvs(min_sample_size=min_sample_size)
     print(f"  DS1000 CSVs:  {len(ds1000_files)}")
     print(f"  CoderEval:    {len(codereval_files)}")
@@ -712,6 +719,21 @@ def read_data(model_keys: Optional[List[str]] = None, min_sample_size: int = 0) 
             if mk not in seen:
                 model_keys.append(mk)
                 seen.add(mk)
+
+        # Also discover models from evalplus/lmeval/agentic directories
+        scan_dirs = ["evalplus_", "lmeval_", "agentic_"]
+        added = 0
+        for prefix in scan_dirs:
+            for dname in os.listdir(RESULTS_DIR):
+                d = os.path.join(RESULTS_DIR, dname)
+                if os.path.isdir(d) and dname.startswith(prefix):
+                    mk = dname[len(prefix):]
+                    if mk not in seen:
+                        model_keys.append(mk)
+                        seen.add(mk)
+                        added += 1
+        if added:
+            print(f"  +{added} additional models from benchmark directories")
 
     rows = []
     for model_key in model_keys:
@@ -782,6 +804,12 @@ def read_data(model_keys: Optional[List[str]] = None, min_sample_size: int = 0) 
         agentic_score = read_agentic(model_key)
         if agentic_score is not None:
             bench_scores["Agentic"] = agentic_score
+
+        # Exclude benchmarks if requested (removes them before category scoring)
+        if exclude_benchmarks:
+            for b in exclude_benchmarks:
+                if b in bench_scores:
+                    del bench_scores[b]
 
         # Runtime (hours) from DS1000+CoderEval latencies
         runtime_h = sum(latencies) / 3600 if latencies else None
@@ -857,12 +885,6 @@ def read_data(model_keys: Optional[List[str]] = None, min_sample_size: int = 0) 
             ram_p90=sys_metrics.get("RAM_p90"),
             gpu_temp_p90=sys_metrics.get("GPU_Temp_p90"),
         ))
-    # Embed quantization in model name (uniquely identifies models)
-    for r in rows:
-        if r.quant:
-            q = r.quant if not r.quant.startswith("@") else r.quant[1:]
-            if q.lower() not in r.name.lower():
-                r.name = f"{r.name}@{q}"
     return [r.to_csv_dict() for r in rows]
 
 
@@ -879,9 +901,14 @@ def main() -> None:
                         help="Random seed for paired bootstrap (default: 42)")
     parser.add_argument("--sample-size", type=int, default=0,
                         help="Minimum sample_size filter for DS1000/CoderEval CSVs (default: no filter)")
+    parser.add_argument("--exclude-benchmarks", type=str, default=None,
+                        help="Comma-separated benchmarks to exclude (e.g. 'MMLU-Pro,Agentic')")
     args = parser.parse_args()
 
     model_keys = [m.strip() for m in args.models.split(",")] if args.models else None
+    exclude = [b.strip() for b in args.exclude_benchmarks.split(",")] if args.exclude_benchmarks else None
+    if exclude:
+        print(f"  Excluding benchmarks: {exclude}")
 
     # --compare mode: paired bootstrap analysis (2+ models, all pairwise)
     if args.compare:
@@ -944,7 +971,7 @@ def main() -> None:
     print(f"  {datetime.now().strftime('%Y-%m-%d %H:%M')}{ss_str}")
     print("=" * 60)
 
-    rows = read_data(model_keys=model_keys, min_sample_size=args.sample_size)
+    rows = read_data(model_keys=model_keys, min_sample_size=args.sample_size, exclude_benchmarks=exclude)
 
     # CSV – build columns dynamically
     fn_csv = ["Model"]
