@@ -485,7 +485,7 @@ def _parse_subset_score(sub_output_dir: str, subset_task: str) -> Optional[float
 # embedding instead of system message (no_system_msg in MODEL_CONFIG).
 #
 # Returns: dict with pipeline="custom", score (0-1).
-def run_custom_benchmark(model_info: dict[str, Any], bench: dict[str, Any], sample_size: int = 5, seed: Optional[int] = None) -> Optional[dict[str, Any]]:
+def run_custom_benchmark(model_info: dict[str, Any], bench: dict[str, Any], sample_size: int = 5, seed: Optional[int] = None, no_structured_output: bool = False) -> Optional[dict[str, Any]]:
     model_key = model_info["key"]
     model_display = model_info["display"]
     fp = os.path.join(DATA_DIR, bench["file"])
@@ -511,7 +511,7 @@ def run_custom_benchmark(model_info: dict[str, Any], bench: dict[str, Any], samp
     # Gemma models have enable_thinking=False (thinking disturbs coding benchmarks)
     if THINKING_ENABLED and _is_reasoning_model(model_key) and not _is_gemma_model(model_key):
         cmd.append("--thinking")
-    if args.no_structured_output:
+    if no_structured_output:
         cmd.append("--no-structured-output")
     t0 = time.time()
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=PIPELINE_TIMEOUTS["custom_subprocess"],
@@ -1030,11 +1030,6 @@ def main() -> None:
         loaded = get_current_loaded_model()
         api_model = None
 
-        # Context length capped at 16K for all benchmarks – sufficient for every
-        # pipeline (DS1000~1.2K, MMLU-Pro~9.4K, Agentic~9K) while reducing VRAM
-        # pressure compared to native 128K on large models.
-        ctx_len = 16384
-
         if loaded:
             li = loaded["identifier"].lower()
             lk = loaded["model_key"].lower()
@@ -1046,12 +1041,12 @@ def main() -> None:
             else:
                 print(f"  [INFO] Different model loaded ({loaded['display_name']}) – unloading...")
                 unload_all_models()
-                ok, api_model = load_model_via_lms(load_key, context_length=ctx_len)
+                ok, api_model = load_model_via_lms(load_key)
                 if not ok:
                     print(f"  [ERROR] Loading failed. Skipping.")
                     continue
         else:
-            ok, api_model = load_model_via_lms(load_key, context_length=ctx_len)
+            ok, api_model = load_model_via_lms(load_key)
             if not ok:
                 print(f"  [ERROR] Loading failed. Skipping.")
                 continue
@@ -1089,7 +1084,7 @@ def main() -> None:
                 elif bname in lmeval_names:
                     result = run_lmeval(model_info, bench, limit=args.sample_size, reasoning=reasoning)
                 else:
-                    result = run_custom_benchmark(model_info, bench, sample_size=args.sample_size, seed=args.seed)
+                    result = run_custom_benchmark(model_info, bench, sample_size=args.sample_size, seed=args.seed, no_structured_output=args.no_structured_output)
 
                 if result:
                     model_results.append(result)

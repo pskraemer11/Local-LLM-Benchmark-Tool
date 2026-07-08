@@ -1,4 +1,4 @@
-# Architektur & Flow – Stand 07.07.2026 (v31)
+# Architektur & Flow – Stand 08.07.2026 (v32)
 
 ## 1. Uberblick
 
@@ -30,10 +30,12 @@ LM Studio (localhost:1234)
 └── Kein logprobs, kein /v1/completions
 
 model_manager.py (GEMEINSAM, unversioniert)
-├── load_model_via_lms(key)    -> (bool, exact_identifier)
-│   ├── key = base modelKey (ohne @) – lms load akzeptiert keine @-Varianten
-│   ├── --gpu max für vollständiges GPU-Offloading (sonst CPU-only bei grossen Modellen)
-│   └── --identifier wird nicht gesetzt (nicht für Varianten-Selektion)
+├── load_model_via_lms(model_key) -> (bool, exact_identifier)
+│   ├── model_key = base modelKey (ohne @) – lms load akzeptiert keine @-Varianten
+│   ├── Aufruf: `lms load {model_key} --yes` (kein --gpu max, kein -c)
+│   │   → GPU-Nutzung wird automatisch uber die `user-concrete-model-default-config`-JSONs gesteuert
+│   │   → Kontextlange wird automatisch aus der Pre-Config ubernommen
+│   └── --identifier wird nicht gesetzt (nicht fur Varianten-Selektion)
 ├── unload_all_models()
 ├── wait_for_model_ready()     [ungenutzt]
 ├── get_current_loaded_model() -> dict mit identifier, model_key, display_name
@@ -66,7 +68,8 @@ run_benchmarks_v12.py (LAUNCHER - main(), v10)
 ├── Task-Retry: MAX_RETRIES=3, exponentielles Backoff
 ├── --seed fuer reproduzierbare Task-Auswahl (an Custom-Subprozess weitergegeben)
 ├── --no-structured-output fuer Fallback in Custom-Pipeline
-├── Context Length: `ctx_len=16384` global an `load_model_via_lms()` ubergeben
+├── Context Length: Wird aus den `user-concrete-model-default-config`-JSONs ubernommen
+│   (kein Parameter mehr an `load_model_via_lms()`)
 ├── Gibt Speicher am Ende frei
 ├── Exkludiert: whisper, vision, ocr, audio, embed, vl
 ├── API-Bereitschaft: time.sleep(10) statt polling-Schleife
@@ -140,7 +143,7 @@ Nach dem Review am 28.06. wurden folgende Architekturanderungen umgesetzt:
 - **Paired Bootstrap Vergleich (v30)**: `consolidate_results_v12.py --compare "key1,key2,key3"` vergleicht alle Paare mit gepaartem Bootstrap-CI. `--seed` sorgt fur identische Task-Subsets.
 - **--seed fur Reproduzierbarkeit (v30)**: `run_benchmarks_v12.py --seed 42` und `custom_benchmark_v12.py --seed 42` ermoeglichen reproduzierbare Task-Auswahl.
 - **--bootstrap entfernt (v30)**: CIs werden immer berechnet, wenn Per-Item-Daten vorhanden sind. Keine Flag noetig.
-- **Context Length 16K (v30)**: `ctx_len=16384` wird global an `load_model_via_lms()` ubergeben – ausreichend fur alle Benchmarks (DS1000~1.2K, MMLU-Pro~9.4K, Agentic~9K), reduziert VRAM-Druck bei 128K-Modellen massiv.
+- **Context Length (v32)**: Wird aus den `user-concrete-model-default-config`-JSONs ubernommen (kein CLI-Parameter mehr). Typisch 8192-16384 – ausreichend fur alle Benchmarks (DS1000~1.2K, MMLU-Pro~9.4K, Agentic~9K), reduziert VRAM-Druck bei 128K-Modellen massiv.
 
 ---
 
@@ -166,7 +169,7 @@ main()
 │   │   └── api_model = loaded["identifier"]
 │   │   └── (unload + reload)                     # bei anderem Modell
 │   │       ├── unload_all_models()
-│   │       ├── ok, api_model = load_model_via_lms(key, context_length=16384)  # -> exakte ID, 16K Context
+│   │       ├── ok, api_model = load_model_via_lms(model_key)  # -> exakte ID (Config aus JSON)
 │   │       └── time.sleep(10)                    # API-Initialisierung abwarten
 │   │
 │   ├── model_info["_api_model"] = api_model      # GLOBAL fuer alle Pipelines
@@ -202,7 +205,7 @@ main()
 - `custom_benchmark_v12.py` importiert aus `model_manager`, ruft **nie** `load/unload` auf
 - `_api_model` (exakte ID aus `lms ps`) wird konsistent in **allen** Pipelines verwendet
 - `API_BASE` wird aus `model_manager.API_BASE` bezogen (nicht hardcoded im Launcher)
-- **Context Length:** `load_model_via_lms()` wird mit `context_length=16384` aufgerufen – 16K reichen fur alle Pipelines (DS1000~1.2K, MMLU-Pro~9.4K, Agentic~9K) und reduzieren VRAM-Druck bei Modellen mit nativen 128K+ Context massiv (z.B. Qwen3 Coder Reap 25B mit 14.23 GB Gewichten + 343 MiB KV-Cache bei 128K vs. ~21 MiB bei 16K).
+- **Context Length:** Wird aus den `user-concrete-model-default-config`-JSONs ubernommen (kein Parameter mehr an `load_model_via_lms()`). Typisch 8192–16384 – ausreichend fur alle Pipelines (DS1000~1.2K, MMLU-Pro~9.4K, Agentic~9K) und reduzieren VRAM-Druck bei Modellen mit nativen 128K+ Context massiv.
 
 ### 2.3 Modell-Bereitschaft (vereinfacht in v9)
 
@@ -792,9 +795,10 @@ pytest tests/ -v
 10. **GLM 4.7 Flash:** Nicht lauffahig auf 16 GB VRAM (GPU Thrashing).
 11. **Gemma 4 19B:** Benotigt deaktivierte KV-Quant zum Laden.
 12. **Granite 4.0 H Tiny:** Experts=64 verursacht `ggml_new_object: not enough space` bei 1M Context. Workaround: Experts=16 setzen. Der `num_experts`-Parameter ist nur uber LM Studio Python SDK/REST API setzbar, nicht im GUI.
-13. **Dynamische Script-Auflosung:** Der Launcher lost den Custom-Benchmark-Pfad nur beim Start auf. Wird die Datei wahrend des Laufs ersetzt, lauft die alte Version bis zum Ende.
-14. **Agentic-Szenario-Timeout:** `PIPELINE_TIMEOUTS["agentic_scenario"]` (600s) verhindert Timeout-Abbrueche bei langen Kontexten (vorher: 120s Hardcoded -> Abbruch bei Tool-Call-Generierung).
-15. **model.yaml-Konflikt:** Ein virtuelles Modell via `hub/models/<publisher>/<model>/model.yaml` kollidiert mit einer bereits geladenen physischen Instanz derselben GGUF-Datei → llama.cpp stuerzt mit HTTP 500 ab. Workaround: model.yaml nur fuer Modelle ohne physische Instanz (z.B. mradermacher/qwen3-coder-reap).
+13. **numExperts (MoE-Modelle):** In `model_registry.yaml` unterscheiden: `experts:` = LMS-Einstellung (reduziert wegen VRAM), `notes:` enthalt den Architekturwert (aus Steckbriefen). Die `user-concrete-model-default-config`-JSONs speichern den LMS-Wert als `llm.load.numExperts`.
+14. **Dynamische Script-Auflosung:** Der Launcher lost den Custom-Benchmark-Pfad nur beim Start auf. Wird die Datei wahrend des Laufs ersetzt, lauft die alte Version bis zum Ende.
+15. **Agentic-Szenario-Timeout:** `PIPELINE_TIMEOUTS["agentic_scenario"]` (600s) verhindert Timeout-Abbrueche bei langen Kontexten (vorher: 120s Hardcoded -> Abbruch bei Tool-Call-Generierung).
+16. **model.yaml-Konflikt:** Ein virtuelles Modell via `hub/models/<publisher>/<model>/model.yaml` kollidiert mit einer bereits geladenen physischen Instanz derselben GGUF-Datei → llama.cpp stuerzt mit HTTP 500 ab. Workaround: model.yaml nur fuer Modelle ohne physische Instanz (z.B. mradermacher/qwen3-coder-reap).
 
 ---
 
@@ -873,10 +877,12 @@ pytest tests/ -v
 
 | Datum  | Datei                                         | Anderung                                                                        |
 |--------|-----------------------------------------------|---------------------------------------------------------------------------------|
+| 08.07. | `Architektur+Flow_v24.md`                     | v32: --gpu max/-c entfernt, Pre-Config-JSONs, numExperts-Klarstellung |
 | 07.07. | `Architektur+Flow_v24.md`                     | v31: Varianten-eindeutige Keys, resume=False, load_key/lms load Fix, Warnung bei Varianten-Mismatch |
 | 07.07. | `run_benchmarks_v12.py`                       | model_info["key"] variant-eindeutig, load_key getrennt, Warnung bei Varianten-Mismatch |
 | 07.07. | `custom_benchmark_v12.py`                     | get_available_models() variant-eindeutige Keys + variants[] |
 | 07.07. | `model_manager.py`                            | load_model_via_lms() mit --gpu max (CPU-Offloading-Fix) |
+| 08.07. | `model_manager.py`                            | --gpu max und -c entfernt; Kontextlange/GPU-Steuerung uber Pre-Config-JSONs |
 | 07.07. | `consolidate_results_v12.py`                  | _get_model_info() variant-eindeutig; Fallback auf base-Key fuer alte Ergebnisse |
 | 07.07. | `csv_writer.py`                               | model_key in Dateinamen jetzt variant-eindeutig |
 | 05.07. | `Architektur+Flow_v24.md`                     | v30: Strukturierter Output, Paired Bootstrap, --seed, --compare, --bootstrap entfernt |
@@ -924,5 +930,5 @@ pytest tests/ -v
 
 ---
 
-*Erstellt: 28.06.2026 | Aktualisiert: 07.07.2026*
-*Basiert auf: v31-Architektur – Varianten-eindeutige Keys, resume=False, lms load --gpu max*
+*Erstellt: 28.06.2026 | Aktualisiert: 08.07.2026*
+*Basiert auf: v32-Architektur – Varianten-eindeutige Keys, resume=False, Pre-Config-JSONs fur Context+GPU, numExperts aus Steckbriefen*
