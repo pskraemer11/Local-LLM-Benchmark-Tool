@@ -22,6 +22,12 @@ ds1000_official/
 Archiv/
 Doku-intern/
 
+# Backup-Ordner (nicht fuer Repo)
+backups/
+
+# Interne Skripte (nicht fuer Repo)
+run_missing_benchmarks.ps1
+
 # LM Studio / System-spezifisch
 lmstudio_model-list*.json
 lmstudio_model-list*.txt

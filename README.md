@@ -158,7 +158,7 @@ From the latest run (30 models, SampleSize=20). Scores in %
 
 ## License
 
-MIT (see LICENSE). The benchmark datasets are subject to their own licenses (Apache-2.0, CC-BY-NC-4.0, etc.).
+GNU General Public License v3.0 (see LICENSE). The benchmark datasets are subject to their own licenses (Apache-2.0, CC-BY-NC-4.0, etc.).
 
 ## Related Projects
 

@@ -409,7 +409,7 @@ North-Mini-Code-1.0-UD:
   k_cache: "q8_0"
   v_cache: "iq4_nl"
   offload: 1
-  notes: "Architektur: North-Mini Dense (Coder) | 128 Experts"
+  notes: "Architektur: North-Mini Dense (Coder) | GGUF-Arch: cohere2moe | 128 Experts"
 
 NuminaMath-7B-CoT:
   publisher: "QuantFactory"
