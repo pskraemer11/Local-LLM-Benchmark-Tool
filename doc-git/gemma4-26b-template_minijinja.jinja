@@ -1,9 +1,7 @@
 {{- bos_token -}}
 {%- if (enable_thinking is defined and enable_thinking) or tools or messages[0]['role'] in ['system', 'developer'] -%}
     {{- '<|turn>system\n' -}}
-    {%- if enable_thinking is defined and enable_thinking -%}
-        {{- '<|think|>\n' -}}
-    {%- endif -%}
+    {{- '<|think|>\n' -}}
     {%- if messages[0]['role'] in ['system', 'developer'] -%}
         {%- set loop_messages = messages[1:] -%}
     {%- else -%}
@@ -87,4 +85,7 @@
 
 {%- if add_generation_prompt -%}
     {{- '<|turn>model\n' -}}
+    {%- if not (enable_thinking is defined and enable_thinking) -%}
+        {{- '<|channel>thought\n<channel|>' -}}
+    {%- endif -%}
 {%- endif -%}

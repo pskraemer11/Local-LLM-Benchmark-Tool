@@ -76,4 +76,8 @@
 {%- endfor -%}
 {%- if add_generation_prompt -%}
 <|turn>model
+{%- if not (enable_thinking is defined and enable_thinking) -%}
+<|channel>thought
+<channel|>
+{%- endif -%}
 {%- endif -%}
