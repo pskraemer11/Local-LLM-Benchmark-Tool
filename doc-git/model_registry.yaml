@@ -8,6 +8,7 @@ AceMath-7B-Instruct:
   quants: [Q8_0]
   arch: "AceMath"
   notes: "Architektur: AceMath"
+  np_recommended: 1
 
 codegemma-7b-it:
   publisher: "lmstudio-community"
@@ -16,6 +17,7 @@ codegemma-7b-it:
   arch: "CodeGemma Dense"
   offload: 1
   notes: "Architektur: CodeGemma Dense"
+  np_recommended: 1
 
 CodeLlama-13b-Instruct-hf:
   publisher: ["mradermacher", "second-state"]
@@ -25,6 +27,7 @@ CodeLlama-13b-Instruct-hf:
   context: 16384
   k_cache: "q5_1"
   notes: "Architektur: CodeLlama Dense"
+  np_recommended: 1
 
 codellama-13b-python:
   publisher: "TheBloke"
@@ -34,6 +37,7 @@ codellama-13b-python:
   k_cache: "q8_0"
   v_cache: "q5_1"
   notes: "Architektur: CodeLlama Dense"
+  np_recommended: 1
 
 CodeLlama-13b-Python-hf:
   publisher: "mradermacher"
@@ -43,6 +47,7 @@ CodeLlama-13b-Python-hf:
   context: 16384
   k_cache: "q5_1"
   notes: "Architektur: CodeLlama Dense"
+  np_recommended: 1
 
 codestral-22b-v0.1:
   publisher: "mistralai"
@@ -52,6 +57,7 @@ codestral-22b-v0.1:
   v_cache: "q5_1"
   offload: 1
   notes: "Architektur: Mistral Dense (Coder)"
+  np_recommended: 1
 
 deepseek-coder-33b-instruct:
   publisher: "TheBloke"
@@ -61,6 +67,7 @@ deepseek-coder-33b-instruct:
   k_cache: "q8_0"
   v_cache: "q4_1"
   notes: "Architektur: DeepSeek Dense (Coder)"
+  np_recommended: 1
 
 deepseek-coder-6.7b-instruct:
   publisher: "TheBloke"
@@ -70,6 +77,7 @@ deepseek-coder-6.7b-instruct:
   k_cache: "f16"
   v_cache: "q8_0"
   notes: "Architektur: DeepSeek Dense (Coder)"
+  np_recommended: 1
 
 Devstral-Small-2-24B-Instruct-2512:
   publisher: "unsloth"
@@ -81,6 +89,7 @@ Devstral-Small-2-24B-Instruct-2512:
   v_cache: "iq4_nl"
   offload: 1
   notes: "Architektur: Mistral Dense (Coder)"
+  np_recommended: 1
 
 ERNIE-4.5-21B-A3B-PT:
   publisher: "unsloth"
@@ -92,7 +101,9 @@ ERNIE-4.5-21B-A3B-PT:
   k_cache: "q8_0"
   v_cache: "q5_1"
   offload: 1
-  notes: "Architektur: ERNIE MoE | Experts, 130 (=64+64+2) / Top-k (active): 2 x 6 (Text+Vision) + 2 shared"
+  notes: "Architektur: ERNIE MoE | Experts, 130 (=64+64+2) / Top-k (active): 2 x 6
+    (Text+Vision) + 2 shared"
+  np_recommended: 4
 
 ERNIE-4.5-21B-A3B-Thinking:
   publisher: "unsloth"
@@ -103,6 +114,7 @@ ERNIE-4.5-21B-A3B-Thinking:
   k_cache: "q8_0"
   v_cache: "q5_1"
   notes: "Architektur: ERNIE MoE | 130 Experts"
+  np_recommended: 4
 
 Falcon3-10B-Instruct:
   publisher: ["lmstudio-community", "tiiuae"]
@@ -110,6 +122,7 @@ Falcon3-10B-Instruct:
   quants: [Q8_0, q8_0]
   arch: "Falcon3 Dense"
   notes: "Architektur: Falcon3 Dense"
+  np_recommended: 1
 
 flux-2-klein-9b:
   publisher: "unsloth"
@@ -118,6 +131,7 @@ flux-2-klein-9b:
   arch: "FLUX Diffusion (Vision)"
   context: 2048
   notes: "Architektur: FLUX Diffusion (Vision)"
+  np_recommended: 1
 
 gemma-4-19b-a4b-it-REAP:
   publisher: "mradermacher"
@@ -130,7 +144,9 @@ gemma-4-19b-a4b-it-REAP:
   k_cache: "q8_0"
   v_cache: "q5_1"
   offload: 1
-  notes: "Architektur: Gemma-4 (19B, REAP-pruned from Gemma-4-26B-A4B) | 90 Experts, Top-k (active): 8 (+1 shared) | Chat-Template: gemma4-19b-template_minijinja.jinja"
+  notes: "Architektur: Gemma-4 (19B, REAP-pruned from Gemma-4-26B-A4B) | 90 Experts,
+    Top-k (active): 8 (+1 shared) | Chat-Template: gemma4-19b-template_minijinja.jinja"
+  np_recommended: 4
 
 gemma-4-26B:
   publisher: "google"
@@ -144,6 +160,7 @@ gemma-4-26B:
   v_cache: "q5_1"
   offload: 1
   notes: "Architektur: Gemma-4 (26B) | 128 Experts | Chat-Template: gemma4-26b-template_minijinja.jinja"
+  np_recommended: 4
 
 gemma-4-26b-a4b-it:
   publisher: "google"
@@ -152,6 +169,7 @@ gemma-4-26b-a4b-it:
   template: "gemma4-26b-template_minijinja.jinja"
   experts: 18
   notes: "Architektur: Gemma-4 (26B) | 128 Experts | Chat-Template: gemma4-26b-template_minijinja.jinja"
+  np_recommended: 4
 
 gemma-4-26B-A4B-it-UD:
   publisher: "unsloth"
@@ -165,6 +183,7 @@ gemma-4-26B-A4B-it-UD:
   v_cache: "q5_1"
   offload: 1
   notes: "Architektur: Gemma-4 (26B) | 128 Experts | Chat-Template: gemma4-26b-template_minijinja.jinja"
+  np_recommended: 4
 
 GLM-4.6V-Flash-UD:
   publisher: "unsloth"
@@ -174,6 +193,7 @@ GLM-4.6V-Flash-UD:
   k_cache: "q8_0"
   v_cache: "q5_1"
   notes: "Architektur: GLM Vision"
+  np_recommended: 1
 
 GLM-4.7-Flash-REAP-23B-A3B.i1:
   publisher: ["mradermacher", "unsloth"]
@@ -184,6 +204,7 @@ GLM-4.7-Flash-REAP-23B-A3B.i1:
   k_cache: "q8_0"
   v_cache: "iq4_nl"
   notes: "Architektur: GLM MoE | 205 Experts"
+  np_recommended: 4
 
 google_gemma-4-26B-A4B-it:
   publisher: "bartowski"
@@ -197,6 +218,7 @@ google_gemma-4-26B-A4B-it:
   v_cache: "q5_1"
   offload: 1
   notes: "Architektur: Gemma-4 (26B) | 128 Experts | Chat-Template: gemma4-26b-template_minijinja.jinja"
+  np_recommended: 4
 
 gpt-oss-20b:
   publisher: ["lmstudio-community", "unsloth"]
@@ -205,6 +227,7 @@ gpt-oss-20b:
   arch: "GPT-OSS Dense"
   experts: 16
   notes: "Architektur: GPT-OSS Dense | 32 Experts"
+  np_recommended: 4
 
 granite-4.0-h-tiny:
   publisher: "ibm-granite"
@@ -216,8 +239,10 @@ granite-4.0-h-tiny:
   experts: 24
   k_cache: "q8_0"
   v_cache: "q5_1"
-  notes: "Architektur: Granite-4.0-H-Tiny. Core components: GQA, Mamba2, MoEs with shared experts, SwiGLU activation, RMSNorm, and shared input/output embeddings.
-  | 64 Experts, Top-6 (active): 4 routed + 2 shared | Chat-Template: granite-4.0-h-tiny_template.jinja"
+  notes: "Architektur: Granite-4.0-H-Tiny. Core components: GQA, Mamba2, MoEs with
+    shared experts, SwiGLU activation, RMSNorm, and shared input/output embeddings.
+    | 64 Experts, Top-6 (active): 4 routed + 2 shared | Chat-Template: granite-4.0-h-tiny_template.jinja"
+  np_recommended: 4
 
 granite-4.0-h-tiny-UD:
   publisher: "unsloth"
@@ -229,6 +254,7 @@ granite-4.0-h-tiny-UD:
   k_cache: "q8_0"
   v_cache: "iq4_nl"
   notes: "Architektur: Granite-4.0 | 64 Experts | Chat-Template: granite-4.0-h-tiny_template.jinja"
+  np_recommended: 4
 
 granite-4.1-30b:
   publisher: ["ibm-granite", "mradermacher"]
@@ -241,6 +267,7 @@ granite-4.1-30b:
   v_cache: "iq4_nl"
   offload: 1
   notes: "Architektur: Granite-4.1 | Chat-Template: granite-4.1-30b_template.jinja"
+  np_recommended: 1
 
 granite-4.1-8b:
   publisher: ["ibm-granite", "lmstudio-community"]
@@ -252,6 +279,7 @@ granite-4.1-8b:
   v_cache: "q5_1"
   offload: 1
   notes: "Architektur: Granite-4.1 | Chat-Template: granite-4.1-30b_template.jinja"
+  np_recommended: 1
 
 granite-4.1-8b-UD:
   publisher: "unsloth"
@@ -262,6 +290,7 @@ granite-4.1-8b-UD:
   k_cache: "q8_0"
   v_cache: "q5_1"
   notes: "Architektur: Granite-4.1 | Chat-Template: granite-4.1-30b_template.jinja"
+  np_recommended: 1
 
 JanusCoder-14B:
   publisher: "unsloth"
@@ -271,6 +300,7 @@ JanusCoder-14B:
   k_cache: "q8_0"
   v_cache: "q8_0"
   notes: "Architektur: JanusCoder Dense"
+  np_recommended: 1
 
 JanusCoder-14B-UD:
   publisher: "unsloth"
@@ -280,6 +310,7 @@ JanusCoder-14B-UD:
   k_cache: "q8_0"
   v_cache: "q8_0"
   notes: "Architektur: JanusCoder Dense"
+  np_recommended: 1
 
 LFM2-24B-A2B:
   publisher: "LiquidAI"
@@ -290,6 +321,7 @@ LFM2-24B-A2B:
   k_cache: "q8_0"
   v_cache: "q5_1"
   notes: "Architektur: LFM2 MoE | 12 Experts"
+  np_recommended: 4
 
 LFM2-24B-A2B-REAP.i1:
   publisher: "mradermacher"
@@ -300,6 +332,7 @@ LFM2-24B-A2B-REAP.i1:
   k_cache: "q8_0"
   v_cache: "q5_1"
   notes: "Architektur: LFM2 MoE | 64 Experts"
+  np_recommended: 4
 
 LFM2-8B-A1B-UD:
   publisher: "unsloth"
@@ -310,6 +343,7 @@ LFM2-8B-A1B-UD:
   k_cache: "q8_0"
   v_cache: "q5_1"
   notes: "Architektur: LFM2 MoE"
+  np_recommended: 4
 
 LFM2.5-8B-A1B:
   publisher: "LiquidAI"
@@ -320,6 +354,7 @@ LFM2.5-8B-A1B:
   k_cache: "q8_0"
   v_cache: "q8_0"
   notes: "Architektur: LFM2 MoE | 32 Experts"
+  np_recommended: 4
 
 LiquidAI_LFM2-24B-A2B:
   publisher: "bartowski"
@@ -330,6 +365,7 @@ LiquidAI_LFM2-24B-A2B:
   k_cache: "q8_0"
   v_cache: "q5_1"
   notes: "Architektur: LFM2 MoE | 12 Experts"
+  np_recommended: 4
 
 LiquidAI_LFM2-8B-A1B:
   publisher: "bartowski"
@@ -340,6 +376,7 @@ LiquidAI_LFM2-8B-A1B:
   k_cache: "q8_0"
   v_cache: "q8_0"
   notes: "Architektur: LFM2 MoE | 4 Experts"
+  np_recommended: 4
 
 Mellum2-12B-A2.5B-Instruct:
   publisher: "JetBrains"
@@ -352,6 +389,7 @@ Mellum2-12B-A2.5B-Instruct:
   v_cache: "q5_1"
   offload: 1
   notes: "Architektur: Mellum2 MoE | 64 Experts, active: 8"
+  np_recommended: 4
 
 Mellum2-12B-A2.5B-Thinking:
   publisher: "JetBrains"
@@ -362,6 +400,7 @@ Mellum2-12B-A2.5B-Thinking:
   k_cache: "q8_0"
   v_cache: "q8_0"
   notes: "Architektur: Mellum2 MoE | 64 Experts, active: 8"
+  np_recommended: 4
 
 MiMo-VL-7B-RL-UD:
   publisher: "unsloth"
@@ -371,6 +410,7 @@ MiMo-VL-7B-RL-UD:
   k_cache: "q8_0"
   v_cache: "q5_1"
   notes: "Architektur: MiMo MoE (Vision)"
+  np_recommended: 4
 
 MiMo-VL-7B-SFT-2508:
   publisher: "mradermacher"
@@ -378,6 +418,7 @@ MiMo-VL-7B-SFT-2508:
   quants: [Q8_0]
   arch: "MiMo MoE (Vision)"
   notes: "Architektur: MiMo MoE (Vision)"
+  np_recommended: 4
 
 Ministral-3-14B-Instruct-2512:
   publisher: "lmstudio-community"
@@ -389,6 +430,7 @@ Ministral-3-14B-Instruct-2512:
   v_cache: "iq4_nl"
   offload: 1
   notes: "Architektur: Mistral Dense"
+  np_recommended: 1
 
 nerdsking-python-coder-7B-i:
   publisher: "Nerdsking"
@@ -398,6 +440,7 @@ nerdsking-python-coder-7B-i:
   k_cache: "f16"
   v_cache: "q8_0"
   notes: "Architektur: Python Coder (custom)"
+  np_recommended: 1
 
 North-Mini-Code-1.0-UD:
   publisher: "unsloth"
@@ -410,6 +453,7 @@ North-Mini-Code-1.0-UD:
   v_cache: "iq4_nl"
   offload: 1
   notes: "Architektur: North-Mini Dense (Coder) | GGUF-Arch: cohere2moe | 128 Experts"
+  np_recommended: 4
 
 NuminaMath-7B-CoT:
   publisher: "QuantFactory"
@@ -417,6 +461,7 @@ NuminaMath-7B-CoT:
   quants: [Q8_0]
   arch: "Numina Math"
   notes: "Architektur: Numina Math"
+  np_recommended: 1
 
 pandalyst-7b-v1.2:
   publisher: "TheBloke"
@@ -424,6 +469,7 @@ pandalyst-7b-v1.2:
   quants: [Q8_0]
   arch: "Pandalyst Dense"
   notes: "Architektur: Pandalyst Dense"
+  np_recommended: 1
 
 pandalyst_13b_v1.0:
   publisher: "TheBloke"
@@ -433,6 +479,7 @@ pandalyst_13b_v1.0:
   k_cache: "q8_0"
   v_cache: "q8_0"
   notes: "Architektur: Pandalyst Dense"
+  np_recommended: 1
 
 phi-4:
   publisher: ["microsoft", "unsloth"]
@@ -443,6 +490,7 @@ phi-4:
   k_cache: "q8_0"
   v_cache: "q5_1"
   notes: "Architektur: Phi-4 Dense"
+  np_recommended: 1
 
 pythia-12b:
   publisher: "mradermacher"
@@ -450,6 +498,7 @@ pythia-12b:
   quants: [Q6_K]
   arch: "Pythia Dense"
   notes: "Architektur: Pythia Dense"
+  np_recommended: 1
 
 Qwen2-7B-LLM:
   publisher: "NexaAI"
@@ -457,6 +506,7 @@ Qwen2-7B-LLM:
   quants: [Q5_1, Q8_0]
   arch: "Qwen2 Dense"
   notes: "Architektur: Qwen2 Dense"
+  np_recommended: 1
 
 qwen2.5-coder-14b-instruct:
   publisher: "qwen"
@@ -468,6 +518,7 @@ qwen2.5-coder-14b-instruct:
   v_cache: "q5_1"
   offload: 1
   notes: "Architektur: Qwen2.5 Dense (Coder)"
+  np_recommended: 1
 
 Qwen2.5-Coder-32B-Instruct:
   publisher: "bartowski"
@@ -477,6 +528,7 @@ Qwen2.5-Coder-32B-Instruct:
   k_cache: "q5_1"
   v_cache: "iq4_nl"
   notes: "Architektur: Qwen2.5 Dense (Coder)"
+  np_recommended: 1
 
 Qwen2.5-Coder-7B-Instruct:
   publisher: "lmstudio-community"
@@ -484,6 +536,7 @@ Qwen2.5-Coder-7B-Instruct:
   quants: [Q8_0]
   arch: "Qwen2.5 Dense (Coder)"
   notes: "Architektur: Qwen2.5 Dense (Coder)"
+  np_recommended: 1
 
 Qwen2.5-Math-7B-Instruct:
   publisher: "lmstudio-community"
@@ -491,6 +544,7 @@ Qwen2.5-Math-7B-Instruct:
   quants: [Q8_0]
   arch: "Qwen2.5 Dense (Math)"
   notes: "Architektur: Qwen2.5 Dense (Math)"
+  np_recommended: 1
 
 Qwen3-14B-UD:
   publisher: "unsloth"
@@ -500,6 +554,7 @@ Qwen3-14B-UD:
   k_cache: "q8_0"
   v_cache: "iq4_nl"
   notes: "Architektur: Qwen3 Dense"
+  np_recommended: 1
 
 Qwen3-Coder-REAP-25B-A3B:
   publisher: "mradermacher"
@@ -511,7 +566,9 @@ Qwen3-Coder-REAP-25B-A3B:
   k_cache: "q8_0"
   v_cache: "q5_1"
   offload: 1
-  notes: "Architektur: Qwen3 MoE (Coder; REAP pruned from Qwen3-Coder-30B-A3B-Instruct) | 103 Experts, Top-k (aktiv): 8"
+  notes: "Architektur: Qwen3 MoE (Coder; REAP pruned from Qwen3-Coder-30B-A3B-Instruct)
+    | 103 Experts, Top-k (aktiv): 8"
+  np_recommended: 4
 
 Qwen3.6-27B:
   publisher: "unsloth"
@@ -523,6 +580,7 @@ Qwen3.6-27B:
   v_cache: "iq4_nl"
   offload: 1
   notes: "Architektur: Qwen3.6 Dense; Reasoning/Thinking-Mode via CoT) "
+  np_recommended: 1
 
 Qwen3.6-28B-REAP.i1:
   publisher: "mradermacher"
@@ -534,7 +592,9 @@ Qwen3.6-28B-REAP.i1:
   k_cache: "q8_0"
   v_cache: "q5_1"
   offload: 1
-  notes: "Architektur: Qwen3.6 MoE (REAP-pruned from Qwen3.6-35B-A3B) | 205 Experts, Top-k (aktiv): 8 + 1 shared"
+  notes: "Architektur: Qwen3.6 MoE (REAP-pruned from Qwen3.6-35B-A3B) | 205 Experts,
+    Top-k (aktiv): 8 + 1 shared"
+  np_recommended: 4
 
 qwen3.6-35b-reap-pruned-ratio-0.5:
   publisher: "lennyhans"
@@ -544,6 +604,7 @@ qwen3.6-35b-reap-pruned-ratio-0.5:
   k_cache: "q8_0"
   v_cache: "q5_1"
   notes: "Architektur: Qwen3.6 MoE (REAP)"
+  np_recommended: 4
 
 rnj-1:
   publisher: "essentialai"
@@ -553,6 +614,7 @@ rnj-1:
   v_cache: "q8_0"
   offload: 1
   notes: "Architektur: RNJ Dense"
+  np_recommended: 1
 
 solar-pro-preview-instruct:
   publisher: "MaziyarPanahi"
@@ -560,6 +622,7 @@ solar-pro-preview-instruct:
   quants: [Q4_K_S]
   arch: "Solar Dense"
   notes: "Architektur: Solar Dense"
+  np_recommended: 1
 
 starcoder2-15b-instruct-v0.1:
   publisher: "lmstudio-community"
@@ -570,6 +633,7 @@ starcoder2-15b-instruct-v0.1:
   k_cache: "q8_0"
   v_cache: "q5_1"
   notes: "Architektur: StarCoder2 Dense"
+  np_recommended: 1
 
 WizardCoder-Python-13B-V1.0.i1:
   publisher: ["mradermacher", "TheBloke"]
@@ -577,3 +641,4 @@ WizardCoder-Python-13B-V1.0.i1:
   quants: [Q6_K]
   arch: "WizardCoder Dense"
   notes: "Architektur: WizardCoder Dense"
+  np_recommended: 1

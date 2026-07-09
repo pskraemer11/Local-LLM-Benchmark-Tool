@@ -4,17 +4,16 @@
 
 LM Studio setzt `Max Concurrent Predictions` (np/parallel) standardmäßig auf **4**.
 Bei **sequentiellen Batch-Jobs** (z.B. Benchmarks, ein Request nach dem anderen)
-werden dadurch unnötig Ressourcen verschwendet:
+hängt die optimale Einstellung von der **Architektur** ab.
 
-- KV-Cache für **4 parallele Slots** alloziert (3 ungenutzt)
-- Slot-Switching per LRU zerstört Cache-Kontinuität
-- Höherer VRAM-Druck → `cache size limit reached`-Evictions
+## Kern-Erkenntnis: Dense vs MoE
 
-## Erkenntnis
+| Architektur | Optimales np | Grund |
+|---|---|---|
+| **Dense** (alle Parameter aktiv) | **np=1** | LCP-Cache-Reuse spart Prompt-Tokens; GPU ist bereits ausgelastet |
+| **MoE** (nur Subset aktiv) | **np=4** | LCP-Cache-Reuse nicht unterstützt; Batching füllt die GPU besser |
 
-Für **sequentiell arbeitende Skripte** (ein `lms load` → N Requests → `unload`)
-ist **np=1 optimal**. Die Messung am 08./09.07.2026 am selben Basis-Modell
-(Qwen2.5 Coder 14B) zeigt:
+### Messung Dense: Qwen2.5 Coder 14B (08./09.07.2026)
 
 | Merkmal | Q5_0 (np=4) | Q6_K (np=1) |
 |---|---|---|
@@ -25,6 +24,17 @@ ist **np=1 optimal**. Die Messung am 08./09.07.2026 am selben Basis-Modell
 
 > **Hinweis:** Q6_K ist rechenintensiver als Q5_0 – die gemessene
 > Geschwindigkeitssteigerung ist **allein auf np=1** zurückzuführen.
+
+### Messung MoE: google_gemma-4-26b-a4b-it Q3_K_S (04./09.07.2026)
+
+| Merkmal | np=4 (04.07.) | np=1 (09.07.) |
+|---|---|---|
+| Eval Speed | **~5.3 t/s** | **~2.1 t/s** |
+| Prompt Eval | 21.8 t/s | 98 t/s (LCP hilft prompt, aber nicht eval) |
+| KV-Cache-Reuse | Nicht unterstützt (MoE) | Nicht unterstützt (MoE) |
+
+np=4 ist **2.5× schneller** bei MoE, weil die GPU durch Batchen von 4 Tokens
+besser ausgelastet wird. LCP-Cache-Reuse entfällt bei MoE ohnehin.
 
 ## Mechanismus
 
@@ -41,10 +51,11 @@ Bei jedem Request wählt der Server einen Slot aus:
 - **LCP-Similarity** (Longest Common Prefix): Der Prompt des vorherigen
   Requests wird mit dem aktuellen verglichen. Bei Übereinstimmung wird
   der KV-Cache des Prefix wiederverwendet (`f_keep` = Anteil aus Cache).
+  **Funktioniert nur bei Dense-Modellen** – MoE unterstützt kein Cache-Reuse.
 - **LRU** (Least Recently Used): Falls kein passender Prefix gefunden wird,
   wird der am längsten ungenutzte Slot gewählt → Cache verloren.
 
-### np=1 vs np=4
+### np=1 vs np=4 – Dense
 
 | Aspekt | np=4 | np=1 |
 |---|---|---|
@@ -53,7 +64,15 @@ Bei jedem Request wählt der Server einen Slot aus:
 | f_keep | Stark schwankend | 0.80–0.95 (stabil) |
 | KV-Cache VRAM | 4× Grundbedarf | 1× Grundbedarf |
 
-### Log-Beleg
+### np=1 vs np=4 – MoE
+
+| Aspekt | np=4 | np=1 |
+|---|---|---|
+| GPU-Auslastung | **Hoch** (4 Tokens parallel) | Niedrig (1 Token) |
+| Cache-Reuse | Entfällt (MoE) | Entfällt (MoE) |
+| Eval Speed | **~2-3× höher** | Niedriger |
+
+### Log-Beleg Dense
 
 **Mit np=1:** Ausschließlich LCP-Selection – der Prefix bleibt erhalten:
 
@@ -74,12 +93,28 @@ selected slot by LRU, t_last = 337789914
 Auch bei LCP-Treffern wird zwischen verschiedenen Slots (0,1,2,3)
 gewechselt, was den nutzbaren Cache verkleinert.
 
+### Log-Beleg MoE
+
+```
+slot print_timing: id 0 | eval time = 81194.31 ms / 174 tokens (2.14 t/s)   # np=1
+slot print_timing: id 3 | eval time = 41573.83 ms / 220 tokens (5.29 t/s)   # np=4
+```
+
 ## Empfehlung
 
-1. **Für sequentielle Batch-Skripte:** np=1 in der GUI setzen
-   (My Models → ⚙️ → Max Concurrent Predictions → 1)
-2. **Für interaktiven Chat/parallele Nutzer:** np=4 (Default) belassen
-3. **Projektweit:** np=1 als Default für alle Benchmark-Läufe
+1. **Dense Modelle** (Qwen, Llama, Mistral, Phi, Granite-4.1): **np=1**
+   → LCP-Cache-Reuse senkt Prompt-Overhead, GPU bereits ausgelastet
+2. **MoE Modelle** (Gemma-4, LFM, ERNIE, Qwen3-Coder-REAP, Mellum2,
+   North-Mini-Code, GLM-4.7-Flash-REAP, DeepSeek-Coder-V2-Lite): **np=4**
+   → Batching nutzt GPU besser, kein Cache-Reuse zu verlieren
+3. **Interaktiver Chat / parallele Nutzer:** np=4 (Default) belassen
+
+## Automatische Konfiguration
+
+Die JSON-Configs in `user-concrete-model-default-config` sind per Skript
+korrigiert: MoE-Modelle haben `numParallelSessions=4`, Dense-Modelle `=1`.
+Die Erkennung erfolgt über das Feld `llm.load.numExperts` – ist es vorhanden,
+gilt das Modell als MoE.
 
 ## Anhang: Fix für PowerShell-Logging
 
