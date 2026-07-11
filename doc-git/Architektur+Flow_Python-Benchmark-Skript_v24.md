@@ -287,7 +287,22 @@ for attempt in range(1, MAX_RETRIES + 1):
             return 0.0, f"Max retries exceeded: {e}"
 ```
 
-### 2.8 Fehlerbehandlung
+### 2.8 Split: `--model_args` vs `--gen_kwargs` (Bugfix 11.07.)
+
+**Problem (bis 10.07.):** `_get_lmeval_params()` legte alle Parameter (`max_tokens`, `temperature`, `top_p`, `min_p`, `until`, `extra_body`) in `--model_args`. Diese landeten im Konstruktor `LocalChatCompletion.__init__(**kwargs)` und wurden dort **stillschweigend ignoriert** (openai_completions.py:158 `**kwargs`). Der API-Payload verwendete stattdessen die `generation_kwargs` aus der Task-YAML (`max_gen_toks: 20` → nur 20 Tokens → 0% Score).
+
+**Fix:** Aufteilung in zwei CLI-Parameter:
+
+| Parameter | Empfänger | Enthält |
+|-----------|-----------|---------|
+| `--model_args` | `LocalChatCompletion.__init__()` | `base_url`, `model`, `num_concurrent`, `max_gen_toks` (Fallback), `eos_string` |
+| `--gen_kwargs` | Evaluator merged in YAML `generation_kwargs` → API-Payload (via `**gen_kwargs` in `_create_payload()`) | `max_tokens`, `temperature`, `top_p`, `top_k`, `min_p`, `until`, `extra_body` |
+
+**Wirkung:** `extra_body.chat_template_kwargs.enable_thinking` fließt jetzt erstmals in den LM-Studio-Request. `max_tokens` überschreibt YAMLs `max_gen_toks`. `temperature`/`top_p`/`min_p` werden korrekt gesetzt.
+
+**Referenz:** `run_benchmarks_v12.py:709-754`, `openai_completions.py:189-206` (LocalChatCompletion._create_payload)
+
+### 2.9 Fehlerbehandlung
 
 | Fehler                  | Behandlung                              |
 |-------------------------|-----------------------------------------|
@@ -483,7 +498,7 @@ exec_sandboxed(code, timeout=30)
 
 **Modell-ID:** `model = model_info.get("_api_model") or model_key` - exakte ID aus `lms ps`.
 
-**Parameter pro Modellklasse:**
+**Parameter pro Modellklasse (via `--gen_kwargs`):**
 
 | Klasse | temperature | top_p | max_tokens | enable_thinking | Besonderheit |
 |--------|-------------|-------|------------|-----------------|--------------|
@@ -491,8 +506,10 @@ exec_sandboxed(code, timeout=30)
 | Reasoning | 0.1 | 0.9 | - | per `--thinking` | min_p=0.02, Timeout x2 |
 | Gemma 4 | 0.0 | 1.0 | 4096 | per `--thinking` | Thinking aktivierbar fur MathQA/MMLU-Pro |
 | Qwen3.6 | 0.1 | 0.9 | 8192 | False (erzwungen) | Thinking-Tokens blockieren Token-Budget |
-| GPT-OSS | 1.0 | 1.0 | 4096 | None | sampling |
+| GPT-OSS | 1.0 | 1.0 | 4096 | None | temperture=1.0, top_k=0, until=`<\|return\|>`/`<\|call\|>` |
 | Qwen3.5 | 0.2 | 0.9 | - | False (erzwungen) | top_k=20, no_system_msg |
+
+**Hinweis:** Seit 11.07. werden alle Generation-Parameter uber `--gen_kwargs` an lm_eval ubergeben (nicht mehr uber `--model_args`). `extra_body` (fur `enable_thinking`) wird via `**gen_kwargs` in den API-Payload gespreadet (openai_completions.py:206). `eos_string` wird NUR fur GPT-OSS gesetzt (via `--model_args`), nicht mehr blanket fur alle Modelle.
 
 `enable_thinking=None` = Modell hat keinen Thinking-Mode. `enable_thinking=False` = Thinking ist deaktiviert (API-Parameter). `enable_thinking per --thinking` = Thinking wird nur fur MathQA/MMLU-Pro aktiviert wenn CLI-Flag gesetzt.
 
@@ -787,7 +804,7 @@ pytest tests/ -v
 2. **evalplus ohne Docker:** Gleiches Sicherheitsrisiko wie eigene Sandbox.
 3. **Kein logprobs:** LM Studio bietet keinen Zugriff auf Token-Wahrscheinlichkeiten.
 4. **Thinking-Token-Extraktion:** `<think>...</think>` wird gestripped.
-5. **lm-eval Regex:** `mmlu_pro_*` extrahiert nur Buchstaben `[A-E]`.
+5. **lm-eval Regex:** `mmlu_pro_*` extrahiert nur Buchstaben `[A-E]`. Seit 11.07.: `mathqa_gen` + `hellaswag_gen` unterstutzen auch Kleinbuchstaben `[a-e]`, `[a-d]`.
 6. **Windows cp1252-Encoding:** `PYTHONIOENCODING=utf-8` global gesetzt.
 7. **`lms unload --all` unzuverlassig:** Node-Prozesse bleiben manchmal aktiv.
 8. **MMLU-Pro modifiziert:** Misst nur Subsets, nicht den vollen Benchmark -> Annaherung.
@@ -904,6 +921,10 @@ pytest tests/ -v
 | 28.06. | `run_benchmarks_v10.py`                       | Launcher v10 (vorher v7): Type Hints, all_summary-Bugfix, API_BASE aus model_manager, Task-Retry, MMLU-Pro-Helper |
 | 28.06. | `custom_benchmark_v10.py`                     | Custom v10 (vorher v24): Type Hints, Task-Retry, kein PandasEval, kein interaktiver Modus |
 | 28.06. | `consolidate_results_v10.py`                  | Konsolidierung v10 (vorher v8): Type Hints, ModelData-Dataclass, median/p90-Spalten, width-Duplizierung entfernt |
+| 11.07. | `run_benchmarks_v12.py`                       | **Bugfix: lm_eval-Parameter via `--gen_kwargs` statt `--model_args`**; `eos_string` nur fur GPT-OSS; HellaSwag `min_limit=100` |
+| 11.07. | `lm_eval_tasks/mathqa_gen/mathqa_gen.yaml`   | `max_gen_toks: 20→512`; Regex `[ABCDE]→[A-Ea-e]`; Pfade relativ |
+| 11.07. | `lm_eval_tasks/hellaswag_gen.yaml`            | `max_gen_toks: 20→100`; Regex `[ABCD]→[A-Da-d]`; `>-→\|` (Newlines) |
+| 11.07. | `lm_eval_tasks/mathqa_gen/utils.py`           | `process_docs()` Regex robuster bei Komma-Werten |
 | 28.06. | `model_manager.py`                            | Versionierung entfernt (vorher _v2); API_BASE zentral; PIPELINE_TIMEOUTS beibehalten |
 | 28.06. | `csv_writer.py`                               | Versionierung entfernt (vorher _v2); fn_csv um median/p90 erweitert             |
 | 28.06. | `benchmark_config.py`                         | NEU: Zentrale Konfiguration fur CAT_WEIGHTS, OVERALL_WEIGHTS, MMLU_PRO_SUBSETS, TOOL_EVAL_SCENARIO_IDS, DISPLAY_NAMES |
@@ -930,5 +951,6 @@ pytest tests/ -v
 
 ---
 
-*Erstellt: 28.06.2026 | Aktualisiert: 08.07.2026*
+*Erstellt: 28.06.2026 | Aktualisiert: 11.07.2026*
 *Basiert auf: v32-Architektur – Varianten-eindeutige Keys, resume=False, Pre-Config-JSONs fur Context+GPU, numExperts aus Steckbriefen*
+*Bugfix 11.07.: lm_eval `--gen_kwargs` statt `--model_args` fur Generation-Parameter; HellaSwag/MathQA YAML-Fixes*

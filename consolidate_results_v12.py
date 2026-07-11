@@ -59,6 +59,8 @@ def _get_model_info() -> Dict[str, Any]:
                     # Build unique key per variant
                     unique_key = sv if sv and sv != mk else f"{mk}@{quant_name}"
                     display = item.get("displayName", "")
+                    if "@" in display:
+                        display = display.split("@")[0]
                     info[unique_key] = {
                         "displayName": display,
                         "vram_gb": round(sz_bytes / 1e9, 2),
@@ -72,11 +74,50 @@ def _get_model_info() -> Dict[str, Any]:
     return info
 
 
+def _normalize_model_keys(model_keys: List[str]) -> List[str]:
+    """Normalize and deduplicate model keys.
+
+    1. Lowercase the @variant part consistently
+    2. If a base model appears both with and without @variant (same variant),
+       keep only the version with @variant (use QUANT_MAP to infer missing quant)
+    3. Keep multiple quant variants as separate entries (e.g. @q3_k_m vs @q4_k_s)
+    """
+    groups: dict[tuple[str, str], list[str]] = {}
+    for mk in model_keys:
+        # Normalize publisher/key separator: "/" → "_" (directory convention)
+        mk = mk.replace("/", "_")
+        if "@" in mk:
+            parts = mk.split("@")
+            if len(parts) > 2:
+                mk = f"{parts[0]}@{parts[-1]}"
+            base, variant = mk.split("@", 1)
+            variant_lower = variant.lower()
+        else:
+            base = mk
+            variant_lower = QUANT_MAP.get(mk, "").lower() if mk in QUANT_MAP else ""
+        key = (base, variant_lower)
+        groups.setdefault(key, []).append(mk)
+
+    result: list[str] = []
+    seen: set[str] = set()
+    for (base, v_lower), originals in groups.items():
+        normalized = f"{base}@{v_lower}" if v_lower else base
+        if normalized not in seen:
+            result.append(normalized)
+            seen.add(normalized)
+    return result
+
+
 def _get_display_name(model_key: str) -> str:
     """Resolve model_key -> human-readable display name, appending @variant if present."""
+    # Fix legacy double-quant (e.g. "model@q5_0@Q5_0" -> "model@Q5_0")
+    parts = model_key.split("@")
+    if len(parts) > 2:
+        model_key = f"{parts[0]}@{parts[-1]}"
     variant = ""
     if "@" in model_key:
         base_key, variant = model_key.split("@", 1)
+        variant = variant.lower()  # consistent lowercase
     else:
         base_key = model_key
     info = _get_model_info()
@@ -99,8 +140,8 @@ def _get_display_name(model_key: str) -> str:
             dn = meta.get("displayName")
             if dn:
                 return f"{dn}@{variant}" if variant else dn
-    # Fallback: prettify key
-    display = model_key.replace("/", " ").replace("_", " ").replace("-", " ").title()
+    # Fallback: prettify base_key only (without variant), then append @variant
+    display = base_key.replace("/", " ").replace("_", " ").replace("-", " ").title()
     return f"{display}@{variant}" if variant else display
 
 
@@ -434,23 +475,50 @@ def find_latest_csvs(min_sample_size: int = 0) -> Tuple[Dict[str, str], Dict[str
         
         # Use model_key if available, else fall back to display name from filename
         lookup_key = model_key_from_csv or model_name_from_file
+        # Normalize "/" → "_" (CSV model_key may use publisher/model format)
+        lookup_key = lookup_key.replace("/", "_")
+        # Fix legacy double-quant (e.g. "model@q5_0@Q5_0" -> "model@q5_0")
+        parts = lookup_key.split("@")
+        if len(parts) > 2:
+            lookup_key = f"{parts[0]}@{parts[-1]}"
+        # Normalize: lowercase the @variant part for consistent lookups
+        if "@" in lookup_key:
+            base, variant = lookup_key.split("@", 1)
+            lookup_key = f"{base}@{variant.lower()}"
         if lookup_key not in target or ts > target[lookup_key][0]:
             target[lookup_key] = (ts, fpath)
     return {k: v[1] for k, v in ds1000.items()}, {k: v[1] for k, v in codereval.items()}
 
 
-def try_read_evalplus(model_key: str) -> Optional[Dict[str, float]]:
+def _find_dir_ci(prefix: str, model_key: str) -> Optional[str]:
+    """Find a result subdirectory by case-insensitive matching.
+    
+    Tries in order:
+    1. Exact match: {prefix}_{model_key_safe}
+    2. Base key (without @variant)
+    3. Case-insensitive scan of RESULTS_DIR for the prefix
+    """
     safe = model_key.replace("/", "_")
-    root = os.path.join(RESULTS_DIR, f"evalplus_{safe}")
-    if not os.path.isdir(root):
-        # Backward compat: try base key (without @ variant)
-        base = model_key.split("@")[0].replace("/", "_")
-        if base != safe:
-            root = os.path.join(RESULTS_DIR, f"evalplus_{base}")
-            if not os.path.isdir(root):
-                return None
-        else:
-            return None
+    candidates = [f"{prefix}_{safe}"]
+    base = model_key.split("@")[0].replace("/", "_")
+    if base != safe:
+        candidates.append(f"{prefix}_{base}")
+    for cand in candidates:
+        path = os.path.join(RESULTS_DIR, cand)
+        if os.path.isdir(path):
+            return path
+    # Case-insensitive fallback: scan RESULTS_DIR for prefix match
+    target_lower = candidates[0].lower()
+    for dname in os.listdir(RESULTS_DIR):
+        if dname.lower() == target_lower and os.path.isdir(os.path.join(RESULTS_DIR, dname)):
+            return os.path.join(RESULTS_DIR, dname)
+    return None
+
+
+def try_read_evalplus(model_key: str) -> Optional[Dict[str, float]]:
+    root = _find_dir_ci("evalplus", model_key)
+    if not root:
+        return None
     results = {}
     for dataset in ["humaneval", "mbpp"]:
         dpath = os.path.join(root, dataset)
@@ -493,16 +561,9 @@ def _read_results_json(search_dir: str, task_name: str, metric_priority: List[st
     return None
 
 def read_lmeval_per_model(model_key: str) -> Optional[Dict[str, float]]:
-    safe = model_key.replace("/", "_")
-    root = os.path.join(RESULTS_DIR, f"lmeval_{safe}")
-    if not os.path.isdir(root):
-        base = model_key.split("@")[0].replace("/", "_")
-        if base != safe:
-            root = os.path.join(RESULTS_DIR, f"lmeval_{base}")
-            if not os.path.isdir(root):
-                return None
-        else:
-            return None
+    root = _find_dir_ci("lmeval", model_key)
+    if not root:
+        return None
     results = {}
 
     METRICS = ["exact_match,custom-extract", "exact_match,remove_whitespace",
@@ -557,16 +618,9 @@ def read_lmeval_per_model(model_key: str) -> Optional[Dict[str, float]]:
 
 
 def read_agentic(model_key: str) -> Optional[float]:
-    safe = model_key.replace("/", "_")
-    root = os.path.join(RESULTS_DIR, f"agentic_{safe}")
-    if not os.path.isdir(root):
-        base = model_key.split("@")[0].replace("/", "_")
-        if base != safe:
-            root = os.path.join(RESULTS_DIR, f"agentic_{base}")
-            if not os.path.isdir(root):
-                return None
-        else:
-            return None
+    root = _find_dir_ci("agentic", model_key)
+    if not root:
+        return None
     # Recursively find all .json files
     all_json = []
     for dirpath, _, filenames in os.walk(root):
@@ -734,6 +788,9 @@ def read_data(model_keys: Optional[List[str]] = None, min_sample_size: int = 0,
                         added += 1
         if added:
             print(f"  +{added} additional models from benchmark directories")
+
+    # Normalize and deduplicate model_keys: lowercase @variant, merge duplicates
+    model_keys = _normalize_model_keys(model_keys)
 
     rows = []
     for model_key in model_keys:
@@ -1121,7 +1178,9 @@ def main() -> None:
 
     with open(md_path, "w", encoding="utf-8") as f:
         f.write(f"# Consolidated Results – Dense Run (15+ Models)\n")
-        f.write(f"\nAs of: {datetime.now().strftime('%Y-%m-%d %H:%M')}, SampleSize=20\n\n")
+        ss_display = args.sample_size if args.sample_size else "mixed"
+        ss_note = f" (DS1000/CoderEval CSVs only)" if args.sample_size else ""
+        f.write(f"\nAs of: {datetime.now().strftime('%Y-%m-%d %H:%M')}, SampleSize={ss_display}{ss_note}\n\n")
         f.write("** New Weighting Total Score: Coding 35%, Math 25%, Agentic 25%, Knowledge 15% **\n")
         f.write("**Efficiency = Score / Runtime (in hours)** – Runtime based on measured DS1000+CoderEval latency.\n\n")
 

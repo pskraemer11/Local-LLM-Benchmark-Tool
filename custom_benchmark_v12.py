@@ -142,7 +142,7 @@ MODEL_CONFIG = {
         "temperature": 0.0,
         "top_p": 1.0,
         "max_tokens": MAX_TOKENS_GENERAL,
-        "enable_thinking": None,
+        "enable_thinking": False,
     },
     "qwen3.5": {
         "temperature": 0.2,
@@ -182,7 +182,56 @@ MODEL_CONFIG = {
         "top_p": 1.0,
         "top_k": 0,
         "max_tokens": 4096,
-        "enable_thinking": None,
+        "enable_thinking": False,
+        "stop": ["<|return|>", "<|call|>"],
+    },
+    "apriel": {
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "max_tokens": 4096,
+        "enable_thinking": False,
+    },
+    "nemotron": {
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "max_tokens": 4096,
+        "enable_thinking": False,
+    },
+    "falcon3": {
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "max_tokens": MAX_TOKENS_GENERAL,
+        "enable_thinking": False,
+    },
+    "codestral": {
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "max_tokens": MAX_TOKENS_GENERAL,
+        "enable_thinking": False,
+    },
+    "devstral": {
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "max_tokens": MAX_TOKENS_GENERAL,
+        "enable_thinking": False,
+    },
+    "ernie": {
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "max_tokens": MAX_TOKENS_GENERAL,
+        "enable_thinking": False,
+    },
+    "rnj": {
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "max_tokens": MAX_TOKENS_GENERAL,
+        "enable_thinking": False,
+    },
+    "python-coder": {
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "max_tokens": MAX_TOKENS_GENERAL,
+        "enable_thinking": False,
     },
 }
 
@@ -470,7 +519,9 @@ def get_available_models() -> list[dict[str, Any]]:
                     sv = item.get("selectedVariant") or ""
                     unique_key = sv if sv and sv != base_key else (f"{base_key}@{quant_name}" if quant_name else base_key)
                     display = item.get("displayName", base_key)
-                    if quant_name and not display.endswith(f"@{quant_name}"):
+                    if quant_name:
+                        if "@" in display:
+                            display = display.split("@")[0]
                         display = f"{display}@{quant_name}"
                     models.append({
                         "key": unique_key,
@@ -608,6 +659,10 @@ def strip_thinking_tokens(text: Optional[str]) -> tuple[Optional[str], int]:
     cleaned = text
     cleaned = re.sub(r"<\|channel>thought\n.*?<channel\|>", "", cleaned, flags=re.DOTALL)
     cleaned = re.sub(r"<think>.*?</think>", "", cleaned, flags=re.DOTALL).strip()
+    # If thinking tags consumed the entire response, warn
+    if estimated_tokens > 0 and (not cleaned or len(cleaned) < 10):
+        print(f"  [WARN] Thinking tokens consumed entire response ({estimated_tokens} tok estimated). "
+              f"Model may need enable_thinking=False in MODEL_CONFIG.")
     return cleaned, estimated_tokens
 
 
@@ -653,6 +708,11 @@ def generate_answer(prompt: Optional[str] = None, model_key: Optional[str] = Non
     if enable_thinking is not None:
         body.setdefault("extra_body", {})
         body["extra_body"]["chat_template_kwargs"] = {"enable_thinking": enable_thinking}
+    # Gemma 4: <|channel>thought tag is hardcoded in GGUF jinja template,
+    # extra_body override is ignored. Force-disable via system prompt.
+    if enable_thinking is False and model_key and "gemma" in model_key.lower():
+        if not any(m.get("role") == "system" for m in messages):
+            messages.append({"role": "system", "content": "Do NOT use thinking or reasoning. Answer directly without <|channel>thought tags."})
     if stop:
         body["stop"] = stop
     if response_format is not None:

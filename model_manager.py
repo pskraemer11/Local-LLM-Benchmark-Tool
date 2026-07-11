@@ -167,9 +167,13 @@ def _ensure_lmstudio_running() -> bool:
     return True
 
 
-def load_model_via_lms(model_key: str) -> tuple[bool, Optional[str]]:
+def load_model_via_lms(model_key: str, context_length: Optional[int] = None, gpu_offload: Optional[float] = None) -> tuple[bool, Optional[str]]:
     print(f"\n  [INFO] Loading '{model_key}'...")
     cmd = ["lms", "load", model_key, "--yes"]
+    if context_length is not None:
+        cmd.extend(["--context-length", str(context_length)])
+    if gpu_offload is not None:
+        cmd.extend(["--gpu", str(gpu_offload)])
     for attempt in range(2):
         try:
             result = subprocess.run(

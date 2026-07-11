@@ -169,7 +169,7 @@ EVALPLUS_BENCHMARKS = [
 ]
 LMEVAL_BENCHMARKS = [
     {"key": "5", "name": "ARC-Challenge",   "task": "arc_challenge_chat"},
-    {"key": "6", "name": "HellaSwag",       "task": "hellaswag_gen"},
+    {"key": "6", "name": "HellaSwag",       "task": "hellaswag_gen", "min_limit": 100},
     {"key": "7", "name": "TruthfulQA",      "task": "truthfulqa_gen"},
     {"key": "8", "name": "MMLU-Pro",        "task": "mmlu_pro", "modified": True},
     {"key": "9", "name": "MathQA",          "task": "mathqa_gen", "timeout_mult": 3},
@@ -215,6 +215,25 @@ def _parse_selection(choice: str, max_val: int) -> Optional[list[int]]:
     return sorted(selected) if selected else None
 
 
+# Safe context lengths for VRAM-constrained models (16 GB GPU).
+# Native context can exceed available VRAM → cap to these safe values.
+SAFE_CONTEXT: dict[str, int] = {
+    "glm-4.7-flash": 131072,           # 202K native → OOM at full context
+    "glm-4.7-flash-reap-23b-a3b": 98304,  # 131K native → safe
+    "kimi-linear-48b-a3b-instruct": 131072,  # 1M native → extreme VRAM
+    "kimi-linear-reap-35b-a3b-instruct-i1": 131072,
+    "north-mini-code-1.0": 131072,     # 256K native → KV-quant inkompatibel
+    "ministral-3-14b-instruct-2512": 65536,
+}
+
+def _get_safe_context(model_key: str) -> Optional[int]:
+    """Return capped context length for VRAM-safe model loading."""
+    key_lower = model_key.lower()
+    for pattern, ctx in SAFE_CONTEXT.items():
+        if pattern in key_lower:
+            return ctx
+    return None
+
 def _model_family(model_key: str) -> str:
     """Extract model family (without publisher prefix) for deduplication."""
     return model_key.replace("\\", "/").split("/")[-1].lower()
@@ -240,8 +259,9 @@ def get_available_models() -> list[dict[str, Any]]:
                     # Unique key per variant: selectedVariant or baseKey@quant
                     unique_key = sv if sv and sv != base_key else (f"{base_key}@{quant_name}" if quant_name else base_key)
                     display = item.get("displayName", base_key)
-                    # Append quant suffix for unique identification
-                    if quant_name and not display.endswith(f"@{quant_name}"):
+                    if quant_name:
+                        if "@" in display:
+                            display = display.split("@")[0]
                         display = f"{display}@{quant_name}"
                     models.append({
                         "key": unique_key,
@@ -400,13 +420,17 @@ def _get_lmeval_params(model_key: str, bench_name: str = "") -> dict[str, Any]:
     NOTE: The parameters must match the behavior in custom_benchmark_v12.py
     (MODEL_CONFIG). Especially important:
       - Qwen3.6: enable_thinking=False AND max_tokens=8192 (both needed!)
-      - GPT-OSS: temperature=1.0 (sampling instead of greedy)
+      - GPT-OSS: temperature=1.0, until=["<|return|>","<|call|>"], top_k=0
       - Reasoning: min_p=0.02, timeout x2
       - Thinking mode for MathQA/MMLU-Pro via --thinking (all reasoning models)
+    
+    Returned keys are split by the caller into --model_args (constructor) and
+    --gen_kwargs (generation kwargs). See run_lmeval() for the split logic.
     """
     gptoss = _is_gptoss_model(model_key)
     if gptoss:
-        return {"max_tokens": 4096, "temperature": 1.0, "top_p": 1.0}
+        return {"max_tokens": 4096, "temperature": 1.0, "top_p": 1.0, "top_k": 0,
+                "until": ["<|return|>", "<|call|>"]}
     if _is_qwen3_6_model(model_key):
         return {"max_tokens": 8192, "temperature": 0.0, "top_p": 1.0, "until": []}
     if _is_qwen3_5_model(model_key):
@@ -427,15 +451,27 @@ def _get_lmeval_params(model_key: str, bench_name: str = "") -> dict[str, Any]:
 
 
 def _build_lmeval_cmd(model_key: str, api_model: str, subset_task: str, per_limit: int, output_dir: str, bench_name: str = "") -> list[str]:
+    """Like run_lmeval(), but returns the cmd list instead of executing it.
+    
+    Used by run_mmlupro_modified() for per-subset lm_eval invocations.
+    Mirrors the same --model_args / --gen_kwargs split as run_lmeval().
+    """
+    gptoss = _is_gptoss_model(model_key)
     lmeval_params = _get_lmeval_params(model_key, bench_name=bench_name)
     model_args_dict = {
         "base_url": f"{API_BASE}/chat/completions",
         "model": api_model,
         "num_concurrent": 1,
+        "max_gen_toks": 512,   # fallback if YAML gen_kwargs has no max_gen_toks
     }
-    if "until" not in lmeval_params:
+    # eos_string only for GPT-OSS; other models use YAML until sequences or gen_kwargs
+    if gptoss and "until" not in lmeval_params:
         model_args_dict["eos_string"] = "<|endoftext|>"
-    model_args_dict.update(lmeval_params)
+    # Generation params go to --gen_kwargs (overrides YAML gen_kwargs via merge)
+    gen_kwargs_keys = {"max_tokens", "temperature", "top_p", "top_k", "min_p",
+                       "until", "extra_body"}
+    gen_kwargs = {k: v for k, v in lmeval_params.items()
+                  if k in gen_kwargs_keys and v is not None}
     model_args = json.dumps(model_args_dict, ensure_ascii=False)
     cmd = [
         sys.executable, "-m", "lm_eval",
@@ -444,7 +480,11 @@ def _build_lmeval_cmd(model_key: str, api_model: str, subset_task: str, per_limi
         "--tasks", subset_task,
         "--limit", str(per_limit),
         "--output_path", output_dir,
+        "--apply_chat_template",
+        "--log_samples",
     ]
+    if gen_kwargs:
+        cmd.extend(["--gen_kwargs", json.dumps(gen_kwargs, ensure_ascii=False)])
     return cmd
 
 
@@ -676,13 +716,19 @@ def run_lmeval(model_info: dict[str, Any], bench: dict[str, Any], limit: int = 5
     print(f"\n  >>> LM-Eval: {bench['name']} / {model_display}")
     t0 = time.time()
     lmeval_params = _get_lmeval_params(model_key, bench_name=bench['name'])
-    # eos_string fixes lm_eval warning "Cannot determine EOS string" (api_models:378)
-    # and prevents generate_until truncation for models without explicit stop token.
     #
-    # API reference (OpenAI-Compat endpoints):
-    #   https://lmstudio.ai/docs/developer/rest
+    # Split params: constructor-level (--model_args) vs. generation-level (--gen_kwargs).
     #
-    # lm_eval uses OpenAI-Compat /v1/chat/completions.
+    # model_args is consumed by LocalChatCompletion.__init__(**kwargs).
+    #   Keys like base_url, model, num_concurrent, max_gen_toks, eos_string
+    #   are constructor params. All other params in lmeval_params are silently
+    #   dropped by the constructor (openai_completions.py:158 **kwargs).
+    #
+    # gen_kwargs is merged by the evaluator into the YAML task's generation_kwargs
+    #   (evaluator.py:311: task_obj.set_config(update=True)), and then passed
+    #   as gen_kwargs to _create_payload(). The remaining **gen_kwargs are
+    #   spread into the API payload dict (openai_completions.py:206).
+    #
     # IMPORTANT: The model parameter MUST correspond to the exact load ID from lms ps,
     #           otherwise LM Studio responds with HTTP 400 "model not found".
     #           A test with "model=check" (invalid name) causes the request to HANG
@@ -691,10 +737,18 @@ def run_lmeval(model_info: dict[str, Any], bench: dict[str, Any], limit: int = 5
         "base_url": f"{API_BASE}/chat/completions",
         "model": api_model,
         "num_concurrent": 1,
+        "max_gen_toks": 512,
     }
-    if "until" not in lmeval_params:
+    # Only set eos_string for models that explicitly need a fixed EOS token.
+    # GPT-OSS uses <|endoftext|> as its primary stop; other chat models rely on
+    # the YAML's until sequences ("\n\n", "Question:") or explicit gen_kwargs.
+    if gptoss and "until" not in lmeval_params:
         model_args_dict["eos_string"] = "<|endoftext|>"
-    model_args_dict.update(lmeval_params)
+    # Gen_kwargs keys that should override YAML generation_kwargs per request.
+    gen_kwargs_keys = {"max_tokens", "temperature", "top_p", "top_k", "min_p",
+                       "until", "extra_body"}
+    gen_kwargs = {k: v for k, v in lmeval_params.items()
+                  if k in gen_kwargs_keys and v is not None}
     model_args = json.dumps(model_args_dict, ensure_ascii=False)
     cmd = [
         sys.executable, "-m", "lm_eval",
@@ -706,6 +760,8 @@ def run_lmeval(model_info: dict[str, Any], bench: dict[str, Any], limit: int = 5
         "--apply_chat_template",
         "--log_samples",
     ]
+    if gen_kwargs:
+        cmd.extend(["--gen_kwargs", json.dumps(gen_kwargs, ensure_ascii=False)])
     yaml_path = None
     for p in [os.path.join(LMEVAL_TASKS_DIR, f"{task_name}.yaml"),
               os.path.join(LMEVAL_TASKS_DIR, task_name, f"{task_name}.yaml")]:
@@ -920,17 +976,28 @@ def run_agentic(model_info: dict[str, Any], limit: int = 5) -> Optional[dict[str
             "score": score, "thinking": THINKING_ENABLED}
 
 
-def save_summary_csv(results: list[dict[str, Any]], model_info: Optional[dict[str, Any]] = None) -> Any:
+def save_summary_csv(results: list[dict[str, Any]], model_info: Optional[dict[str, Any]] = None,
+                     sample_size: int = 5, seed: str = "", exclude_benchmarks: str = "",
+                     no_structured_output: str = "", no_unload_between: str = "") -> Any:
     """Legacy – forwards to csv_writer."""
     return csv_writer.write_accumulative_summary(
         results, model_info or {},
+        sample_size=sample_size, seed=seed, exclude_benchmarks=exclude_benchmarks,
+        no_structured_output=no_structured_output, no_unload_between=no_unload_between,
         base_dir=BASE_DIR,
     )
 
 
-def save_model_summary_csv(results: list[dict[str, Any]], model_info: dict[str, Any]) -> Any:
+def save_model_summary_csv(results: list[dict[str, Any]], model_info: dict[str, Any],
+                           sample_size: int = 5, seed: str = "", exclude_benchmarks: str = "",
+                           no_structured_output: str = "", no_unload_between: str = "") -> Any:
     """Legacy – forwards to csv_writer."""
-    return csv_writer.write_accumulative_summary(results, model_info, base_dir=BASE_DIR)
+    return csv_writer.write_accumulative_summary(results, model_info,
+                                                 sample_size=sample_size, seed=seed,
+                                                 exclude_benchmarks=exclude_benchmarks,
+                                                 no_structured_output=no_structured_output,
+                                                 no_unload_between=no_unload_between,
+                                                 base_dir=BASE_DIR)
 
 
 def main() -> None:
@@ -963,6 +1030,8 @@ def main() -> None:
                         help="Comma-separated benchmark names to exclude (e.g. 'MMLU-Pro,MathQA')")
     parser.add_argument("--no-structured-output", action="store_true",
                         help="Disable structured JSON output in custom benchmarks (fallback to regex)")
+    parser.add_argument("--no-unload-between", action="store_true",
+                        help="Skip unload/reload between benchmarks (faster but risk of perf degradation)")
     args = parser.parse_args()
 
     global THINKING_ENABLED
@@ -1041,12 +1110,12 @@ def main() -> None:
             else:
                 print(f"  [INFO] Different model loaded ({loaded['display_name']}) – unloading...")
                 unload_all_models()
-                ok, api_model = load_model_via_lms(load_key)
+                ok, api_model = load_model_via_lms(load_key, context_length=_get_safe_context(load_key))
                 if not ok:
                     print(f"  [ERROR] Loading failed. Skipping.")
                     continue
         else:
-            ok, api_model = load_model_via_lms(load_key)
+            ok, api_model = load_model_via_lms(load_key, context_length=_get_safe_context(load_key))
             if not ok:
                 print(f"  [ERROR] Loading failed. Skipping.")
                 continue
@@ -1067,7 +1136,20 @@ def main() -> None:
 
         model_results = []
 
-        for bench in benchmarks:
+        for bidx, bench in enumerate(benchmarks):
+            # Unload/reload between benchmarks to prevent KV-cache/GPU memory degradation
+            if not args.no_unload_between and bidx > 0:
+                print(f"  [INFO] Unloading/reloading model between benchmarks...")
+                unload_all_models()
+                time.sleep(2)
+                ok, api_model = load_model_via_lms(load_key, context_length=_get_safe_context(load_key))
+                if not ok:
+                    print(f"  [ERROR] Reload before {bench['name']} failed. Skipping.")
+                    continue
+                print("  [INFO] Waiting 10s for API re-initialization...")
+                time.sleep(10)
+                model_info["_api_model"] = api_model
+
             try:
                 bname = bench["name"]
                 ep_names = {b["name"] for b in EVALPLUS_BENCHMARKS}
@@ -1082,7 +1164,8 @@ def main() -> None:
                 elif bname in ep_names:
                     result = run_evalplus(model_info, bench, sample_size=args.sample_size, seed=args.seed, reasoning=reasoning)
                 elif bname in lmeval_names:
-                    result = run_lmeval(model_info, bench, limit=args.sample_size, reasoning=reasoning)
+                    per_limit = max(bench.get("min_limit", 0), args.sample_size)
+                    result = run_lmeval(model_info, bench, limit=per_limit, reasoning=reasoning)
                 else:
                     result = run_custom_benchmark(model_info, bench, sample_size=args.sample_size, seed=args.seed, no_structured_output=args.no_structured_output)
 
@@ -1104,7 +1187,7 @@ def main() -> None:
                             ok = True
                     if not ok:
                         print(f"  [WARN] Model after {bname} no longer loaded – reloading...")
-                        load_model_via_lms(load_key)
+                        load_model_via_lms(load_key, context_length=_get_safe_context(load_key))
                         import time as _t
                         _t.sleep(10)
             except subprocess.TimeoutExpired:
@@ -1116,6 +1199,10 @@ def main() -> None:
         if model_results:
             csv_writer.write_accumulative_summary(model_results, model_info,
                                                   sample_size=args.sample_size,
+                                                  seed=str(args.seed or ""),
+                                                  exclude_benchmarks=args.exclude_benchmarks or "",
+                                                  no_structured_output=str(args.no_structured_output or ""),
+                                                  no_unload_between=str(args.no_unload_between or ""),
                                                   base_dir=BASE_DIR)
 
     print("\n" + "=" * 60)
@@ -1132,6 +1219,10 @@ def main() -> None:
     if all_summary and len(models) > 1:
         csv_writer.write_konsolidiert_aktuell(all_summary,
                                               sample_size=args.sample_size,
+                                              seed=str(args.seed or ""),
+                                              exclude_benchmarks=args.exclude_benchmarks or "",
+                                              no_structured_output=str(args.no_structured_output or ""),
+                                              no_unload_between=str(args.no_unload_between or ""),
                                               base_dir=BASE_DIR)
 
 

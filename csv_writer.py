@@ -72,6 +72,10 @@ TASK_FIELDS = [
     "benchmark",
     "timestamp",
     "sample_size",
+    "seed",
+    "exclude_benchmarks",
+    "no_structured_output",
+    "no_unload_between",
     "task_index",
     "score",
     "score_detail",
@@ -103,6 +107,10 @@ MODEL_FIELDS = [
     "benchmark",
     "timestamp",
     "sample_size",
+    "seed",
+    "exclude_benchmarks",
+    "no_structured_output",
+    "no_unload_between",
     "num_tasks",
     "avg_score_pct",
     "avg_latency_s",
@@ -126,6 +134,10 @@ SUMMARY_FIELDS = [
     "benchmark",
     "timestamp",
     "sample_size",
+    "seed",
+    "exclude_benchmarks",
+    "no_structured_output",
+    "no_unload_between",
     "thinking",
     "score",
     "detail",
@@ -143,6 +155,10 @@ CONSOLIDATED_FIELDS = [
     "score",
     "timestamp",
     "sample_size",
+    "seed",
+    "exclude_benchmarks",
+    "no_structured_output",
+    "no_unload_between",
     "thinking",
 ]
 
@@ -171,6 +187,8 @@ def _write_csv(path: str, fieldnames: list[str], rows: list[dict], delimiter: st
 
 def write_per_task_csv(results: list[dict], benchmark_name: str, model_display: str,
                        model_key: str = "", sample_size: int = 5, pipeline: str = "custom",
+                       seed: str = "", exclude_benchmarks: str = "",
+                       no_structured_output: str = "", no_unload_between: str = "",
                        base_dir: Optional[str] = None) -> str:
     """Writes per-task raw data (replaces save_csv in benchmark_lmstudio)."""
     ts = _now_ts()
@@ -189,6 +207,10 @@ def write_per_task_csv(results: list[dict], benchmark_name: str, model_display: 
             "benchmark": benchmark_name,
             "timestamp": iso,
             "sample_size": str(sample_size),
+            "seed": str(seed) if seed else "",
+            "exclude_benchmarks": exclude_benchmarks,
+            "no_structured_output": no_structured_output,
+            "no_unload_between": no_unload_between,
             "task_index": r.get("task_index", i),
             "score": r.get("score", ""),
             "score_detail": r.get("score_detail", ""),
@@ -218,6 +240,8 @@ def write_per_task_csv(results: list[dict], benchmark_name: str, model_display: 
 
 def write_per_model_csv(entries: list[dict], model_display: str, model_key: str = "",
                         pipeline: str = "custom", sample_size: int = 5,
+                        seed: str = "", exclude_benchmarks: str = "",
+                        no_structured_output: str = "", no_unload_between: str = "",
                         base_dir: Optional[str] = None) -> str:
     """Writes aggregated model summary (replaces save_model_summary)."""
     ts = _now_ts()
@@ -235,6 +259,10 @@ def write_per_model_csv(entries: list[dict], model_display: str, model_key: str 
             "benchmark": e.get("benchmark_name", e.get("benchmark", "")),
             "timestamp": iso,
             "sample_size": str(sample_size),
+            "seed": str(seed) if seed else "",
+            "exclude_benchmarks": exclude_benchmarks,
+            "no_structured_output": no_structured_output,
+            "no_unload_between": no_unload_between,
             "num_tasks": e.get("num_tasks", e.get("sample_len", "")),
             "avg_score_pct": f"{e.get('avg_score', 0) * 100:.1f}" if e.get("avg_score") is not None else "",
             "avg_latency_s": f"{e.get('avg_latency', e.get('avg_latency_s', 0)):.1f}",
@@ -256,6 +284,8 @@ def write_per_model_csv(entries: list[dict], model_display: str, model_key: str 
 
 def write_accumulative_summary(results: list[dict], model_info: dict,
                                sample_size: int = 5,
+                               seed: str = "", exclude_benchmarks: str = "",
+                               no_structured_output: str = "", no_unload_between: str = "",
                                base_dir: Optional[str] = None) -> str:
     """Accumulating model CSV – EACH call creates a NEW file with timestamp.
     
@@ -281,6 +311,10 @@ def write_accumulative_summary(results: list[dict], model_info: dict,
             "benchmark": r.get("bench", r.get("benchmark", "")),
             "timestamp": iso,
             "sample_size": str(sample_size),
+            "seed": str(seed) if seed else "",
+            "exclude_benchmarks": exclude_benchmarks,
+            "no_structured_output": no_structured_output,
+            "no_unload_between": no_unload_between,
             "thinking": r.get("thinking", ""),
             "score": r.get("score", ""),
             "detail": r.get("detail", ""),
@@ -295,6 +329,8 @@ def write_accumulative_summary(results: list[dict], model_info: dict,
 
 
 def write_konsolidiert_aktuell(results: list[dict], sample_size: int = 5,
+                               seed: str = "", exclude_benchmarks: str = "",
+                               no_structured_output: str = "", no_unload_between: str = "",
                                base_dir: Optional[str] = None) -> str:
     """Consolidated overview (replaces inline code in run_benchmarks main)."""
     d = _results_dir(base_dir)
@@ -310,6 +346,10 @@ def write_konsolidiert_aktuell(results: list[dict], sample_size: int = 5,
             "score": str(r.get("score", "")),
             "timestamp": iso,
             "sample_size": str(sample_size),
+            "seed": str(seed) if seed else "",
+            "exclude_benchmarks": exclude_benchmarks,
+            "no_structured_output": no_structured_output,
+            "no_unload_between": no_unload_between,
             "thinking": r.get("thinking", ""),
         })
     _write_csv(path, CONSOLIDATED_FIELDS, rows)

@@ -104,10 +104,14 @@ slot print_timing: id 3 | eval time = 41573.83 ms / 220 tokens (5.29 t/s)   # np
 
 1. **Dense Modelle** (Qwen, Llama, Mistral, Phi, Granite-4.1): **np=1**
    → LCP-Cache-Reuse senkt Prompt-Overhead, GPU bereits ausgelastet
-2. **MoE Modelle** (Gemma-4, LFM, ERNIE, Qwen3-Coder-REAP, Mellum2,
-   North-Mini-Code, GLM-4.7-Flash-REAP, DeepSeek-Coder-V2-Lite): **np=4**
+2. **MoE Modelle** (Gemma-4, LFM, Qwen3-Coder-REAP, Mellum2,
+   North-Mini-Code, GLM-4.7-Flash-REAP, DeepSeek-Coder-V2-Lite,
+   **Kimi-Linear**): **np=4**
    → Batching nutzt GPU besser, kein Cache-Reuse zu verlieren
-3. **Interaktiver Chat / parallele Nutzer:** np=4 (Default) belassen
+3. **Ausnahme ERNIE** (`ernie4_5-moe`): **np=1** – Shared-Expert-Architektur +
+   heterogene Text/Vision-Experten verursachen ineffiziente CUDA-Kernel bei np=4.
+   Gemessen 09.07.2026: np=4 → 0.9-2.7 tok/s (DS1000, 35min), np=1 → erwartet ~15-20+ tok/s.
+4. **Interaktiver Chat / parallele Nutzer:** np=4 (Default) belassen
 
 ## Automatische Konfiguration
 

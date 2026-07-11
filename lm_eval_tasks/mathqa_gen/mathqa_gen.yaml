@@ -2,9 +2,9 @@ task: mathqa_gen
 dataset_path: json
 dataset_kwargs:
   data_files:
-    test: C:/Users/pskra/Python-Projekte/Benchmarks/simple_evals/challenge_test.jsonl
-    validation: C:/Users/pskra/Python-Projekte/Benchmarks/simple_evals/dev.jsonl
-    train: C:/Users/pskra/Python-Projekte/Benchmarks/simple_evals/train.jsonl
+    test: simple_evals/challenge_test.jsonl
+    validation: simple_evals/dev.jsonl
+    train: simple_evals/train.jsonl
 output_type: generate_until
 test_split: test
 validation_split: validation
@@ -27,7 +27,7 @@ generation_kwargs:
   until:
     - "\n\n"
     - "Question:"
-  max_gen_toks: 20
+  max_gen_toks: 512
   do_sample: false
   temperature: 0.0
 metric_list:
@@ -40,7 +40,7 @@ filter_list:
   - name: custom-extract
     filter:
       - function: regex
-        regex_pattern: '(?:answer (?:is|:)|would be|option)?\s*\(?([ABCDE])\b'
+        regex_pattern: '(?:answer (?:is|:)|would be|option)?\s*\(?([A-Ea-e])\b'
       - function: take_first
 metadata:
   version: 1.0

@@ -1,6 +1,6 @@
 # Model Registry – Single Source of Truth
 # Generated from ~/.lmstudio/.internal/user-concrete-model-default-config
-# 60 unique models
+# 102 unique models
 
 AceMath-7B-Instruct:
   publisher: "mradermacher"
@@ -8,7 +8,15 @@ AceMath-7B-Instruct:
   quants: [Q8_0]
   arch: "AceMath"
   notes: "Architektur: AceMath"
-  np_recommended: 1
+
+Apriel-1.5-15b-Thinker:
+  publisher: "unsloth"
+  hf_url: "https://huggingface.co/unsloth/Apriel-1.5-15b-Thinker-GGUF"
+  quants: [Q5_K_S]
+  context: 73728
+  k_cache: "q5_1"
+  v_cache: "iq4_nl"
+  offload: 1
 
 codegemma-7b-it:
   publisher: "lmstudio-community"
@@ -17,7 +25,6 @@ codegemma-7b-it:
   arch: "CodeGemma Dense"
   offload: 1
   notes: "Architektur: CodeGemma Dense"
-  np_recommended: 1
 
 CodeLlama-13b-Instruct-hf:
   publisher: ["mradermacher", "second-state"]
@@ -27,7 +34,6 @@ CodeLlama-13b-Instruct-hf:
   context: 16384
   k_cache: "q5_1"
   notes: "Architektur: CodeLlama Dense"
-  np_recommended: 1
 
 codellama-13b-python:
   publisher: "TheBloke"
@@ -37,7 +43,6 @@ codellama-13b-python:
   k_cache: "q8_0"
   v_cache: "q5_1"
   notes: "Architektur: CodeLlama Dense"
-  np_recommended: 1
 
 CodeLlama-13b-Python-hf:
   publisher: "mradermacher"
@@ -47,27 +52,34 @@ CodeLlama-13b-Python-hf:
   context: 16384
   k_cache: "q5_1"
   notes: "Architektur: CodeLlama Dense"
-  np_recommended: 1
 
 codestral-22b-v0.1:
   publisher: "mistralai"
   hf_url: "https://huggingface.co/mistralai/codestral-22b-v0.1"
   arch: "Mistral Dense (Coder)"
-  k_cache: "q8_0"
-  v_cache: "q5_1"
+  k_cache: "q5_1"
+  v_cache: "iq4_nl"
   offload: 1
   notes: "Architektur: Mistral Dense (Coder)"
-  np_recommended: 1
+
+Codestral-RAG-19B-Pruned:
+  publisher: "bartowski"
+  hf_url: "https://huggingface.co/bartowski/Codestral-RAG-19B-Pruned-GGUF"
+  quants: [Q5_K_M]
+  arch: "Mistral Dense (Coder)"
+  context: 16384
+  k_cache: "iq4_nl"
+  notes: "Architektur: Mistral Dense (Coder)"
 
 deepseek-coder-33b-instruct:
-  publisher: "TheBloke"
-  hf_url: "https://huggingface.co/TheBloke/deepseek-coder-33B-instruct-GGUF"
+  publisher: ["mradermacher", "TheBloke"]
+  hf_url: "https://huggingface.co/mradermacher/deepseek-coder-33b-instruct-GGUF"
   quants: [Q3_K_S]
   arch: "DeepSeek Dense (Coder)"
   k_cache: "q8_0"
-  v_cache: "q4_1"
+  v_cache: "iq4_nl"
+  offload: 1
   notes: "Architektur: DeepSeek Dense (Coder)"
-  np_recommended: 1
 
 deepseek-coder-6.7b-instruct:
   publisher: "TheBloke"
@@ -77,33 +89,99 @@ deepseek-coder-6.7b-instruct:
   k_cache: "f16"
   v_cache: "q8_0"
   notes: "Architektur: DeepSeek Dense (Coder)"
-  np_recommended: 1
+
+DeepSeek-Coder-V2-Lite-Instruct:
+  publisher: ["bartowski", "lmstudio-community"]
+  hf_url: "https://huggingface.co/bartowski/DeepSeek-Coder-V2-Lite-Instruct-GGUF"
+  quants: [Q5_K_M, Q6_K]
+  context: 16384
+  k_cache: "f16"
+  v_cache: "f16"
+
+DeepSeek-OCR:
+  publisher: "ggml-org"
+  hf_url: "https://huggingface.co/ggml-org/DeepSeek-OCR-GGUF"
+  quants: [Q8_0]
+  context: 16384
+
+DeepSeek-R1-Distill-Qwen-14B:
+  publisher: ["lmstudio-community", "unsloth"]
+  hf_url: "https://huggingface.co/lmstudio-community/DeepSeek-R1-Distill-Qwen-14B-GGUF"
+  quants: [Q6_K, Q4_K_M, Q5_K_M]
+  arch: "DeepSeek R1 Distill"
+  context: 16384
+  k_cache: "iq4_nl"
+  v_cache: "iq4_nl"
+  notes: "Architektur: DeepSeek R1 Distill"
+
+DeepSeek-R1-Distill-Qwen-32B:
+  publisher: "bartowski"
+  hf_url: "https://huggingface.co/bartowski/DeepSeek-R1-Distill-Qwen-32B-GGUF"
+  quants: [IQ3_XS]
+  arch: "DeepSeek R1 Distill"
+  context: 16384
+  k_cache: "iq4_nl"
+  v_cache: "q8_0"
+  notes: "Architektur: DeepSeek R1 Distill"
 
 Devstral-Small-2-24B-Instruct-2512:
   publisher: "unsloth"
   hf_url: "https://huggingface.co/unsloth/Devstral-Small-2-24B-Instruct-2512-GGUF"
   quants: [Q3_K_S]
   arch: "Mistral Dense (Coder)"
-  context: 98304
+  context: 90112
   k_cache: "q5_1"
   v_cache: "iq4_nl"
   offload: 1
   notes: "Architektur: Mistral Dense (Coder)"
-  np_recommended: 1
+
+Devstral-Small-2-24B-Instruct-2512-UD:
+  publisher: "unsloth"
+  hf_url: "https://huggingface.co/unsloth/Devstral-Small-2-24B-Instruct-2512-UD"
+  quants: [IQ3_XXS]
+  arch: "Mistral Dense (Coder)"
+  context: 16384
+  k_cache: "q5_1"
+  v_cache: "iq4_nl"
+  notes: "Architektur: Mistral Dense (Coder)"
+
+devstral-small-2-2512:
+  publisher: "mistralai"
+  hf_url: "https://huggingface.co/mistralai/devstral-small-2-2512"
+  arch: "Mistral Dense (Coder)"
+  context: 16384
+  k_cache: "iq4_nl"
+  v_cache: "iq4_nl"
+  notes: "Architektur: Mistral Dense (Coder)"
+
+devstral-small-2505:
+  publisher: "mistralai"
+  hf_url: "https://huggingface.co/mistralai/devstral-small-2505"
+  arch: "Mistral Dense (Coder)"
+  context: 16384
+  k_cache: "q5_1"
+  v_cache: "f16"
+  notes: "Architektur: Mistral Dense (Coder)"
+
+devstral-small-2507:
+  publisher: "mistralai"
+  hf_url: "https://huggingface.co/mistralai/devstral-small-2507"
+  arch: "Mistral Dense (Coder)"
+  context: 16384
+  k_cache: "q5_1"
+  v_cache: "q8_0"
+  notes: "Architektur: Mistral Dense (Coder)"
 
 ERNIE-4.5-21B-A3B-PT:
-  publisher: "unsloth"
-  hf_url: "https://huggingface.co/unsloth/ERNIE-4.5-21B-A3B-PT-GGUF"
-  quants: [IQ4_NL]
+  publisher: ["lmstudio-community", "unsloth"]
+  hf_url: "https://huggingface.co/lmstudio-community/ERNIE-4.5-21B-A3B-PT-GGUF"
+  quants: [Q4_K_M, IQ4_NL]
   arch: "ERNIE MoE"
-  context: 131072
-  experts: 18
+  context: 16384
+  experts: 8
   k_cache: "q8_0"
   v_cache: "q5_1"
-  offload: 1
-  notes: "Architektur: ERNIE MoE | Experts, 130 (=64+64+2) / Top-k (active): 2 x 6
-    (Text+Vision) + 2 shared"
-  np_recommended: 4
+  notes: "Architektur: ERNIE MoE | 8 Experts"
 
 ERNIE-4.5-21B-A3B-Thinking:
   publisher: "unsloth"
@@ -113,8 +191,7 @@ ERNIE-4.5-21B-A3B-Thinking:
   experts: 8
   k_cache: "q8_0"
   v_cache: "q5_1"
-  notes: "Architektur: ERNIE MoE | 130 Experts"
-  np_recommended: 4
+  notes: "Architektur: ERNIE MoE | 8 Experts"
 
 Falcon3-10B-Instruct:
   publisher: ["lmstudio-community", "tiiuae"]
@@ -122,7 +199,6 @@ Falcon3-10B-Instruct:
   quants: [Q8_0, q8_0]
   arch: "Falcon3 Dense"
   notes: "Architektur: Falcon3 Dense"
-  np_recommended: 1
 
 flux-2-klein-9b:
   publisher: "unsloth"
@@ -131,11 +207,32 @@ flux-2-klein-9b:
   arch: "FLUX Diffusion (Vision)"
   context: 2048
   notes: "Architektur: FLUX Diffusion (Vision)"
-  np_recommended: 1
+
+gemma-4-12b:
+  publisher: "google"
+  hf_url: "https://huggingface.co/google/gemma-4-12b"
+  arch: "Gemma-4 (12B)"
+  template: "gemma4_12b_template_minijinja.jinja"
+  context: 16384
+  k_cache: "q8_0"
+  v_cache: "iq4_nl"
+  offload: 1
+  notes: "Architektur: Gemma-4 (12B) | Chat-Template: gemma4_12b_template_minijinja.jinja"
+
+gemma-4-12b-qat:
+  publisher: "google"
+  hf_url: "https://huggingface.co/google/gemma-4-12b-qat"
+  arch: "Gemma-4 (12B)"
+  template: "gemma4_12b_template_minijinja.jinja"
+  context: 16384
+  k_cache: "iq4_nl"
+  v_cache: "q8_0"
+  offload: 1
+  notes: "Architektur: Gemma-4 (12B) | Chat-Template: gemma4_12b_template_minijinja.jinja"
 
 gemma-4-19b-a4b-it-REAP:
   publisher: "mradermacher"
-  hf_url: "https://huggingface.co/mradermacher/gemma-4-19b-a4b-it-REAP-GGUF"
+  hf_url: "https://huggingface.co/mradermacher/gemma-4-19b-a4b-it-REAP-i1-GGUF"
   quants: [Q4_K_S, IQ4_NL]
   arch: "Gemma-4 (19B)"
   template: "gemma4-19b-template_minijinja.jinja"
@@ -144,9 +241,7 @@ gemma-4-19b-a4b-it-REAP:
   k_cache: "q8_0"
   v_cache: "q5_1"
   offload: 1
-  notes: "Architektur: Gemma-4 (19B, REAP-pruned from Gemma-4-26B-A4B) | 90 Experts,
-    Top-k (active): 8 (+1 shared) | Chat-Template: gemma4-19b-template_minijinja.jinja"
-  np_recommended: 4
+  notes: "Architektur: Gemma-4 (19B) | 18 Experts | Chat-Template: gemma4-19b-template_minijinja.jinja"
 
 gemma-4-26B:
   publisher: "google"
@@ -159,17 +254,16 @@ gemma-4-26B:
   k_cache: "q8_0"
   v_cache: "q5_1"
   offload: 1
-  notes: "Architektur: Gemma-4 (26B) | 128 Experts | Chat-Template: gemma4-26b-template_minijinja.jinja"
-  np_recommended: 4
+  notes: "Architektur: Gemma-4 (26B) | 18 Experts | Chat-Template: gemma4-26b-template_minijinja.jinja"
 
 gemma-4-26b-a4b-it:
-  publisher: "google"
+  publisher: ["google", "mradermacher"]
   hf_url: "https://huggingface.co/google/gemma-4-26B-A4B-it-qat-q4_0-gguf"
+  quants: [IQ4_XS]
   arch: "Gemma-4 (26B)"
   template: "gemma4-26b-template_minijinja.jinja"
   experts: 18
-  notes: "Architektur: Gemma-4 (26B) | 128 Experts | Chat-Template: gemma4-26b-template_minijinja.jinja"
-  np_recommended: 4
+  notes: "Architektur: Gemma-4 (26B) | 18 Experts | Chat-Template: gemma4-26b-template_minijinja.jinja"
 
 gemma-4-26B-A4B-it-UD:
   publisher: "unsloth"
@@ -178,22 +272,41 @@ gemma-4-26B-A4B-it-UD:
   arch: "Gemma-4 (26B)"
   template: "gemma4-26b-template_minijinja.jinja"
   context: 65536
-  experts: 128
+  experts: 18
   k_cache: "q8_0"
   v_cache: "q5_1"
   offload: 1
-  notes: "Architektur: Gemma-4 (26B) | 128 Experts | Chat-Template: gemma4-26b-template_minijinja.jinja"
-  np_recommended: 4
+  notes: "Architektur: Gemma-4 (26B) | 18 Experts | Chat-Template: gemma4-26b-template_minijinja.jinja"
 
-GLM-4.6V-Flash-UD:
-  publisher: "unsloth"
-  hf_url: "https://huggingface.co/unsloth/GLM-4.6V-Flash-UD"
-  quants: [Q6_K_XL]
-  arch: "GLM Vision"
+gemma-4-31B.i1:
+  publisher: "mradermacher"
+  hf_url: "https://huggingface.co/mradermacher/gemma-4-31B-i1-GGUF"
+  quants: [IQ3_M]
+  arch: "Gemma-4 (31B)"
+  template: "gemma4-26b-template_minijinja.jinja"
+  context: 16384
   k_cache: "q8_0"
-  v_cache: "q5_1"
-  notes: "Architektur: GLM Vision"
-  np_recommended: 1
+  v_cache: "iq4_nl"
+  offload: 1
+  notes: "Architektur: Gemma-4 (31B) | Chat-Template: gemma4-26b-template_minijinja.jinja"
+
+gemma-4-e4b:
+  publisher: "google"
+  hf_url: "https://huggingface.co/google/gemma-4-e4b"
+  context: 16384
+  offload: 1
+
+GLM-4.7-Flash:
+  publisher: "unsloth"
+  hf_url: "https://huggingface.co/unsloth/GLM-4.7-Flash-REAP-23B-A3B-GGUF"
+  quants: [Q3_K_S]
+  arch: "GLM MoE"
+  context: 65536
+  experts: 16
+  k_cache: "q8_0"
+  v_cache: "iq4_nl"
+  offload: 1
+  notes: "Architektur: GLM MoE | 16 Experts"
 
 GLM-4.7-Flash-REAP-23B-A3B.i1:
   publisher: ["mradermacher", "unsloth"]
@@ -203,31 +316,44 @@ GLM-4.7-Flash-REAP-23B-A3B.i1:
   experts: 24
   k_cache: "q8_0"
   v_cache: "iq4_nl"
-  notes: "Architektur: GLM MoE | 205 Experts"
-  np_recommended: 4
+  notes: "Architektur: GLM MoE | 24 Experts"
+
+GLM-OCR:
+  publisher: "ggml-org"
+  hf_url: "https://huggingface.co/ggml-org/GLM-OCR-GGUF"
+  quants: [Q8_0]
+  context: 16384
 
 google_gemma-4-26B-A4B-it:
   publisher: "bartowski"
   hf_url: "https://huggingface.co/bartowski/google_gemma-4-26B-A4B-it-GGUF"
-  quants: [Q3_K_S]
+  quants: [IQ4_XS, Q3_K_S]
   arch: "Gemma-4 (26B)"
   template: "gemma4-26b-template_minijinja.jinja"
-  context: 65536
-  experts: 18
-  k_cache: "q8_0"
-  v_cache: "q5_1"
+  context: 16384
+  experts: 8
+  k_cache: "iq4_nl"
+  v_cache: "q8_0"
   offload: 1
-  notes: "Architektur: Gemma-4 (26B) | 128 Experts | Chat-Template: gemma4-26b-template_minijinja.jinja"
-  np_recommended: 4
+  notes: "Architektur: Gemma-4 (26B) | 8 Experts | Chat-Template: gemma4-26b-template_minijinja.jinja"
 
 gpt-oss-20b:
-  publisher: ["lmstudio-community", "unsloth"]
+  publisher: ["lmstudio-community", "openai", "unsloth"]
   hf_url: "https://huggingface.co/lmstudio-community/gpt-oss-20b-GGUF"
-  quants: [MXFP4, Q6_K]
+  quants: [MXFP4, Q6_K, Q8_0]
   arch: "GPT-OSS Dense"
+  context: 16384
   experts: 16
-  notes: "Architektur: GPT-OSS Dense | 32 Experts"
-  np_recommended: 4
+  k_cache: "q8_0"
+  v_cache: "q8_0"
+  notes: "Architektur: GPT-OSS Dense | 16 Experts"
+
+granite-20b-code-instruct:
+  publisher: "bartowski"
+  hf_url: "https://huggingface.co/bartowski/granite-20b-code-instruct-GGUF"
+  quants: [Q5_K_S]
+  context: 16384
+  k_cache: "q8_0"
 
 granite-4.0-h-tiny:
   publisher: "ibm-granite"
@@ -235,26 +361,21 @@ granite-4.0-h-tiny:
   quants: [Q8_0]
   arch: "Granite-4.0"
   template: "granite-4.0-h-tiny_template.jinja"
-  context: 262144
+  context: 1048576
   experts: 24
   k_cache: "q8_0"
-  v_cache: "q5_1"
-  notes: "Architektur: Granite-4.0-H-Tiny. Core components: GQA, Mamba2, MoEs with
-    shared experts, SwiGLU activation, RMSNorm, and shared input/output embeddings.
-    | 64 Experts, Top-6 (active): 4 routed + 2 shared | Chat-Template: granite-4.0-h-tiny_template.jinja"
-  np_recommended: 4
+  v_cache: "q8_0"
+  notes: "Architektur: Granite-4.0 | 24 Experts | Chat-Template: granite-4.0-h-tiny_template.jinja"
 
 granite-4.0-h-tiny-UD:
   publisher: "unsloth"
   hf_url: "https://huggingface.co/unsloth/granite-4.0-h-tiny-UD"
-  experts: 64
   quants: [Q8_K_XL]
   arch: "Granite-4.0"
   template: "granite-4.0-h-tiny_template.jinja"
   k_cache: "q8_0"
   v_cache: "iq4_nl"
-  notes: "Architektur: Granite-4.0 | 64 Experts | Chat-Template: granite-4.0-h-tiny_template.jinja"
-  np_recommended: 4
+  notes: "Architektur: Granite-4.0 | Chat-Template: granite-4.0-h-tiny_template.jinja"
 
 granite-4.1-30b:
   publisher: ["ibm-granite", "mradermacher"]
@@ -262,24 +383,22 @@ granite-4.1-30b:
   quants: [Q3_K_S]
   arch: "Granite-4.1"
   template: "granite-4.1-30b_template.jinja"
-  context: 65536
+  context: 59904
   k_cache: "q5_1"
   v_cache: "iq4_nl"
   offload: 1
   notes: "Architektur: Granite-4.1 | Chat-Template: granite-4.1-30b_template.jinja"
-  np_recommended: 1
 
 granite-4.1-8b:
-  publisher: ["ibm-granite", "lmstudio-community"]
+  publisher: ["ibm-granite", "lmstudio-community", "unsloth"]
   hf_url: "https://huggingface.co/ibm-granite/granite-4.1-8b-GGUF"
   quants: [Q8_0, Q6_K]
   arch: "Granite-4.1"
   template: "granite-4.1-30b_template.jinja"
   k_cache: "q8_0"
-  v_cache: "q5_1"
+  v_cache: "q8_0"
   offload: 1
   notes: "Architektur: Granite-4.1 | Chat-Template: granite-4.1-30b_template.jinja"
-  np_recommended: 1
 
 granite-4.1-8b-UD:
   publisher: "unsloth"
@@ -290,17 +409,16 @@ granite-4.1-8b-UD:
   k_cache: "q8_0"
   v_cache: "q5_1"
   notes: "Architektur: Granite-4.1 | Chat-Template: granite-4.1-30b_template.jinja"
-  np_recommended: 1
 
-JanusCoder-14B:
-  publisher: "unsloth"
-  hf_url: "https://huggingface.co/unsloth/JanusCoder-14B-GGUF"
-  quants: [Q5_K_M]
+JanusCoder-14B.i1:
+  publisher: ["mradermacher", "unsloth"]
+  hf_url: "https://huggingface.co/mradermacher/JanusCoder-14B-i1-GGUF"
+  quants: [Q6_K, Q5_K_M]
   arch: "JanusCoder Dense"
+  context: 16384
   k_cache: "q8_0"
-  v_cache: "q8_0"
+  v_cache: "iq4_nl"
   notes: "Architektur: JanusCoder Dense"
-  np_recommended: 1
 
 JanusCoder-14B-UD:
   publisher: "unsloth"
@@ -310,51 +428,37 @@ JanusCoder-14B-UD:
   k_cache: "q8_0"
   v_cache: "q8_0"
   notes: "Architektur: JanusCoder Dense"
-  np_recommended: 1
 
-LFM2-24B-A2B:
-  publisher: "LiquidAI"
-  hf_url: "https://huggingface.co/LiquidAI/LFM2-24B-A2B-GGUF"
+Kimi-Linear-REAP-35B-A3B-Instruct.i1:
+  publisher: "mradermacher"
+  hf_url: "https://huggingface.co/mradermacher/Kimi-Linear-REAP-35B-A3B-Instruct-i1-GGUF"
+  quants: [IQ3_XXS]
+  context: 262144
+  experts: 9
+  offload: 1
+  notes: "9 Experts"
+
+lfm2-24b-a2b:
+  publisher: ["liquid", "LiquidAI"]
+  hf_url: "https://huggingface.co/liquid/lfm2-24b-a2b"
   quants: [Q4_0]
   arch: "LFM2 MoE"
+  context: 16384
   experts: 12
-  k_cache: "q8_0"
+  k_cache: "iq4_nl"
   v_cache: "q5_1"
   notes: "Architektur: LFM2 MoE | 12 Experts"
-  np_recommended: 4
 
 LFM2-24B-A2B-REAP.i1:
   publisher: "mradermacher"
   hf_url: "https://huggingface.co/mradermacher/LFM2-24B-A2B-REAP-i1-GGUF"
   quants: [Q6_K]
   arch: "LFM2 MoE"
-  experts: 4
-  k_cache: "q8_0"
-  v_cache: "q5_1"
-  notes: "Architektur: LFM2 MoE | 64 Experts"
-  np_recommended: 4
-
-LFM2-8B-A1B-UD:
-  publisher: "unsloth"
-  hf_url: "https://huggingface.co/unsloth/LFM2-8B-A1B-UD"
-  experts: 4
-  quants: [Q8_K_XL]
-  arch: "LFM2 MoE"
-  k_cache: "q8_0"
-  v_cache: "q5_1"
-  notes: "Architektur: LFM2 MoE"
-  np_recommended: 4
-
-LFM2.5-8B-A1B:
-  publisher: "LiquidAI"
-  hf_url: "https://huggingface.co/LiquidAI/LFM2.5-8B-A1B-GGUF"
-  quants: [Q8_0]
-  arch: "LFM2 MoE"
-  experts: 4
+  experts: 8
   k_cache: "q8_0"
   v_cache: "q8_0"
-  notes: "Architektur: LFM2 MoE | 32 Experts"
-  np_recommended: 4
+  offload: 1
+  notes: "Architektur: LFM2 MoE | 8 Experts"
 
 LiquidAI_LFM2-24B-A2B:
   publisher: "bartowski"
@@ -364,32 +468,54 @@ LiquidAI_LFM2-24B-A2B:
   experts: 6
   k_cache: "q8_0"
   v_cache: "q5_1"
-  notes: "Architektur: LFM2 MoE | 12 Experts"
-  np_recommended: 4
+  notes: "Architektur: LFM2 MoE | 6 Experts"
 
-LiquidAI_LFM2-8B-A1B:
-  publisher: "bartowski"
-  hf_url: "https://huggingface.co/bartowski/LiquidAI_LFM2-8B-A1B-GGUF"
+Llama-3.1-13B-Instruct:
+  publisher: "mradermacher"
+  hf_url: "https://huggingface.co/mradermacher/Llama-3.1-13B-Instruct-GGUF"
+  quants: [Q6_K]
+  context: 16384
+  k_cache: "iq4_nl"
+  v_cache: "iq4_nl"
+
+Llama-3.3-8B-Instruct:
+  publisher: "mradermacher"
+  hf_url: "https://huggingface.co/mradermacher/Llama-3.3-8B-Instruct-GGUF"
   quants: [Q8_0]
-  arch: "LFM2 MoE"
-  experts: 6
-  k_cache: "q8_0"
-  v_cache: "q8_0"
-  notes: "Architektur: LFM2 MoE | 4 Experts"
-  np_recommended: 4
+  context: 16384
+  k_cache: "f16"
+
+magistral-small:
+  publisher: "mistralai"
+  hf_url: "https://huggingface.co/mistralai/magistral-small"
+  context: 16384
+  k_cache: "q5_1"
+  v_cache: "f16"
+
+magistral-small-2509:
+  publisher: "mistralai"
+  hf_url: "https://huggingface.co/mistralai/magistral-small-2509"
+  context: 16384
+  k_cache: "iq4_nl"
+  v_cache: "iq4_nl"
+
+mathstral-7B-v0.1:
+  publisher: ["bartowski", "lmstudio-community"]
+  hf_url: "https://huggingface.co/bartowski/mathstral-7B-v0.1-GGUF"
+  quants: [Q8_0]
+  context: 16384
 
 Mellum2-12B-A2.5B-Instruct:
   publisher: "JetBrains"
-  hf_url: "https://huggingface.co/JetBrains/Mellum2-12B-A2.5B-Instruct-GGUF-MXFP4_MOE"
+  hf_url: "https://huggingface.co/JetBrains/Mellum2-12B-A2.5B-Instruct-GGUF-Q4_K_M"
   quants: [Q4_K_M]
   arch: "Mellum2 MoE"
   context: 131072
-  experts: 16
+  experts: 8
   k_cache: "q8_0"
-  v_cache: "q5_1"
+  v_cache: "q8_0"
   offload: 1
-  notes: "Architektur: Mellum2 MoE | 64 Experts, active: 8"
-  np_recommended: 4
+  notes: "Architektur: Mellum2 MoE | 8 Experts"
 
 Mellum2-12B-A2.5B-Thinking:
   publisher: "JetBrains"
@@ -399,8 +525,25 @@ Mellum2-12B-A2.5B-Thinking:
   experts: 6
   k_cache: "q8_0"
   v_cache: "q8_0"
-  notes: "Architektur: Mellum2 MoE | 64 Experts, active: 8"
-  np_recommended: 4
+  notes: "Architektur: Mellum2 MoE | 6 Experts"
+
+Meta-Llama-3.1-8B-Instruct:
+  publisher: "bartowski"
+  hf_url: "https://huggingface.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF"
+  quants: [Q8_0]
+  context: 16384
+  k_cache: "q5_1"
+  v_cache: "q8_0"
+
+MiMo-VL-7B-RL-2508:
+  publisher: "mradermacher"
+  hf_url: "https://huggingface.co/mradermacher/MiMo-VL-7B-RL-2508-GGUF"
+  quants: [Q8_0]
+  arch: "MiMo MoE (Vision)"
+  context: 16384
+  k_cache: "q8_0"
+  v_cache: "q5_1"
+  notes: "Architektur: MiMo MoE (Vision)"
 
 MiMo-VL-7B-RL-UD:
   publisher: "unsloth"
@@ -410,7 +553,6 @@ MiMo-VL-7B-RL-UD:
   k_cache: "q8_0"
   v_cache: "q5_1"
   notes: "Architektur: MiMo MoE (Vision)"
-  np_recommended: 4
 
 MiMo-VL-7B-SFT-2508:
   publisher: "mradermacher"
@@ -418,19 +560,53 @@ MiMo-VL-7B-SFT-2508:
   quants: [Q8_0]
   arch: "MiMo MoE (Vision)"
   notes: "Architektur: MiMo MoE (Vision)"
-  np_recommended: 4
 
 Ministral-3-14B-Instruct-2512:
-  publisher: "lmstudio-community"
+  publisher: ["lmstudio-community", "mistralai", "unsloth"]
   hf_url: "https://huggingface.co/lmstudio-community/Ministral-3-14B-Instruct-2512-GGUF"
-  quants: [Q6_K]
+  quants: [Q6_K, Q5_K_M]
   arch: "Mistral Dense"
-  context: 98304
+  context: 90112
   k_cache: "q5_1"
   v_cache: "iq4_nl"
   offload: 1
   notes: "Architektur: Mistral Dense"
-  np_recommended: 1
+
+mistral-nemo-instruct-2407:
+  publisher: "mistralai"
+  hf_url: "https://huggingface.co/mistralai/mistral-nemo-instruct-2407"
+  context: 16384
+  k_cache: "q8_0"
+  v_cache: "iq4_nl"
+  offload: 1
+
+mistralai_Mistral-Small-3.2-24B-Instruct-2506:
+  publisher: "bartowski"
+  hf_url: "https://huggingface.co/bartowski/mistralai_Mistral-Small-3.2-24B-Instruct-2506-GGUF"
+  quants: [IQ4_NL, IQ4_XS, Q4_K_S]
+  arch: "Mistral Dense"
+  context: 16384
+  k_cache: "iq4_nl"
+  notes: "Architektur: Mistral Dense"
+
+moonshotai_Kimi-Linear-48B-A3B-Instruct:
+  publisher: "bartowski"
+  hf_url: "https://huggingface.co/bartowski/moonshotai_Kimi-Linear-48B-A3B-Instruct-GGUF"
+  quants: [IQ2_S]
+  context: 262144
+  experts: 9
+  k_cache: "q8_0"
+  v_cache: "q5_1"
+  offload: 1
+  notes: "9 Experts"
+
+Nemotron-Cascade-14B-Thinking:
+  publisher: "mradermacher"
+  hf_url: "https://huggingface.co/mradermacher/Nemotron-Cascade-14B-Thinking-GGUF"
+  quants: [Q5_K_M]
+  k_cache: "q8_0"
+  v_cache: "q5_1"
+  offload: 1
 
 nerdsking-python-coder-7B-i:
   publisher: "Nerdsking"
@@ -440,7 +616,6 @@ nerdsking-python-coder-7B-i:
   k_cache: "f16"
   v_cache: "q8_0"
   notes: "Architektur: Python Coder (custom)"
-  np_recommended: 1
 
 North-Mini-Code-1.0-UD:
   publisher: "unsloth"
@@ -449,11 +624,10 @@ North-Mini-Code-1.0-UD:
   arch: "North-Mini Dense (Coder)"
   context: 98304
   experts: 16
-  k_cache: "q8_0"
+  k_cache: "q5_1"
   v_cache: "iq4_nl"
   offload: 1
-  notes: "Architektur: North-Mini Dense (Coder) | GGUF-Arch: cohere2moe | 128 Experts"
-  np_recommended: 4
+  notes: "Architektur: North-Mini Dense (Coder) | 16 Experts"
 
 NuminaMath-7B-CoT:
   publisher: "QuantFactory"
@@ -461,7 +635,6 @@ NuminaMath-7B-CoT:
   quants: [Q8_0]
   arch: "Numina Math"
   notes: "Architektur: Numina Math"
-  np_recommended: 1
 
 pandalyst-7b-v1.2:
   publisher: "TheBloke"
@@ -469,7 +642,6 @@ pandalyst-7b-v1.2:
   quants: [Q8_0]
   arch: "Pandalyst Dense"
   notes: "Architektur: Pandalyst Dense"
-  np_recommended: 1
 
 pandalyst_13b_v1.0:
   publisher: "TheBloke"
@@ -479,7 +651,6 @@ pandalyst_13b_v1.0:
   k_cache: "q8_0"
   v_cache: "q8_0"
   notes: "Architektur: Pandalyst Dense"
-  np_recommended: 1
 
 phi-4:
   publisher: ["microsoft", "unsloth"]
@@ -490,7 +661,15 @@ phi-4:
   k_cache: "q8_0"
   v_cache: "q5_1"
   notes: "Architektur: Phi-4 Dense"
-  np_recommended: 1
+
+phi-4-reasoning-plus:
+  publisher: "microsoft"
+  hf_url: "https://huggingface.co/microsoft/phi-4-reasoning-plus"
+  arch: "Phi-4 Dense"
+  context: 16384
+  k_cache: "iq4_nl"
+  v_cache: "q8_0"
+  notes: "Architektur: Phi-4 Dense"
 
 pythia-12b:
   publisher: "mradermacher"
@@ -498,7 +677,6 @@ pythia-12b:
   quants: [Q6_K]
   arch: "Pythia Dense"
   notes: "Architektur: Pythia Dense"
-  np_recommended: 1
 
 Qwen2-7B-LLM:
   publisher: "NexaAI"
@@ -506,19 +684,25 @@ Qwen2-7B-LLM:
   quants: [Q5_1, Q8_0]
   arch: "Qwen2 Dense"
   notes: "Architektur: Qwen2 Dense"
-  np_recommended: 1
+
+Qwen2.5-14B-Instruct-1M:
+  publisher: "lmstudio-community"
+  hf_url: "https://huggingface.co/lmstudio-community/Qwen2.5-14B-Instruct-1M-GGUF"
+  quants: [Q6_K]
+  context: 16384
+  k_cache: "q5_1"
+  v_cache: "iq4_nl"
 
 qwen2.5-coder-14b-instruct:
-  publisher: "qwen"
+  publisher: ["qwen", "unsloth"]
   hf_url: "https://huggingface.co/Qwen/Qwen2.5-Coder-14B-Instruct-GGUF"
-  quants: [q5_0, q6_k]
+  quants: [q5_0, q5_k_m, q6_k, Q6_K]
   arch: "Qwen2.5 Dense (Coder)"
-  context: 98304
-  k_cache: "q8_0"
-  v_cache: "q5_1"
+  context: 128000
+  k_cache: "q5_1"
+  v_cache: "iq4_nl"
   offload: 1
   notes: "Architektur: Qwen2.5 Dense (Coder)"
-  np_recommended: 1
 
 Qwen2.5-Coder-32B-Instruct:
   publisher: "bartowski"
@@ -528,7 +712,6 @@ Qwen2.5-Coder-32B-Instruct:
   k_cache: "q5_1"
   v_cache: "iq4_nl"
   notes: "Architektur: Qwen2.5 Dense (Coder)"
-  np_recommended: 1
 
 Qwen2.5-Coder-7B-Instruct:
   publisher: "lmstudio-community"
@@ -536,7 +719,6 @@ Qwen2.5-Coder-7B-Instruct:
   quants: [Q8_0]
   arch: "Qwen2.5 Dense (Coder)"
   notes: "Architektur: Qwen2.5 Dense (Coder)"
-  np_recommended: 1
 
 Qwen2.5-Math-7B-Instruct:
   publisher: "lmstudio-community"
@@ -544,7 +726,20 @@ Qwen2.5-Math-7B-Instruct:
   quants: [Q8_0]
   arch: "Qwen2.5 Dense (Math)"
   notes: "Architektur: Qwen2.5 Dense (Math)"
-  np_recommended: 1
+
+Qwen2.5-VL-8B-OCR:
+  publisher: "mradermacher"
+  hf_url: "https://huggingface.co/mradermacher/Qwen2.5-VL-8B-OCR-GGUF"
+  quants: [Q8_0]
+  context: 16384
+
+qwen3-14b:
+  publisher: "qwen"
+  hf_url: "https://huggingface.co/Qwen/qwen3-14b"
+  arch: "Qwen3 Dense"
+  context: 16384
+  k_cache: "q8_0"
+  notes: "Architektur: Qwen3 Dense"
 
 Qwen3-14B-UD:
   publisher: "unsloth"
@@ -554,47 +749,113 @@ Qwen3-14B-UD:
   k_cache: "q8_0"
   v_cache: "iq4_nl"
   notes: "Architektur: Qwen3 Dense"
-  np_recommended: 1
 
-Qwen3-Coder-REAP-25B-A3B:
-  publisher: "mradermacher"
-  hf_url: "https://huggingface.co/mradermacher/Qwen3-Coder-REAP-25B-A3B-i1-GGUF"
-  quants: [Q3_K_M]
-  arch: "Qwen3 MoE (Coder)"
-  context: 98304
-  experts: 16
-  k_cache: "q8_0"
-  v_cache: "q5_1"
-  offload: 1
-  notes: "Architektur: Qwen3 MoE (Coder; REAP pruned from Qwen3-Coder-30B-A3B-Instruct)
-    | 103 Experts, Top-k (aktiv): 8"
-  np_recommended: 4
-
-Qwen3.6-27B:
+Qwen3-30B-A3B-Instruct-2507:
   publisher: "unsloth"
-  hf_url: "https://huggingface.co/unsloth/Qwen3.6-27B-GGUF"
+  hf_url: "https://huggingface.co/unsloth/Qwen3-30B-A3B-Instruct-2507-GGUF"
   quants: [Q3_K_S]
-  arch: "Qwen3.6 Dense"
+  arch: "Qwen3 Dense"
   context: 65536
+  experts: 16
   k_cache: "q5_1"
   v_cache: "iq4_nl"
   offload: 1
-  notes: "Architektur: Qwen3.6 Dense; Reasoning/Thinking-Mode via CoT) "
-  np_recommended: 1
+  notes: "Architektur: Qwen3 Dense | 16 Experts"
+
+Qwen3-30B-A3B-python-coder:
+  publisher: "mradermacher"
+  hf_url: "https://huggingface.co/mradermacher/Qwen3-30B-A3B-python-coder-GGUF"
+  quants: [Q3_K_S]
+  context: 16384
+  experts: 16
+  k_cache: "q8_0"
+  v_cache: "q5_1"
+  notes: "16 Experts"
+
+qwen3-coder-30b:
+  publisher: "qwen"
+  hf_url: "https://huggingface.co/Qwen/qwen3-coder-30b"
+  arch: "Qwen3 MoE (Coder)"
+  context: 16384
+  k_cache: "q8_0"
+  v_cache: "q8_0"
+  notes: "Architektur: Qwen3 MoE (Coder)"
+
+Qwen3-Coder-30B-A3B-Instruct:
+  publisher: "unsloth"
+  hf_url: "https://huggingface.co/unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF"
+  quants: [Q3_K_S]
+  arch: "Qwen3 MoE (Coder)"
+  context: 65536
+  experts: 16
+  k_cache: "q5_1"
+  v_cache: "iq4_nl"
+  offload: 1
+  notes: "Architektur: Qwen3 MoE (Coder) | 16 Experts"
+
+qwen3-coder-reap-25b-a3b-i1:
+  publisher: "mradermacher"
+  hf_url: "https://huggingface.co/mradermacher/Qwen3-Coder-REAP-25B-A3B-i1-GGUF"
+  quants: [Q3_K_M, Q4_K_S]
+  arch: "Qwen3 MoE (Coder)"
+  context: 16384
+  experts: 16
+  k_cache: "q5_1"
+  v_cache: "iq4_nl"
+  notes: "Architektur: Qwen3 MoE (Coder) | 16 Experts"
+
+Qwen3.5-9B:
+  publisher: ["lmstudio-community", "qwen", "unsloth"]
+  hf_url: "https://huggingface.co/lmstudio-community/Qwen3.5-9B-GGUF"
+  quants: [Q6_K, Q5_K_M]
+  arch: "Qwen3 Dense"
+  context: 16384
+  k_cache: "q5_1"
+  v_cache: "q8_0"
+  notes: "Architektur: Qwen3 Dense"
+
+Qwen3.5-9B-DeepSeek-V4-Flash:
+  publisher: "mradermacher"
+  hf_url: "https://huggingface.co/mradermacher/Qwen3.5-9B-DeepSeek-V4-Flash-GGUF"
+  quants: [Q8_0]
+  arch: "Qwen3 Dense"
+  context: 16384
+  k_cache: "q8_0"
+  v_cache: "iq4_nl"
+  notes: "Architektur: Qwen3 Dense"
+
+Qwen3.6-27B:
+  publisher: "unsloth"
+  hf_url: "https://huggingface.co/unsloth/Qwen3.6-27B-MTP-GGUF"
+  quants: [Q3_K_S]
+  arch: "Qwen3.6 MoE (REAP)"
+  context: 32768
+  k_cache: "q5_1"
+  v_cache: "iq4_nl"
+  offload: 1
+  notes: "Architektur: Qwen3.6 MoE (REAP)"
+
+Qwen3.6-27B-UD:
+  publisher: "unsloth"
+  hf_url: "https://huggingface.co/unsloth/Qwen3.6-27B-UD"
+  quants: [IQ3_XXS]
+  arch: "Qwen3.6 MoE (REAP)"
+  context: 16384
+  k_cache: "q5_1"
+  v_cache: "iq4_nl"
+  notes: "Architektur: Qwen3.6 MoE (REAP)"
 
 Qwen3.6-28B-REAP.i1:
   publisher: "mradermacher"
   hf_url: "https://huggingface.co/mradermacher/Qwen3.6-28B-REAP-i1-GGUF"
   quants: [IQ3_S, Q3_K_S]
   arch: "Qwen3.6 MoE (REAP)"
-  context: 98304
+  context: 262144
   experts: 18
-  k_cache: "q8_0"
-  v_cache: "q5_1"
+  k_cache: "q5_1"
+  v_cache: "iq4_nl"
   offload: 1
-  notes: "Architektur: Qwen3.6 MoE (REAP-pruned from Qwen3.6-35B-A3B) | 205 Experts,
-    Top-k (aktiv): 8 + 1 shared"
-  np_recommended: 4
+  notes: "Architektur: Qwen3.6 MoE (REAP) | 18 Experts"
 
 qwen3.6-35b-reap-pruned-ratio-0.5:
   publisher: "lennyhans"
@@ -604,7 +865,13 @@ qwen3.6-35b-reap-pruned-ratio-0.5:
   k_cache: "q8_0"
   v_cache: "q5_1"
   notes: "Architektur: Qwen3.6 MoE (REAP)"
-  np_recommended: 4
+
+Qwen_Qwen3.6-27B-imatrix:
+  publisher: "bartowski"
+  hf_url: "https://huggingface.co/bartowski/Qwen_Qwen3.6-27B-imatrix"
+  arch: "Qwen3.6 MoE (REAP)"
+  context: 16384
+  notes: "Architektur: Qwen3.6 MoE (REAP)"
 
 rnj-1:
   publisher: "essentialai"
@@ -614,7 +881,6 @@ rnj-1:
   v_cache: "q8_0"
   offload: 1
   notes: "Architektur: RNJ Dense"
-  np_recommended: 1
 
 solar-pro-preview-instruct:
   publisher: "MaziyarPanahi"
@@ -622,7 +888,6 @@ solar-pro-preview-instruct:
   quants: [Q4_K_S]
   arch: "Solar Dense"
   notes: "Architektur: Solar Dense"
-  np_recommended: 1
 
 starcoder2-15b-instruct-v0.1:
   publisher: "lmstudio-community"
@@ -633,7 +898,45 @@ starcoder2-15b-instruct-v0.1:
   k_cache: "q8_0"
   v_cache: "q5_1"
   notes: "Architektur: StarCoder2 Dense"
-  np_recommended: 1
+
+translategemma-12b-it:
+  publisher: "mradermacher"
+  hf_url: "https://huggingface.co/mradermacher/translategemma-12b-it-GGUF"
+  quants: [Q6_K]
+  context: 16384
+  k_cache: "iq4_nl"
+
+translategemma-27b-it:
+  publisher: "mradermacher"
+  hf_url: "https://huggingface.co/mradermacher/translategemma-27b-it-GGUF"
+  quants: [IQ4_XS]
+  context: 16384
+  k_cache: "iq4_nl"
+  v_cache: "iq4_nl"
+  offload: 1
+
+whisper-large-v3:
+  publisher: "handy-computer"
+  hf_url: "https://huggingface.co/handy-computer/whisper-large-v3-gguf"
+  quants: [Q8_0]
+  context: 16384
+  k_cache: "f16"
+  v_cache: "f16"
+
+whisper-large-v3-f16:
+  publisher: "vonjack"
+  hf_url: "https://huggingface.co/vonjack/whisper-large-v3-f16"
+  context: 16384
+  k_cache: "f16"
+  v_cache: "q8_0"
+
+whisper-large-v3-turbo:
+  publisher: "handy-computer"
+  hf_url: "https://huggingface.co/handy-computer/whisper-large-v3-turbo-gguf"
+  quants: [Q8_0]
+  context: 16384
+  k_cache: "f16"
+  v_cache: "q8_0"
 
 WizardCoder-Python-13B-V1.0.i1:
   publisher: ["mradermacher", "TheBloke"]
@@ -641,4 +944,3 @@ WizardCoder-Python-13B-V1.0.i1:
   quants: [Q6_K]
   arch: "WizardCoder Dense"
   notes: "Architektur: WizardCoder Dense"
-  np_recommended: 1
