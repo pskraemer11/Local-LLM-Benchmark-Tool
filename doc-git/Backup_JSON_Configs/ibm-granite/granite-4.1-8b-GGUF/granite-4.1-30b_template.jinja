@@ -1,0 +1,71 @@
+{%- if available_tools is defined and available_tools %}
+    {%- set tools = available_tools %}
+{%- endif %}
+{%- set ns = namespace(tools_msg='', sys='') %}
+{%- if tools %}
+    {%- set ns.tools_msg = 'You are a helpful assistant with access to the following tools. Return each tool call as JSON with "name" and "arguments" inside <tool_call></tool_call>:\n<tools>' %}
+    {%- for t in tools %}
+        {%- set ns.tools_msg = ns.tools_msg + '\n' + (t | tojson) %}
+    {%- endfor %}
+    {%- set ns.tools_msg = ns.tools_msg + '\n</tools>' %}
+{%- endif %}
+{%- if messages[0].role == 'system' %}
+    {%- if messages[0].content is string %}
+        {%- set ns.sys = messages[0].content %}
+    {%- elif messages[0].content is iterable %}
+        {%- for entry in messages[0].content if entry.type == 'text' %}
+            {%- if ns.sys %}
+                {%- set ns.sys = ns.sys + '\n' %}
+            {%- endif %}
+            {%- set ns.sys = ns.sys + entry.text %}
+        {%- endfor %}
+    {%- endif %}
+    {%- if ns.tools_msg %}
+        {%- set ns.sys = ns.sys + '\n\n' + ns.tools_msg %}
+    {%- endif %}
+{%- elif ns.tools_msg %}
+    {%- set ns.sys = ns.tools_msg %}
+{%- endif %}
+{%- if ns.sys %}
+{{- '<|start_of_role|>system<|end_of_role|>' + ns.sys + '<|end_of_text|>\n' }}
+{%- endif %}
+{%- for msg in messages %}
+    {%- set c = '' %}
+    {%- if msg.content is string %}
+        {%- set c = msg.content %}
+    {%- elif msg.content is iterable %}
+        {%- for entry in msg.content if entry.type == 'text' %}
+            {%- if c %}
+                {%- set c = c + '\n' %}
+            {%- endif %}
+            {%- set c = c + entry.text %}
+        {%- endfor %}
+    {%- endif %}
+    {%- if msg.role in ('user', 'system') and not loop.first %}
+{{- '<|start_of_role|>' + msg.role + '<|end_of_role|>' + c + '<|end_of_text|>\n' }}
+    {%- elif msg.role == 'assistant' %}
+{{- '<|start_of_role|>assistant<|end_of_role|>' + c }}
+        {%- if msg.tool_calls %}
+            {%- for tc in msg.tool_calls %}
+                {%- set fn = tc.function if tc.function else tc %}
+                {%- if (loop.first and c) or not loop.first %}
+{{- '\n' }}
+                {%- endif %}
+                {%- set args_str = fn.arguments | tojson if fn.arguments is not string else fn.arguments %}
+{{- '<tool_call>\n{"name": "' + fn.name + '", "arguments": ' + args_str + '}\n</tool_call>' }}
+            {%- endfor %}
+        {%- endif %}
+{{- '<|end_of_text|>\n' }}
+    {%- elif msg.role == 'tool' %}
+        {%- if loop.first or messages[loop.index0 - 1].role != 'tool' %}
+{{- '<|start_of_role|>user<|end_of_role|>' }}
+        {%- endif %}
+{{- '\n<tool_response>\n' + c + '\n</tool_response>' }}
+        {%- if loop.last or messages[loop.index0 + 1].role != 'tool' %}
+{{- '<|end_of_text|>\n' }}
+        {%- endif %}
+    {%- endif %}
+{%- endfor %}
+{%- if add_generation_prompt %}
+{{- '<|start_of_role|>assistant<|end_of_role|>' }}
+{%- endif %}

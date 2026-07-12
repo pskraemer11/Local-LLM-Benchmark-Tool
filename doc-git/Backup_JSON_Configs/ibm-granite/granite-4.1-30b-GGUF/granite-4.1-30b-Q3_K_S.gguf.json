@@ -1,0 +1,79 @@
+{
+  "preset": "",
+  "operation": {
+    "fields": [
+      {
+        "key": "llm.prediction.temperature",
+        "value": 0.2
+      },
+      {
+        "key": "llm.prediction.reasoning.parsing",
+        "value": {
+          "enabled": false,
+          "startString": "<think>",
+          "endString": "</think>"
+        }
+      },
+      {
+        "key": "llm.prediction.systemPrompt",
+        "value": "You are granite-4.1-30b (Q3_K_S), a helpful Large Language Model (LLM) trained by IBM.\n\nSupported Languages: English, German, Spanish, French, etc.\n\nIntended use: \n- respond to general instructions \n- build AI assistants for multiple domains\n\nCapabilities\n-  Summarization\n-  Text classification\n-  Text extraction\n-  Question-answering\n-  Retrieval Augmented Generation (RAG)\n-  Code related tasks\n-  Function-calling tasks\n-  Multilingual dialog use cases\n-  Fill-In-the-Middle (FIM) code completions\n\n<role>\nYou are a meticulous assistant with expertise in AI/software engineering, Python, and building physics/energy efficiency. Always verify your outputs and re-run failed tests before reporting errors.\n</role>\n\n<rules>\n- When a user asks \"Why is X happening?\", answer the question — do not fix the problem unless asked.\n- If you are a reasoning model, keep your internal chain-of-thought concise. Skip deep thinking for simple coding or math tasks. Only reason extensively for complex analysis or debugging.\n</rules>\n\n<workflow>\nFor complex tasks:\n1. Understand context before proposing solutions\n2. Consider multiple approaches, justify your choice\n3. Share the plan for extensive tasks before implementing\n4. Make minimal, focused changes — no gold-plating\n5. Verify results, including edge cases\n</workflow>\n\n<analysis>\nFor content-rich answers:\n- Label uncertainty clearly, note counterarguments.\n- Distinguish established facts from assumptions and speculation.\n- Check recent developments: IT/AI ≤ 2 years, construction/standards ≤ 5 years.\n- Cite sources (IEA, NIST, BSI, arXiv, etc.) and assess their reliability.\n- Do: use concrete examples. Don't: rely on empty platitudes, false certainty, or unverified sources.\n</analysis>\n\n<efficiency>\nCombine steps where possible (e.g., multiple bash commands, grep/sed over repeatedly opening files). Every action incurs cost.\n</efficiency>\n\n<code>\n- Clean code, minimal comments. Only comment where logic isn't self-explanatory.\n- Understand the codebase first. No unprompted refactoring.\n- Don't assume relative paths — explore first. Edit in-place; no copies. Prefer sed for global search/replace.\n</code>\n\n<git>\n- Default: user.name \"openhands\", user.email \"openhands@all-hands.dev\"\n- No dangerous operations (push main, delete repo) without explicit instruction.\n- Before commit: git status, stage all relevant files. Prefer git commit -a.\n- Don't commit node_modules/, .env, build/, cache, large binaries.\n</git>\n\n<testing>\n- Bug fixes: write a reproducing test first.\n- New features: TDD where appropriate. If infra is missing, ask first.\n</testing>\n\n<web_research>\nOnly when information may be outdated (IT/AI >6 months, construction standards >1 year) or for regulatory/standards verification. Note access date and source reliability.\n</web_research>\n\n<examples>\nUser:\nImplement a function that returns the nth Fibonacci number.\n\nAssistant:\ndef fib(n: int) -> int:\n    a, b = 0, 1\n    for _ in range(n):\n        a, b = b, a + b\n    return a\n\nUser:\nSolve 3x + 7 = 22 for x.\n\nAssistant:\n3x = 22 - 7 → 3x = 15 → x = 5\n</examples>\n\n<output>\n- Structure: Background → Analysis → Uncertainties → Sources → Conclusion (as needed).\n- Write in flowing paragraphs. Bold only key terms.\n- No introductory self-praise or empty closing sentences.\n- Respond in the user's language (German) unless it's code.\n</output>"
+      },
+      {
+        "key": "llm.prediction.promptTemplate",
+        "value": {
+          "type": "jinja",
+          "jinjaPromptTemplate": {
+            "template": "{%- if available_tools is defined and available_tools %}\n    {%- set tools = available_tools %}\n{%- endif %}\n{%- set ns = namespace(tools_msg='', sys='') %}\n{%- if tools %}\n    {%- set ns.tools_msg = 'You are a helpful assistant with access to the following tools. Return each tool call as JSON with \"name\" and \"arguments\" inside <tool_call></tool_call>:\\n<tools>' %}\n    {%- for t in tools %}\n        {%- set ns.tools_msg = ns.tools_msg + '\\n' + (t | tojson) %}\n    {%- endfor %}\n    {%- set ns.tools_msg = ns.tools_msg + '\\n</tools>' %}\n{%- endif %}\n{%- if messages[0].role == 'system' %}\n    {%- if messages[0].content is string %}\n        {%- set ns.sys = messages[0].content %}\n    {%- elif messages[0].content is iterable %}\n        {%- for entry in messages[0].content if entry.type == 'text' %}\n            {%- if ns.sys %}\n                {%- set ns.sys = ns.sys + '\\n' %}\n            {%- endif %}\n            {%- set ns.sys = ns.sys + entry.text %}\n        {%- endfor %}\n    {%- endif %}\n    {%- if ns.tools_msg %}\n        {%- set ns.sys = ns.sys + '\\n\\n' + ns.tools_msg %}\n    {%- endif %}\n{%- elif ns.tools_msg %}\n    {%- set ns.sys = ns.tools_msg %}\n{%- endif %}\n{%- if ns.sys %}\n{{- '<|start_of_role|>system<|end_of_role|>' + ns.sys + '<|end_of_text|>\\n' }}\n{%- endif %}\n{%- for msg in messages %}\n    {%- set c = '' %}\n    {%- if msg.content is string %}\n        {%- set c = msg.content %}\n    {%- elif msg.content is iterable %}\n        {%- for entry in msg.content if entry.type == 'text' %}\n            {%- if c %}\n                {%- set c = c + '\\n' %}\n            {%- endif %}\n            {%- set c = c + entry.text %}\n        {%- endfor %}\n    {%- endif %}\n    {%- if msg.role in ('user', 'system') and not loop.first %}\n{{- '<|start_of_role|>' + msg.role + '<|end_of_role|>' + c + '<|end_of_text|>\\n' }}\n    {%- elif msg.role == 'assistant' %}\n{{- '<|start_of_role|>assistant<|end_of_role|>' + c }}\n        {%- if msg.tool_calls %}\n            {%- for tc in msg.tool_calls %}\n                {%- set fn = tc.function if tc.function else tc %}\n                {%- if (loop.first and c) or not loop.first %}\n{{- '\\n' }}\n                {%- endif %}\n                {%- set args_str = fn.arguments | tojson if fn.arguments is not string else fn.arguments %}\n{{- '<tool_call>\\n{\"name\": \"' + fn.name + '\", \"arguments\": ' + args_str + '}\\n</tool_call>' }}\n            {%- endfor %}\n        {%- endif %}\n{{- '<|end_of_text|>\\n' }}\n    {%- elif msg.role == 'tool' %}\n        {%- if loop.first or messages[loop.index0 - 1].role != 'tool' %}\n{{- '<|start_of_role|>user<|end_of_role|>' }}\n        {%- endif %}\n{{- '\\n<tool_response>\\n' + c + '\\n</tool_response>' }}\n        {%- if loop.last or messages[loop.index0 + 1].role != 'tool' %}\n{{- '<|end_of_text|>\\n' }}\n        {%- endif %}\n    {%- endif %}\n{%- endfor %}\n{%- if add_generation_prompt %}\n{{- '<|start_of_role|>assistant<|end_of_role|>' }}\n{%- endif %}\n"
+          },
+          "stopStrings": []
+        }
+      }
+    ]
+  },
+  "load": {
+    "fields": [
+      {
+        "key": "llm.load.contextLength",
+        "value": 49152
+      },
+      {
+        "key": "llm.load.llama.acceleration.offloadRatio",
+        "value": 1
+      },
+      {
+        "key": "llm.load.llama.evalBatchSize",
+        "value": 4096
+      },
+      {
+        "key": "llm.load.llama.physicalBatchSize",
+        "value": 1024
+      },
+      {
+        "key": "llm.load.llama.keepModelInMemory",
+        "value": false
+      },
+      {
+        "key": "llm.load.llama.tryMmap",
+        "value": false
+      },
+      {
+        "key": "llm.load.llama.kCacheQuantizationType",
+        "value": {
+          "checked": true,
+          "value": "q5_1"
+        }
+      },
+      {
+        "key": "llm.load.llama.vCacheQuantizationType",
+        "value": {
+          "checked": true,
+          "value": "iq4_nl"
+        }
+      },
+      {
+        "key": "llm.load.numParallelSessions",
+        "value": 1
+      }
+    ]
+  }
+}

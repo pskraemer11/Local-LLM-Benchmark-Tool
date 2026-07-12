@@ -1,0 +1,78 @@
+{
+  "preset": "",
+  "operation": {
+    "fields": [
+      {
+        "key": "llm.prediction.systemPrompt",
+        "value": "You are GLM-4.7-Flash-REAP-23B-A3B (i1-Q4_K_S) a helpful agentic multimodal Large Language Model (LLM) with 23 billion parameters trained by GLM. You can interact with a computer to solve tasks.\n\nyou are a vision-language model optimized for local deployment and low-latency applications. \n\nKey features include:\n-  Preserved Capabilities: Retains all core functionalities including code generation, agentic workflows, repository-scale understanding, and function calling\n-  Drop-in Compatibility: Works with vanilla vLLM - no source modifications or custom patches required\n - Optimized for Real-World Use: Particularly effective for resource-constrained environments, local deployments, and academic research\n\nGLM-4.6V is equipped with native multimodal tool calling capability:\n-   Multimodal Input: Images, screenshots, and document pages can be passed directly as tool parameters without being converted to textual descriptions in advance\n-   Multimodal Output: The model can visually comprehend results returned by tools—such as searching results, statistical charts, rendered web screenshots, or retrieved product images—and incorporate them into subsequent reasoning chain, as well as final output.\n\n<role>\nYou are a meticulous assistant with expertise in AI/software engineering, Python, and building physics/energy efficiency. Always verify your outputs and re-run failed tests before reporting errors.\n</role>\n\n<rules>\n- When a user asks \"Why is X happening?\", answer the question — do not fix the problem unless asked.\n- If you are a reasoning model, keep your internal chain-of-thought concise. Skip deep thinking for simple coding or math tasks. Only reason extensively for complex analysis or debugging.\n</rules>\n\n<workflow>\nFor complex tasks:\n1. Understand context before proposing solutions\n2. Consider multiple approaches, justify your choice\n3. Share the plan for extensive tasks before implementing\n4. Make minimal, focused changes — no gold-plating\n5. Verify results, including edge cases\n</workflow>\n\n<analysis>\nFor content-rich answers:\n- Label uncertainty clearly, note counterarguments.\n- Distinguish established facts from assumptions and speculation.\n- Check recent developments: IT/AI ≤ 2 years, construction/standards ≤ 5 years.\n- Cite sources (IEA, NIST, BSI, arXiv, etc.) and assess their reliability.\n- Do: use concrete examples. Don't: rely on empty platitudes, false certainty, or unverified sources.\n</analysis>\n\n<efficiency>\nCombine steps where possible (e.g., multiple bash commands, grep/sed over repeatedly opening files). Every action incurs cost.\n</efficiency>\n\n<code>\n- Clean code, minimal comments. Only comment where logic isn't self-explanatory.\n- Understand the codebase first. No unprompted refactoring.\n- Don't assume relative paths — explore first. Edit in-place; no copies. Prefer sed for global search/replace.\n</code>\n\n<git>\n- Default: user.name \"openhands\", user.email \"openhands@all-hands.dev\"\n- No dangerous operations (push main, delete repo) without explicit instruction.\n- Before commit: git status, stage all relevant files. Prefer git commit -a.\n- Don't commit node_modules/, .env, build/, cache, large binaries.\n</git>\n\n<testing>\n- Bug fixes: write a reproducing test first.\n- New features: TDD where appropriate. If infra is missing, ask first.\n</testing>\n\n<web_research>\nOnly when information may be outdated (IT/AI >6 months, construction standards >1 year) or for regulatory/standards verification. Note access date and source reliability.\n</web_research>\n\n<examples>\nUser:\nImplement a function that returns the nth Fibonacci number.\n\nAssistant:\ndef fib(n: int) -> int:\n    a, b = 0, 1\n    for _ in range(n):\n        a, b = b, a + b\n    return a\n\nUser:\nSolve 3x + 7 = 22 for x.\n\nAssistant:\n3x = 22 - 7 → 3x = 15 → x = 5\n</examples>\n\n<output>\n- Structure: Background → Analysis → Uncertainties → Sources → Conclusion (as needed).\n- Write in flowing paragraphs. Bold only key terms.\n- No introductory self-praise or empty closing sentences.\n- Respond in the user's language (German) unless it's code.\n</output>"
+      },
+      {
+        "key": "llm.prediction.temperature",
+        "value": 0.3
+      },
+      {
+        "key": "llm.prediction.promptTemplate",
+        "value": {
+          "type": "manual",
+          "jinjaPromptTemplate": {
+            "template": "[gMASK]<sop>\n{%- if tools -%}\n<|system|>\n# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>\n{% for tool in tools %}\n{{ tool | tojson(ensure_ascii=False) }}\n{% endfor %}\n</tools>\n\nFor each function call, output the function name and arguments within the following XML format:\n<tool_call>{function-name}<arg_key>{arg-key-1}</arg_key><arg_value>{arg-value-1}</arg_value><arg_key>{arg-key-2}</arg_key><arg_value>{arg-value-2}</arg_value>...</tool_call>{%- endif -%}\n{%- macro visible_text(content) -%}\n    {%- if content is string -%}\n        {{- content }}\n    {%- elif content is iterable and content is not mapping -%}\n        {%- for item in content -%}\n            {%- if item is mapping and item.type == 'text' -%}\n                {{- item.text }}\n            {%- elif item is string -%}\n                {{- item }}\n            {%- endif -%}\n        {%- endfor -%}\n    {%- else -%}\n        {{- content }}\n    {%- endif -%}\n{%- endmacro -%}\n{%- set ns = namespace(last_user_index=-1) %}\n{%- for m in messages %}\n    {%- if m.role == 'user' %}\n        {% set ns.last_user_index = loop.index0 -%}\n    {%- endif %}\n{%- endfor %}\n{% for m in messages %}\n{%- if m.role == 'user' -%}<|user|>{{ visible_text(m.content) }}\n{%- elif m.role == 'assistant' -%}\n<|assistant|>\n{%- set reasoning_content = '' %}\n{%- set content = visible_text(m.content) %}\n{%- if m.reasoning_content is string %}\n    {%- set reasoning_content = m.reasoning_content %}\n{%- else %}\n    {%- if '</think>' in content %}\n        {%- set reasoning_content = content.split('</think>')[0].rstrip('\\n').split('<think>')[-1].lstrip('\\n') %}\n        {%- set content = content.split('</think>')[-1].lstrip('\\n') %}\n    {%- endif %}\n{%- endif %}\n{%- if ((clear_thinking is defined and not clear_thinking) or loop.index0 > ns.last_user_index) and reasoning_content -%}\n{{ '<think>' + reasoning_content.strip() +  '</think>'}}\n{%- else -%}\n{{ '</think>' }}\n{%- endif -%}\n{%- if content.strip() -%}\n{{ content.strip() }}\n{%- endif -%}\n{% if m.tool_calls %}\n{% for tc in m.tool_calls %}\n{%- if tc.function %}\n    {%- set tc = tc.function %}\n{%- endif %}\n{{- '<tool_call>' + tc.name -}}\n{% set _args = tc.arguments %}{% for k, v in _args.items() %}<arg_key>{{ k }}</arg_key><arg_value>{{ v | tojson(ensure_ascii=False) if v is not string else v }}</arg_value>{% endfor %}</tool_call>{% endfor %}\n{% endif %}\n{%- elif m.role == 'tool' -%}\n{%- if m.content is string -%}\n{%- if loop.first or (messages[loop.index0 - 1].role != \"tool\") %}\n    {{- '<|observation|>' }}\n{%- endif %}\n{{- '<tool_response>' }}\n{{- m.content }}\n{{- '</tool_response>' }}\n{%- else -%}\n<|observation|>{% for tr in m.content %}\n<tool_response>{{ tr.output if tr.output is defined else tr }}</tool_response>{% endfor -%}\n{% endif -%}\n{%- elif m.role == 'system' -%}\n<|system|>{{ visible_text(m.content) }}\n{%- endif -%}\n{%- endfor -%}\n{%- if add_generation_prompt -%}\n    <|assistant|>{{- '</think>' if (enable_thinking is defined and not enable_thinking) else '<think>' -}}\n{%- endif -%}"
+          },
+          "stopStrings": [
+            "<|end_of_text|>",
+            "<|endoftext|>"
+          ],
+          "manualPromptTemplate": {
+            "beforeSystem": "|<im_start|>system\n",
+            "afterSystem": "|<im_end|>\n",
+            "beforeUser": "|<im_start|>user\n",
+            "afterUser": "|<im_end|>\n",
+            "beforeAssistant": "|<im_start|>assistant\n",
+            "afterAssistant": "|<im_end|>\n"
+          }
+        }
+      }
+    ]
+  },
+  "load": {
+    "fields": [
+      {
+        "key": "llm.load.llama.evalBatchSize",
+        "value": 4096
+      },
+      {
+        "key": "llm.load.llama.physicalBatchSize",
+        "value": 1024
+      },
+      {
+        "key": "llm.load.numParallelSessions",
+        "value": 4
+      },
+      {
+        "key": "llm.load.llama.kCacheQuantizationType",
+        "value": {
+          "checked": true,
+          "value": "q8_0"
+        }
+      },
+      {
+        "key": "llm.load.llama.vCacheQuantizationType",
+        "value": {
+          "checked": true,
+          "value": "iq4_nl"
+        }
+      },
+      {
+        "key": "llm.load.llama.keepModelInMemory",
+        "value": false
+      },
+      {
+        "key": "llm.load.llama.tryMmap",
+        "value": false
+      },
+      {
+        "key": "llm.load.numExperts",
+        "value": 24
+      }
+    ]
+  }
+}

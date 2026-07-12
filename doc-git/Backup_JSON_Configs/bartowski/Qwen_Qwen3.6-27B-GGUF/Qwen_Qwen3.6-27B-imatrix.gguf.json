@@ -1,0 +1,30 @@
+{
+  "preset": "",
+  "operation": {
+    "fields": []
+  },
+  "load": {
+    "fields": [
+      {
+        "key": "llm.load.llama.evalBatchSize",
+        "value": 8192
+      },
+      {
+        "key": "llm.load.contextLength",
+        "value": 16384
+      },
+      {
+        "key": "llm.load.llama.keepModelInMemory",
+        "value": false
+      },
+      {
+        "key": "llm.load.llama.tryMmap",
+        "value": false
+      },
+      {
+        "key": "llm.load.numParallelSessions",
+        "value": 1
+      }
+    ]
+  }
+}

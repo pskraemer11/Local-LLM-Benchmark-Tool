@@ -2,18 +2,18 @@
 # -*- coding: utf-8 -*-
 """
 Shared module for LM Studio model management.
-Imported by run_benchmarks_v12.py AND custom_benchmark_v12.py.
+Imported by run_benchmarks_v13.py AND custom_benchmark_v13.py.
 
 ── Role in the system ─────────────────────────────────────────────
   This module encapsulates ALL interactions with the LM Studio CLI
   (lms load / unload / ps). It is used from two sides:
 
-  1. run_benchmarks_v12.py (Launcher)
+  1. run_benchmarks_v13.py (Launcher)
      - CALLS load_model_via_lms() and unload_all_models()
      - Model load/unload happens HERE ONLY
      - Uses get_current_loaded_model() for status checking
 
-  2. custom_benchmark_v12.py (Custom pipeline subprocess)
+  2. custom_benchmark_v13.py (Custom pipeline subprocess)
      - IMPORTS the constants (API_BASE, TIMEOUT_*)
      - NEVER calls load/unload (initiated by the launcher)
      - Uses check_api_available() as health-check (legacy)
@@ -26,9 +26,8 @@ Imported by run_benchmarks_v12.py AND custom_benchmark_v12.py.
   erfolgen koennen.
 
 ── Wichtige Hinweise ───────────────────────────────────────────────
-  - wait_for_model_ready() und check_api_available() werden aktuell
-    No longer used by the launcher (replaced by time.sleep(10)
-    after load_model_via_lms()). Kept for legacy scripts.
+  - wait_for_model_ready() wird vom Launcher nach load_model_via_lms()
+    aufgerufen, um die API-Bereitschaft aktiv zu prüfen (anstatt time.sleep(10)).
   - load_model_via_lms() returns the EXACT model ID from lms ps --json
     (e.g. "microsoft/phi-4@q6_k"), used by ALL pipelines as the
     model parameter in API calls.
@@ -52,7 +51,7 @@ TIMEOUT_HEALTH_CHECK = 5
 TIMEOUT_UNLOAD_WAIT = 2
 
 # ── Pipeline-specific timeouts ──────────────────────────────────
-# These values are imported by run_benchmarks_v12.py and used as
+# These values are imported by run_benchmarks_v13.py and used as
 # subprocess/scenario timeouts in each pipeline function.
 # Some values (lmeval_base, evalplus_base) serve as base timeouts
 # and are automatically doubled for reasoning models.
@@ -133,6 +132,89 @@ def unload_all_models() -> bool:
     return False
 
 
+def get_available_models(exclude_keywords: Optional[list[str]] = None) -> list[dict]:
+    """Query LM Studio for installed models via `lms ls --json`.
+
+    Returns a list of dicts with keys:
+        key, model_key, display, variant, quant, variants,
+        identifier, params, publisher
+    """
+    try:
+        result = subprocess.run(
+            ["lms", "ls", "--json"],
+            capture_output=True, text=True, timeout=TIMEOUT_CLI,
+            encoding="utf-8", errors="replace"
+        )
+        if result.returncode == 0:
+            data = json.loads(result.stdout)
+            models = []
+            for item in data if isinstance(data, list) else data.values():
+                if isinstance(item, dict):
+                    base_key = item.get("modelKey", "")
+                    if not base_key:
+                        continue
+                    quant = item.get("quantization", {}) or {}
+                    quant_name = quant.get("name", "") if isinstance(quant, dict) else ""
+                    sv = item.get("selectedVariant") or ""
+                    unique_key = sv if sv and sv != base_key else (f"{base_key}@{quant_name}" if quant_name else base_key)
+                    display = item.get("displayName", base_key)
+                    if quant_name:
+                        if "@" in display:
+                            display = display.split("@")[0]
+                        display = f"{display}@{quant_name}"
+                    models.append({
+                        "key": unique_key,
+                        "model_key": base_key,
+                        "display": display,
+                        "variant": sv or base_key,
+                        "quant": quant_name,
+                        "variants": item.get("variants") or [],
+                        "identifier": item.get("indexedModelIdentifier", base_key),
+                        "params": item.get("paramsString", ""),
+                        "publisher": item.get("publisher", ""),
+                    })
+            if models:
+                if exclude_keywords:
+                    models = [m for m in models
+                              if not any(kw in m["key"].lower() for kw in exclude_keywords)]
+                return models
+        print(f"[WARN] lms ls failed: {result.stderr.strip()}")
+    except FileNotFoundError:
+        print("[ERROR] lms.exe not found. Is LM Studio installed?")
+    except (subprocess.TimeoutExpired, json.JSONDecodeError) as e:
+        print(f"[WARN] Error with lms ls: {e}")
+    return []
+
+
+def parse_selection(choice: str, max_val: int) -> Optional[list[int]]:
+    """Parse user input like '1', '1,3,5', '1-5' into zero-based indices."""
+    choice = choice.strip()
+    if not choice:
+        return None
+    parts = choice.replace(" ", "").split(",")
+    selected = set()
+    for part in parts:
+        if "-" in part:
+            try:
+                lo, hi = part.split("-", 1)
+                lo_i, hi_i = int(lo), int(hi)
+                if lo_i < 1 or hi_i > max_val or lo_i > hi_i:
+                    return None
+                for n in range(lo_i, hi_i + 1):
+                    selected.add(n - 1)
+            except ValueError:
+                return None
+        else:
+            try:
+                n = int(part)
+                if n < 1 or n > max_val:
+                    return None
+                selected.add(n - 1)
+            except ValueError:
+                return None
+    return sorted(selected) if selected else None
+
+
 def _ensure_lmstudio_running() -> bool:
     """Start llmster daemon + lms server if not available."""
     from urllib.request import Request, urlopen
@@ -151,7 +233,7 @@ def _ensure_lmstudio_running() -> bool:
         print(f"  [WARN] llmster.exe not found at {llmster}")
         return False
     try:
-        subprocess.Popen([llmster], shell=True)
+        subprocess.Popen([llmster])
         time.sleep(5)
     except Exception as e:
         print(f"  [WARN] llmster start failed: {e}")
@@ -214,11 +296,15 @@ def load_model_via_lms(model_key: str, context_length: Optional[int] = None, gpu
 
 
 def wait_for_model_ready(timeout: int = TIMEOUT_MODEL_READY) -> bool:
+    """Wait for the LM Studio API to return a successful response (model loaded and serving).
+    
+    Unlike the previous implementation, this only considers HTTP 200 as "ready".
+    Other errors (e.g. "No models loaded", 500, timeout) are retried until timeout.
+    """
     from urllib.request import Request, urlopen
     from urllib.error import HTTPError, URLError
     start = time.time()
-    consecutive_failures = 0
-    print("  [INFO] Waiting for readiness", end="", flush=True)
+    print("  [INFO] Waiting for model readiness", end="", flush=True)
     while time.time() - start < timeout:
         time.sleep(2)
         print(".", end="", flush=True)
@@ -232,16 +318,12 @@ def wait_for_model_ready(timeout: int = TIMEOUT_MODEL_READY) -> bool:
                           headers={"Content-Type": "application/json"})
             with urlopen(req, timeout=5) as resp:
                 if resp.status == 200:
-                    print(" bereit")
+                    print(" ready")
                     return True
-        except HTTPError as e:
-            body = e.read().decode("utf-8", errors="replace")
-            if "No models loaded" not in body:
-                print(" bereit")
-                return True
-        except Exception as e:
-            consecutive_failures += 1
-            if consecutive_failures <= 3:
-                print(f"\n  [WARN] readiness check: {e}")
+        except (HTTPError, URLError, OSError) as e:
+            # "No models loaded" (HTTP 400), 503, connection refused → keep waiting
+            pass
+        except Exception:
+            pass
     print(" TIMEOUT")
     return False

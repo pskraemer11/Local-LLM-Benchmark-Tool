@@ -1,0 +1,91 @@
+{
+  "preset": "",
+  "operation": {
+    "fields": [
+      {
+        "key": "llm.prediction.temperature",
+        "value": 0.2
+      },
+      {
+        "key": "llm.prediction.topPSampling",
+        "value": {
+          "checked": true,
+          "value": 0.8
+        }
+      },
+      {
+        "key": "llm.prediction.minPSampling",
+        "value": {
+          "checked": true,
+          "value": 0.1
+        }
+      },
+      {
+        "key": "llm.prediction.reasoning.parsing",
+        "value": {
+          "enabled": false,
+          "startString": "<think>",
+          "endString": "</think>"
+        }
+      },
+      {
+        "key": "llm.prediction.systemPrompt",
+        "value": "You are Kimi-Linear-48B-A3B-Instruct (IQ2_S), a helpful agentic model trained by Moonshot AI.\n\n<role>\nYou are a meticulous AI/software engineering assistant. Provide accurate, well-reasoned answers.\n</role>\n\n<thinking>\nKeep reasoning concise. Only think extensively for complex analysis, debugging, or multi-step logic. For simple questions, answer directly.\n</thinking>\n\n<code>\n- Write clean, correct code. Verify edge cases.\n- Output only the requested code unless explanation is asked.\n- Use idiomatic Python patterns.\n</code>\n\n<math>\n- Show step-by-step reasoning only for multi-step problems.\n- Verify your result before finalizing.\n</math>\n\n<output>\n- Respond in the user's language (default: German). Code is always in English.\n- No empty phrases, self-praise, or disclaimers.\n- Structured: Answer first, then optional context.\n</output>\n"
+      }
+    ]
+  },
+  "load": {
+    "fields": [
+      {
+        "key": "llm.load.contextLength",
+        "value": 262144
+      },
+      {
+        "key": "llm.load.llama.evalBatchSize",
+        "value": 4096
+      },
+      {
+        "key": "llm.load.offloadKVCacheToGpu",
+        "value": true
+      },
+      {
+        "key": "llm.load.llama.keepModelInMemory",
+        "value": false
+      },
+      {
+        "key": "llm.load.llama.tryMmap",
+        "value": false
+      },
+      {
+        "key": "llm.load.llama.kCacheQuantizationType",
+        "value": {
+          "checked": false,
+          "value": "q8_0"
+        }
+      },
+      {
+        "key": "llm.load.llama.vCacheQuantizationType",
+        "value": {
+          "checked": false,
+          "value": "q5_1"
+        }
+      },
+      {
+        "key": "llm.load.numParallelSessions",
+        "value": 4
+      },
+      {
+        "key": "llm.load.llama.physicalBatchSize",
+        "value": 1024
+      },
+      {
+        "key": "llm.load.numExperts",
+        "value": 9
+      },
+      {
+        "key": "llm.load.llama.acceleration.offloadRatio",
+        "value": 1
+      }
+    ]
+  }
+}

@@ -9,12 +9,12 @@ Shared CSV writer – unified schema for ALL benchmark pipelines.
 
     Pipeline             Writes                Read by (consolidation)
     ────────             ─────────             ──────────────────────────
-    Custom               tasks_*.csv           consolidate_results_v12.py
-    EvalPlus             modell_*.csv           consolidate_results_v12.py
-    LM-Eval              modell_*.csv           consolidate_results_v12.py
-    Agentic              modell_*.csv           consolidate_results_v12.py
+    Custom               tasks_*.csv           consolidate_results_v13.py
+    EvalPlus             modell_*.csv           consolidate_results_v13.py
+    LM-Eval              modell_*.csv           consolidate_results_v13.py
+    Agentic              modell_*.csv           consolidate_results_v13.py
 
-  The launcher (run_benchmarks_v12.py) calls write_accumulative_summary()
+  The launcher (run_benchmarks_v13.py) calls write_accumulative_summary()
   for each model's interim summary and write_konsolidiert_aktuell()
   for the final overview at the end.
 
@@ -60,7 +60,7 @@ def _results_dir(base_dir=None):
 
 # ── Field definitions ────────────────────────────────────────────
 
-# WARNING: Column names must match the readers in consolidate_results_v12.py
+# WARNING: Column names must match the readers in consolidate_results_v13.py
 # (read_custom_csv, read_lmeval_per_model, try_read_evalplus).
 # Any changes here MUST also update the readers.
 
@@ -104,6 +104,7 @@ MODEL_FIELDS = [
     "pipeline",
     "model",
     "model_key",
+    "category",
     "benchmark",
     "timestamp",
     "sample_size",
@@ -131,6 +132,7 @@ SUMMARY_FIELDS = [
     "pipeline",
     "model",
     "model_key",
+    "category",
     "benchmark",
     "timestamp",
     "sample_size",
@@ -151,6 +153,7 @@ CONSOLIDATED_FIELDS = [
     "pipeline",
     "model",
     "model_key",
+    "category",
     "benchmark",
     "score",
     "timestamp",
@@ -256,6 +259,7 @@ def write_per_model_csv(entries: list[dict], model_display: str, model_key: str 
             "pipeline": pipeline,
             "model": model_display,
             "model_key": model_key,
+            "category": e.get("category", ""),
             "benchmark": e.get("benchmark_name", e.get("benchmark", "")),
             "timestamp": iso,
             "sample_size": str(sample_size),
@@ -308,6 +312,7 @@ def write_accumulative_summary(results: list[dict], model_info: dict,
             "pipeline": r.get("pipeline", ""),
             "model": r.get("model", ""),
             "model_key": model_info["key"],
+            "category": r.get("category", ""),
             "benchmark": r.get("bench", r.get("benchmark", "")),
             "timestamp": iso,
             "sample_size": str(sample_size),
@@ -342,6 +347,7 @@ def write_konsolidiert_aktuell(results: list[dict], sample_size: int = 5,
             "pipeline": r.get("pipeline", ""),
             "model": r.get("model", ""),
             "model_key": r.get("model_key", ""),
+            "category": r.get("category", ""),
             "benchmark": r.get("bench", r.get("benchmark", "")),
             "score": str(r.get("score", "")),
             "timestamp": iso,

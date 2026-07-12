@@ -1,12 +1,12 @@
 # Thinking/Reasoning Konfiguration
 
-Dokumentiert die Steuerung des Thinking-Modus in `custom_benchmark_v12.py:MODEL_CONFIG`.
+Dokumentiert die Steuerung des Thinking-Modus in `custom_benchmark_v13.py:MODEL_CONFIG`.
 
 ## Mechanismus
 
 Das System steuert Thinking auf zwei Ebenen:
 
-1. **MODEL_CONFIG** (`custom_benchmark_v12.py:140-230`): Per-Modell-Defaults
+1. **MODEL_CONFIG** (`custom_benchmark_v13.py:140-230`): Per-Modell-Defaults
 2. **`--thinking` CLI-Flag**: Überschreibt per `REASONING_PATTERNS` auf `True`
 
 ### API-Steuerung
@@ -15,7 +15,7 @@ Der Parameter `enable_thinking` wird als `extra_body.chat_template_kwargs.enable
 
 ### Gemma 4 Sonderfall
 
-Gemma 4 Modelle ignorieren `enable_thinking=False` über API, weil `<|channel>thought` im GGUF-Jinja-Template fest verdrahtet ist. Zusätzlicher System-Prompt-Override in `generate_answer()` (`custom_benchmark_v12.py:659-663`):
+Gemma 4 Modelle ignorieren `enable_thinking=False` über API, weil `<|channel>thought` im GGUF-Jinja-Template fest verdrahtet ist. Zusätzlicher System-Prompt-Override in `generate_answer()` (`custom_benchmark_v13.py:659-663`):
 ```
 "System: Do NOT use thinking or reasoning. Answer directly without <|channel>thought tags."
 ```
@@ -39,6 +39,38 @@ Gemma 4 Modelle ignorieren `enable_thinking=False` über API, weil `<|channel>th
 | rnj | False | 2048 | |
 | python-coder | False | 2048 | Fängt qwen3-*-python-coder u.ä. |
 
+## --thinking Flag Verhalten (v13 Klarstellung)
+
+Das `--thinking` CLI-Flag hat seit v13 eine eingeschränkte Wirkung:
+
+| Modellgruppe | --thinking Wirkung | Begründung |
+|-------------|-------------------|------------|
+| **Reasoning-Modelle** (Name enthält "reasoning"/"think"/"r1") | ✅ Aktiviert enable_thinking + Timeout ×2 | Natives Reasoning unterstützt |
+| **Gemma 4** | ✅ Aktiviert enable_thinking für MATH-500 | Gemma-4-Template setzt `<|channel>thought` |
+| **Qwen3.6** | ❌ Wird ignoriert (enable_thinking=False erzwungen) | Thinking-Tokens blockieren Token-Budget → 0% Score |
+| **GPT-OSS** | ❌ Wird ignoriert (kein Thinking-Support) | GPT-OSS Architektur hat kein Thinking |
+| **Qwen3.5** | ❌ Wird ignoriert (enable_thinking=False erzwungen) | Kein Thinking-Support |
+| **Default (andere Modelle)** | ❌ Hat keine Wirkung | enable_thinking=None (kein extra_body) |
+
+**Praktische Konsequenz:** `--thinking` sollte nur bei Gemma 4 und expliziten Reasoning-Modellen verwendet werden. 
+Für alle anderen Modelle ist es ein No-Op.
+
+## MODEL_CONFIG in _get_lmeval_params (v13)
+
+Seit v13 werden die Thinking-Parameter nicht mehr in MODEL_CONFIG (custom_benchmark_v13.py) verwaltet, 
+sondern zentral in `_get_lmeval_params()` in `run_benchmarks_v13.py`. Dies vermeidet doppelte Konfiguration 
+zwischen Custom-Pipeline und lm_eval-Pipeline.
+
+Die Modell-Klassifizierung (_is_reasoning_model, _is_qwen3_6_model, _is_gptoss_model, _is_gemma_model, 
+_is_qwen3_5_model) steuert:
+- enable_thinking (True/False/None)
+- max_tokens (2048/4096/8192)
+- temperature/top_p/min_p
+- stop-Strings (until)
+- no_system_msg
+
+MODEL_CONFIG in custom_benchmark_v13.py enthält nur noch die Custom-Pipeline-Parameter.
+
 ## Historie
 
 ### 2026-07-11
@@ -53,7 +85,7 @@ Gemma 4 Modelle ignorieren `enable_thinking=False` über API, weil `<|channel>th
 - **YAML Regex**: `[ABCDE]` → `[A-Ea-e]` (lowercase auch matchbar), selbiges für HellaSwag
 - **HellaSwag YAML**: `>-` (folded) → `|` (literal) für Newlines im Prompt
 - **utils.py**: `process_docs()` Regex robuster gegen Komma-Werte in Choices
-- **run_benchmarks_v12.py**: lm_eval-Parameter via `--gen_kwargs` statt `--model_args` übergeben
+- **run_benchmarks_v13.py**: lm_eval-Parameter via `--gen_kwargs` statt `--model_args` übergeben
   - Generation-Parameter (max_tokens, temperature, top_p, min_p, extra_body, until)
     landen jetzt im API-Payload statt im (ignorierten) Konstruktor
   - `--model_args` enthält nur noch Konstruktor-Parameter (base_url, model, num_concurrent, max_gen_toks)

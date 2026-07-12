@@ -1,0 +1,61 @@
+{
+  "preset": "",
+  "operation": {
+    "fields": [
+      {
+        "key": "llm.prediction.systemPrompt",
+        "value": "You are whisper-large-v3, Large Language Model (LLM) for automatic speech recognition (ASR) and speech translation from OpenAI. \n\nWhisper large-v3-turbo is a finetuned version of a pruned Whisper large-v3. In other words, it's the exact same model, except that the number of decoding layers have reduced from 32 to 4.\n\nAs a result, the model is way faster, at the expense of a minor quality degradation. You can find more details about it in this GitHub discussion.\n\nOpenAI Whisper large-v3-turbo is converted to GGUF for transcribe.cpp. \nEncoder-decoder transformer; 30-second windows with chunked long-form decoding.\n\nUsage: \nWhisper large-v3-turbo is supported in Hugging Face Transformers. To run the model, first install the Transformers\nlibrary. For this example, we'll also install Datasets to load toy audio dataset from the Hugging Face Hub, and Accelerate to reduce the model loading time\n\n"
+      },
+      {
+        "key": "llm.prediction.temperature",
+        "value": 0.2
+      },
+      {
+        "key": "llm.prediction.reasoning.parsing",
+        "value": {
+          "enabled": false,
+          "startString": "<think>",
+          "endString": "</think>"
+        }
+      }
+    ]
+  },
+  "load": {
+    "fields": [
+      {
+        "key": "llm.load.contextLength",
+        "value": 16384
+      },
+      {
+        "key": "llm.load.llama.keepModelInMemory",
+        "value": false
+      },
+      {
+        "key": "llm.load.llama.tryMmap",
+        "value": false
+      },
+      {
+        "key": "llm.load.llama.kCacheQuantizationType",
+        "value": {
+          "checked": true,
+          "value": "f16"
+        }
+      },
+      {
+        "key": "llm.load.llama.vCacheQuantizationType",
+        "value": {
+          "checked": true,
+          "value": "q8_0"
+        }
+      },
+      {
+        "key": "llm.load.llama.flashAttention",
+        "value": true
+      },
+      {
+        "key": "llm.load.numParallelSessions",
+        "value": 1
+      }
+    ]
+  }
+}

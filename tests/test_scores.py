@@ -2,7 +2,7 @@ import os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import pytest
 from benchmark_config import CAT_WEIGHTS, OVERALL_WEIGHTS
-from consolidate_results_v12 import compute_category_scores, _percentile
+from consolidate_results_v13 import compute_category_scores, _percentile
 
 class TestComputeCategoryScores:
     def test_all_present(self):
@@ -18,7 +18,7 @@ class TestComputeCategoryScores:
     def test_fully_loaded(self):
         scores = {"DS1000": 0.5, "CoderEval": 0.8, "HumanEval+_plus": 1.0, "MBPP+_plus": 0.6,
                   "ARC-Challenge": 0.5, "HellaSwag": 0.5, "TruthfulQA": 0.5, "MMLU-Pro": 0.5,
-                  "MathQA": 0.5, "Agentic": 0.5}
+                  "MATH-500": 0.5, "Agentic": 0.5}
         cats = compute_category_scores(scores)
         assert cats["coding"] == pytest.approx(0.725)
         assert cats["knowledge"] == 0.5

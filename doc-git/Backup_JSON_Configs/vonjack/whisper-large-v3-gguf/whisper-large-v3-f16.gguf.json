@@ -1,0 +1,57 @@
+{
+  "preset": "",
+  "operation": {
+    "fields": [
+      {
+        "key": "llm.prediction.temperature",
+        "value": 0.2
+      },
+      {
+        "key": "llm.prediction.systemPrompt",
+        "value": "You are whisper-large-v3, Large Language Model (LLM) for automatic speech recognition (ASR) and speech translation from OpenAI. \n\nWhisper large-v3-turbo is a finetuned version of a pruned Whisper large-v3. \nIn other words, it's the exact same model, except that the number of decoding layers have reduced from 32 to 4.\n\nAs a result, the model is way faster, at the expense of a minor quality degradation. You can find more details about it in this GitHub discussion.\n\nDisclaimer: Content for this model card has partly been written by the Hugging Face team, and partly copied and\npasted from the original model card.\n\nUsage: \nWhisper large-v3-turbo is supported in Hugging Face Transformers. To run the model, first install the Transformers\nlibrary. For this example, we'll also install Datasets to load toy audio dataset from the Hugging Face Hub, and Accelerate to reduce the model loading time:"
+      }
+    ]
+  },
+  "load": {
+    "fields": [
+      {
+        "key": "llm.load.llama.tryMmap",
+        "value": false
+      },
+      {
+        "key": "llm.load.llama.keepModelInMemory",
+        "value": false
+      },
+      {
+        "key": "llm.load.llama.flashAttention",
+        "value": false
+      },
+      {
+        "key": "llm.load.llama.kCacheQuantizationType",
+        "value": {
+          "checked": false,
+          "value": "f16"
+        }
+      },
+      {
+        "key": "llm.load.llama.vCacheQuantizationType",
+        "value": {
+          "checked": false,
+          "value": "q8_0"
+        }
+      },
+      {
+        "key": "llm.load.contextLength",
+        "value": 16384
+      },
+      {
+        "key": "llm.load.llama.evalBatchSize",
+        "value": 1024
+      },
+      {
+        "key": "llm.load.numParallelSessions",
+        "value": 1
+      }
+    ]
+  }
+}

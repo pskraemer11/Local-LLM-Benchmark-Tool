@@ -225,8 +225,8 @@ gemma-4-12b-qat:
   arch: "Gemma-4 (12B)"
   template: "gemma4_12b_template_minijinja.jinja"
   context: 16384
-  k_cache: "iq4_nl"
-  v_cache: "q8_0"
+  k_cache: "q8_0"
+  v_cache: "iq4_nl"
   offload: 1
   notes: "Architektur: Gemma-4 (12B) | Chat-Template: gemma4_12b_template_minijinja.jinja"
 
@@ -243,7 +243,7 @@ gemma-4-19b-a4b-it-REAP:
   offload: 1
   notes: "Architektur: Gemma-4 (19B) | 18 Experts | Chat-Template: gemma4-19b-template_minijinja.jinja"
 
-gemma-4-26B:
+gemma-4-26b-a4b-it-quat:
   publisher: "google"
   hf_url: "https://huggingface.co/google/gemma-4-26B-A4B-it-qat-q4_0-gguf"
   quants: [q4_0]
@@ -254,7 +254,7 @@ gemma-4-26B:
   k_cache: "q8_0"
   v_cache: "q5_1"
   offload: 1
-  notes: "Architektur: Gemma-4 (26B) | 18 Experts | Chat-Template: gemma4-26b-template_minijinja.jinja"
+  notes: "Architektur: Gemma-4 (26B), weigths quantitative aware trained (qat) | 18 Experts | Chat-Template: gemma4-26b-template_minijinja.jinja"
 
 gemma-4-26b-a4b-it:
   publisher: ["google", "mradermacher"]
@@ -306,7 +306,7 @@ GLM-4.7-Flash:
   k_cache: "q8_0"
   v_cache: "iq4_nl"
   offload: 1
-  notes: "Architektur: GLM MoE | 16 Experts"
+  notes: "Architektur: GLM MoE | 16 Experts | K-Cache nicht stärker als Q8_0 quantisieren!"
 
 GLM-4.7-Flash-REAP-23B-A3B.i1:
   publisher: ["mradermacher", "unsloth"]
@@ -377,18 +377,6 @@ granite-4.0-h-tiny-UD:
   v_cache: "iq4_nl"
   notes: "Architektur: Granite-4.0 | Chat-Template: granite-4.0-h-tiny_template.jinja"
 
-granite-4.1-30b:
-  publisher: ["ibm-granite", "mradermacher"]
-  hf_url: "https://huggingface.co/ibm-granite/granite-4.1-30b-GGUF"
-  quants: [Q3_K_S]
-  arch: "Granite-4.1"
-  template: "granite-4.1-30b_template.jinja"
-  context: 59904
-  k_cache: "q5_1"
-  v_cache: "iq4_nl"
-  offload: 1
-  notes: "Architektur: Granite-4.1 | Chat-Template: granite-4.1-30b_template.jinja"
-
 granite-4.1-8b:
   publisher: ["ibm-granite", "lmstudio-community", "unsloth"]
   hf_url: "https://huggingface.co/ibm-granite/granite-4.1-8b-GGUF"
@@ -409,7 +397,31 @@ granite-4.1-8b-UD:
   k_cache: "q8_0"
   v_cache: "q5_1"
   notes: "Architektur: Granite-4.1 | Chat-Template: granite-4.1-30b_template.jinja"
+  
+granite-4.1-30b:
+  publisher: ["ibm-granite", "mradermacher"]
+  hf_url: "https://huggingface.co/ibm-granite/granite-4.1-30b-GGUF"
+  quants: [Q3_K_S]
+  arch: "Granite-4.1"
+  template: "granite-4.1-30b_template.jinja"
+  context: 59904
+  k_cache: "q5_1"
+  v_cache: "iq4_nl"
+  offload: 1
+  notes: "Architektur: Granite-4.1 | Chat-Template: granite-4.1-30b_template.jinja"
 
+granite-4.1-30b-i1:
+  publisher: ["ibm-granite", "mradermacher"]
+  hf_url: "https://huggingface.co/ibm-granite/granite-4.1-30b-GGUF"
+  quants: [Q3_K_S]
+  arch: "Granite-4.1"
+  template: "granite-4.1-30b_template.jinja"
+  context: 59904
+  k_cache: "q5_1"
+  v_cache: "iq4_nl"
+  offload: 1
+  notes: "Architektur: Granite-4.1 | dnymisch quant. iMatrix (i1) | Chat-Template: granite-4.1-30b_template.jinja"
+  
 JanusCoder-14B.i1:
   publisher: ["mradermacher", "unsloth"]
   hf_url: "https://huggingface.co/mradermacher/JanusCoder-14B-i1-GGUF"
@@ -438,17 +450,6 @@ Kimi-Linear-REAP-35B-A3B-Instruct.i1:
   offload: 1
   notes: "9 Experts"
 
-lfm2-24b-a2b:
-  publisher: ["liquid", "LiquidAI"]
-  hf_url: "https://huggingface.co/liquid/lfm2-24b-a2b"
-  quants: [Q4_0]
-  arch: "LFM2 MoE"
-  context: 16384
-  experts: 12
-  k_cache: "iq4_nl"
-  v_cache: "q5_1"
-  notes: "Architektur: LFM2 MoE | 12 Experts"
-
 LFM2-24B-A2B-REAP.i1:
   publisher: "mradermacher"
   hf_url: "https://huggingface.co/mradermacher/LFM2-24B-A2B-REAP-i1-GGUF"
@@ -459,6 +460,17 @@ LFM2-24B-A2B-REAP.i1:
   v_cache: "q8_0"
   offload: 1
   notes: "Architektur: LFM2 MoE | 8 Experts"
+
+lfm2-24b-a2b:
+  publisher: ["liquid", "LiquidAI"]
+  hf_url: "https://huggingface.co/liquid/lfm2-24b-a2b"
+  quants: [Q4_0]
+  arch: "LFM2 MoE"
+  context: 16384
+  experts: 12
+  k_cache: "iq4_nl"
+  v_cache: "q5_1"
+  notes: "Architektur: LFM2 MoE | 12 Experts"
 
 LiquidAI_LFM2-24B-A2B:
   publisher: "bartowski"

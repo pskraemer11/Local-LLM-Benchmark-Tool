@@ -1,0 +1,34 @@
+{
+  "preset": "",
+  "operation": {
+    "fields": []
+  },
+  "load": {
+    "fields": [
+      {
+        "key": "llm.load.llama.physicalBatchSize",
+        "value": 1024
+      },
+      {
+        "key": "llm.load.llama.evalBatchSize",
+        "value": 4096
+      },
+      {
+        "key": "llm.load.llama.keepModelInMemory",
+        "value": false
+      },
+      {
+        "key": "llm.load.llama.tryMmap",
+        "value": false
+      },
+      {
+        "key": "llm.load.numExperts",
+        "value": 18
+      },
+      {
+        "key": "llm.load.numParallelSessions",
+        "value": 4
+      }
+    ]
+  }
+}

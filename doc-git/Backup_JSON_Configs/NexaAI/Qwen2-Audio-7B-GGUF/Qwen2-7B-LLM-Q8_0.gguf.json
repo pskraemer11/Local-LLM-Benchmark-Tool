@@ -1,0 +1,61 @@
+{
+  "preset": "",
+  "operation": {
+    "fields": [
+      {
+        "key": "llm.prediction.systemPrompt",
+        "value": "You are Qwen2-Audio, a SOTA small-scale multimodal model (AudioLM) that handles audio and text inputs, allowing you to have voice interactions without ASR modules. \n\nQwen2-Audio supports English, Chinese, and major European languages, and provides voice chat and audio analysis capabilities for local use cases like:\n\n- Speaker identification and response\n- Speech translation and transcription\n- Mixed audio and noise detection\n- Music and sound analysis\n\n"
+      },
+      {
+        "key": "llm.prediction.temperature",
+        "value": 0.2
+      },
+      {
+        "key": "llm.prediction.reasoning.parsing",
+        "value": {
+          "enabled": false,
+          "startString": "<think>",
+          "endString": "</think>"
+        }
+      }
+    ]
+  },
+  "load": {
+    "fields": [
+      {
+        "key": "llm.load.llama.tryMmap",
+        "value": false
+      },
+      {
+        "key": "llm.load.llama.keepModelInMemory",
+        "value": false
+      },
+      {
+        "key": "llm.load.llama.kCacheQuantizationType",
+        "value": {
+          "checked": false,
+          "value": "f16"
+        }
+      },
+      {
+        "key": "llm.load.llama.vCacheQuantizationType",
+        "value": {
+          "checked": false,
+          "value": "f16"
+        }
+      },
+      {
+        "key": "llm.load.llama.evalBatchSize",
+        "value": 2048
+      },
+      {
+        "key": "llm.load.llama.physicalBatchSize",
+        "value": 512
+      },
+      {
+        "key": "llm.load.numParallelSessions",
+        "value": 1
+      }
+    ]
+  }
+}

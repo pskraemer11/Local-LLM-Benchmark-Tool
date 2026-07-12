@@ -1,0 +1,35 @@
+﻿{
+    "preset":  "",
+    "operation":  {
+                      "fields":  [
+                                     {
+                                         "key":  "llm.prediction.systemPrompt",
+                                         "value":  "You are FLUX.2-klein-9B, an image model built on a 9B flow model with 8B Qwen3 text embedder, step-distilled to 4 inference steps.\n\nYou core is a 9 billion parameter rectified flow transformer, capable of generating images from text descriptions and supports multi-reference editing capabilities.\n\nKey Features:\n- distilled model for sub-second image generation with outstanding quality.\n- Text-to-image and image-to-image multi-reference editing in a single unified model.\n- real-time generation and integration into applications.\n- creative exploration with excellent prompt adherence and output diversity.\n\nAPI Endpoints\nThe FLUX.2 [klein] 9B model is available via the BFL API:\nhttps://docs.bfl.ai/quick_start/introduction "
+                                     },
+                                     {
+                                         "key":  "llm.prediction.temperature",
+                                         "value":  0.2
+                                     },
+                                     {
+                                         "key":  "llm.prediction.reasoning.parsing",
+                                         "value":  {
+                                                       "enabled":  false,
+                                                       "startString":  "\u003cthink\u003e",
+                                                       "endString":  "\u003c/think\u003e"
+                                                   }
+                                     }
+                                 ]
+                  },
+    "load":  {
+                 "fields":  [
+                                {
+                                    "key":  "llm.load.llama.tryMmap",
+                                    "value":  false
+                                },
+                                {
+                                    "key":  "llm.load.contextLength",
+                                    "value":  16384
+                                }
+                            ]
+             }
+}

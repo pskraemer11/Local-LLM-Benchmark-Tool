@@ -2,8 +2,8 @@
 Central configuration for all benchmark pipelines.
 
 Imported by:
-  - run_benchmarks_v12.py       (PIPELINE_DISCOVERY, TOOL_EVAL_SCENARIO_IDS)
-  - consolidate_results_v12.py  (QUANT_MAP, CAT_WEIGHTS, ...)
+  - run_benchmarks_v13.py       (PIPELINE_DISCOVERY, TOOL_EVAL_SCENARIO_IDS)
+  - consolidate_results_v13.py  (QUANT_MAP, CAT_WEIGHTS, ...)
   - generate_quant_map.py       (uses lms ls --json dynamically)
   - tests/test_scores.py        (CAT_WEIGHTS, OVERALL_WEIGHTS)
 
@@ -90,16 +90,16 @@ CAT_WEIGHTS = {
         "CoderEval": 0.25,
     },
     "knowledge": {
-        "ARC-Challenge": 0.25,
-        "HellaSwag": 0.25,
-        "TruthfulQA": 0.25,
-        "MMLU-Pro": 0.25,
+        "ARC-Challenge": 1/3,
+        "HellaSwag": 1/3,
+        "TruthfulQA": 1/3,
     },
     "math": {
-        "MathQA": 1.0,
+        "MATH-500": 1.0,
     },
     "agentic": {
-        "Agentic": 1.0,
+        "Agentic": 0.5,
+        "IFEval": 0.5,
     },
 }
 

@@ -1,0 +1,56 @@
+﻿{
+    "preset":  "",
+    "operation":  {
+                      "fields":  [
+                                     {
+                                         "key":  "llm.prediction.systemPrompt",
+                                         "value":  "\u003crole\u003e \nYou are Nanonets-OCR2-3b, a LLM model for transforming documents into structured markdown with intelligent content recognition and semantic tagging.\n\nYour features and capabilites: \n- LaTeX Equation Recognition\n- Intelligent Image Description: Describe images within documents using structured \u003cimg\u003e tags, making them digestible for LLM processing. \n- describe various image types, including logos, charts, graphs etc., detailing their content, style, and context.\n-  Signature Detection \u0026 Isolation\n-  Watermark Extraction, placing it within a \u003cwatermark\u003e tag.\n-  Smart Checkbox Handling: Converts form checkboxes and radio buttons into standardized Unicode symbols (☐, ☑, ☒) for consistent and reliable processing.\n-  Complex Table Extraction: Accurately extracts complex tables from documents and converts them into both markdown and HTML table formats.\n-  Flow charts \u0026 Organisational charts: Extracts flow charts and organisational as mermaid code.\n-   Handwritten Documents: The model is trained on handwritten documents across multiple languages.\n-  Multilingual: you are trained on documents of multiple languages, including English, Chinese, French, Spanish, Portuguese, German and more.\n-  Visual Question Answering (VQA): provide answers directly if it is present in the document; otherwise, responds with \"Not mentioned.\"\n\u003c/role\u003e\n\n\u003ccore_principles\u003e\nExtract the text from the above document as if you were reading it naturally. \n\nReturn the tables in Markdown format. \n\nReturn the equations in LaTeX representation. \n\nIf there is an image in the document and image caption is not present, add a small description of the image inside the \u003cimg\u003e\u003c/img\u003e tag; otherwise, add the image caption inside \u003cimg\u003e\u003c/img\u003e. \n\nWatermarks should be wrapped in brackets. \nExample: \u003cwatermark\u003eOFFICIAL COPY\u003c/watermark\u003e. \n\nPage numbers should be wrapped in brackets. \nExample: \u003cpage_number\u003e14\u003c/page_number\u003e or \u003cpage_number\u003e9/22\u003c/page_number\u003e. \n\nPrefer using ☐ and ☑ for check boxes.\n\u003c/core_principles\u003e"
+                                     },
+                                     {
+                                         "key":  "llm.prediction.temperature",
+                                         "value":  0.1
+                                     },
+                                     {
+                                         "key":  "llm.prediction.structured",
+                                         "value":  {
+                                                       "type":  "none"
+                                                   }
+                                     },
+                                     {
+                                         "key":  "llm.prediction.topPSampling",
+                                         "value":  {
+                                                       "checked":  true,
+                                                       "value":  0.9
+                                                   }
+                                     }
+                                 ]
+                  },
+    "load":  {
+                 "fields":  [
+                                {
+                                    "key":  "llm.load.contextLength",
+                                    "value":  16384
+                                },
+                                {
+                                    "key":  "llm.load.llama.evalBatchSize",
+                                    "value":  8192
+                                },
+                                {
+                                    "key":  "llm.load.llama.keepModelInMemory",
+                                    "value":  false
+                                },
+                                {
+                                    "key":  "llm.load.llama.tryMmap",
+                                    "value":  false
+                                },
+                                {
+                                    "key":  "llm.load.llama.physicalBatchSize",
+                                    "value":  1024
+                                },
+                                {
+                                    "key":  "llm.load.numParallelSessions",
+                                    "value":  1
+                                }
+                            ]
+             }
+}
