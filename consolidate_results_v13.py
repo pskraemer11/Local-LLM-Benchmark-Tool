@@ -31,8 +31,9 @@ from typing import Any, Dict, List, Optional, Tuple
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 RESULTS_DIR = os.path.join(BASE_DIR, "ergebnisse")
 
-from benchmark_config import (MMLU_PRO_SUBSETS, LB_MEANS_BLACKLIST,
-                             CAT_WEIGHTS, OVERALL_WEIGHTS, QUANT_MAP)
+from benchmark_config import (MMLU_PRO_SUBSETS, MMLU_PRO_ENABLED,
+                             LB_MEANS_BLACKLIST, CAT_WEIGHTS, OVERALL_WEIGHTS,
+                             QUANT_MAP, get_quant)
 
 # --- Model info cache (from lms ls --json) ---
 _MODEL_INFO_CACHE = None
@@ -151,8 +152,12 @@ def _lookup_vram(model_key: str) -> Optional[Dict[str, Any]]:
     Priority for quant: QUANT_MAP (static) > lms ls --json (dynamic)
     Priority for vram_gb: lms ls --json only (dynamic – deleted models have no file)
     """
-    # Step 1: Get quant from QUANT_MAP (primary – works for deleted models too)
-    quant_from_map = QUANT_MAP.get(model_key)
+    # Step 1: Get quant from QUANT_MAP via variant-aware get_quant() (primary
+    # – works for deleted models too). This prevents the previous behaviour
+    # where `QUANT_MAP.get(model_key)` returned None for `gpt-oss-20b` if the
+    # caller passed `lmstudio-community/gpt-oss-20b`, leading to a wrong
+    # quant from lms_match.
+    quant_from_map = get_quant(model_key) or None
 
     # Step 2: Get VRAM + quant from lms ls --json (dynamic – only installed models)
     info = _get_model_info()
@@ -166,19 +171,45 @@ def _lookup_vram(model_key: str) -> Optional[Dict[str, Any]]:
                 lms_match = meta
                 break
     if not lms_match:
-        # Fuzzy: strip publisher prefix, match normalized
+        # Fuzzy match. Previous implementation used substring matching
+        # `dk_norm in mk_base_norm` which produced FALSE POSITIVES for short
+        # keys (e.g. `gemma412b` in `gemma419ba4bitreap`). The fix:
+        #   1. Strip ONLY the known publisher prefix from the model_key,
+        #      not from the matched candidates.
+        #   2. Require either EXACT normalized equality OR a minimum length
+        #      ratio (>=0.85) when one string is a prefix of the other.
         import re as _re
-        dk_norm = _re.sub(r"[^a-z0-9]", "", model_key.lower())
+        PUB_PREFIXES = r"^(?:ibm|google|microsoft|mistralai|essentialai|"
+        PUB_PREFIXES += r"qwen|lmstudio-community|openai|mradermacher|"
+        PUB_PREFIXES += r"jetbrains|unsloth|modelgraft|fb|meta|deepseek|"
+        PUB_PREFIXES += r"cerebras|moonshotai|zai-org|baidu|alibaba)[/\\]"
+        dk_stripped = _re.sub(PUB_PREFIXES, "", model_key.lower(), count=1)
+        dk_norm = _re.sub(r"[-_./\\@]", "", dk_stripped)
+        # Also strip trailing @quant for length comparison
+        dk_base = _re.sub(r"@.*$", "", dk_stripped)
+        dk_base_norm = _re.sub(r"[-_./\\@]", "", dk_base)
+        best_match = None
+        best_score = 0.0
         for mk in info:
-            mk_base = _re.sub(r"@.*", "", mk)
-            mk_base_norm = _re.sub(r"[^a-z0-9]", "", mk_base.lower())
-            if dk_norm in mk_base_norm or mk_base_norm in dk_norm:
-                lms_match = info[mk]
+            mk_stripped = _re.sub(PUB_PREFIXES, "", mk.lower(), count=1)
+            mk_base = _re.sub(r"@.*$", "", mk_stripped)
+            mk_base_norm = _re.sub(r"[-_./\\@]", "", mk_base)
+            if not mk_base_norm:
+                continue
+            # Exact match (normalized)
+            if dk_base_norm == mk_base_norm:
+                best_match = info[mk]
+                best_score = 1.0
                 break
-            dk_short = _re.sub(r"(ibm|google|microsoft|mistralai|essentialai)/", "", dk_norm)
-            if len(dk_short) > 5 and dk_short in mk_base_norm:
-                lms_match = info[mk]
-                break
+            # Substring match with length-ratio guard to prevent the
+            # `gemma412b in gemma419ba4bitreap` false-positive
+            if dk_base_norm in mk_base_norm or mk_base_norm in dk_base_norm:
+                shorter, longer = sorted([dk_base_norm, mk_base_norm], key=len)
+                ratio = len(shorter) / len(longer) if longer else 0.0
+                if ratio >= 0.85 and ratio > best_score:
+                    best_score = ratio
+                    best_match = info[mk]
+        lms_match = best_match
 
     # Step 3: Merge – QUANT_MAP wins for quant, lms wins for vram_gb
     if lms_match:
@@ -219,24 +250,43 @@ def _percentile(values: List[float], p: float) -> float:
 
 def bootstrap_ci(scores: List[float], n_resamples: int = 10000, alpha: float = 0.05) -> Tuple[float, float]:
     """Bootstrap 95% confidence interval for the mean.
-    
+
     Draws n_resamples samples with replacement from scores,
     computes the mean each time, and returns the (alpha/2)-th and
     (1-alpha/2)-th percentile of the distribution.
+
+    NumPy-accelerated: ~100x faster than the previous pure-Python
+    loop (1M random.choice calls for N=100 / 10k resamples).
+    Falls back to pure Python if NumPy is unavailable.
     """
     if len(scores) < 2:
         return (float('nan'), float('nan'))
-    n = len(scores)
-    means = [0.0] * n_resamples
-    for i in range(n_resamples):
-        s = 0.0
-        for _ in range(n):
-            s += random.choice(scores)
-        means[i] = s / n
-    means.sort()
-    lo_idx = int(n_resamples * alpha / 2)
-    hi_idx = int(n_resamples * (1 - alpha / 2))
-    return (means[lo_idx], means[hi_idx])
+    try:
+        import numpy as np
+        arr = np.asarray(scores, dtype=np.float64)
+        n = arr.shape[0]
+        # Sampling with replacement: n_resamples × n indices
+        idx = np.random.randint(0, n, size=(n_resamples, n))
+        means = arr[idx].mean(axis=1)
+        lo_idx = int(n_resamples * alpha / 2)
+        hi_idx = int(n_resamples * (1 - alpha / 2))
+        # np.partition is O(n) and faster than full sort when we only
+        # need the two boundary percentiles
+        boundary = np.partition(means, (lo_idx, hi_idx))
+        return (float(boundary[lo_idx]), float(boundary[hi_idx]))
+    except ImportError:
+        # Fallback: pure-Python
+        n = len(scores)
+        means = [0.0] * n_resamples
+        for i in range(n_resamples):
+            s = 0.0
+            for _ in range(n):
+                s += random.choice(scores)
+            means[i] = s / n
+        means.sort()
+        lo_idx = int(n_resamples * alpha / 2)
+        hi_idx = int(n_resamples * (1 - alpha / 2))
+        return (means[lo_idx], means[hi_idx])
 
 def paired_bootstrap_ci(scores_a: List[float], scores_b: List[float],
                         n_resamples: int = 10000, alpha: float = 0.05,
@@ -245,23 +295,42 @@ def paired_bootstrap_ci(scores_a: List[float], scores_b: List[float],
 
     Both score lists must have the same length (same items, same order).
     Returns (mean_diff, ci_lo, ci_hi).  Positive means A > B.
+
+    NumPy-accelerated with deterministic seed support.
+    Falls back to pure Python if NumPy is unavailable.
     """
     if len(scores_a) != len(scores_b) or len(scores_a) < 2:
         return (float('nan'), float('nan'), float('nan'))
-    rng = random.Random(seed) if seed is not None else random.Random()
-    n = len(scores_a)
-    diffs = [0.0] * n_resamples
-    for i in range(n_resamples):
-        s = 0.0
-        for _ in range(n):
-            idx = rng.randrange(n)
-            s += scores_a[idx] - scores_b[idx]
-        diffs[i] = s / n
-    diffs.sort()
-    lo_idx = int(n_resamples * alpha / 2)
-    hi_idx = int(n_resamples * (1 - alpha / 2))
-    mean_diff = sum(scores_a[i] - scores_b[i] for i in range(n)) / n
-    return (mean_diff, diffs[lo_idx], diffs[hi_idx])
+    try:
+        import numpy as np
+        if seed is not None:
+            np.random.seed(seed)
+        a = np.asarray(scores_a, dtype=np.float64)
+        b = np.asarray(scores_b, dtype=np.float64)
+        n = a.shape[0]
+        idx = np.random.randint(0, n, size=(n_resamples, n))
+        diffs = (a[idx] - b[idx]).mean(axis=1)
+        mean_diff = float((a - b).mean())
+        lo_idx = int(n_resamples * alpha / 2)
+        hi_idx = int(n_resamples * (1 - alpha / 2))
+        boundary = np.partition(diffs, (lo_idx, hi_idx))
+        return (mean_diff, float(boundary[lo_idx]), float(boundary[hi_idx]))
+    except ImportError:
+        # Fallback: pure-Python
+        rng = random.Random(seed) if seed is not None else random.Random()
+        n = len(scores_a)
+        diffs = [0.0] * n_resamples
+        for i in range(n_resamples):
+            s = 0.0
+            for _ in range(n):
+                idx = rng.randrange(n)
+                s += scores_a[idx] - scores_b[idx]
+            diffs[i] = s / n
+        diffs.sort()
+        lo_idx = int(n_resamples * alpha / 2)
+        hi_idx = int(n_resamples * (1 - alpha / 2))
+        mean_diff = sum(scores_a[i] - scores_b[i] for i in range(n)) / n
+        return (mean_diff, diffs[lo_idx], diffs[hi_idx])
 
 
 def read_paired_scores(path_a: str, path_b: str) -> Tuple[List[float], List[float]]:
@@ -569,7 +638,10 @@ def read_lmeval_per_model(model_key: str) -> Optional[Dict[str, float]]:
     METRICS = ["exact_match,custom-extract", "exact_match,remove_whitespace",
                "exact_match,flexible-extract", "bleu_acc,none", "rouge1_acc,none"]
 
-    # Old-style: find the model results subdirectory (NOT an MMLU-Pro subset)
+    # Old-style: find the model results subdirectory. We skip the
+    # 14 MMLU-Pro subset directories by name to avoid misinterpreting
+    # an archived MMLU-Pro run as a regular lmeval result (MMLU-Pro is
+    # ARCHIVIERT 12.07.2026; see benchmark_config.MMLU_PRO_ENABLED).
     first_sub = None
     for item in os.listdir(root):
         sub = os.path.join(root, item)
@@ -591,29 +663,19 @@ def read_lmeval_per_model(model_key: str) -> Optional[Dict[str, float]]:
                         alias = {"arc_challenge_chat": "ARC-Challenge",
                                   "hellaswag_gen": "HellaSwag",
                                   "truthfulqa_gen": "TruthfulQA",
-                                  "mmlu_pro": "MMLU-Pro",
+                                  "truthfulqa_mc1": "TruthfulQA",
+                                  "truthfulqa_mc2": "TruthfulQA",
                                   "ifeval": "IFEval",
                                   "bbh_zeroshot": "BBH",
                                   "minerva_math500": "MATH-500"}.get(task_name, task_name)
                         results[alias] = task_data[metric]
                         break
 
-    # MMLU-Pro modified: 14 individual subset directories
-    mmlu_scores = []
-    for subset in MMLU_PRO_SUBSETS:
-        subset_dir = os.path.join(root, subset)
-        if not os.path.isdir(subset_dir):
-            continue
-        # Within subset dir, find the model's results subdirectory
-        for item in os.listdir(subset_dir):
-            sub = os.path.join(subset_dir, item)
-            if os.path.isdir(sub):
-                score = _read_results_json(sub, subset, METRICS)
-                if score is not None:
-                    mmlu_scores.append(score)
-                    break
-    if mmlu_scores:
-        results["MMLU-Pro"] = sum(mmlu_scores) / len(mmlu_scores)
+    # MMLU-Pro (ARCHIVIERT): The 14-subset aggregation is no longer
+    # performed here. If you re-enable MMLU-Pro via
+    # `Archiv/run_mmlupro_benchmark.py`, the per-model results will be
+    # saved as a separate file `mmlupro_archived_*.csv` and can be
+    # merged in post-processing. See Code-Review_2026-07-12.md §3.1 D4.
 
     return results if results else None
 

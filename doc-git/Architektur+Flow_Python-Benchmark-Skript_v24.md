@@ -1,4 +1,6 @@
-# Architektur & Flow – Stand 12.07.2026 (v33)
+# Architektur & Flow – Stand 12.07.2026 (v13.0.0-p3)
+
+> **Versions-Konvention:** siehe [`../VERSION`](../VERSION) – Single Source of Truth für Projekt-Version. Der Dateiname `_v24.md` ist Legacy und wird in einer zukünftigen Major-Version auf `_v13.md` umgestellt.
 
 ## 1. Uberblick
 

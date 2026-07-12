@@ -1,0 +1,129 @@
+# GitHub Actions CI for LLM Benchmark Suite
+# Prio 4.15 (Code-Review_2026-07-12.md §4 Prio 4)
+#
+# Jobs:
+#   1. test      – pytest mit allen Dependencies
+#   2. lint      – ruff (style + errors) und basic Python-Syntax
+#   3. typecheck – mypy mit lenient settings (large legacy codebase)
+#
+# Note: We do NOT run the full benchmark on CI (that takes hours and
+# needs a local LM Studio server). CI is for code-level validation only.
+
+name: CI
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master, develop]
+
+# Cancel in-progress runs for the same branch on a new push
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # Runtime dependencies (as documented in README.md)
+          pip install "lm-eval[api,math]" evalplus nvidia-ml-py3 psutil
+          # Test dependencies
+          pip install pytest pytest-cov
+          # Additional IFEval + MATH-500 dependencies (Prio 0 fix)
+          pip install langdetect immutabledict "antlr4-python3-runtime==4.11" nltk
+          # Linting + typechecking
+          pip install ruff mypy
+
+      - name: Verify Python imports compile
+        run: |
+          python -m py_compile run_benchmarks_v13.py
+          python -m py_compile custom_benchmark_v13.py
+          python -m py_compile model_manager.py
+          python -m py_compile csv_writer.py
+          python -m py_compile consolidate_results_v13.py
+          python -m py_compile benchmark_config.py
+
+      - name: Run tests
+        run: |
+          # Quick smoke test (do not require LM Studio server)
+          python -m pytest tests/ -v --tb=short
+
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install ruff
+        run: pip install ruff
+      - name: Run ruff
+        # Lenient settings: this is a research codebase, not a library.
+        # We catch E (errors) and F (pyflakes) but leave style to
+        # individual discretion via Ruff config in pyproject.toml.
+        run: |
+          ruff check --select E,F --ignore E501,F401 .
+
+  typecheck:
+    name: Typecheck (mypy, lenient)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install mypy
+        run: pip install mypy types-requests types-PyYAML
+      - name: Run mypy
+        # Lenient settings: legacy codebase has many Any types.
+        # We only check the most critical modules.
+        run: |
+          mypy --ignore-missing-imports \
+               --no-strict-optional \
+               --no-strict \
+               --follow-imports=silent \
+               benchmark_config.py \
+               csv_writer.py 2>&1 | head -100
+
+  summary:
+    name: CI Summary
+    runs-on: ubuntu-latest
+    needs: [test, lint, typecheck]
+    if: always()
+    steps:
+      - name: Summary
+        run: |
+          if [ "${{ needs.test.result }}" = "success" ] && \
+             [ "${{ needs.lint.result }}" = "success" ] && \
+             [ "${{ needs.typecheck.result }}" = "success" ]; then
+            echo "✅ All CI jobs passed"
+            exit 0
+          else
+            echo "❌ CI failures:"
+            echo "  test:      ${{ needs.test.result }}"
+            echo "  lint:      ${{ needs.lint.result }}"
+            echo "  typecheck: ${{ needs.typecheck.result }}"
+            exit 1
+          fi

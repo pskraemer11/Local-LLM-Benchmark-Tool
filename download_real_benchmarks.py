@@ -1,10 +1,28 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
+DEPRECATED (12.07.2026) – siehe Code-Review_2026-07-12.md §3.1 D6
+
 Laedt ALLE verfuegbaren Benchmark-Datensaetze von HuggingFace und anderen Quellen
 herunter und speichert sie als JSONL-Dateien im simple_evals/ Ordner.
 Jede Aufgabe erhaelt ein _group-Feld fuer die spaetere Subsampling-Logik
 in custom_benchmark_v12.py (subsample_tasks()).
+
+STATUS: Das Skript ist nicht mehr in die aktive Pipeline eingebunden.
+  - Der Launcher liest die JSONL-Dateien direkt aus simple_evals/
+  - Die Installations-Skripte (install_benchmark-data_windows.ps1 und
+    install_benchmark-data_debian.sh) verweisen weiterhin auf dieses Skript
+  - Die hier heruntergeladenen JSONL-Dateien entsprechen NICHT der v13
+    Schema-Konvention (manche Felder wie "_group" sind outdated)
+
+EMPFOHLENE AKTION FUER NEUE BENCHMARK-INSTALLATIONEN:
+  1. Manuelle Download der bentigten Datensaetze via
+     - huggingface-cli download (fuer HuggingFace-Datensaetze)
+     - evalplus --version (fuer HumanEval+ / MBPP+)
+     - HuggingFace Hub Web-UI (fuer einzelne Datensaetze)
+  2. Ablage als JSONL im Format:
+     {"prompt": "...", "entry_point": "...", "tests": [...], "type": "..."}
+  3. Konsolidierung ueber custom_benchmark_v13.py + consolidate_results_v13.py
 
 Quellen: HumanEval+, MathQA, MBPP+, DS1000, BBH, MMLU, MMLU-Pro,
          ARC-Challenge, TruthfulQA, HellaSwag, PandasEval

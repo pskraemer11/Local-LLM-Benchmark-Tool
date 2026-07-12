@@ -26,9 +26,14 @@ QUANT_MAP = {
     "deepseek-coder-33b-instruct": "Q3_K_S",  # Deepseek Coder 33B Instruct
     "deepseek-coder-6.7b-instruct": "Q8_0",  # Deepseek Coder 6.7B Instruct
     "devstral-small-2-24b-instruct-2512": "IQ3_XXS",  # Devstral Small 2 24B Instruct 2512 UD
+    "devstral-small-2-24b-instruct-2512@q3_k_s": "Q3_K_S",  # Devstral Small 2 24B Instruct 2512 Q3_K_S
     "ernie-4.5-21b-a3b-pt": "IQ4_NL",  # ERNIE 4.5 21B A3B PT
     "falcon3-10b-instruct": "Q8_0",  # Falcon3 10B Instruct
-    "gpt-oss-20b": "Q6_K",  # GPT-OSS 20B
+    # GPT-OSS 20B – three quant variants, all distinct entries (no fallback).
+    # Use get_quant() for variant-aware lookup with explicit priority.
+    "gpt-oss-20b": "Q6_K",  # base/default (consolidated 2026-07-12 SS4)
+    "lmstudio-community/gpt-oss-20b": "MXFP4",  # lmstudio community variant
+    "unsloth/gpt-oss-20b": "Q6_K",  # unsloth variant
     "gemma-4-19b-a4b-it-reap-i1": "IQ4_NL",  # Gemma 4 19B A4B Instruct REAP I1
     "granite-4.0-h-tiny": "Q8_0",  # Granite 4.0 H Tiny
     "granite-4.1-8b": "Q8_0",  # Granite 4.1 8B
@@ -47,6 +52,7 @@ QUANT_MAP = {
     "qwen2.5-math-7b-instruct": "Q8_0",  # Qwen2.5 Math 7B Instruct
     "qwen3-30b-a3b-python-coder": "Q3_K_S",  # Qwen3 30B A3B Python Coder
     "qwen3-coder-reap-25b-a3b-i1": "Q3_K_M",  # Qwen3 Coder REAP 25B A3B I1
+    "qwen3-coder-reap-25b-a3b-i1@q4_k_s": "Q4_K_S",  # Qwen3 Coder REAP 25B A3B I1 @ Q4_K_S
     "qwen/qwen3.5-9b": "Q5_K_M",  # Qwen3.5 9B
     "qwen3.5-9b-deepseek-v4-flash": "Q8_0",  # Qwen3.5 9B DeepSeek v4 Flash
     "qwen3.6-27b": "Q3_K_S",  # Qwen3.6 27B
@@ -56,17 +62,53 @@ QUANT_MAP = {
     "gemma-4-26b-a4b-it": "IQ3_S",  # Gemma 4 26B A4B Instruct UD
     "qwen3.6-28b-reap-i1": "IQ3_M",  # Qwen3.6 28B REAP I1
     "acemath-7b-instruct": "Q8_0",  # AceMath 7B Instruct
-    "lmstudio-community/gpt-oss-20b": "MXFP4",  # GPT-OSS 20B (lmstudio)
-    "unsloth/gpt-oss-20b": "Q6_K",  # GPT-OSS 20B (unsloth)
     "google/gemma-4-12b": "Q8_0",  # Gemma 4 12B
+    "gemma-4-12b": "Q8_0",  # Gemma 4 12B (alias)
     "granite-4.1-30b": "Q3_K_S",  # Granite 4.1 30B
-    "devstral-small-2-24b-instruct-2512@q3_k_s": "Q3_K_S",  # Devstral Small 2 24B Instruct 2512 Q3_K_S
-    "qwen3-coder-reap-25b-a3b-i1@q4_k_s": "Q4_K_S",  # Qwen3 Coder REAP 25B A3B I1 @ Q4_K_S
     "gemma-4-26b-a4b-it-qat": "Q4_0",  # Gemma 4 26B A4B Instruct QAT Q4_0
     "google_gemma-4-26b-a4b-it": "Q3_K_S",  # Gemma 4 26B A4B Instruct Q3_K_S
 }
 
 
+def get_quant(model_key: str) -> str:
+    """Variant-aware quantization lookup with explicit priority.
+
+    Priority (highest first):
+      1. Exact match in QUANT_MAP (preserves publisher prefix and @quant suffix)
+      2. Suffix-only match (strip publisher prefix, keep @quant)
+      3. Base-only match (strip publisher prefix AND @quant)
+
+    This is the canonical way to look up a model quant and prevents the
+    old `_lookup_vram` from picking the wrong quant when a model has
+    multiple entries (e.g. GPT-OSS 20B has MXFP4, Q6_K, and Q8_0).
+
+    Returns "?" when no entry matches.
+    """
+    if not model_key:
+        return "?"
+    import re as _re
+    # 1. Exact match
+    if model_key in QUANT_MAP:
+        return QUANT_MAP[model_key]
+    # 2/3: strip publisher + @quant for fallback matches
+    stripped = _re.sub(r"^[a-z0-9_-]+[/\\]", "", model_key)
+    base = _re.sub(r"@.*$", "", stripped)
+    if stripped in QUANT_MAP:
+        return QUANT_MAP[stripped]
+    if base in QUANT_MAP:
+        return QUANT_MAP[base]
+    return "?"
+
+
+# ── MMLU-Pro-Subsets (ARCHIVIERT 12.07.2026) ──
+# MMLU-Pro wurde aus dem aktiven Benchmark-Settings entfernt, weil die
+# Auswertung auf 16-GB-VRAM-Hardware zu zeitaufwändig war (siehe
+# Code-Review_2026-07-12.md §3.1 D4).
+#
+# Für Re-Aktivierung: siehe `Archiv/run_mmlupro_benchmark.py` – dort ist
+# die vollständige Logik als self-contained Skript ausgelagert.
+# Aufzurufen mit:
+#     python Archiv/run_mmlupro_benchmark.py --model gemma-4-26b-a4b-it
 MMLU_PRO_SUBSETS = [
     "mmlu_pro_biology", "mmlu_pro_business", "mmlu_pro_chemistry",
     "mmlu_pro_computer_science", "mmlu_pro_economics", "mmlu_pro_engineering",
@@ -74,11 +116,117 @@ MMLU_PRO_SUBSETS = [
     "mmlu_pro_math", "mmlu_pro_other", "mmlu_pro_philosophy",
     "mmlu_pro_physics", "mmlu_pro_psychology",
 ]
+MMLU_PRO_ENABLED = False  # Hardcoded OFF – siehe Doku oben
 
 EXCLUDE_KEYWORDS = [
     "whisper", "vision", "ocr", "transcription", "transcribe",
     "translat", "audit", "audio", "embed", "vl", "flux",
 ]
+
+
+# ── Per-Modell-Defaults (Custom-Pipeline) ──
+# Prio 3.13 (Code-Review_2026-07-12.md §3.1 D2): zentralisierte
+# Thinking-Konfiguration. Vorher gab es zwei Stellen
+# (`custom_benchmark_v13.py:MODEL_CONFIG` und
+# `run_benchmarks_v13.py:_get_lmeval_params`), die ähnliche Defaults
+# hielten. Jetzt ist die Single Source of Truth hier.
+#
+# Struktur: pattern -> {temperature, top_p, top_k, max_tokens, ...}
+#   - "default" wird benutzt wenn kein Pattern matched
+#   - "qwen3.6" hat "enable_thinking": False erzwungen (sonst 0% Score
+#     weil Thinking-Tokens das Token-Budget verbrauchen)
+#   - "gpt-oss" hat "stop": ["<|return|>", "<|call|>"] für Harmony-Format
+THINKING_CONFIG = {
+    "default": {
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "max_tokens": 2048,
+        "enable_thinking": False,
+    },
+    "qwen3.5": {
+        "temperature": 0.2,
+        "top_p": 0.9,
+        "top_k": 20,
+        "max_tokens": 2048,
+        "enable_thinking": False,
+        "no_system_msg": True,
+    },
+    "qwen3.6": {
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "max_tokens": 8192,
+        "enable_thinking": False,
+    },
+    "gemma": {
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "max_tokens": 4096,
+        "enable_thinking": False,
+    },
+    "deepseek": {
+        "temperature": 0.1,
+        "top_p": 0.9,
+        "min_p": 0.02,
+        "max_tokens": 2048,
+        "enable_thinking": False,
+    },
+    "gpt-oss": {
+        "temperature": 1.0,
+        "top_p": 1.0,
+        "top_k": 0,
+        "max_tokens": 4096,
+        "enable_thinking": False,
+        "stop": ["<|return|>", "<|call|>"],
+    },
+    "apriel": {
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "max_tokens": 4096,
+        "enable_thinking": False,
+    },
+    "nemotron": {
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "max_tokens": 4096,
+        "enable_thinking": False,
+    },
+    "falcon3": {
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "max_tokens": 2048,
+        "enable_thinking": False,
+    },
+    "codestral": {
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "max_tokens": 2048,
+        "enable_thinking": False,
+    },
+    "devstral": {
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "max_tokens": 2048,
+        "enable_thinking": False,
+    },
+    "ernie": {
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "max_tokens": 2048,
+        "enable_thinking": False,
+    },
+    "rnj": {
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "max_tokens": 2048,
+        "enable_thinking": False,
+    },
+    "python-coder": {
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "max_tokens": 2048,
+        "enable_thinking": False,
+    },
+}
 
 LB_MEANS_BLACKLIST = {"Granite 4.0 H Tiny"}
 

@@ -1,6 +1,10 @@
 # LLM Benchmark Suite
 
-Local benchmark framework for LLMs via LM Studio REST API (OpenAI-compatible). Tests coding, reasoning, knowledge, and agentic capabilities across **4 pipelines** with **10 benchmarks**.
+> **Version:** see [`VERSION`](./VERSION) (currently 13.0.0-p3).  
+> **Release date:** 2026-07-12  
+> **Status:** see [`Doku-intern/Reviews/Code-Review_2026-07-12.md`](./Doku-intern/Reviews/Code-Review_2026-07-12.md) for the most recent code-review and fix history.
+
+Local benchmark framework for LLMs via LM Studio REST API (OpenAI-compatible). Tests coding, reasoning, knowledge, and agentic capabilities across **4 pipelines** with **9 benchmarks** (MMLU-Pro is archived).
 
 **Goal:**
 While many benchmark results are available online, they typically run on large servers with abundant memory and powerful CPU/GPU resources. 
@@ -35,11 +39,21 @@ Over 50 LLM models were tested on an HP Omen gaming PC with an NVIDIA RTX 5070 T
 
 ```bash
 # Clone repository
-git clone https://github.com/pskraemer11/llm-benchmark-suite.git
+git clone https://github.com/pskraer11/llm-benchmark-suite.git
 cd llm-benchmark-suite
 
 # Python dependencies
 pip install lm-eval[api] evalplus nvidia-ml-py3 psutil
+
+# lm-eval task dependencies (REQUIRED for IFEval and MATH-500)
+# Without these, IFEval and MATH-500 will fail with ModuleNotFoundError
+# (see Terminalausgabe Benchmark Run 12.07.2026 for details).
+#   - langdetect: required by lm_eval/tasks/ifeval/instructions.py
+#   - immutabledict: required by lm_eval/tasks/ifeval/instructions_util.py
+#   - sympy, math_verify, antlr4-python3-runtime==4.11: required by lm_eval/tasks/minerva_math/
+#   - nltk: required by lm_eval for TruthfulQA tokenization
+pip install langdetect immutabledict "antlr4-python3-runtime==4.11" lm-eval[math] nltk
+python -c "import nltk; nltk.download('punkt', quiet=True); nltk.download('punkt_tab', quiet=True)"
 
 # If no NVIDIA GPU, CPU/GPU utilization must be obtained differently
 

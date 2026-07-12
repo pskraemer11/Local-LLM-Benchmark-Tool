@@ -57,6 +57,19 @@ PACKAGES=(
     "seaborn"
     "psutil"
     "nvidia-ml-py"
+    # ── lm-eval-harness Dependencies ──
+    # Ohne diese schlagen IFEval und MATH-500 mit ModuleNotFoundError fehl
+    # (siehe Terminalausgabe Benchmark Run 12.07.2026):
+    #   - IFEval:       'No module named langdetect' + 'immutabledict'
+    #                   (lm_eval/tasks/ifeval/instructions.py:36, instructions_util.py:23)
+    #   - MATH-500:     'No module named math_verify' + 'antlr4-python3-runtime==4.11'
+    #                   (lm_eval/tasks/minerva_math/utils.py:16,19)
+    "langdetect"
+    "immutabledict"
+    "antlr4-python3-runtime==4.11"
+    "lm-eval[math]"
+    # nltk wird von lm_eval für TruthfulQA benötigt
+    "nltk"
 )
 
 for pkg in "${PACKAGES[@]}"; do
@@ -66,19 +79,31 @@ for pkg in "${PACKAGES[@]}"; do
     else
         echo "FEHLGESCHLAGEN"
         echo "  [WARN] $pkg konnte nicht installiert werden."
+        echo "         Manuelle Installation: pip install $pkg"
     fi
 done
 
-# ─── 5. Benchmark-Daten herunterladen ───
-echo ""
-echo "[5/5] Lade Benchmark-Datensaetze herunter..."
-if [ -f "$DOWNLOAD_SCRIPT" ]; then
-    python "$DOWNLOAD_SCRIPT"
-    echo "  [OK] Download abgeschlossen."
+# NLTK Daten herunterladen (für TruthfulQA Tokenisierung)
+echo -n "  Lade NLTK-Daten (punkt, punkt_tab) ... "
+if python -c "import nltk; nltk.download('punkt', quiet=True); nltk.download('punkt_tab', quiet=True)" 2>/dev/null; then
+    echo "OK"
 else
-    echo "  [ERROR] $DOWNLOAD_SCRIPT nicht gefunden."
-    echo "  Stelle sicher, dass das Skript im selben Ordner liegt."
-    exit 1
+    echo "FEHLGESCHLAGEN"
+    echo "  [WARN] NLTK-Daten fehlen. TruthfulQA kann fehlschlagen."
+fi
+
+# ─── 5. Benchmark-Daten herunterladen ───
+# DEPRECATED 12.07.2026: download_real_benchmarks.py ist nicht mehr
+# in der aktiven Pipeline. Die simple_evals/ JSONL-Dateien sollten
+# manuell via evalplus / HuggingFace CLI bezogen werden.
+echo ""
+echo "[5/5] Benchmark-Datensaetze..."
+if [ -f "$DOWNLOAD_SCRIPT" ]; then
+    echo "  [INFO] $DOWNLOAD_SCRIPT ist DEPRECATED (12.07.2026)."
+    echo "  [INFO] Manuelle Installation empfohlen – siehe Skript-Header."
+    echo "  [WARN] Datenformate entsprechen NICHT dem v13-Schema."
+else
+    echo "  [INFO] Kein Legacy-Skript gefunden. Manuelle Installation erforderlich."
 fi
 
 echo ""

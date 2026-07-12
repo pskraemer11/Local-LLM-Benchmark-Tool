@@ -81,7 +81,7 @@ from typing import Any, Optional
 #   /v1/models                  GET  – OpenAI-Compat: model list
 #
 from benchmark_config import (PIPELINE_DISCOVERY, TOOL_EVAL_SCENARIO_IDS,
-                             EXCLUDE_KEYWORDS, MMLU_PRO_SUBSETS)
+                             EXCLUDE_KEYWORDS, MMLU_PRO_SUBSETS, MMLU_PRO_ENABLED)
 from model_manager import (
     API_BASE, TIMEOUT_CLI, TIMEOUT_MODEL_READY, PIPELINE_TIMEOUTS,
     get_current_loaded_model, unload_all_models,
@@ -136,6 +136,8 @@ LMEVAL_TASKS_DIR = os.path.join(BASE_DIR, "lm_eval_tasks")
 # ── Versioned Script References (dynamic) ──────────────────
 # Automatically finds the highest version of custom_benchmark_v*.py.
 # No manual update after Copy-Item needed anymore.
+# Prio 3.12 (Code-Review_2026-07-12.md §3.1 D1): log the resolved path
+# so it's clear which script version is actually being used.
 _custom_scripts = glob.glob(os.path.join(BASE_DIR, "custom_benchmark_v*.py"))
 _versions = []
 for _s in _custom_scripts:
@@ -145,6 +147,10 @@ for _s in _custom_scripts:
 if not _versions:
     sys.exit("[FATAL] No custom_benchmark_v*.py found.")
 CUSTOM_BENCHMARK_SCRIPT = max(_versions, key=lambda x: x[0])[1]
+print(f"[INFO] Using custom_benchmark script: {os.path.basename(CUSTOM_BENCHMARK_SCRIPT)} "
+      f"(version v{max(_versions, key=lambda x: x[0])[0]})")
+print(f"[INFO] Subprocess interpreter: {sys.executable}")
+print(f"[INFO] Repository root:        {BASE_DIR}")
 del _custom_scripts, _versions, _m, _s
 
 # ── Benchmark Definitions ──────────────────────────────────────
@@ -173,7 +179,7 @@ EVALPLUS_BENCHMARKS = [
 LMEVAL_BENCHMARKS = [
     {"key": "5", "name": "ARC-Challenge",   "category": "knowledge", "task": "arc_challenge_chat"},
     {"key": "6", "name": "HellaSwag",       "category": "knowledge", "task": "hellaswag_gen", "min_limit": 100},
-    {"key": "7", "name": "TruthfulQA",      "category": "knowledge", "task": "truthfulqa_gen"},
+    {"key": "7", "name": "TruthfulQA",      "category": "knowledge", "task": "truthfulqa_mc1"},
     {"key": "8", "name": "IFEval",          "category": "agentic",   "task": "ifeval"},
     {"key": "9", "name": "MATH-500",        "category": "math",      "task": "minerva_math500", "timeout_mult": 3},
 ]
@@ -464,8 +470,31 @@ def _parse_subset_score(sub_output_dir: str, subset_task: str) -> Optional[float
 # Qwen3.5 compatibility: --qwen-prompt enables prompt-based
 # embedding instead of system message (no_system_msg in MODEL_CONFIG).
 #
+
+
+def _ensure_model_still_loaded(model_key: str, load_key: str, bench_name: str = "") -> None:
+    """After EVERY benchmark (Custom/EvalPlus/LM-Eval/Agentic) verify the
+    model is still loaded. If not, transparently reload it. This avoids
+    silent crashes when a sub-process accidentally unloads the model.
+    """
+    cand_key = model_key.lower()
+    loaded = get_current_loaded_model()
+    ok = False
+    if loaded:
+        lk = loaded["model_key"].lower()
+        li = loaded["identifier"].lower()
+        if cand_key in lk or cand_key in li or lk in cand_key or li in cand_key:
+            ok = True
+    if not ok:
+        label = f" after {bench_name}" if bench_name else ""
+        print(f"  [WARN] Model{label} no longer loaded – reloading...")
+        load_model_via_lms(load_key, context_length=_get_safe_context(load_key))
+        if not wait_for_model_ready(timeout=60):
+            print("  [WARN] Model readiness check timed out")
+
+
 # Returns: dict with pipeline="custom", score (0-1).
-def run_custom_benchmark(model_info: dict[str, Any], bench: dict[str, Any], sample_size: int = 5, seed: Optional[int] = None, no_structured_output: bool = False) -> Optional[dict[str, Any]]:
+def run_custom_benchmark(model_info: dict[str, Any], bench: dict[str, Any], sample_size: int = 5, seed: Optional[int] = None, no_structured_output: bool = False, keep_response: bool = False) -> Optional[dict[str, Any]]:
     model_key = model_info["key"]
     model_display = model_info["display"]
     fp = os.path.join(DATA_DIR, bench["file"])
@@ -491,18 +520,34 @@ def run_custom_benchmark(model_info: dict[str, Any], bench: dict[str, Any], samp
     # Gemma models have enable_thinking=False (thinking disturbs coding benchmarks)
     if THINKING_ENABLED and _is_reasoning_model(model_key) and not _is_gemma_model(model_key):
         cmd.append("--thinking")
-    if no_structured_output:
+    # Only add --no-structured-output on retry (see fallback below)
+    _do_retry = no_structured_output
+    if _do_retry:
         cmd.append("--no-structured-output")
+    if keep_response:
+        cmd.append("--keep-response")
     t0 = time.time()
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=PIPELINE_TIMEOUTS["custom_subprocess"],
                             encoding="utf-8", errors="replace")
     elapsed = time.time() - t0
     output = result.stdout[-2000:] if result.stdout else ""
+    stderr_text = result.stderr or ""
     if output.strip():
         print(output)
+    # Channel-Error Auto-Fallback: if the subprozess reports a LM Studio
+    # Channel-Error (structured-output + lazy-grammar conflict, see Server-Log
+    # 12.07.2026 L58671/L94468), transparently retry once with
+    # --no-structured-output instead of returning a 0% score.
+    # Detection via the [CHANNEL-ERROR] marker printed by the subprozess
+    # when error_detail contains "Cannot combine structured output" /
+    # "Channel Error" (see custom_benchmark_v13.py run benchmark loop).
+    if not _do_retry and "[CHANNEL-ERROR]" in (result.stdout or ""):
+        print(f"  [INFO] Channel-Error detected – retrying with --no-structured-output")
+        return run_custom_benchmark(model_info, bench, sample_size=sample_size,
+                                   seed=seed, no_structured_output=True)
     if result.returncode != 0:
         print(f"  [ERROR] Returncode {result.returncode}")
-        print(result.stderr[-500:])
+        print(stderr_text[-500:])
         return None
     score = None
     if output:
@@ -780,71 +825,14 @@ def run_lmeval(model_info: dict[str, Any], bench: dict[str, Any], limit: int = 5
             "score": score, "thinking": THINKING_ENABLED}
 
 
-# ── MMLU-Pro (modified) – special case within Pipeline 3 ───
-# Reason: lm_eval's built-in "mmlu_pro" task loads ALL 12,032
-# tasks at once and is extremely slow for reasoning models
-# (~25s/call). Therefore we split into 14 individual subset tasks
-# and apply stratified subsampling:
-#   - limit <= 14: random selection of limit subsets, 1 task each
-#   - limit >  14: all 14 subsets, ceil(limit/14) tasks per subset
-# Returns: dict with pipeline="lmeval", bench="MMLU-Pro", score.
-def run_mmlupro_modified(model_info: dict[str, Any], limit: int = 5, reasoning: bool = False) -> Optional[dict[str, Any]]:
-    """MMLU-Pro modified: max 1 task per subset, total max limit.
-    Uses the 14 individual lm_eval subset tasks."""
-    model_key = model_info["key"]
-    model_display = model_info["display"]
-    api_model = model_info.get("_api_model") or model_info.get("variant") or model_key
-    safe = model_key.replace("/", "_").replace("\\", "_")
-    output_dir = os.path.join(RESULTS_DIR, f"lmeval_{safe}")
-    os.makedirs(output_dir, exist_ok=True)
-
-    num_subsets = len(MMLU_PRO_SUBSETS)
-    if limit <= num_subsets:
-        selected = random.sample(MMLU_PRO_SUBSETS, limit)
-        per_limit = 1
-    else:
-        selected = MMLU_PRO_SUBSETS
-        per_limit = math.ceil(limit / num_subsets)
-
-    print(f"\n  >>> MMLU-Pro (modified): {model_display}")
-    print(f"      Subsets: {len(selected)}, per subset: {per_limit}, total: {len(selected) * per_limit}")
-
-    lmeval_params = _get_lmeval_params(model_key, bench_name="MMLU-Pro")
-
-    scores = []
-    t0 = time.time()
-    lm_env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
-
-    for subset_task in selected:
-        t_sub = time.time()
-        sub_output_dir = os.path.join(output_dir, subset_task)
-        os.makedirs(sub_output_dir, exist_ok=True)
-        cmd = _build_lmeval_cmd(model_key, api_model, subset_task, per_limit, sub_output_dir, bench_name="MMLU-Pro")
-        try:
-            r = subprocess.run(cmd, capture_output=True, text=True,
-                               timeout=PIPELINE_TIMEOUTS["mmlupro_per_subset"],
-                               encoding="utf-8", errors="replace", env=lm_env)
-            if r.returncode != 0:
-                print(f"    [WARN] {subset_task} returncode={r.returncode}")
-                continue
-            sub_score = _parse_subset_score(sub_output_dir, subset_task)
-            if sub_score is not None:
-                scores.append(sub_score)
-                print(f"    [OK] {subset_task}: {sub_score:.1%} ({time.time()-t_sub:.0f}s)")
-            else:
-                print(f"    [WARN] {subset_task}: no score found")
-        except subprocess.TimeoutExpired:
-            print(f"    [WARN] {subset_task}: timeout")
-        except Exception as e:
-            print(f"    [WARN] {subset_task}: {e}")
-
-    elapsed = time.time() - t0
-    avg_score = sum(scores) / len(scores) if scores else None
-    print(f"  [OK] MMLU-Pro (mod.) done ({elapsed:.0f}s) – Subsets: {len(scores)}/{len(selected)}, avg: {avg_score:.1%}" if avg_score is not None else f"  [WARN] MMLU-Pro (mod.) – no scores")
-
-    return {"pipeline": "lmeval", "bench": "MMLU-Pro", "category": "knowledge",
-            "model": model_display,
-            "score": avg_score, "thinking": THINKING_ENABLED}
+# ── MMLU-Pro (ARCHIVIERT 12.07.2026) ──
+# Die spezielle MMLU-Pro-Auswertung wurde aus Performance-Gründen
+# (12,032 Tasks × ~25s/call = >50h pro Modell auf 16-GB-VRAM) aus
+# dem aktiven Launcher entfernt. Die Logik ist in
+# `Archiv/run_mmlupro_benchmark.py` self-contained ausgelagert
+# und kann bei Bedarf aufgerufen werden mit:
+#     python Archiv/run_mmlupro_benchmark.py --model <key> --sample-size 14
+# Siehe Code-Review_2026-07-12.md §3.1 D4 für Details.
 
 # ── Pipeline 4/4: Agentic (tool-eval-bench) ───────────────────
 # Starts tool_eval_bench as module (-m) with a random
@@ -932,16 +920,9 @@ def save_summary_csv(results: list[dict[str, Any]], model_info: Optional[dict[st
     )
 
 
-def save_model_summary_csv(results: list[dict[str, Any]], model_info: dict[str, Any],
-                           sample_size: int = 5, seed: str = "", exclude_benchmarks: str = "",
-                           no_structured_output: str = "", no_unload_between: str = "") -> Any:
-    """Legacy – forwards to csv_writer."""
-    return csv_writer.write_accumulative_summary(results, model_info,
-                                                 sample_size=sample_size, seed=seed,
-                                                 exclude_benchmarks=exclude_benchmarks,
-                                                 no_structured_output=no_structured_output,
-                                                 no_unload_between=no_unload_between,
-                                                 base_dir=BASE_DIR)
+# NOTE: Legacy save_model_summary_csv wurde am 12.07.2026 entfernt
+# (Code-Review_2026-07-12.md §3.1 D5). Direkt
+# csv_writer.write_accumulative_summary(...) nutzen.
 
 
 def main() -> None:
@@ -976,13 +957,25 @@ def main() -> None:
                         help="Disable structured JSON output in custom benchmarks (fallback to regex)")
     parser.add_argument("--no-unload-between", action="store_true",
                         help="Skip unload/reload between benchmarks (faster but risk of perf degradation)")
+    parser.add_argument("--keep-response", action="store_true",
+                        help="Write the full LLM response to per-task CSVs (default: truncated to 200 chars, see W1 in Code-Review_2026-07-12.md)")
     args = parser.parse_args()
 
     global THINKING_ENABLED
     THINKING_ENABLED = args.thinking
 
+    # Read version from VERSION file (Prio 4.17 – single source of truth)
+    _version = "13.0.0-p3"
+    _version_file = os.path.join(BASE_DIR, "VERSION")
+    if os.path.isfile(_version_file):
+        with open(_version_file, "r", encoding="utf-8") as _vf:
+            for _line in _vf:
+                if _line.startswith("__version__"):
+                    _version = _line.split("=", 1)[1].strip().strip("'\"")
+                    break
+
     print("=" * 60)
-    print("  Unified Benchmark Launcher v13")
+    print(f"  Unified Benchmark Launcher v{_version}")
     print(f"  SampleSize: {args.sample_size}")
     if args.thinking:
         print("  Thinking mode: ON (MATH-500, reasoning models)")
@@ -1065,8 +1058,10 @@ def main() -> None:
                 continue
         # Short pause – the model is confirmed loaded via lms ps,
         # but the REST server needs a moment to initialize.
+        # 30B models can take 30-60s to finish loading on RTX 5070 Ti
+        # (see Server-Log 12.07.2026: 13x "No models loaded" with 30s timeout).
         print("  [INFO] Waiting for API readiness...")
-        if not wait_for_model_ready(timeout=30):
+        if not wait_for_model_ready(timeout=60):
             print("  [WARN] Model readiness check timed out – continuing anyway")
         model_info["_api_model"] = api_model  # Unified ID for ALL pipelines
 
@@ -1092,7 +1087,7 @@ def main() -> None:
                     print(f"  [ERROR] Reload before {bench['name']} failed. Skipping.")
                     continue
                 print("  [INFO] Waiting for API re-initialization...")
-                if not wait_for_model_ready(timeout=30):
+                if not wait_for_model_ready(timeout=60):
                     print("  [WARN] Model readiness check timed out – continuing anyway")
                 model_info["_api_model"] = api_model
 
@@ -1101,7 +1096,6 @@ def main() -> None:
                 ep_names = {b["name"] for b in EVALPLUS_BENCHMARKS}
                 lmeval_names = {b["name"] for b in LMEVAL_BENCHMARKS}
                 agentic_names = {b["name"] for b in AGENTIC_BENCHMARKS}
-                is_custom = bname not in ep_names and bname not in lmeval_names and bname not in agentic_names
 
                 if bname in agentic_names:
                     result = run_agentic(model_info, limit=args.sample_size)
@@ -1111,7 +1105,7 @@ def main() -> None:
                     per_limit = max(bench.get("min_limit", 0), args.sample_size)
                     result = run_lmeval(model_info, bench, limit=per_limit, reasoning=reasoning)
                 else:
-                    result = run_custom_benchmark(model_info, bench, sample_size=args.sample_size, seed=args.seed, no_structured_output=args.no_structured_output)
+                    result = run_custom_benchmark(model_info, bench, sample_size=args.sample_size, seed=args.seed, no_structured_output=args.no_structured_output, keep_response=args.keep_response)
 
                 if result:
                     model_results.append(result)
@@ -1120,20 +1114,10 @@ def main() -> None:
                 if result:
                     all_summary.append(result)
 
-                if is_custom:
-                    loaded = get_current_loaded_model()
-                    cand_key = model_key.lower()
-                    ok = False
-                    if loaded:
-                        lk = loaded["model_key"].lower()
-                        li = loaded["identifier"].lower()
-                        if cand_key in lk or cand_key in li or lk in cand_key or li in cand_key:
-                            ok = True
-                    if not ok:
-                        print(f"  [WARN] Model after {bname} no longer loaded – reloading...")
-                        load_model_via_lms(load_key, context_length=_get_safe_context(load_key))
-                        if not wait_for_model_ready(timeout=30):
-                            print("  [WARN] Model readiness check timed out")
+                # After EVERY benchmark: check whether the model is still loaded.
+                # Previously this was only for Custom – EvalPlus/LM-Eval/Agentic
+                # could silently lose the model between runs.
+                _ensure_model_still_loaded(model_key, load_key, bench_name=bname)
             except subprocess.TimeoutExpired:
                 print(f"  [ERROR] {bench['name']} timeout (expired)")
             except Exception as e:

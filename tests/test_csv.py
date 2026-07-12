@@ -1,7 +1,7 @@
 import os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import pytest
-from consolidate_results_v12 import read_custom_csv, _auto_delimiter
+from consolidate_results_v13 import read_custom_csv, _auto_delimiter
 
 FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "test_tasks.csv")
 

@@ -1,0 +1,31 @@
+# Canonical version string for the LLM Benchmark Suite
+#
+# Prio 4.17 (Code-Review_2026-07-12.md §4 Prio 4) – Single source of
+# truth for the project version. Other version mentions (README.md
+# "Features" header, Architektur-Doku v24 file name, internal
+# __version__ string in run_benchmarks_v13.py) should be aligned
+# with this file.
+#
+# SemVer: MAJOR.MINOR.PATCH
+#   MAJOR – incompatible API/architecture changes
+#   MINOR – backward-compatible feature additions
+#   PATCH – backward-compatible bug fixes
+MAJOR=13
+MINOR=0
+PATCH=0
+SUFFIX="-p3"   # for "Prio 3 refactoring pass" 12.07.2026
+
+# Resolved version (use this in any "X.Y.Z" reference)
+__version__ = f"{MAJOR}.{MINOR}.{PATCH}{SUFFIX}"
+# Example: 13.0.0-p3
+
+# Release metadata
+RELEASE_DATE = "2026-07-12"
+RELEASE_NOTES = """
+- Prio 0: langdetect, immutabledict, antlr4-python3-runtime==4.11 für IFEval + MATH-500
+- Prio 1: Channel-Error Auto-Fallback, wait_for_model_ready 30s→60s, Reload-Logik
+- Prio 2: _lookup_vram Fuzzy-Match fix, get_quant() Helper, NumPy-Bootstrap
+- Prio 2 (Terminal): truthfulqa_mc1, DS1000 _unwrap_solution + matplotlib patch, extract_code Granite
+- Prio 3: MMLU-Pro ausgelagert, Legacy-Aliase entfernt, THINKING_CONFIG zentralisiert
+- Prio 4: GitHub Actions CI, pyproject.toml, Versionierungs-Konvention
+"""

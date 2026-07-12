@@ -1,6 +1,6 @@
 # Model Registry – Single Source of Truth
 # Generated from ~/.lmstudio/.internal/user-concrete-model-default-config
-# 102 unique models
+# 104 unique models
 
 AceMath-7B-Instruct:
   publisher: "mradermacher"
@@ -816,6 +816,17 @@ qwen3-coder-reap-25b-a3b-i1:
   v_cache: "iq4_nl"
   notes: "Architektur: Qwen3 MoE (Coder) | 16 Experts"
 
+qwen3-coder-reap-25b-a3b:
+  publisher: "unsloth"
+  hf_url: "https://huggingface.co/unsloth/Qwen3-Coder-REAP-25B-A3B-GGUF"
+  quants: [Q3_K_M]
+  arch: "Qwen3 MoE (Coder)"
+  context: 16384
+  experts: 16
+  k_cache: "q5_1"
+  v_cache: "iq4_nl"
+  notes: "Architektur: Qwen3 MoE (Coder) | 16 Experts"
+
 Qwen3.5-9B:
   publisher: ["lmstudio-community", "qwen", "unsloth"]
   hf_url: "https://huggingface.co/lmstudio-community/Qwen3.5-9B-GGUF"
@@ -877,6 +888,17 @@ qwen3.6-35b-reap-pruned-ratio-0.5:
   k_cache: "q8_0"
   v_cache: "q5_1"
   notes: "Architektur: Qwen3.6 MoE (REAP)"
+
+qwen3.6-27b:
+  publisher: "unsloth"
+  hf_url: "https://huggingface.co/unsloth/Qwen3.6-27B-GGUF"
+  quants: [Q3_K_S]
+  arch: "Qwen3.6 MoE (REAP)"
+  context: 32768
+  k_cache: "q5_1"
+  v_cache: "iq4_nl"
+  offload: 1
+  notes: "Architektur: Qwen3.6 MoE (REAP) | nicht-MTP (Basis-Version)"
 
 Qwen_Qwen3.6-27B-imatrix:
   publisher: "bartowski"

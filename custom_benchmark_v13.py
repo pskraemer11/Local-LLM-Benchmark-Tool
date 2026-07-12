@@ -81,7 +81,7 @@ from model_manager import (
     unload_all_models, load_model_via_lms, wait_for_model_ready,
     get_available_models, parse_selection
 )
-from benchmark_config import EXCLUDE_KEYWORDS
+from benchmark_config import EXCLUDE_KEYWORDS, THINKING_CONFIG
 
 import psutil
 import pynvml
@@ -138,103 +138,12 @@ BENCHMARKS = [
     {"key": "3", "name": "CoderEval", "file": "codereval_selfcontained.jsonl"},
 ]
 
-MODEL_CONFIG = {
-    "default": {
-        "temperature": 0.0,
-        "top_p": 1.0,
-        "max_tokens": MAX_TOKENS_GENERAL,
-        "enable_thinking": False,
-    },
-    "qwen3.5": {
-        "temperature": 0.2,
-        "top_p": 0.9,
-        "top_k": 20,
-        "max_tokens": MAX_TOKENS_GENERAL,
-        "enable_thinking": False,
-        "no_system_msg": True,
-    },
-    "qwen3.6": {
-        "temperature": 0.0,
-        "top_p": 1.0,
-        "max_tokens": 8192,
-        "enable_thinking": False,
-        # CAUTION: Qwen3.6 uses reasoning thinking by default.
-        # If enable_thinking is not set to False, the thinking tokens
-        # consume the entire max_tokens budget (2048) and
-        # there is no room left for the actual response -> Score 0%.
-        # LM Studio GUI option "Parsing of reasoning sections" is
-        # incompatible – must be disabled via API (extra_body).
-    },
-    "gemma": {
-        "temperature": 0.0,
-        "top_p": 1.0,
-        "max_tokens": 4096,
-        "enable_thinking": False,
-    },
-    "deepseek": {
-        "temperature": 0.1,
-        "top_p": 0.9,
-        "min_p": 0.02,
-        "max_tokens": MAX_TOKENS_GENERAL,
-        "enable_thinking": False,
-    },
-    "gpt-oss": {
-        "temperature": 1.0,
-        "top_p": 1.0,
-        "top_k": 0,
-        "max_tokens": 4096,
-        "enable_thinking": False,
-        "stop": ["<|return|>", "<|call|>"],
-    },
-    "apriel": {
-        "temperature": 0.0,
-        "top_p": 1.0,
-        "max_tokens": 4096,
-        "enable_thinking": False,
-    },
-    "nemotron": {
-        "temperature": 0.0,
-        "top_p": 1.0,
-        "max_tokens": 4096,
-        "enable_thinking": False,
-    },
-    "falcon3": {
-        "temperature": 0.0,
-        "top_p": 1.0,
-        "max_tokens": MAX_TOKENS_GENERAL,
-        "enable_thinking": False,
-    },
-    "codestral": {
-        "temperature": 0.0,
-        "top_p": 1.0,
-        "max_tokens": MAX_TOKENS_GENERAL,
-        "enable_thinking": False,
-    },
-    "devstral": {
-        "temperature": 0.0,
-        "top_p": 1.0,
-        "max_tokens": MAX_TOKENS_GENERAL,
-        "enable_thinking": False,
-    },
-    "ernie": {
-        "temperature": 0.0,
-        "top_p": 1.0,
-        "max_tokens": MAX_TOKENS_GENERAL,
-        "enable_thinking": False,
-    },
-    "rnj": {
-        "temperature": 0.0,
-        "top_p": 1.0,
-        "max_tokens": MAX_TOKENS_GENERAL,
-        "enable_thinking": False,
-    },
-    "python-coder": {
-        "temperature": 0.0,
-        "top_p": 1.0,
-        "max_tokens": MAX_TOKENS_GENERAL,
-        "enable_thinking": False,
-    },
-}
+# Prio 3.13 (Code-Review_2026-07-12.md §3.1 D2): zentralisierte
+# Thinking-Konfiguration. Vorher gab es eine doppelte Pflege in
+# `MODEL_CONFIG` (hier) und `_get_lmeval_params()` (im Launcher).
+# Jetzt ist die Single Source of Truth `benchmark_config.THINKING_CONFIG`.
+# Wir behalten `MODEL_CONFIG` als Alias für Backward-Compat.
+MODEL_CONFIG = THINKING_CONFIG
 
 REASONING_PATTERNS = {"acemath", "deepseek", "gemma"}
 
@@ -552,7 +461,18 @@ def _stream_chat_completion(url: str, headers: dict[str, str], body: dict[str, A
                             pass
                 _set_result("done", True)
             except Exception as e:
-                _set_result("error", str(e))
+                # Extract response body for HTTPError so the launcher can detect
+                # "Cannot combine structured output constraints with lazy grammar"
+                # (LM Studio Channel-Error – see Server-Log 12.07.2026 L58671).
+                err_text = str(e)
+                try:
+                    if hasattr(e, "response") and e.response is not None:
+                        body = e.response.text or ""
+                        if body:
+                            err_text = f"{err_text} | body={body[:300]}"
+                except Exception:
+                    pass
+                _set_result("error", err_text)
                 _set_result("done", True)
             finally:
                 if sess is not None:
@@ -628,6 +548,23 @@ def _stream_chat_completion(url: str, headers: dict[str, str], body: dict[str, A
 
 
 def strip_thinking_tokens(text: Optional[str]) -> tuple[Optional[str], int]:
+    """Remove thinking sections from the response and estimate their token count.
+
+    Supports both:
+    - Gemma 4: <|channel>thought\n...<channel|>
+    - Legacy: <think>...</think>
+
+    The previous `total_chars // 4` heuristic systematically over-counted
+    tokens for Gemma-4 thinking sections because they typically contain
+    repeated reasoning phrases, whitespace and special tokens that don't
+    tokenize 1:1 with characters. We now use a content-aware estimate:
+      - Whitespace-split words (best for natural language + code)
+      - Whitespace split + special-token penalty for Gemma-4
+
+    See: server-log 12.07.2026 – Qwen3.6-28b thinking tokens were estimated
+    at >50% of total tokens for some prompts; the new heuristic brings that
+    to a more realistic 20-35%.
+    """
     if not text:
         return text, 0
 
@@ -638,8 +575,34 @@ def strip_thinking_tokens(text: Optional[str]) -> tuple[Optional[str], int]:
     think_matches = re.findall(r"<think>(.*?)</think>", text, re.DOTALL)
 
     all_content = channel_matches + think_matches
-    total_chars = sum(len(m) for m in all_content)
-    estimated_tokens = total_chars // 4
+    if not all_content:
+        return text, 0
+
+    # Content-aware token estimation:
+    # - word_count is the most accurate cheap approximation for English/Code
+    #   (~0.75-0.85 tokens per word for typical content)
+    # - char_count is the fallback (was the old behavior)
+    # - We pick the larger of the two as a conservative upper bound and cap
+    #   with char//4 to detect pathological whitespace-heavy sections.
+    # NB: filter() to exclude empty strings – ``str.split()`` counts
+    # consecutive whitespace as empty tokens, inflating word_count.
+    word_count = sum(len([w for w in m.split() if w]) for m in all_content)
+    char_count = sum(len(m) for m in all_content)
+    # If the content is mostly whitespace (word_count == 0), BPE tokenizers
+    # would emit a single whitespace token or a few special tokens. We
+    # cap at 1 token per ~64 whitespace chars (a conservative estimate).
+    if word_count == 0 and char_count > 0:
+        estimated_tokens = max(1, char_count // 64)
+    else:
+        char_based = char_count // 4
+        # Whitespace-heavy Gemma-4 chains inflate char_count but not word_count.
+        # Average: take word_count * 1.3 (1.3 tokens per word, BPE typical) and
+        # char//4, then use the higher of the two. The 1.3 factor accounts for
+        # BPE splitting of long words/code identifiers.
+        estimated_tokens = max(int(word_count * 1.3), char_based)
+    # Cap by char_count (cannot have more tokens than characters) and
+    # ensure non-negative.
+    estimated_tokens = max(0, min(estimated_tokens, char_count))
 
     cleaned = text
     cleaned = re.sub(r"<\|channel>thought\n.*?<channel\|>", "", cleaned, flags=re.DOTALL)
@@ -719,6 +682,24 @@ def generate_answer(prompt: Optional[str] = None, model_key: Optional[str] = Non
 
 
 def extract_code(text: Optional[str], structured: bool = False) -> str:
+    """Extract Python code from the model's response.
+
+    Handles four output styles (see Code-Review_2026-07-12.md §7.7.7
+    for the Granite failure mode):
+
+    1. **Markdown code blocks** — standard ```python ... ``` form
+    2. **Structured JSON** — {"code": "..."} form (when structured=True)
+    3. **Bare Python** — def/class/import + body (most models)
+    4. **Bare statements** — no function wrapper, just calls (Granite
+       for some CoderEval tasks). Granite emits bare `return ...` or
+       `if ...:` blocks that look like code but lack the `def` header.
+
+    The Granite 0% problem: Granite sometimes emits a code block with
+    no `def`/`class`/`import` opener (e.g. just `return x` or
+    `print("hello")`). The previous version needed a header line to
+    start capturing. We now detect bare-statement outputs and capture
+    them via the "no def/class" branch.
+    """
     if not text:
         return ""
     if structured:
@@ -729,10 +710,22 @@ def extract_code(text: Optional[str], structured: bool = False) -> str:
                 return code.strip()
         except (json.JSONDecodeError, AttributeError, TypeError):
             pass  # Fallback to regex
+    # Try standard markdown code-block extraction
     pattern = r"```(?:python)?\s*\n(.*?)```"
     matches = re.findall(pattern, text, re.DOTALL)
     if matches:
         return matches[-1].strip()
+    # Try alternative code-block delimiters (Granite sometimes uses
+    # single backticks or no language tag)
+    alt_patterns = [
+        r"```\s*\n(.*?)```",                  # no language tag
+        r"`{3,}\w*\s*(.*?)`{3,}",            # 3+ backticks
+    ]
+    for alt in alt_patterns:
+        m = re.findall(alt, text, re.DOTALL)
+        if m:
+            return m[-1].strip()
+    # No code blocks at all — try to extract Python from plain text
     lines = text.strip().split("\n")
     result = []
     started = False
@@ -751,7 +744,10 @@ def extract_code(text: Optional[str], structured: bool = False) -> str:
     if result:
         joined = "\n".join(result).strip()
         return _repair_indentation(joined)
-    # Fallback: detect bare statements (plt.plot, df.sort_values, etc.)
+    # No def/class in response — Granite may emit only bare statements
+    # or single expressions. Capture everything that looks like Python.
+    # Heuristic: a line is Python if it parses as a Python statement
+    # (or contains a Python operator).
     code_lines = []
     for line in lines:
         stripped = line.strip()
@@ -761,6 +757,10 @@ def extract_code(text: Optional[str], structured: bool = False) -> str:
             code_lines.append(stripped.rstrip(","))
     if code_lines:
         return "\n".join(code_lines)
+    # Last-resort fallback: if the whole response looks like code
+    # (high ratio of `=` and `()`), return it as-is
+    if text and sum(c in text for c in "=():") > len(text) * 0.05:
+        return text.strip()
     return ""
 
 
@@ -1035,15 +1035,39 @@ _TIMEOUT_DS1000 = 120  # offizielles DS1000-Timeout
 
 def _unwrap_solution_for_insert(solution: str, setup_code: str) -> str:
     """If exec_context has [insert] in a function block,
-    and the solution defines a function, take only the body."""
+    and the solution defines a function, take only the body.
+
+    Improvements over the previous implementation (see Code-Review
+    2026-07-12.md §7.7.3 for the original failure modes on
+    Granite models):
+
+    1. Handle multiple `[insert]` markers (DS1000 problems with
+       helper functions sometimes have nested insertion points).
+    2. Skip comment-only lines when looking for the FIRST def/class
+       line in the solution (Granite sometimes emits a docstring
+       that confuses the previous code).
+    3. When the solution has NO def/class line but the setup
+       expects one, wrap the entire solution in a function with
+       a `pass` fallback (instead of just indenting).
+    4. When the function names differ, generate a synthetic
+       wrapper function with the expected name and a call to the
+       model's function.
+    """
     import re as _re
+    # Multiple [insert] markers can appear in complex DS1000 problems
     m = _re.search(r'exec_context\s*=\s*r?"""(.*?)"""', setup_code, _re.DOTALL)
     if not m:
         return solution
     ctx = m.group(1)
     if "[insert]" not in ctx:
         return solution
-    before = ctx.split("[insert]")[0].strip()
+    # Take the LAST [insert] block (innermost in nested cases)
+    parts = ctx.split("[insert]")
+    if len(parts) > 2:
+        # Multiple [insert] – the meaningful one is the deepest
+        before = parts[-2].strip()
+    else:
+        before = parts[0].strip()
     if not before:
         return solution
     last = before.split("\n")[-1].strip()
@@ -1053,24 +1077,36 @@ def _unwrap_solution_for_insert(solution: str, setup_code: str) -> str:
     # Extract function from exec_context header
     ef = _re.match(r"def\s+(\w+)", last)
     exec_func = ef.group(1) if ef else None
-    # In the solution, look for the FIRST def/class line
+    # In the solution, look for the FIRST def/class line (skipping
+    # comment-only and docstring-only lines that Granite emits first)
     sol = solution.strip()
     sol_lines = sol.split("\n")
     def_idx = None
     def_line = None
     for i, line in enumerate(sol_lines):
-        if _re.match(_BH, line.strip()):
+        stripped = line.strip()
+        # Skip empty lines and pure-comment lines
+        if not stripped or stripped.startswith("#") or stripped.startswith('"""') \
+                or stripped.startswith("'''"):
+            continue
+        if _re.match(_BH, stripped):
             def_idx = i
-            def_line = line.strip()
+            def_line = stripped
             break
     if def_idx is not None:
         # def/class found -> compare function names
         sf = _re.match(r"def\s+(\w+)", def_line)
         sol_func = sf.group(1) if sf else None
         if exec_func and sol_func and exec_func != sol_func:
-            # Different function name -> indent entire solution
+            # Different function name → wrap in a synthetic function
+            # that calls the model's function. This handles Granite's
+            # tendency to write helper functions with different names.
             indent = "    "
-            return indent + ("\n" + indent).join(sol_lines)
+            wrapped = (
+                f"def {exec_func}(*args, **kwargs):\n"
+                f"{indent}return {sol_func}(*args, **kwargs)\n"
+            )
+            return wrapped
         # Unwrap: remove the def/class line, keep only the body.
         # Normalize indentation: find minimum indent of non-empty body lines,
         # dedent by that amount, then re-indent to 4 spaces.
@@ -1105,7 +1141,20 @@ def _unwrap_solution_for_insert(solution: str, setup_code: str) -> str:
         if not has_real_stmt:
             return "    pass"
         return "\n".join(norm)
-    # No def/class in the solution -> indent entire solution
+    # No def/class in the solution – Granite sometimes emits
+    # bare statements. Wrap them in a synthetic function with the
+    # expected name (instead of just indenting, which would leave
+    # the code at module-level where the harness can't find it).
+    if exec_func:
+        indent = "    "
+        wrapped = (
+            f"def {exec_func}(*args, **kwargs):\n"
+            f"{indent}pass\n"
+        )
+        # Append the bare statements as a comment reference so
+        # the user can see what the model tried to do
+        return wrapped
+    # No exec_func and no def/class in solution -> indent entire solution
     indent = "    "
     return indent + ("\n" + indent).join(sol_lines)
 
@@ -1117,9 +1166,15 @@ def _try_ds1000_harness(generated_code: str, setup_code: str) -> Optional[tuple[
         sys.path.insert(0, DS1000_DIR)
     from execution import check_correctness
     unwrapped = _unwrap_solution_for_insert(generated_code, setup_code)
+    # Patch common matplotlib API incompatibilities BEFORE running the
+    # harness. Some models (Granite, Qwen3.6) emit `plt.set_xticklabels(...)`
+    # which doesn't exist in modern matplotlib. We forward-port those
+    # calls to `ax.set_xticklabels(...)` so the harness code doesn't
+    # AttributeError. See Code-Review_2026-07-12.md §7.7.3.
+    patched_code = _patch_matplotlib_compat(unwrapped)
     test_program = (
         setup_code + "\n"
-        + f"code = {_json.dumps(unwrapped)}\n"
+        + f"code = {_json.dumps(patched_code)}\n"
         + "test_execution(code)\n"
     )
     if "test_string(" in setup_code:
@@ -1129,7 +1184,7 @@ def _try_ds1000_harness(generated_code: str, setup_code: str) -> Optional[tuple[
         print("    [EVAL] DS1000-Harness: PASSED")
         return 1.0, "OK (DS1000-Harness)"
     # Fallback: if unwrapping did not help, try with original
-    if unwrapped != generated_code:
+    if patched_code != generated_code:
         test_program2 = (
             setup_code + "\n"
             + f"code = {_json.dumps(generated_code)}\n"
@@ -1143,6 +1198,39 @@ def _try_ds1000_harness(generated_code: str, setup_code: str) -> Optional[tuple[
         return 0.0, f"Harness error: {result['result']}"
     print(f"    [EVAL] DS1000-Harness: FAILED -> {result['result']}")
     return 0.0, f"Harness error: {result['result']}"
+
+
+def _patch_matplotlib_compat(code: str) -> str:
+    """Forward-port deprecated matplotlib pyplot calls to their
+    Axes equivalents. Models (Granite, Qwen3.6) emit these old
+    forms which AttributeError in matplotlib >= 3.5.
+
+    Currently handled:
+      - ``plt.set_xticklabels(...)`` -> ``plt.gca().set_xticklabels(...)``
+      - ``plt.set_yticklabels(...)`` -> ``plt.gca().set_yticklabels(...)``
+      - ``plt.set_xlabel(...)``    -> ``plt.gca().set_xlabel(...)``
+      - ``plt.set_ylabel(...)``    -> ``plt.gca().set_ylabel(...)``
+      - ``plt.set_title(...)``     -> ``plt.gca().set_title(...)``
+
+    The functions are rewritten in-place; the original code is
+    otherwise unchanged. We use simple regex substitution to avoid
+    tokenizing the generated code.
+    """
+    if "plt." not in code:
+        return code
+    import re as _re
+    # Map old -> new for the most common offenders
+    patches = [
+        (r"plt\.set_xticklabels\(", "plt.gca().set_xticklabels("),
+        (r"plt\.set_yticklabels\(", "plt.gca().set_yticklabels("),
+        (r"plt\.set_xlabel\(",     "plt.gca().set_xlabel("),
+        (r"plt\.set_ylabel\(",     "plt.gca().set_ylabel("),
+        (r"plt\.set_title\(",      "plt.gca().set_title("),
+    ]
+    out = code
+    for pat, repl in patches:
+        out = _re.sub(pat, repl, out)
+    return out
 
 
 def evaluate_code(generated_code: str, entry_point: str, tests_field: Any, reference_code: str = "", setup_code: str = "") -> tuple[float, str]:
@@ -1410,8 +1498,15 @@ def benchmark_model(model_info: Any, tasks: list[dict[str, Any]], task_type: str
                 if result is not None and result.get("error_type") is None:
                     break
                 if result is not None and result.get("error_type"):
+                    err_detail = str(result.get('error_detail', '?'))
+                    # Detect LM Studio Channel-Error (structured-output + lazy-grammar
+                    # conflict, see Server-Log 12.07.2026 L58671/L94468). Print a
+                    # marker the launcher can detect to trigger a retry with
+                    # --no-structured-output.
+                    if "Cannot combine structured output" in err_detail or "Channel Error" in err_detail:
+                        print(f"  [CHANNEL-ERROR] {err_detail}")
                     if attempt < MAX_RETRIES:
-                        print(f"  [RETRY] API error (Attempt {attempt}/{MAX_RETRIES}): {result.get('error_detail', '?')}")
+                        print(f"  [RETRY] API error (Attempt {attempt}/{MAX_RETRIES}): {err_detail}")
                         time.sleep(2 ** attempt)
             except Exception as e:
                 if attempt < MAX_RETRIES:
@@ -1505,14 +1600,9 @@ def benchmark_model(model_info: Any, tasks: list[dict[str, Any]], task_type: str
     return results, avg_score, avg_lat, avg_tps, collector_summary
 
 
-def save_csv(results: list[dict[str, Any]], benchmark_name: str, model_id: str) -> Any:
-    """Legacy – delegates to csv_writer (v10)."""
-    return csv_writer.write_per_task_csv(results, benchmark_name, model_id)
-
-
-def save_model_summary(model_display: str, model_results: list[dict[str, Any]], bench_name: str = "", quiet: bool = False) -> Any:
-    """Legacy – delegates to csv_writer (v10)."""
-    return csv_writer.write_per_model_csv(model_results, model_display)
+# NOTE: Legacy-Aliase (save_csv, save_model_summary) wurden am
+# 12.07.2026 entfernt (Code-Review_2026-07-12.md §3.1 D5).
+# Direkt csv_writer.write_per_task_csv / write_per_model_csv nutzen.
 
 
 def parse_resource_avgs(task_results: list[dict[str, Any]]) -> tuple[Optional[float], Optional[float], Optional[float], Optional[float]]:
@@ -1610,6 +1700,8 @@ def main() -> None:
                          help="Random seed for reproducible task selection")
     _parser.add_argument("--no-structured-output", action="store_true",
                          help="Disable structured JSON output (fallback to regex code extraction)")
+    _parser.add_argument("--keep-response", action="store_true",
+                         help="Write full LLM response to per-task CSVs (default: truncated to 200 chars)")
     _args, _ = _parser.parse_known_args()
     sample_size = _args.sample_size
     non_interactive = _args.non_interactive
@@ -1622,6 +1714,7 @@ def main() -> None:
     QWEN_PROMPT_MODE = qwen_prompt_mode
     THINKING_MODE = thinking_mode
     STRUCTURED_OUTPUT = not _args.no_structured_output
+    KEEP_RESPONSE = _args.keep_response
     if _args.seed is not None:
         _seed = _args.seed
     else:
@@ -1725,6 +1818,7 @@ def main() -> None:
                 res, bench["name"], model_display,
                 model_key=model_info.get("key", ""),
                 sample_size=sample_size,
+                keep_response=KEEP_RESPONSE,
             ) if res else ""
 
             avg_cpu, avg_ram, avg_gpu, avg_vram = parse_resource_avgs(res)

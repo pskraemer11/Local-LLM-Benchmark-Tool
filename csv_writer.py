@@ -177,6 +177,18 @@ def _now_ts() -> str:
 def _now_iso() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
+def _truncate_response(response: str, max_chars: int = 200) -> str:
+    """Truncate LLM response to ``max_chars`` characters for compact CSV output.
+
+    Adds a marker showing the original length so consumers know the
+    response was truncated. Use keep_response=True in write_per_task_csv
+    to disable truncation entirely (e.g. for debugging).
+    """
+    if len(response) <= max_chars:
+        return response
+    return f"{response[:max_chars]}\n[…truncated, {len(response)} chars total]"
+
+
 def _write_csv(path: str, fieldnames: list[str], rows: list[dict], delimiter: str = ";") -> str:
     with open(path, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=fieldnames, delimiter=delimiter, extrasaction="ignore")
@@ -192,8 +204,16 @@ def write_per_task_csv(results: list[dict], benchmark_name: str, model_display: 
                        model_key: str = "", sample_size: int = 5, pipeline: str = "custom",
                        seed: str = "", exclude_benchmarks: str = "",
                        no_structured_output: str = "", no_unload_between: str = "",
+                       keep_response: bool = False, response_max_chars: int = 200,
                        base_dir: Optional[str] = None) -> str:
-    """Writes per-task raw data (replaces save_csv in benchmark_lmstudio)."""
+    """Writes per-task raw data (replaces save_csv in benchmark_lmstudio).
+
+    The full model response (raw LLM output) is only written to the CSV
+    when ``keep_response=True``. By default, responses are truncated to
+    ``response_max_chars`` characters (default 200) with a marker showing
+    the original length. This prevents 5MB+ CSV files for 100-task runs
+    (see Review-Report 12.07.2026, W1: response-Spalte).
+    """
     ts = _now_ts()
     # Filename: full model key (including quant variant)
     safe_m = _safe_slice(model_key if model_key else model_display, 50)
@@ -203,6 +223,9 @@ def write_per_task_csv(results: list[dict], benchmark_name: str, model_display: 
     iso = _now_iso()
     rows = []
     for i, r in enumerate(results):
+        response = r.get("response", "")
+        if response and not keep_response:
+            response = _truncate_response(str(response), response_max_chars)
         rows.append({
             "pipeline": pipeline,
             "model": model_display,
@@ -234,7 +257,7 @@ def write_per_task_csv(results: list[dict], benchmark_name: str, model_display: 
             "gpu_temp_max": r.get("GPU_Temp_max", ""),
             "error_type": r.get("error_type", ""),
             "error_detail": r.get("error_detail", ""),
-            "response": r.get("response", ""),
+            "response": response,
         })
     _write_csv(path, TASK_FIELDS, rows)
     print(f"[INFO] Task results: {path}")
@@ -417,16 +440,10 @@ def write_quant_comparison(results: list, base_dir: str) -> str:
     return csv_path
 
 
-# ── Abwaertskompatibilitaet (Aliase) ────────────────────────────
-
-def save_csv(results, benchmark_name, model_id):
-    """Altes Interface aus benchmark_lmstudio_v23 – leitet an write_per_task_csv weiter."""
-    return write_per_task_csv(results, benchmark_name, model_id)
-
-def save_model_summary(model_display, model_results, bench_name="", quiet=False):
-    """Altes Interface – leitet an write_per_model_csv weiter."""
-    return write_per_model_csv(model_results, model_display)
-
-def save_model_summary_csv(results, model_info):
-    """Altes Interface aus run_benchmarks – leitet an write_accumulative_summary weiter."""
-    return write_accumulative_summary(results, model_info)
+# ── NOTE: Legacy-Aliase (save_csv, save_model_summary, save_model_summary_csv)
+# wurden am 12.07.2026 entfernt (Code-Review_2026-07-12.md §3.1 D5).
+# Die offiziellen Funktionsnamen sind jetzt:
+#   - write_per_task_csv(...)
+#   - write_per_model_csv(...)
+#   - write_accumulative_summary(...)
+#   - write_konsolidiert_aktuell(...)

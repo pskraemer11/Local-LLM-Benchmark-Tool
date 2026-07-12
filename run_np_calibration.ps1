@@ -9,6 +9,13 @@ $ScriptDir = "C:\Users\pskra\Python-Projekte\Benchmarks"
 $LogFile   = Join-Path $ScriptDir "runs\2026\07\np_calibration_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
 $Python    = "python"
 
+# UTF-8 Encoding (siehe Code-Review_2026-07-12.md §7.7.10)
+chcp 65001 | Out-Null
+$env:PYTHONIOENCODING = "utf-8"
+$OutputEncoding = [System.Text.Encoding]::UTF8
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+[Console]::InputEncoding = [System.Text.Encoding]::UTF8
+
 Set-Location -LiteralPath $ScriptDir
 
 # ── Modelle & Config-Pfade ──────────────────────────────────────────
@@ -90,8 +97,8 @@ $Models = @(
 )
 
 $Benchmarks = @(
-    "truthfulqa_gen",
-    "mathqa_gen"
+    "truthfulqa_mc1",
+    "minerva_math500"
 )
 
 # ── Hilfsfunktionen ──────────────────────────────────────────────────

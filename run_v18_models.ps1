@@ -1,3 +1,10 @@
+# UTF-8 Encoding (siehe Code-Review_2026-07-12.md §7.7.10)
+chcp 65001 | Out-Null
+$env:PYTHONIOENCODING = "utf-8"
+$OutputEncoding = [System.Text.Encoding]::UTF8
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+[Console]::InputEncoding = [System.Text.Encoding]::UTF8
+
 $models = @(
     "google/gemma-4-12b",
     "deepseek-r1-distill-qwen-14b",
