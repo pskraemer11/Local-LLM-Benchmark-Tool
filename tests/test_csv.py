@@ -30,8 +30,15 @@ class TestReadCustomCSV:
         assert metrics["GPU_p90"] is not None
 
     def test_missing_file(self):
-        with pytest.raises(FileNotFoundError):
-            read_custom_csv("nonexistent.csv")
+        # As of 12.07.2026 (Prio 4.16): read_custom_csv now catches
+        # OSError gracefully and returns (None, None, None, {}) instead
+        # of propagating FileNotFoundError. The function prints a [WARN]
+        # to stderr so the operator can see what happened.
+        score, tps, lat, metrics = read_custom_csv("nonexistent.csv")
+        assert score is None
+        assert tps is None
+        assert lat is None
+        assert metrics == {}
 
 
 class TestAutoDelimiter:

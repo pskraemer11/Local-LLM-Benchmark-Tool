@@ -36,7 +36,7 @@ Gemma 4 Modelle ignorieren `enable_thinking=False` über API, weil `<|channel>th
 | codestral | False | 2048 | |
 | devstral | False | 2048 | |
 | ernie | False | 2048 | |
-| rnj | False | 2048 | |
+| rnj | False | 2048 | THOUGHT:/RESPONSE: Parsing-Format (hub model.yaml) |
 | python-coder | False | 2048 | Fängt qwen3-*-python-coder u.ä. |
 
 ## --thinking Flag Verhalten (v13 Klarstellung)
@@ -45,7 +45,7 @@ Das `--thinking` CLI-Flag hat seit v13 eine eingeschränkte Wirkung:
 
 | Modellgruppe | --thinking Wirkung | Begründung |
 |-------------|-------------------|------------|
-| **Reasoning-Modelle** (Name enthält "reasoning"/"think"/"r1") | ✅ Aktiviert enable_thinking + Timeout ×2 | Natives Reasoning unterstützt |
+| **Reasoning-Modelle** (Name enthält "reasoning"/"think"/"r1"/"rnj") | ✅ Aktiviert enable_thinking + Timeout ×2 | Natives Reasoning unterstützt |
 | **Gemma 4** | ✅ Aktiviert enable_thinking für MATH-500 | Gemma-4-Template setzt `<|channel>thought` |
 | **Qwen3.6** | ❌ Wird ignoriert (enable_thinking=False erzwungen) | Thinking-Tokens blockieren Token-Budget → 0% Score |
 | **GPT-OSS** | ❌ Wird ignoriert (kein Thinking-Support) | GPT-OSS Architektur hat kein Thinking |

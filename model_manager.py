@@ -92,6 +92,7 @@ def get_current_loaded_model() -> Optional[dict[str, str]]:
             "model_key": entry.get("modelKey", entry.get("path", "")),
             "display_name": entry.get("displayName", ""),
             "status": entry.get("status", ""),
+            "context_length": entry.get("contextLength"),
         }
     except (json.JSONDecodeError, subprocess.TimeoutExpired, Exception):
         return None

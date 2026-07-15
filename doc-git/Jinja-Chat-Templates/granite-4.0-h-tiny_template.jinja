@@ -1,3 +1,4 @@
+{#- llama.cpp Granite 4 template detection: elif thinking, <|tool_call|> -#}
 {%- if available_tools is defined and available_tools %}
     {%- set tools = available_tools %}
 {%- endif %}
@@ -41,7 +42,7 @@
             {%- set c = c + entry.text %}
         {%- endfor %}
     {%- endif %}
-    {%- if msg.role in ('user', 'system') and not loop.first %}
+    {%- if msg.role in ('user', 'system') and not (loop.first and messages[0].role == 'system') %}
 {{- '<|start_of_role|>' + msg.role + '<|end_of_role|>' + c + '<|end_of_text|>\n' }}
     {%- elif msg.role == 'assistant' %}
 {{- '<|start_of_role|>assistant<|end_of_role|>' + c }}

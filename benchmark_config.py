@@ -170,6 +170,13 @@ THINKING_CONFIG = {
         "max_tokens": 2048,
         "enable_thinking": False,
     },
+    "glm": {
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "max_tokens": 2048,
+        "enable_thinking": False,
+        "no_system_msg": True,
+    },
     "gpt-oss": {
         "temperature": 1.0,
         "top_p": 1.0,

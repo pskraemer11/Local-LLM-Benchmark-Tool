@@ -237,19 +237,18 @@ class TestExtractCodeGraniteFallbacks:
 
 
 class TestTruthfulQATaskSwitch:
-    """Prio 2.1: truthfulqa_gen → truthfulqa_mc1."""
+    """Prio 2.1: truthfulqa_mc1 (loglikelihood) → truthfulqa_gen (generate_until)."""
 
-    def test_truthfulqa_mc1_in_registry(self):
-        """truthfulqa_mc1 should be the new default task name."""
+    def test_truthfulqa_gen_in_registry(self):
+        """truthfulqa_gen should be the default task name (chat-compatible)."""
         from run_benchmarks_v13 import LMEVAL_BENCHMARKS
         truthfulqa = next(b for b in LMEVAL_BENCHMARKS if b["name"] == "TruthfulQA")
-        assert truthfulqa["task"] == "truthfulqa_mc1"
+        assert truthfulqa["task"] == "truthfulqa_gen"
 
-    def test_truthfulqa_mc1_alias_in_consolidation(self):
-        """consolidate_results_v13 must handle truthfulqa_mc1 alias."""
-        # Read the module source to verify the alias exists
+    def test_truthfulqa_gen_alias_in_consolidation(self):
+        """consolidate_results_v13 must handle truthfulqa_gen alias."""
         import consolidate_results_v13
         import inspect
         source = inspect.getsource(consolidate_results_v13)
-        assert '"truthfulqa_mc1"' in source
+        assert '"truthfulqa_gen"' in source
         assert '"truthfulqa_mc2"' in source

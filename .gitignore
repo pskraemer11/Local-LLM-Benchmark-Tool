@@ -28,7 +28,7 @@ backups/
 # Interne Skripte (nicht fuer Repo)
 run_missing_benchmarks.ps1
 
-# LM Studio / System-spezifisch
+# LM Studio / Nutzer-spezifisch
 lmstudio_model-list*.json
 lmstudio_model-list*.txt
 model-list.json

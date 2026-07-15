@@ -50,6 +50,7 @@ Sources: DS1000, CoderEval
 from __future__ import annotations
 
 import ast
+import csv
 import csv_writer as csv_writer
 import json
 import math
@@ -135,7 +136,9 @@ STOP_TOKENS_DEFAULT = ["<|endoftext|>"]
 
 BENCHMARKS = [
     {"key": "1", "name": "DS1000", "file": "data_science.jsonl"},
-    {"key": "3", "name": "CoderEval", "file": "codereval_selfcontained.jsonl"},
+    # NOTE: The interactive menu uses parse_selection() which expects 1..len(BENCHMARKS).
+    # Keep keys sequential so the printed options match what the parser accepts.
+    {"key": "2", "name": "CoderEval", "file": "codereval_selfcontained.jsonl"},
 ]
 
 # Prio 3.13 (Code-Review_2026-07-12.md §3.1 D2): zentralisierte
@@ -467,9 +470,9 @@ def _stream_chat_completion(url: str, headers: dict[str, str], body: dict[str, A
                 err_text = str(e)
                 try:
                     if hasattr(e, "response") and e.response is not None:
-                        body = e.response.text or ""
-                        if body:
-                            err_text = f"{err_text} | body={body[:300]}"
+                        resp_body = e.response.text or ""
+                        if resp_body:
+                            err_text = f"{err_text} | body={resp_body[:300]}"
                 except Exception:
                     pass
                 _set_result("error", err_text)
@@ -1098,11 +1101,11 @@ def _unwrap_solution_for_insert(solution: str, setup_code: str) -> str:
         sf = _re.match(r"def\s+(\w+)", def_line)
         sol_func = sf.group(1) if sf else None
         if exec_func and sol_func and exec_func != sol_func:
-            # Different function name → wrap in a synthetic function
-            # that calls the model's function. This handles Granite's
-            # tendency to write helper functions with different names.
+            # Different function name → include the model's function
+            # definition AND a synthetic wrapper that calls it.
             indent = "    "
             wrapped = (
+                solution + "\n\n"
                 f"def {exec_func}(*args, **kwargs):\n"
                 f"{indent}return {sol_func}(*args, **kwargs)\n"
             )
@@ -1141,20 +1144,9 @@ def _unwrap_solution_for_insert(solution: str, setup_code: str) -> str:
         if not has_real_stmt:
             return "    pass"
         return "\n".join(norm)
-    # No def/class in the solution – Granite sometimes emits
-    # bare statements. Wrap them in a synthetic function with the
-    # expected name (instead of just indenting, which would leave
-    # the code at module-level where the harness can't find it).
-    if exec_func:
-        indent = "    "
-        wrapped = (
-            f"def {exec_func}(*args, **kwargs):\n"
-            f"{indent}pass\n"
-        )
-        # Append the bare statements as a comment reference so
-        # the user can see what the model tried to do
-        return wrapped
-    # No exec_func and no def/class in solution -> indent entire solution
+    # No def/class in the solution – the model output IS the body.
+    # Indent it so it plugs correctly at the [insert] position
+    # inside the function.
     indent = "    "
     return indent + ("\n" + indent).join(sol_lines)
 
@@ -1315,13 +1307,24 @@ def evaluate_code(generated_code: str, entry_point: str, tests_field: Any, refer
 
 def _get_model_config(model_key: Optional[str], thinking: bool = False) -> dict[str, Any]:
     key_lower = model_key.lower() if model_key else ""
+    # First pass: find a specific MODEL_CONFIG entry that matches.
+    # If the model is also in REASONING_PATTERNS, the thinking=True
+    # override is applied (Bug fix 12.07.2026: previously the override
+    # was only applied for matched entries, not for the default fallback.
+    # This meant models like "acemath-7b" — which are in
+    # REASONING_PATTERNS but NOT in MODEL_CONFIG — silently lost the
+    # thinking=True setting).
     for pattern, cfg in MODEL_CONFIG.items():
         if pattern in key_lower:
             cfg_copy = dict(cfg)
             if thinking and any(p in key_lower for p in REASONING_PATTERNS):
                 cfg_copy["enable_thinking"] = True
             return cfg_copy
+    # Second pass: fall back to the default config. Apply the
+    # thinking=True override if the model is in REASONING_PATTERNS.
     cfg_copy = dict(MODEL_CONFIG["default"])
+    if thinking and any(p in key_lower for p in REASONING_PATTERNS):
+        cfg_copy["enable_thinking"] = True
     return cfg_copy
 
 
@@ -1566,10 +1569,13 @@ def benchmark_model(model_info: Any, tasks: list[dict[str, Any]], task_type: str
     think_ratio = (sum_think / sum_out * 100) if sum_out > 0 else 0
     scores = [r["score"] for r in results if r["score"] is not None]
     avg_score = sum(scores) / len(scores) if scores else None
+    # Always print average score for the launcher to parse, even in
+    # non-interactive mode (quiet=True). The launcher's regex needs
+    # "Average score: XX%" in stdout.
+    if avg_score is not None:
+        print(f"  Average score: {avg_score:.1%}")
     if not quiet:
         print(f"\n  --- Result {benchmark_name} / {model_key} ---")
-        if avg_score is not None:
-            print(f"  Average score: {avg_score:.1%}")
         print(f"  Average latency: {avg_lat:.1f}s")
         print(f"  Average tokens/s: {avg_tps:.1f}")
         print(f"  \u2248{think_ratio:.0f}% Thinking ratio ({sum_think}/{sum_out} tokens)")
@@ -1768,6 +1774,7 @@ def main() -> None:
             models = available
     else:
         print("\n[WARN] Interactive mode is no longer supported – use run_benchmarks_v13.py")
+        print("[INFO] custom_benchmark_v13.py only implements DS1000 + CoderEval. For HumanEval+/MBPP+/ARC/HellaSwag/TruthfulQA/IFEval/MATH-500 use run_benchmarks_v13.py.")
         print("[INFO] Start with: python run_benchmarks_v13.py --benchmarks DS1000,CoderEval")
         benchmarks = select_benchmark()
         models = select_models(get_available_models())

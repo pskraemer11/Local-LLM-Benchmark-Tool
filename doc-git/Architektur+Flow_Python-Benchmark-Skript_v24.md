@@ -1,4 +1,4 @@
-# Architektur & Flow – Stand 12.07.2026 (v13.0.0-p3)
+# Architektur & Flow – Stand 15.07.2026 (v13.0.0-p5)
 
 > **Versions-Konvention:** siehe [`../VERSION`](../VERSION) – Single Source of Truth für Projekt-Version. Der Dateiname `_v24.md` ist Legacy und wird in einer zukünftigen Major-Version auf `_v13.md` umgestellt.
 
@@ -112,6 +112,10 @@ consolidate_results_v13.py (KONSOLIDIERUNG, v10)
 ├── --compare: Paired Bootstrap fuer2+ Modelle (alle Paarvergleiche)
 ├── --seed fuer reproduzierbares Bootstrap
 ├── --models: Modell-Filter
+├── --since/--until: Zeitraum-Filter fur CSV-Ergebnis-Dateien (YYYYMMDD_HHMMSS oder YYYYMMDD)
+├── --all-runs: Alle historischen Benchmark-Laufe einbeziehen (Default: nur letzter Lauf)
+├── --no-installed: Installed-Filter deaktivieren (Default: nur aktuell via lms ls installierte Modelle)
+├── --merge: Shortcut fur --all-runs + --no-installed, merged die letzten --runs N Laufe (Default: 2)
 ├── Varianten-bewusste Modell-Info (v31):
 │   ├── _get_model_info(): Keys jetzt variant-eindeutig (selectedVariant oder modelKey@quant)
 │   │   → Kein Ueberschreiben mehr bei mehreren Quants des gleichen Modells
@@ -120,6 +124,8 @@ consolidate_results_v13.py (KONSOLIDIERUNG, v10)
 │   ├── try_read_evalplus(): Fallback auf base-Key (ohne @) fuer alte Ergebnisverzeichnisse
 │   ├── read_lmeval_per_model(): Gleicher Fallback
 │   └── read_agentic(): Gleicher Fallback
+├── Installed-Filter: Kreuzreferenz mit lms ls --json, nur aktuell installierte Modelle (Default)
+├── Latest-Run-Filter: Nur CSVs vom neuesten Timestamp overall (Default; --all-runs deaktiviert)
 ├── Vollstandige Type Hints (27 Funktionen)
 └── Vollstandige Type Hints (27 Funktionen)
 ```
@@ -339,8 +345,15 @@ MATH-500 ist ein standardisierter Mathematik-Benchmark (500 Aufgaben aus dem MAT
 Er ersetzt MathQA (604 Multiple-Choice-Aufgaben), da MATH-500 eine bessere Abdeckung mathematischer 
 Konzepte bietet und starker verbreitet ist.
 
-**Pipeline:** `lm_eval --model local-chat-completions --tasks math500_gen --gen_kwargs ...` 
-(Generation, keine Multiple-Choice). Regex-Extraktion der finalen Antwort.
+**Pipeline:** `lm_eval --model local-chat-completions --tasks minerva_math500 --gen_kwargs ...` 
+(Generation, keine Multiple-Choice). Extraktion der finalen Antwort via `\boxed{}`-Regex.
+
+**Windows-SIGALRM-Bug (gefixt 15.07.):** Der originale `minerva_math500`-Task aus lm-eval verwendet 
+`signal.SIGALRM` fur Timeouts in `is_equiv()` – existiert **nicht auf Windows**. Dadurch wurde JEDE 
+Antwort als falsch gewertet (0.0% fur alle Modelle). **Fix:** Eigener Task in 
+`lm_eval_tasks/minerva_math500/` mit SIGALRM-freiem `process_results()`: Extrahiert `\boxed{...}`-
+Inhalt per Regex, normalisiert und vergleicht als String. Kein `math_verify`, kein `sympy.parse_latex` 
+mit Signal-Timeout.
 
 **MathQA (entfernt):** Früher genutzt (604 Multiple-Choice A-E). Ersetzt durch MATH-500 (offene Generierung).
 
@@ -387,6 +400,43 @@ Die 600s pro Szenario verhindern das vorherige Problem, dass `tool_eval_bench` n
 Das `--no-unload-between`-Flag verhindert das Entladen/Nachladen zwischen Benchmarks desselben Modells. 
 Standardmäßig wird nach jedem Benchmark das Modell entladen (um VRAM zu sparen). Mit `--no-unload-between` 
 bleibt das Modell geladen – nützlich bei vielen kleinen Benchmarks, aber riskant bei Modellen knapp über 16 GB VRAM.
+
+### registry_tool.py (NEU 14.07.)
+
+**`registry_tool.py`** konsolidiert drei bisher separate Code-Stellen fur Registry- und JSON-Config-Wartung:
+
+| Befehl | Herkunft | Funktion |
+|--------|----------|----------|
+| `compare` | Bisher embedded Python in `sync_model_configs.ps1` | Registry vs LMS vs JSON-Configs vergleichen |
+| `add` | Bisher embedded Python in `sync_model_configs.ps1` | Neue LMS-Modelle in Registry aufnehmen (canonical Key = `publisher/model-name`) |
+| `configs` | Bisher embedded Python in `sync_model_configs.ps1` | `load.fields` (offloadRatio, numParallelSessions) in JSON-Configs schreiben |
+| `sync-ctx` | `sync_context_length.py` | `context_length` aus JSON-Configs in Registry uebernehmen |
+| `fill-ctx` | `fmt_registry.py` | Fehlende `context_length: 16384` in der Registry erganzen (size-basierte Regel) |
+| `fill-size` | **NEU 15.07.** | `file_size_bytes` aus LMS-Cache fur Registry-Eintrage ohne size erganzen |
+| `migrate-keys` | **NEU 15.07.** | Eintrage ohne Publisher-Prafix auf `publisher/model-name` umstellen (119 Keys migriert) |
+| `fmt` | `fmt_registry.py` | Leerzeilen normalisieren (keine innerhalb, eine zwischen Eintragen) |
+| `sync` | Alle obigen | Full Maintenance: add → configs → sync-ctx → fill-ctx → fmt |
+
+**Aufruf:**
+```bash
+python registry_tool.py sync          # Vollwartung
+python registry_tool.py compare       # Nur Report
+python registry_tool.py add <datei>   # Neue Modelle aus JSON-Datei
+python registry_tool.py configs       # Nur load.fields schreiben
+python registry_tool.py sync-ctx      # Nur context_length syncen
+```
+
+**`sync_model_configs.ps1`** wurde auf `registry_tool.py` umgestellt (kein embedded Python mehr). Die alten Skripte `sync_context_length.py` und `fmt_registry.py` sind Thin Wrapper, die an `registry_tool.py` delegieren.
+
+### model_registry.yaml – Neue Felder (14.07.)
+
+| Feld | Typ | Default | Beschreibung |
+|------|-----|---------|-------------|
+| `offload` | int (0-1) | 1 | GPU-Offload-Ratio (1 = voller GPU-Offload) |
+| `num_parallel` | int | 1 (Dense) / 4 (MoE) | Max Concurrent Prediction Sessions |
+| `context_length` | int | 16384 | Kontextlange aus JSON-Config (Default bei fehlendem Eintrag) |
+
+**Leerzeilen-Formatierung:** Innerhalb eines Eintrags keine Leerzeilen, zwischen Eintragen genau eine. Wird automatisch von `registry_tool.py fmt` bzw. `save_registry()` in `registry_tool.py` sichergestellt.
 
 ### Reasoning-Parsing in LM Studio (2026-07-07)
 
@@ -653,6 +703,9 @@ Benchmarks/
 ├── custom_benchmark_v13.py          # Aktuelle Custom-Pipeline (DS1000 + CoderEval, strukturierter Output)
 ├── run_benchmarks_v13.py            # Aktueller Launcher (v13), dynam. Script-Aufloesung, --seed
 ├── consolidate_results_v13.py       # Aktuelle Konsolidierung (--compare, --models, immer-CI)
+├── registry_tool.py                 # Registry + JSON-Config-Wartung (konsolidiert)
+├── sync_context_length.py           # Thin Wrapper → registry_tool.py sync-ctx
+├── fmt_registry.py                  # Thin Wrapper → registry_tool.py fill-ctx / fmt
 ├── generate_quant_map.py            # QUANT_MAP-Generator (auto-generiert)
 ├── check_agentic.py                 # Agentic-Diagnose
 ├── download_real_benchmarks.py      # Datensatz-Download
@@ -666,6 +719,9 @@ Benchmarks/
 │
 ├── simple_evals/                    # JSONL-Datensaetze (DS1000, CoderEval)
 ├── lm_eval_tasks/                   # Custom YAML-Tasks
+│   ├── hellaswag_gen.yaml           # HellaSwag mit Chat-Prompt + Regex-Extraktion
+│   ├── mathqa_gen/                  # MathQA (Multi-Choice) – Custom YAML + utils.py
+│   └── minerva_math500/             # MATH-500 – SIGALRM-freie Windows-Version (15.07.)
 ├── Doku+Install/                    # Dokumentation
 ├── ergebnisse/                      # Ergebnisse + Konsolidierung
 ├── ds1000_official/                 # DS-1000-Framework (Windows-Patches)
@@ -801,11 +857,13 @@ pytest tests/ -v
 12. **Granite 4.0 H Tiny:** Experts=64 verursacht `ggml_new_object: not enough space` bei 1M Context. Workaround: Experts=16 setzen. Der `num_experts`-Parameter ist nur uber LM Studio Python SDK/REST API setzbar, nicht im GUI.
 13. **numExperts (MoE-Modelle):** In `model_registry.yaml` unterscheiden: `experts:` = LMS-Einstellung (reduziert wegen VRAM), `notes:` enthalt den Architekturwert (aus Steckbriefen). Die `user-concrete-model-default-config`-JSONs speichern den LMS-Wert als `llm.load.numExperts`.
 14. **Dynamische Script-Auflosung:** Der Launcher lost den Custom-Benchmark-Pfad nur beim Start auf. Wird die Datei wahrend des Laufs ersetzt, lauft die alte Version bis zum Ende.
+20. **Windows SIGALRM (minerva_math500):** Der originale lm-eval-Task `minerva_math500` verwendet `signal.SIGALRM` fur Timeouts bei `is_equiv()`. Auf Windows wird dadurch jede Antwort als falsch gewertet (0.0%). Workaround: Eigener Override in `lm_eval_tasks/minerva_math500/` mit SIGALRM-freiem `process_results()`.
 15. **Agentic-Szenario-Timeout:** `PIPELINE_TIMEOUTS["agentic_scenario"]` (600s) verhindert Timeout-Abbrueche bei langen Kontexten (vorher: 120s Hardcoded -> Abbruch bei Tool-Call-Generierung).
 16. **model.yaml-Konflikt:** Ein virtuelles Modell via `hub/models/<publisher>/<model>/model.yaml` kollidiert mit einer bereits geladenen physischen Instanz derselben GGUF-Datei → llama.cpp stuerzt mit HTTP 500 ab. Workaround: model.yaml nur fuer Modelle ohne physische Instanz (z.B. mradermacher/qwen3-coder-reap).
 17. **MATH-500 statt MathQA:** MathQA wurde durch MATH-500 ersetzt (bessere Abdeckung, standardisierter). MMLU-Pro entfernt (zu teuer, 14 Subsets).
 18. **`--no-unload-between`:** Standardmäßig aus. Nützlich bei vielen kleinen Benchmarks, spart Ladezeit.
 19. **`--exclude-benchmarks`:** Erlaubt Ausschluss einzelner Benchmarks (z.B. `--exclude-benchmarks agentic,custom`).
+20. **Consolidate Bugfixes (15.07.):** `find_latest_csvs` paart DS1000/CoderEval jetzt per `model_key` statt rohem Timestamp; Directory-Scan in `read_data` wird bei `--since` ubersprungen; `--merge` ohne `--runs` setzt `all_runs=True` statt `merge_runs=2`; IFEval-Metriken (`prompt_level_strict_acc,none` etc.) zur METRICS-Liste erganzt.
 
 ---
 
@@ -909,6 +967,15 @@ pytest tests/ -v
 | 05.07. | `custom_benchmark_v12.py`                     | v12 aus v11: Stale Refs gefixt, EXCLUDE_KEYWORDS aus Config |
 | 05.07. | `model_manager.py`                            | German/English-Mix bereinigt |
 | 04.07. | `Architektur+Flow_v24.md`                     | Thinking-Mode fur alle Reasoning-Modelle, REASONING_PATTERNS, enable_thinking-Tabelle |
+| 15.07. | `Architektur+Flow_v24.md`                     | p5: MATH-500 SIGALRM-Fix (lm_eval_tasks/minerva_math500/), registry_tool.py fill-size/migrate-keys, Orphan mradermacher/qwen3-30b-a3b-python-coder, consolidate Bugfixes (DS1000/CoderEval pairing, --merge default, IFEval-Metriken) |
+| 14.07. | `Architektur+Flow_v24.md`                     | p4: registry_tool.py, new CLI args in consolidate, offload/num_parallel in Registry, Blank-Line-Formatting |
+| 14.07. | `registry_tool.py`                            | **NEU:** Konsolidiert sync_model_configs.ps1-embedded-Python + sync_context_length.py + fmt_registry.py |
+| 14.07. | `sync_model_configs.ps1`                      | Rewrite: ruft registry_tool.py statt embedded Python; neuer Schritt 4 (configs) |
+| 14.07. | `fmt_registry.py`                             | Rewrite: Thin Wrapper → registry_tool.py; Modul-Funktionen dorthin verlagert |
+| 14.07. | `sync_context_length.py`                      | Rewrite: Thin Wrapper → registry_tool.py sync-ctx |
+| 14.07. | `assemble_blueprint.py`                       | Ruft `format_blank_lines()` nach `classify_registry()` (automatische Leerzeilen-Normalisierung) |
+| 14.07. | `model_registry.yaml`                         | 46 Eintrage mit `context_length: 16384` befullt; offload+num_parallel in allen Eintragen; Leerzeilen formatiert; duplicate-key `deepseek-coder-33b-instruct-i1` bereinigt |
+| 14.07. | `consolidate_results_v13.py`                  | Neue CLI: --merge, --since, --until, --all-runs, --no-installed; Default: installed-only + latest-run |
 | 04.07. | `custom_benchmark_v12.py`                     | REASONING_PATTERNS-Set, `--thinking` aktiviert Thinking fur AceMath+DeepSeek+Gemma |
 | 04.07. | `run_benchmarks_v12.py`                       | `_get_lmeval_params()` Thinking fur Reasoning+Gemma bei MathQA/MMLU-Pro |
 | 30.06. | `Architektur+Flow_v24.md`                     | Update: QUANT_MAP, qwen3.6-Klasse, konsolidiert_aktuell.csv, Qwen3/Qwen3.6-Ergebnisse |
@@ -945,6 +1012,7 @@ pytest tests/ -v
 
 ---
 
-*Erstellt: 28.06.2026 | Aktualisiert: 12.07.2026*
-*Basiert auf: v33-Architektur – v12→v13, MATH-500 statt MathQA, MMLU-Pro entfernt, --no-unload-between, --exclude-benchmarks*
+*Erstellt: 28.06.2026 | Aktualisiert: 15.07.2026*
+*Basiert auf: v13.0.0-p5 – MATH-500 SIGALRM-Fix, registry_tool.py fill-size/migrate-keys, consolidate Bugfixes*
 *Bugfix 11.07.: lm_eval `--gen_kwargs` statt `--model_args` fur Generation-Parameter; HellaSwag/MathQA YAML-Fixes*
+*Bugfix 15.07.: MATH-500=0.0% durch Windows-SIGALRM-Inkompatibilitat – eigener Task in lm_eval_tasks/minerva_math500/*

@@ -13,25 +13,25 @@ hängt die optimale Einstellung von der **Architektur** ab.
 | **Dense** (alle Parameter aktiv) | **np=1** | LCP-Cache-Reuse spart Prompt-Tokens; GPU ist bereits ausgelastet |
 | **MoE** (nur Subset aktiv) | **np=4** | LCP-Cache-Reuse nicht unterstützt; Batching füllt die GPU besser |
 
-### Messung Dense: Qwen2.5 Coder 14B (08./09.07.2026)
+### Messung Dense: Qwen2.5 Coder 14B, zwei Qauntisierungsvarianten (08./09.07.2026)
 
-| Merkmal | Q5_0 (np=4) | Q6_K (np=1) |
-|---|---|---|
-| Eval Speed | **~8–9.6 t/s** | **~12.8–13.4 t/s** |
-| `cache size limit reached` | Ja (häufig) | Keine |
-| LCP-Cache-Treffer (f_keep) | Slot-wechselnd | **0.52–0.94** |
-| VRAM-Auslastung | Höher | Geringer (~3-4 GB weniger) |
+| Merkmal                     | Q5_0 (np=4)    | Q6_K (np=1)                |
+|-----------------------------|----------------|----------------------------|
+| Eval Speed                  | **~8–9.6 t/s** | **~12.8–13.4 t/s**         |
+| `cache size limit reached`  | Ja (häufig)    | Keine                      |
+| LCP-Cache-Treffer (f_keep)  | Slot-wechselnd | **0.52–0.94**              |
+| VRAM-Auslastung             | Höher          | Geringer (~3-4 GB weniger) |
 
 > **Hinweis:** Q6_K ist rechenintensiver als Q5_0 – die gemessene
 > Geschwindigkeitssteigerung ist **allein auf np=1** zurückzuführen.
 
 ### Messung MoE: google_gemma-4-26b-a4b-it Q3_K_S (04./09.07.2026)
 
-| Merkmal | np=4 (04.07.) | np=1 (09.07.) |
-|---|---|---|
-| Eval Speed | **~5.3 t/s** | **~2.1 t/s** |
-| Prompt Eval | 21.8 t/s | 98 t/s (LCP hilft prompt, aber nicht eval) |
-| KV-Cache-Reuse | Nicht unterstützt (MoE) | Nicht unterstützt (MoE) |
+| Merkmal        | np=4 (04.07.)           | np=1 (09.07.)                              |
+|----------------|-------------------------|--------------------------------------------|
+| Eval Speed     | **~5.3 t/s**            | **~2.1 t/s**                               |
+| Prompt Eval    | 21.8 t/s                | 98 t/s (LCP hilft prompt, aber nicht eval) |
+| KV-Cache-Reuse | Nicht unterstützt (MoE) | Nicht unterstützt (MoE)                    |
 
 np=4 ist **2.5× schneller** bei MoE, weil die GPU durch Batchen von 4 Tokens
 besser ausgelastet wird. LCP-Cache-Reuse entfällt bei MoE ohnehin.

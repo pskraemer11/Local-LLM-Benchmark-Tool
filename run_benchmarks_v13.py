@@ -60,6 +60,7 @@ import re
 import subprocess
 import sys
 import time
+import warnings
 from datetime import datetime
 from typing import Any, Optional
 
@@ -90,7 +91,7 @@ from model_manager import (
 )
 
 # Model classification helper functions
-REASONING_KEYWORDS = ["reasoning", "think", "r1"]
+REASONING_KEYWORDS = ["reasoning", "think", "r1", "rnj"]
 
 def _is_qwen3_6_model(model_key: str) -> bool:
     return "qwen3.6" in model_key.lower()
@@ -179,7 +180,7 @@ EVALPLUS_BENCHMARKS = [
 LMEVAL_BENCHMARKS = [
     {"key": "5", "name": "ARC-Challenge",   "category": "knowledge", "task": "arc_challenge_chat"},
     {"key": "6", "name": "HellaSwag",       "category": "knowledge", "task": "hellaswag_gen", "min_limit": 100},
-    {"key": "7", "name": "TruthfulQA",      "category": "knowledge", "task": "truthfulqa_mc1"},
+    {"key": "7", "name": "TruthfulQA",      "category": "knowledge", "task": "truthfulqa_gen"},
     {"key": "8", "name": "IFEval",          "category": "agentic",   "task": "ifeval"},
     {"key": "9", "name": "MATH-500",        "category": "math",      "task": "minerva_math500", "timeout_mult": 3},
 ]
@@ -196,23 +197,81 @@ BENCH_LOOKUP = {b["name"].lower(): b for b in ALL_BENCHMARKS}
 ALL_BENCH_NAMES = sorted(BENCH_LOOKUP.keys())
 
 
-# Safe context lengths for VRAM-constrained models (16 GB GPU).
-# Native context can exceed available VRAM → cap to these safe values.
-SAFE_CONTEXT: dict[str, int] = {
-    "glm-4.7-flash": 131072,           # 202K native → OOM at full context
-    "glm-4.7-flash-reap-23b-a3b": 98304,  # 131K native → safe
+# Fallback hardcoded context lengths (used only when registry has no entry).
+SAFE_CONTEXT_FALLBACK: dict[str, int] = {
     "kimi-linear-48b-a3b-instruct": 131072,  # 1M native → extreme VRAM
     "kimi-linear-reap-35b-a3b-instruct-i1": 131072,
     "north-mini-code-1.0": 131072,     # 256K native → KV-quant inkompatibel
     "ministral-3-14b-instruct-2512": 65536,
 }
 
+# Cached registry data
+_REGISTRY_DATA: Optional[dict] = None
+_REGISTRY_NORM: Optional[dict[str, str]] = None
+
+def _load_registry_for_context() -> tuple[dict, dict[str, str]]:
+    global _REGISTRY_DATA, _REGISTRY_NORM
+    if _REGISTRY_DATA is not None:
+        return _REGISTRY_DATA, _REGISTRY_NORM
+
+    from assemble_blueprint import normalize_model_name
+    from pathlib import Path
+
+    rpath = Path(__file__).resolve().parent / "doc-git" / "model_registry.yaml"
+    if not rpath.exists():
+        _REGISTRY_DATA = {}
+        _REGISTRY_NORM = {}
+        return _REGISTRY_DATA, _REGISTRY_NORM
+
+    try:
+        from ruamel.yaml import YAML
+        y = YAML()
+        y.preserve_quotes = True
+        with open(rpath, "r", encoding="utf-8") as f:
+            data = y.load(f) or {}
+    except Exception:
+        _REGISTRY_DATA = {}
+        _REGISTRY_NORM = {}
+        return _REGISTRY_DATA, _REGISTRY_NORM
+
+    norm = {}
+    for key, entry in data.items():
+        if isinstance(entry, dict) and "context_length" in entry:
+            nk = normalize_model_name(key)
+            norm[nk] = key
+    _REGISTRY_DATA = data
+    _REGISTRY_NORM = norm
+    return _REGISTRY_DATA, _REGISTRY_NORM
+
+
 def _get_safe_context(model_key: str) -> Optional[int]:
-    """Return capped context length for VRAM-safe model loading."""
-    key_lower = model_key.lower()
-    for pattern, ctx in SAFE_CONTEXT.items():
-        if pattern in key_lower:
+    """Return capped context length for VRAM-safe model loading.
+
+    Priority:
+      1. model_registry.yaml entry matching via normalized name
+      2. SAFE_CONTEXT_FALLBACK hardcoded dict
+    """
+    from assemble_blueprint import normalize_model_name
+
+    # 1. Try registry
+    registry, rnorm = _load_registry_for_context()
+    nk = normalize_model_name(model_key)
+    if nk in rnorm:
+        entry = registry[rnorm[nk]]
+        ctx = entry.get("context_length")
+        if ctx is not None:
+            return int(ctx)
+
+    # 2. Try fallback (exact normalized match)
+    for pattern, ctx in SAFE_CONTEXT_FALLBACK.items():
+        if normalize_model_name(pattern) == nk:
             return ctx
+
+    # 3. Try substring fallback matching (for patterns that are prefixes)
+    for pattern, ctx in SAFE_CONTEXT_FALLBACK.items():
+        if pattern in model_key.lower():
+            return ctx
+
     return None
 
 def _model_family(model_key: str) -> str:
@@ -299,6 +358,9 @@ def select_models_interactive(available_models: list[dict[str, Any]]) -> Optiona
     if not filtered:
         print("\n[WARN] No models found.")
         return None
+
+    # Stable, deterministic ordering for the menu: alphabetic by display label.
+    filtered.sort(key=lambda m: str(m.get("display") or m.get("key") or "").lower())
     print("\n" + "-" * 50)
     print("  Available models:")
     for i, m in enumerate(filtered, 1):
@@ -320,11 +382,16 @@ def select_benchmarks_interactive() -> Optional[list[dict[str, Any]]]:
     print("=" * 60)
     cat_order = ["coding", "math", "knowledge", "agentic"]
     cat_heading = {"coding": "CODING", "math": "MATH", "knowledge": "KNOWLEDGE", "agentic": "AGENTIC & INSTRUCTION"}
+    # Display contiguous benchmark numbers (1..N) without gaps.
+    displayed: list[dict[str, Any]] = []
     for cat in cat_order:
         print(f"  --- {cat_heading.get(cat, cat.upper())} ---")
         for b in ALL_BENCHMARKS:
             if b.get("category") != cat:
                 continue
+            displayed.append(b)
+            idx = len(displayed)
+
             label = b["name"]
             if b.get("modified"):
                 label += " (mod.)"
@@ -332,19 +399,21 @@ def select_benchmarks_interactive() -> Optional[list[dict[str, Any]]]:
                 label += " (tool-eval-bench)"
             if b.get("task") == "ifeval":
                 label += " (lm-eval)"
-            print(f"  [{b['key']}] {label}")
+            print(f"  [{idx}] {label}")
     print("  [a] All benchmarks")
     print("  [q] Quit")
+
     while True:
         choice = input("\n  Your choice: ").strip().lower()
         if choice == "q":
             print("\nBye.")
             return None
         if choice == "a":
-            return ALL_BENCHMARKS
-        indices = parse_selection(choice, len(ALL_BENCHMARKS))
+            return displayed
+
+        indices = parse_selection(choice, len(displayed))
         if indices is not None:
-            result = [ALL_BENCHMARKS[i] for i in indices]
+            result = [displayed[i] for i in indices]
             names = ", ".join(b["name"] for b in result)
             print(f"  -> {names}")
             return result
@@ -569,6 +638,10 @@ def run_custom_benchmark(model_info: dict[str, Any], bench: dict[str, Any], samp
 # Uses evalplus-native datasets (humanEval, mbpp).
 # Returns: dict with pipeline="evalplus", score pass@1 (0-1).
 def run_evalplus(model_info: dict[str, Any], bench: dict[str, Any], sample_size: int = 5, seed: Optional[int] = None, reasoning: bool = False) -> Optional[dict[str, Any]]:
+    # Some models (e.g. DeepSeek Coder) generate regex patterns like "\d+"
+    # instead of r"\d+", causing SyntaxWarning spam from Python 3.12+.
+    warnings.filterwarnings("ignore", category=SyntaxWarning)
+
     model_key = model_info["key"]
     model_display = model_info["display"]
     dataset = bench["dataset"]
@@ -605,9 +678,18 @@ def run_evalplus(model_info: dict[str, Any], bench: dict[str, Any], sample_size:
     )
 
     temp_str = "1.0" if gptoss else "0.0"
-    samples_path = os.path.join(root_dir, dataset,
-                                f"local-model_openai_temp_{temp_str}.jsonl")
-    os.makedirs(os.path.dirname(samples_path), exist_ok=True)
+    out_dir = os.path.join(root_dir, dataset)
+    os.makedirs(out_dir, exist_ok=True)
+
+    # Delete old .jsonl/.raw.jsonl to prevent accumulation across runs
+    import glob as _glob
+    for old_f in _glob.glob(os.path.join(out_dir, "*.jsonl")):
+        try:
+            os.remove(old_f)
+        except Exception:
+            pass
+
+    samples_path = os.path.join(out_dir, f"local-model_openai_temp_{temp_str}.jsonl")
 
     limit_scale = max(1.0, n_select / 5.0)
     eval_base = PIPELINE_TIMEOUTS["evalplus_base"]
@@ -809,7 +891,8 @@ def run_lmeval(model_info: dict[str, Any], bench: dict[str, Any], limit: int = 5
                 if task_data:
                     for metric in ["exact_match,custom-extract",
                                 "bleu_acc,none", "rouge1_acc,none",
-                               "exact_match,remove_whitespace"]:
+                               "exact_match,remove_whitespace",
+                               "exact_match,none", "math_verify,none"]:
                         if metric in task_data:
                             score = task_data[metric]
                             break
@@ -955,8 +1038,9 @@ def main() -> None:
                         help="Comma-separated benchmark names to exclude (e.g. 'MATH-500')")
     parser.add_argument("--no-structured-output", action="store_true",
                         help="Disable structured JSON output in custom benchmarks (fallback to regex)")
-    parser.add_argument("--no-unload-between", action="store_true",
-                        help="Skip unload/reload between benchmarks (faster but risk of perf degradation)")
+    parser.add_argument("--unload-between", action="store_true",
+                        help="Reload model between benchmarks (default: keep loaded). "
+                             "Use if KV-cache/GPU memory degradation occurs.")
     parser.add_argument("--keep-response", action="store_true",
                         help="Write the full LLM response to per-task CSVs (default: truncated to 200 chars, see W1 in Code-Review_2026-07-12.md)")
     args = parser.parse_args()
@@ -1040,14 +1124,24 @@ def main() -> None:
             li = loaded["identifier"].lower()
             lk = loaded["model_key"].lower()
             mk = model_key.lower()
+            desired_ctx = _get_safe_context(load_key)
+            current_ctx = loaded.get("context_length")
             # Check if this model is already loaded (key or identifier match)
             if mk in li or mk in lk or li in mk or lk in mk:
-                api_model = loaded["identifier"]
-                print(f"  [OK] '{model_display}' already loaded – ID: {api_model}")
+                if current_ctx is not None and desired_ctx is not None and current_ctx != desired_ctx:
+                    print(f"  [INFO] '{model_display}' loaded with context={current_ctx}, need {desired_ctx} – reloading...")
+                    unload_all_models()
+                    ok, api_model = load_model_via_lms(load_key, context_length=desired_ctx)
+                    if not ok:
+                        print(f"  [ERROR] Loading failed. Skipping.")
+                        continue
+                else:
+                    api_model = loaded["identifier"]
+                    print(f"  [OK] '{model_display}' already loaded – ID: {api_model}")
             else:
                 print(f"  [INFO] Different model loaded ({loaded['display_name']}) – unloading...")
                 unload_all_models()
-                ok, api_model = load_model_via_lms(load_key, context_length=_get_safe_context(load_key))
+                ok, api_model = load_model_via_lms(load_key, context_length=desired_ctx)
                 if not ok:
                     print(f"  [ERROR] Loading failed. Skipping.")
                     continue
@@ -1056,6 +1150,25 @@ def main() -> None:
             if not ok:
                 print(f"  [ERROR] Loading failed. Skipping.")
                 continue
+        # Verify loaded model context length matches desired value
+        desired_ctx = _get_safe_context(load_key)
+        if desired_ctx is not None:
+            loaded_after = get_current_loaded_model()
+            actual_ctx = loaded_after.get("context_length") if loaded_after else None
+            if actual_ctx is not None and actual_ctx != desired_ctx:
+                print(f"  [WARN] Model loaded with context={actual_ctx}, expected {desired_ctx} – reloading...")
+                unload_all_models()
+                ok, api_model = load_model_via_lms(load_key, context_length=desired_ctx)
+                if ok:
+                    loaded_after = get_current_loaded_model()
+                    actual_ctx = loaded_after.get("context_length") if loaded_after else None
+                    if actual_ctx is not None and actual_ctx != desired_ctx:
+                        print(f"  [ERROR] Still context={actual_ctx} after reload – continuing anyway")
+                    else:
+                        print(f"  [OK] Context now {desired_ctx}")
+                else:
+                    print(f"  [ERROR] Reload failed – continuing with context={actual_ctx}")
+
         # Short pause – the model is confirmed loaded via lms ps,
         # but the REST server needs a moment to initialize.
         # 30B models can take 30-60s to finish loading on RTX 5070 Ti
@@ -1077,8 +1190,8 @@ def main() -> None:
         model_results = []
 
         for bidx, bench in enumerate(benchmarks):
-            # Unload/reload between benchmarks to prevent KV-cache/GPU memory degradation
-            if not args.no_unload_between and bidx > 0:
+            # Unload/reload between benchmarks — off by default, opt-in via --unload-between
+            if args.unload_between and bidx > 0:
                 print(f"  [INFO] Unloading/reloading model between benchmarks...")
                 unload_all_models()
                 time.sleep(2)
@@ -1130,7 +1243,7 @@ def main() -> None:
                                                   seed=str(args.seed or ""),
                                                   exclude_benchmarks=args.exclude_benchmarks or "",
                                                   no_structured_output=str(args.no_structured_output or ""),
-                                                  no_unload_between=str(args.no_unload_between or ""),
+                                                  no_unload_between='True' if not args.unload_between else '',
                                                   base_dir=BASE_DIR)
 
     print("\n" + "=" * 60)
@@ -1151,7 +1264,7 @@ def main() -> None:
                                               seed=str(args.seed or ""),
                                               exclude_benchmarks=args.exclude_benchmarks or "",
                                               no_structured_output=str(args.no_structured_output or ""),
-                                              no_unload_between=str(args.no_unload_between or ""),
+                                               no_unload_between='True' if not args.unload_between else '',
                                               base_dir=BASE_DIR)
 
 

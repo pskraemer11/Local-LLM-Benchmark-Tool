@@ -87,7 +87,4 @@
 
 {%- if add_generation_prompt -%}
     {{- '<|turn>model\n' -}}
-    {%- if not (enable_thinking is defined and enable_thinking) -%}
-        {{- '<|channel>thought\n<channel|>' -}}
-    {%- endif -%}
 {%- endif -%}

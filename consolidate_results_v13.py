@@ -30,6 +30,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 RESULTS_DIR = os.path.join(BASE_DIR, "ergebnisse")
+INSTALLED_CACHE = None
 
 from benchmark_config import (MMLU_PRO_SUBSETS, MMLU_PRO_ENABLED,
                              LB_MEANS_BLACKLIST, CAT_WEIGHTS, OVERALL_WEIGHTS,
@@ -75,6 +76,35 @@ def _get_model_info() -> Dict[str, Any]:
     return info
 
 
+def _get_installed_model_keys() -> set:
+    global INSTALLED_CACHE
+    if INSTALLED_CACHE is not None:
+        return INSTALLED_CACHE
+    installed = set()
+    try:
+        import subprocess
+        r = subprocess.run(["lms", "ls", "--json"], capture_output=True, text=True, timeout=15)
+        if r.returncode == 0:
+            data = json.loads(r.stdout)
+            for item in data if isinstance(data, list) else data.values():
+                if not isinstance(item, dict):
+                    continue
+                mk = item.get("modelKey", "")
+                if not mk:
+                    continue
+                # Normalize the same way CSVs do: / → _, lowercase @variant
+                norm = mk.replace("/", "_")
+                quant = item.get("quantization", {}) or {}
+                quant_name = quant.get("name", "") if isinstance(quant, dict) else str(quant)
+                if quant_name:
+                    norm = f"{norm}@{quant_name.lower()}"
+                installed.add(norm)
+    except Exception:
+        pass
+    INSTALLED_CACHE = installed
+    return installed
+
+
 def _normalize_model_keys(model_keys: List[str]) -> List[str]:
     """Normalize and deduplicate model keys.
 
@@ -85,17 +115,24 @@ def _normalize_model_keys(model_keys: List[str]) -> List[str]:
     """
     groups: dict[tuple[str, str], list[str]] = {}
     for mk in model_keys:
-        # Normalize publisher/key separator: "/" → "_" (directory convention)
-        mk = mk.replace("/", "_")
+        # Look up QUANT_MAP BEFORE the "/" → "_" replacement because
+        # the keys in QUANT_MAP use the publisher-prefixed form
+        # (e.g. "mistralai/codestral-22b-v0.1"), not the normalized form.
+        # Fixed 12.07.2026 as part of the test-coverage expansion (Prio 4.16).
         if "@" in mk:
             parts = mk.split("@")
             if len(parts) > 2:
                 mk = f"{parts[0]}@{parts[-1]}"
-            base, variant = mk.split("@", 1)
+            base_pre, variant = mk.split("@", 1)
             variant_lower = variant.lower()
         else:
-            base = mk
-            variant_lower = QUANT_MAP.get(mk, "").lower() if mk in QUANT_MAP else ""
+            base_pre = mk
+            # Try both: original (with /) and normalized (with _)
+            variant_lower = QUANT_MAP.get(mk, "").lower() or \
+                QUANT_MAP.get(mk.replace("/", "_"), "").lower()
+        # Normalize publisher/key separator: "/" → "_" (directory convention)
+        mk = mk.replace("/", "_")
+        base = base_pre.replace("/", "_")
         key = (base, variant_lower)
         groups.setdefault(key, []).append(mk)
 
@@ -420,7 +457,19 @@ def read_custom_csv(path: str, out_scores: Optional[List[float]] = None) -> Tupl
     latencies = []
     cpu_per_task, gpu_per_task = [], []
     ram_vals, temp_vals, vram_vals = [], [], []
-    delim = _auto_delimiter(path)
+    # Wrap the entire file-handling in try/except so that a missing
+    # file (FileNotFoundError), a permission error, or an unreadable
+    # directory gracefully returns (None, None, None, {}) instead of
+    # crashing. The previous version only wrapped the `with open(...)`
+    # block, but `_auto_delimiter(path)` also opens the file and is
+    # called *before* the try block, so a missing file would raise
+    # FileNotFoundError that propagated to the caller. Fixed 12.07.2026
+    # as part of the test-coverage expansion (Prio 4.16).
+    try:
+        delim = _auto_delimiter(path)
+    except (OSError, IOError) as e:
+        print(f"  [WARN] {os.path.basename(path)}: {e}", file=sys.stderr)
+        return None, None, None, {}
     try:
         with open(path, "r", encoding="utf-8") as f:
             reader = csv.DictReader(f, delimiter=delim)
@@ -488,27 +537,45 @@ def read_custom_csv(path: str, out_scores: Optional[List[float]] = None) -> Tupl
     return mean(scores), mean(tok_speeds) if tok_speeds else None, total_latency, metrics
 
 
-def find_latest_csvs(min_sample_size: int = 0) -> Tuple[Dict[str, str], Dict[str, str]]:
-    """Find latest CSV files for DS1000 and CoderEval.
+def _ts_filter(ts: str, since: Optional[str], until: Optional[str]) -> bool:
+    """Filter CSV timestamps by optional since/until range.
+    Supports formats: YYYYMMDD_HHMMSS or YYYYMMDD (expanded to full-day range).
+    """
+    if since:
+        # Normalize: if only YYYYMMDD given, append _000000
+        since_full = since if "_" in since else f"{since}_000000"
+        if ts < since_full:
+            return False
+    if until:
+        until_full = until if "_" in until else f"{until}_235959"
+        if ts > until_full:
+            return False
+    return True
+
+
+def find_latest_csvs(min_sample_size: int = 0, since: Optional[str] = None,
+                     until: Optional[str] = None, all_runs: bool = False,
+                     merge_runs: int = 0
+                     ) -> Tuple[Dict[str, str], Dict[str, str]]:
+    """Find CSV files for DS1000 and CoderEval, with time + run filtering.
     
     Args:
-        min_sample_size: If > 0, only include CSVs with sample_size >= this value.
+        min_sample_size: If > 0, only include CSVs with sample_size >= this.
+        since: Only include CSVs with timestamp >= this (YYYYMMDD_HHMMSS or YYYYMMDD).
+        until: Only include CSVs with timestamp <= this.
+        all_runs: If True, keep latest CSV per model (all historical runs).
+                  If False (default), only keep CSVs from the latest timestamp overall.
+        merge_runs: If > 0, keep only the N newest timestamp clusters (runs),
+                    per model the newest CSV. Overrides all_runs.
     
-    Returns dicts keyed by model_key (from CSV content), not display name.
-    This ensures unique entries for models with same name but different quants
-    (e.g. qwen3-coder-reap-25b-a3b-i1@iq4_xs vs @q3_k_m).
-    
-    NOTE: The lookup key is the model_key field from the CSV content,
-    NOT the filename. For models with the same base key but different
-    quant variant, the CSV files must contain the correct model_key
-    field (set by csv_writer.py).
+    Returns dicts keyed by model_key (from CSV content), path.
     """
-    ds1000 = {}
-    codereval = {}
     # Pattern: (optional tasks_) + YYYYMMDD_HHMMSS + DS1000|CoderEval + _ModelName.csv
     pat = re.compile(
         r"^(?:tasks_)?(\d{8}_\d{6})_(DS1000|CoderEval)_(.+)\.csv$"
     )
+    # Collect all valid entries: list of (ts, btype, lookup_key, fpath)
+    all_entries: list[tuple[str, str, str, str]] = []
     for fname in os.listdir(RESULTS_DIR):
         m = pat.match(fname)
         if not m:
@@ -516,9 +583,11 @@ def find_latest_csvs(min_sample_size: int = 0) -> Tuple[Dict[str, str], Dict[str
         ts = m.group(1)
         btype = m.group(2)
         model_name_from_file = m.group(3)
-        target = ds1000 if btype == "DS1000" else codereval
         
-        # Try to extract model_key from CSV content
+        # Time range filter
+        if not _ts_filter(ts, since, until):
+            continue
+        
         fpath = os.path.join(RESULTS_DIR, fname)
         model_key_from_csv = None
         file_sample_size = 0
@@ -535,28 +604,77 @@ def find_latest_csvs(min_sample_size: int = 0) -> Tuple[Dict[str, str], Dict[str
                             file_sample_size = int(ss)
                         except ValueError:
                             pass
-                    break  # only need first row
+                    break
         except Exception:
             pass
         
         if min_sample_size > 0 and file_sample_size < min_sample_size:
             continue
         
-        # Use model_key if available, else fall back to display name from filename
         lookup_key = model_key_from_csv or model_name_from_file
-        # Normalize "/" → "_" (CSV model_key may use publisher/model format)
         lookup_key = lookup_key.replace("/", "_")
-        # Fix legacy double-quant (e.g. "model@q5_0@Q5_0" -> "model@q5_0")
         parts = lookup_key.split("@")
         if len(parts) > 2:
             lookup_key = f"{parts[0]}@{parts[-1]}"
-        # Normalize: lowercase the @variant part for consistent lookups
         if "@" in lookup_key:
             base, variant = lookup_key.split("@", 1)
             lookup_key = f"{base}@{variant.lower()}"
-        if lookup_key not in target or ts > target[lookup_key][0]:
-            target[lookup_key] = (ts, fpath)
-    return {k: v[1] for k, v in ds1000.items()}, {k: v[1] for k, v in codereval.items()}
+        
+        all_entries.append((ts, btype, lookup_key, fpath))
+    
+    if not all_entries:
+        return {}, {}
+    
+    if merge_runs > 0:
+        # Merge N newest model runs. DS1000 and CoderEval CSVs for the same
+        # model have slightly different timestamps (written seconds apart), so
+        # grouping by timestamp alone would split pairs → keep only 1 CSV per model.
+        # Fix: group by model_key, use max(DS_ts, CE_ts) as run timestamp.
+        model_groups: dict[str, dict] = {}
+        for ts, btype, lookup_key, fpath in all_entries:
+            if lookup_key not in model_groups:
+                model_groups[lookup_key] = {"max_ts": ts, "ds1000": None, "codereval": None}
+            mg = model_groups[lookup_key]
+            if ts > mg["max_ts"]:
+                mg["max_ts"] = ts
+            if btype == "DS1000":
+                if mg["ds1000"] is None or ts > mg["ds1000"][0]:
+                    mg["ds1000"] = (ts, fpath)
+            else:
+                if mg["codereval"] is None or ts > mg["codereval"][0]:
+                    mg["codereval"] = (ts, fpath)
+        # Sort model runs by max timestamp descending, keep N newest
+        sorted_runs = sorted(model_groups.items(),
+                             key=lambda x: x[1]["max_ts"], reverse=True)[:merge_runs]
+        ds1000: dict[str, str] = {}
+        codereval: dict[str, str] = {}
+        for mk, mg in sorted_runs:
+            if mg["ds1000"]:
+                ds1000[mk] = mg["ds1000"][1]
+            if mg["codereval"]:
+                codereval[mk] = mg["codereval"][1]
+        return ds1000, codereval
+    elif all_runs:
+        # Keep latest per model (all historical runs)
+        ds1000: dict[str, tuple[str, str]] = {}
+        codereval: dict[str, tuple[str, str]] = {}
+        for ts, btype, lookup_key, fpath in all_entries:
+            target = ds1000 if btype == "DS1000" else codereval
+            if lookup_key not in target or ts > target[lookup_key][0]:
+                target[lookup_key] = (ts, fpath)
+        return {k: v[1] for k, v in ds1000.items()}, {k: v[1] for k, v in codereval.items()}
+    else:
+        # Only keep CSVs from the latest timestamp overall (single benchmark run)
+        latest_ts = max(ts for ts, _, _, _ in all_entries)
+        ds1000: dict[str, tuple[str, str]] = {}
+        codereval: dict[str, tuple[str, str]] = {}
+        for ts, btype, lookup_key, fpath in all_entries:
+            if ts != latest_ts:
+                continue
+            target = ds1000 if btype == "DS1000" else codereval
+            if lookup_key not in target or ts > target[lookup_key][0]:
+                target[lookup_key] = (ts, fpath)
+        return {k: v[1] for k, v in ds1000.items()}, {k: v[1] for k, v in codereval.items()}
 
 
 def _find_dir_ci(prefix: str, model_key: str) -> Optional[str]:
@@ -636,40 +754,43 @@ def read_lmeval_per_model(model_key: str) -> Optional[Dict[str, float]]:
     results = {}
 
     METRICS = ["exact_match,custom-extract", "exact_match,remove_whitespace",
-               "exact_match,flexible-extract", "bleu_acc,none", "rouge1_acc,none"]
+               "exact_match,flexible-extract", "bleu_acc,none", "rouge1_acc,none",
+               "exact_match,none", "math_verify,none",
+               "prompt_level_strict_acc,none", "inst_level_strict_acc,none",
+               "prompt_level_loose_acc,none", "inst_level_loose_acc,none"]
 
-    # Old-style: find the model results subdirectory. We skip the
-    # 14 MMLU-Pro subset directories by name to avoid misinterpreting
-    # an archived MMLU-Pro run as a regular lmeval result (MMLU-Pro is
-    # ARCHIVIERT 12.07.2026; see benchmark_config.MMLU_PRO_ENABLED).
-    first_sub = None
+    # Collect all results_*.json files across all subdirectories, sorted by
+    # modification time (newest first) so stale data from old runs is
+    # overridden by fresh results when multiple runs exist for the same model.
+    json_files = []
     for item in os.listdir(root):
         sub = os.path.join(root, item)
         if os.path.isdir(sub) and item not in MMLU_PRO_SUBSETS:
-            first_sub = sub
-            break
-    if first_sub:
-        for fname in os.listdir(first_sub):
-            if not (fname.startswith("results_") and fname.endswith(".json")):
-                continue
-            try:
-                with open(os.path.join(first_sub, fname), "r", encoding="utf-8") as f:
-                    data = json.load(f)
-            except Exception:
-                continue
-            for task_name, task_data in data.get("results", {}).items():
-                for metric in METRICS:
-                    if metric in task_data:
-                        alias = {"arc_challenge_chat": "ARC-Challenge",
-                                  "hellaswag_gen": "HellaSwag",
-                                  "truthfulqa_gen": "TruthfulQA",
-                                  "truthfulqa_mc1": "TruthfulQA",
-                                  "truthfulqa_mc2": "TruthfulQA",
-                                  "ifeval": "IFEval",
-                                  "bbh_zeroshot": "BBH",
-                                  "minerva_math500": "MATH-500"}.get(task_name, task_name)
-                        results[alias] = task_data[metric]
-                        break
+            for fname in os.listdir(sub):
+                if fname.startswith("results_") and fname.endswith(".json"):
+                    fpath = os.path.join(sub, fname)
+                    json_files.append(fpath)
+    # Sort by modification time descending (newest first)
+    json_files.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+    for fpath in json_files:
+        try:
+            with open(fpath, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            continue
+        for task_name, task_data in data.get("results", {}).items():
+            for metric in METRICS:
+                if metric in task_data:
+                    alias = {"arc_challenge_chat": "ARC-Challenge",
+                              "hellaswag_gen": "HellaSwag",
+                              "truthfulqa_gen": "TruthfulQA",
+                              "truthfulqa_mc1": "TruthfulQA",
+                              "truthfulqa_mc2": "TruthfulQA",
+                              "ifeval": "IFEval",
+                              "bbh_zeroshot": "BBH",
+                              "minerva_math500": "MATH-500"}.get(task_name, task_name)
+                    results[alias] = task_data[metric]
+                    break
 
     # MMLU-Pro (ARCHIVIERT): The 14-subset aggregation is no longer
     # performed here. If you re-enable MMLU-Pro via
@@ -820,8 +941,12 @@ class ModelData:
 
 
 def read_data(model_keys: Optional[List[str]] = None, min_sample_size: int = 0,
-              exclude_benchmarks: Optional[List[str]] = None) -> List[Dict[str, Any]]:
-    ds1000_files, codereval_files = find_latest_csvs(min_sample_size=min_sample_size)
+              exclude_benchmarks: Optional[List[str]] = None,
+              since: Optional[str] = None, until: Optional[str] = None,
+              all_runs: bool = False, no_installed: bool = False,
+              merge_runs: int = 0) -> List[Dict[str, Any]]:
+    ds1000_files, codereval_files = find_latest_csvs(
+        min_sample_size=min_sample_size, since=since, until=until, all_runs=all_runs, merge_runs=merge_runs)
     print(f"  DS1000 CSVs:  {len(ds1000_files)}")
     print(f"  CoderEval:    {len(codereval_files)}")
 
@@ -838,20 +963,33 @@ def read_data(model_keys: Optional[List[str]] = None, min_sample_size: int = 0,
                 model_keys.append(mk)
                 seen.add(mk)
 
-        # Also discover models from evalplus/lmeval/agentic directories
+        # Discover models from evalplus/lmeval/agentic directories.
+        # Skip when --since is active — directories have no embedded timestamp
+        # so we cannot reliably filter them.
         scan_dirs = ["evalplus_", "lmeval_", "agentic_"]
         added = 0
-        for prefix in scan_dirs:
-            for dname in os.listdir(RESULTS_DIR):
-                d = os.path.join(RESULTS_DIR, dname)
-                if os.path.isdir(d) and dname.startswith(prefix):
-                    mk = dname[len(prefix):]
-                    if mk not in seen:
-                        model_keys.append(mk)
-                        seen.add(mk)
-                        added += 1
+        if not since:
+            for prefix in scan_dirs:
+                for dname in os.listdir(RESULTS_DIR):
+                    d = os.path.join(RESULTS_DIR, dname)
+                    if os.path.isdir(d) and dname.startswith(prefix):
+                        mk = dname[len(prefix):]
+                        if mk not in seen:
+                            model_keys.append(mk)
+                            seen.add(mk)
+                            added += 1
         if added:
             print(f"  +{added} additional models from benchmark directories")
+        elif since:
+            print(f"  (directory scan skipped due to --since filter)")
+
+        # Filter to only currently-installed models (unless --no-installed)
+        if not no_installed:
+            installed = _get_installed_model_keys()
+            if installed:
+                before = len(model_keys)
+                model_keys = [mk for mk in model_keys if mk in installed]
+                print(f"  Installed filter: {before} -> {len(model_keys)} models")
 
     # Normalize and deduplicate model_keys: lowercase @variant, merge duplicates
     model_keys = _normalize_model_keys(model_keys)
@@ -1024,6 +1162,18 @@ def main() -> None:
                         help="Minimum sample_size filter for DS1000/CoderEval CSVs (default: no filter)")
     parser.add_argument("--exclude-benchmarks", type=str, default=None,
                         help="Comma-separated benchmarks to exclude (e.g. 'IFEval,Agentic')")
+    parser.add_argument("--since", type=str, default=None,
+                        help="Include only CSVs with timestamp >= this (format: YYYYMMDD_HHMMSS or YYYYMMDD)")
+    parser.add_argument("--until", type=str, default=None,
+                        help="Include only CSVs with timestamp <= this (format: YYYYMMDD_HHMMSS or YYYYMMDD)")
+    parser.add_argument("--all-runs", action="store_true", default=False,
+                        help="Include all historical benchmark runs (default: only latest run)")
+    parser.add_argument("--no-installed", action="store_true", default=False,
+                        help="Skip installed-model filter (default: only currently installed models)")
+    parser.add_argument("--merge", action="store_true", default=False,
+                        help="Merge mehrere Benchmark-Laeufe (neuestes CSV pro Modell, kein Installed-Filter)")
+    parser.add_argument("--runs", type=int, default=0,
+                        help="Anzahl der zu mergenden Laeufe (Timestamp-Cluster, default: 2 bei --merge)")
     args = parser.parse_args()
 
     model_keys = [m.strip() for m in args.models.split(",")] if args.models else None
@@ -1042,7 +1192,10 @@ def main() -> None:
         print(f"  Models: {', '.join(parts)}")
         print(f"  Seed: {args.seed}")
         print("=" * 60)
-        ds1000_files, codereval_files = find_latest_csvs(min_sample_size=args.sample_size)
+        merge_runs = args.runs if args.runs > 0 else (2 if args.merge else 0)
+        ds1000_files, codereval_files = find_latest_csvs(
+            min_sample_size=args.sample_size, since=args.since, until=args.until,
+            all_runs=args.all_runs, merge_runs=merge_runs)
         benchmarks_to_compare = []
         if args.compare_benchmark == "all":
             benchmarks_to_compare = [("DS1000", ds1000_files), ("CoderEval", codereval_files)]
@@ -1089,10 +1242,30 @@ def main() -> None:
     print("  Consolidating Dense-Run Results (v13)")
     print("  + Bootstrap 95% CI for DS1000 / CoderEval")
     ss_str = f" (min sample_size={args.sample_size})" if args.sample_size else ""
-    print(f"  {datetime.now().strftime('%Y-%m-%d %H:%M')}{ss_str}")
+    filters = []
+    if args.since:
+        filters.append(f"since={args.since}")
+    if args.until:
+        filters.append(f"until={args.until}")
+    if args.all_runs:
+        filters.append("all-runs")
+    elif not filters:
+        filters.append("latest-run")
+    if not args.no_installed:
+        filters.append("installed-only")
+    filter_str = f" [{', '.join(filters)}]" if filters else ""
+    print(f"  {datetime.now().strftime('%Y-%m-%d %H:%M')}{ss_str}{filter_str}")
     print("=" * 60)
 
-    rows = read_data(model_keys=model_keys, min_sample_size=args.sample_size, exclude_benchmarks=exclude)
+    merge_runs = args.runs if args.runs > 0 else 0
+    if args.merge:
+        args.no_installed = True
+        if merge_runs == 0:
+            args.all_runs = True
+    rows = read_data(model_keys=model_keys, min_sample_size=args.sample_size,
+                     exclude_benchmarks=exclude, since=args.since, until=args.until,
+                     all_runs=args.all_runs, no_installed=args.no_installed,
+                     merge_runs=merge_runs)
 
     # CSV – build columns dynamically
     fn_csv = ["Model"]

@@ -175,7 +175,11 @@ def _now_ts() -> str:
     return datetime.now().strftime("%Y%m%d_%H%M%S")
 
 def _now_iso() -> str:
-    return datetime.now().isoformat(timespec="seconds")
+    # ISO 8601 with colons is invalid on Windows file systems.
+    # We use the "compact" ISO format (T replaced with _, colons
+    # dropped) for use in CSV filenames while still being
+    # chronologically sortable.
+    return datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
 
 def _truncate_response(response: str, max_chars: int = 200) -> str:
     """Truncate LLM response to ``max_chars`` characters for compact CSV output.
