@@ -345,10 +345,23 @@ def read_lms_configs(config_root: Path) -> list:
                             break
 
                     ctx_length = None
+                    offload = None
+                    num_parallel = None
+                    use_unified_kv = None
                     for field in data.get("load", {}).get("fields", []):
-                        if field.get("key") == "llm.load.contextLength":
+                        k = field.get("key")
+                        if k == "llm.load.contextLength":
                             ctx_length = field.get("value")
-                            break
+                        elif k == "llm.load.llama.acceleration.offloadRatio":
+                            offload = field.get("value")
+                        elif k == "llm.load.numParallelSessions":
+                            num_parallel = field.get("value")
+                        elif k == "llm.load.useUnifiedKvCache":
+                            v = field.get("value")
+                            if isinstance(v, bool):
+                                use_unified_kv = v
+                            elif isinstance(v, str):
+                                use_unified_kv = v.lower() == "true"
 
                     models.append({
                         "publisher": publisher,
@@ -356,6 +369,9 @@ def read_lms_configs(config_root: Path) -> list:
                         "file_name": json_path.name,
                         "system_prompt": sys_prompt or "",
                         "context_length": ctx_length,
+                        "offload": offload,
+                        "num_parallel": num_parallel,
+                        "use_unified_kv": use_unified_kv,
                         "json_path": json_path,
                     })
                 except Exception as e:

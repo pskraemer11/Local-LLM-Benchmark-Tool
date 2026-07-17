@@ -1,34 +1,34 @@
-## Klassifikation der 57 Fachgebiete aus MMU-Benchmark ##
+## Classification of the 57 Subject Areas from the MMLU Benchmark ##
 
-Variante A: Biologie/Medizin trennen + Geschichte/Recht trennen
-#	Gruppe				Fächer
-1	Mathematik			5
-2	Physik, Ingenieurwesen, Astronomie	5
-3	Chemie				2
-4	Biologie			5
-5	Medizin				6
-6	Informatik			4
-7	Sozialwissenschaften		10
-8	Geschichte & Politik		5
-9	Recht				3
-10	Philosophie, Ethik, Religion	5
-11	Betriebswirtschaft & Management	3
-12	Logik & Allgemeinwissen		4
+Variant A: Separate Biology/Medicine + Separate History/Law
+#	Group				Subjects
+1	Mathematics			5
+2	Physics, Engineering, Astronomy	5
+3	Chemistry			2
+4	Biology			5
+5	Medicine			6
+6	Computer Science		4
+7	Social Sciences			10
+8	History & Politics		5
+9	Law				3
+10	Philosophy, Ethics, Religion	5
+11	Business Administration & Management	3
+12	Logic & General Knowledge	4
 
-Variante B: Sozialwissenschaften splitten + Geschichte/Recht splitten
-#	Gruppe	Fächer
-1	Mathematik	5
-2	Physik, Ingenieurwesen, Astronomie	5
-3	Chemie	2
-4	Biologie & Medizin	11
-5	Informatik	4
-6	Psychologie & Soziologie	4
-7	Politik & Geographie	6
-8	Geschichte	4
-9	Recht	3
-10	Philosophie, Ethik, Religion	5
-11	Betriebswirtschaft & Management	3
-12	Logik & Allgemeinwissen	4
+Variant B: Split Social Sciences + Split History/Law
+#	Group	Subjects
+1	Mathematics	5
+2	Physics, Engineering, Astronomy	5
+3	Chemistry	2
+4	Biology & Medicine	11
+5	Computer Science	4
+6	Psychology & Sociology	4
+7	Politics & Geography	6
+8	History	4
+9	Law	3
+10	Philosophy, Ethics, Religion	5
+11	Business Administration & Management	3
+12	Logic & General Knowledge	4
 
 MMLU 12 Groups (user's classification):
 

@@ -10,7 +10,7 @@ essentialai/rnj-1:
   arch: Gemma-3 Dense
   k_cache: q8_0
   v_cache: iq4_nl
-  offload: 1
+  offload: 1.0
   notes: 'Architektur: Gemma-3 Dense | 8.3B Parameter | Tool-Use'
   reasoning: thinking
   capabilities: text
@@ -19,6 +19,7 @@ essentialai/rnj-1:
   num_parallel: 1
   context_length: 262144
   file_size_bytes: 8839561735
+  useUnifiedKvCache: false
 
 mistralai/codestral-22b-v0.1:
   publisher: mistralai
@@ -26,15 +27,16 @@ mistralai/codestral-22b-v0.1:
   arch: Llama Dense
   k_cache: q8_0
   v_cache: iq4_nl
-  offload: 1
+  offload: 1.0
   notes: 'Architektur: Llama Dense | 22B Parameter'
   reasoning: instruct
   capabilities: coding, text
   blueprint: coding_agent
   truncation: full
   num_parallel: 1
-  context_length: 65536
+  context_length: 32768
   file_size_bytes: 11935315327
+  useUnifiedKvCache: true
 
 openai/gpt-oss-20b:
   publisher: openai
@@ -52,6 +54,8 @@ openai/gpt-oss-20b:
   num_parallel: 4
   context_length: 4608
   file_size_bytes: 12109568811
+  n_layers: 24
+  hidden_dim: 2880
 
 unsloth/gpt-oss-20b:
   publisher: unsloth
@@ -69,6 +73,8 @@ unsloth/gpt-oss-20b:
   num_parallel: 4
   context_length: 4608
   file_size_bytes: 12109568811
+  n_layers: 24
+  hidden_dim: 2880
 
 unsloth/phi-4:
   publisher: unsloth
@@ -85,6 +91,8 @@ unsloth/phi-4:
   num_parallel: 1
   context_length: 98304
   file_size_bytes: 10412707392
+  n_layers: 40
+  hidden_dim: 5120
 
 mradermacher/acemath-7b-instruct:
   publisher: "mradermacher"
@@ -96,7 +104,7 @@ mradermacher/acemath-7b-instruct:
   capabilities: coding, text
   blueprint: reasoning_coding
   truncation: full
-  offload: 1
+  offload: 1.0
   num_parallel: 1
   context_length: 32768
 
@@ -107,7 +115,7 @@ unsloth/apriel-1.5-15b-thinker:
   arch: "Apriel Dense (Multimodal)"
   k_cache: "q5_1"
   v_cache: "iq4_nl"
-  offload: 1
+  offload: 1.0
   reasoning: thinking
   capabilities: vision, coding, text
   blueprint: apriel_reasoning
@@ -122,7 +130,7 @@ lmstudio-community/codegemma-7b-it:
   hf_url: "https://huggingface.co/lmstudio-community/codegemma-7b-it-GGUF"
   quants: [Q8_0]
   arch: "CodeGemma Dense"
-  offload: 1
+  offload: 1.0
   notes: "Architektur: CodeGemma Dense"
   reasoning: instruct
   capabilities: coding, text
@@ -142,8 +150,8 @@ lmstudio-community/codegemma-7b-it:
   capabilities: coding, text
   blueprint: coding_agent
   truncation: medium
-  context_length: 32768
-  offload: 1
+  context_length: 16384
+  offload: 1.0
   num_parallel: 1
 
 thebloke/codellama-13b-python:
@@ -158,9 +166,9 @@ thebloke/codellama-13b-python:
   capabilities: coding, text
   blueprint: coding_agent
   truncation: medium
-  offload: 1
+  offload: 1.0
   num_parallel: 1
-  context_length: 32768
+  context_length: 16384
 
 mradermacher/codellama-13b-python-hf:
   publisher: "mradermacher"
@@ -188,8 +196,8 @@ bartowski/codestral-rag-19b-pruned:
   capabilities: coding, text
   blueprint: coding_agent
   truncation: medium
-  context_length: 32768
-  offload: 1
+  context_length: 16384
+  offload: 1.0
   num_parallel: 1
 
 "['mradermacher', 'thebloke']/deepseek-coder-33b-instruct":
@@ -199,15 +207,18 @@ bartowski/codestral-rag-19b-pruned:
   arch: "DeepSeek Dense (Coder)"
   k_cache: "q8_0"
   v_cache: "iq4_nl"
-  offload: 1
+  offload: 1.0
   notes: "Architektur: DeepSeek Dense (Coder)"
   reasoning: instruct
   capabilities: coding, text
   blueprint: coding_agent
   truncation: medium
-  context_length: 16384
+  context_length: 32768
   num_parallel: 1
   file_size_bytes: 14421773824
+  useUnifiedKvCache: true
+  n_layers: 62
+  hidden_dim: 7168
 
 "['mradermacher', 'thebloke']/deepseek-coder-33b-instruct-i1":
   publisher: ["mradermacher", "TheBloke"]
@@ -225,6 +236,8 @@ bartowski/codestral-rag-19b-pruned:
   context_length: 32768
   num_parallel: 1
   file_size_bytes: 13705146112
+  n_layers: 62
+  hidden_dim: 7168
 
 thebloke/deepseek-coder-6.7b-instruct:
   publisher: "TheBloke"
@@ -238,7 +251,7 @@ thebloke/deepseek-coder-6.7b-instruct:
   capabilities: coding, text
   blueprint: coding_agent
   truncation: full
-  offload: 1
+  offload: 1.0
   num_parallel: 1
   context_length: 32768
 
@@ -252,24 +265,8 @@ ggml-org/deepseek-ocr:
   capabilities: vision, text
   blueprint: none
   truncation: medium
-  context_length: 32768
-  offload: 1
-  num_parallel: 1
-
-deepseek-r1-distill-qwen-14b:
-  publisher: "lmstudio-community"
-  hf_url: "https://huggingface.co/lmstudio-community/DeepSeek-R1-Distill-Qwen-14B-GGUF"
-  quants: Q6_K
-  arch: "DeepSeek R1 Distill"
-  k_cache: "q8_0"
-  v_cache: "q5_1"
-  notes: "Architektur: DeepSeek R1 Distill"
-  reasoning: thinking
-  capabilities: text
-  blueprint: reasoning_assistant
-  truncation: full
-  context_length: 65536
-  offload: 1
+  context_length: 16384
+  offload: 1.0
   num_parallel: 1
 
 bartowski/deepseek-r1-distill-qwen-32b:
@@ -284,8 +281,8 @@ bartowski/deepseek-r1-distill-qwen-32b:
   capabilities: text
   blueprint: reasoning_assistant
   truncation: medium
-  context_length: 32768
-  offload: 1
+  context_length: 16384
+  offload: 1.0
   num_parallel: 1
 
 unsloth/devstral-small-2-24b-instruct-2512:
@@ -295,15 +292,18 @@ unsloth/devstral-small-2-24b-instruct-2512:
   arch: "Mistral Dense (Coder)"
   k_cache: "q5_1"
   v_cache: "iq4_nl"
-  offload: 1
+  offload: 1.0
   notes: "Architektur: Mistral Dense (Coder); 12.2 GB"
   reasoning: instruct
   capabilities: coding, vision, text
   blueprint: coding_agent
   truncation: full
-  context_length: 49152
+  context_length: 65536
   num_parallel: 1
   file_size_bytes: 12156681873
+  useUnifiedKvCache: true
+  n_layers: 40
+  hidden_dim: 5120
 
 unsloth/devstral-small-2-24b-instruct-2512-ud:
   publisher: "unsloth"
@@ -320,6 +320,8 @@ unsloth/devstral-small-2-24b-instruct-2512-ud:
   offload: 1
   num_parallel: 1
   context_length: 32768
+  n_layers: 40
+  hidden_dim: 5120
 
 mistralai/devstral-small-2-2512:
   publisher: "mistralai"
@@ -332,8 +334,8 @@ mistralai/devstral-small-2-2512:
   capabilities: coding, vision, text
   blueprint: coding_agent
   truncation: medium
-  context_length: 32768
-  offload: 1
+  context_length: 16384
+  offload: 1.0
   num_parallel: 1
 
 "['lmstudio-community', 'unsloth']/ernie-4.5-21b-a3b-pt":
@@ -349,10 +351,13 @@ mistralai/devstral-small-2-2512:
   capabilities: vision, coding, text
   blueprint: coding_agent
   truncation: medium
-  context_length: 49152
-  offload: 1
+  context_length: 65536
+  offload: 1.0
   num_parallel: 1
   file_size_bytes: 12475596576
+  useUnifiedKvCache: true
+  n_layers: 28
+  hidden_dim: 2560
 
 unsloth/ernie-4.5-21b-a3b-thinking:
   publisher: "unsloth"
@@ -367,7 +372,7 @@ unsloth/ernie-4.5-21b-a3b-thinking:
   capabilities: vision, coding, text
   blueprint: reasoning_coding
   truncation: full
-  offload: 1
+  offload: 1.0
   num_parallel: 1
   context_length: 32768
 
@@ -381,10 +386,13 @@ tiiuae/falcon3-10b-instruct:
   capabilities: coding, text
   blueprint: coding_agent
   truncation: full
-  offload: 1
+  offload: 1.0
   num_parallel: 1
   context_length: 98304
   file_size_bytes: 10955241088
+  useUnifiedKvCache: true
+  n_layers: 40
+  hidden_dim: 3072
 
 unsloth/flux-2-klein-9b:
   publisher: "unsloth"
@@ -396,10 +404,11 @@ unsloth/flux-2-klein-9b:
   capabilities: vision
   blueprint: none
   truncation: minimal
-  context_length: 262144
-  offload: 1
+  context_length: 2048
+  offload: 1.0
   num_parallel: 1
   file_size_bytes: 7865424160
+  useUnifiedKvCache: false
 
 google/gemma-4-12b-qat:
   publisher: "google"
@@ -409,7 +418,7 @@ google/gemma-4-12b-qat:
   template: "gemma4_12b_template_minijinja.jinja"
   k_cache: "f16"
   v_cache: "f16"
-  offload: 1
+  offload: 1.0
   notes: "Architektur: Gemma-4 12B Unified (dense, encoder-free multimodal) |  max.\
     \  256K Kontext | Text, Image, Audio, Video"
   reasoning: instruct
@@ -417,7 +426,7 @@ google/gemma-4-12b-qat:
   blueprint: gemma_assistant
   truncation: medium
   custom_template: true
-  context_length: 32768
+  context_length: 16384
   num_parallel: 1
 
 mradermacher/gemma-4-19b-a4b-it-reap:
@@ -429,7 +438,7 @@ mradermacher/gemma-4-19b-a4b-it-reap:
   experts: 18
   k_cache: "f16"
   v_cache: "f16"
-  offload: 1
+  offload: 1.0
   notes: "Architektur: MoE, REAP-compressed to ~19B | max. 128 Experts | max. 256K
     Kontext | Text, Image (dedicated vision encoder)"
   reasoning: instruct
@@ -437,9 +446,10 @@ mradermacher/gemma-4-19b-a4b-it-reap:
   blueprint: gemma_assistant
   truncation: full
   custom_template: true
-  context_length: 4608
+  context_length: 65536
   num_parallel: 4
   file_size_bytes: 12534643616
+  useUnifiedKvCache: true
 
 google/gemma-4-26b-a4b-it-quat:
   publisher: "google"
@@ -450,7 +460,7 @@ google/gemma-4-26b-a4b-it-quat:
   experts: 18
   k_cache: "f16"
   v_cache: "f16"
-  offload: 1
+  offload: 1.0
   notes: "Architektur: MoE (QAT-optimiert) | Experts: 128 total, 8 active + 1 shared
     | max. 256K Kontext | Text, Image"
   reasoning: instruct
@@ -459,7 +469,10 @@ google/gemma-4-26b-a4b-it-quat:
   truncation: full
   custom_template: true
   num_parallel: 4
-  context_length: 32768
+  context_length: 16384
+  useUnifiedKvCache: false
+  n_layers: 30
+  hidden_dim: 2816
 
 google/gemma-4-26b-a4b-it:
   publisher: "google"
@@ -475,12 +488,15 @@ google/gemma-4-26b-a4b-it:
   blueprint: gemma_assistant
   truncation: full
   custom_template: true
-  context_length: 3072
-  offload: 1
+  context_length: 16384
+  offload: 1.0
   num_parallel: 4
   file_size_bytes: 13580873493
   k_cache: f16
   v_cache: f16
+  useUnifiedKvCache: true
+  n_layers: 30
+  hidden_dim: 2816
 
 unsloth/gemma-4-26b-a4b-it-ud:
   publisher: "unsloth"
@@ -501,6 +517,8 @@ unsloth/gemma-4-26b-a4b-it-ud:
   custom_template: true
   num_parallel: 4
   context_length: 32768
+  n_layers: 30
+  hidden_dim: 2816
 
 mradermacher/gemma-4-31b.i1:
   publisher: "mradermacher"
@@ -510,7 +528,7 @@ mradermacher/gemma-4-31b.i1:
   template: "gemma4-26b-template_minijinja.jinja"
   k_cache: "f16"
   v_cache: "f16"
-  offload: 1
+  offload: 1.0
   notes: "Architektur: Gemma-4 31B (dense) | 256K Kontext | Text, Image (dedicated
     vision encoder)"
   reasoning: instruct
@@ -518,24 +536,26 @@ mradermacher/gemma-4-31b.i1:
   blueprint: gemma_assistant
   truncation: medium
   custom_template: true
-  context_length: 32768
+  context_length: 16384
   num_parallel: 1
 
 google/gemma-4-e4b:
   publisher: "google"
   hf_url: "https://huggingface.co/google/gemma-4-e4b"
   arch: "Gemma-4 (E4B)"
-  offload: 1
+  offload: 1.0
   notes: "Architektur: Gemma-4 E4B (dense, Per-Layer Embeddings PLE) | max 128K Kontext
     | Text, Image, Audio"
   capabilities: coding, vision, audio, text
   blueprint: gemma_assistant
   truncation: medium
-  context_length: 32768
+  context_length: 16384
   num_parallel: 1
   reasoning: instruct
   k_cache: f16
   v_cache: f16
+  n_layers: 42
+  hidden_dim: 2560
 
 unsloth/glm-4.7-flash:
   publisher: "unsloth"
@@ -545,15 +565,16 @@ unsloth/glm-4.7-flash:
   experts: 24
   k_cache: "q8_0"
   v_cache: "iq4_nl"
-  offload: 1
+  offload: 1.0
   notes: "Architektur: GLM MoE | 24 Experts | K-Cache nicht staerker als Q8_0 quantisieren!"
   reasoning: instruct
   capabilities: coding, text
   blueprint: coding_agent
   truncation: full
-  context_length: 8192
+  context_length: 32768
   num_parallel: 4
   file_size_bytes: 13288618336
+  useUnifiedKvCache: true
 
 "['mradermacher', 'unsloth']/glm-4.7-flash-reap-23b-a3b.i1":
   publisher: ["mradermacher", "unsloth"]
@@ -583,8 +604,8 @@ ggml-org/glm-ocr:
   capabilities: vision, text
   blueprint: none
   truncation: medium
-  context_length: 32768
-  offload: 1
+  context_length: 16384
+  offload: 1.0
   num_parallel: 1
 
 bartowski/google_gemma-4-26b-a4b-it:
@@ -607,6 +628,8 @@ bartowski/google_gemma-4-26b-a4b-it:
   context_length: 3072
   num_parallel: 4
   file_size_bytes: 13746291840
+  n_layers: 30
+  hidden_dim: 2816
 
 "['lmstudio-community', 'openai', 'unsloth']/gpt-oss-20b":
   publisher: ["lmstudio-community", "openai", "unsloth"]
@@ -622,10 +645,13 @@ bartowski/google_gemma-4-26b-a4b-it:
   capabilities: coding, text
   blueprint: gptoss_reasoning
   truncation: medium
-  context_length: 4608
-  offload: 1
+  context_length: 40960
+  offload: 1.0
   num_parallel: 4
   file_size_bytes: 12109568811
+  useUnifiedKvCache: true
+  n_layers: 24
+  hidden_dim: 2880
 
 ibm-granite/granite-4.0-h-tiny:
   publisher: "ibm-granite"
@@ -643,10 +669,13 @@ ibm-granite/granite-4.0-h-tiny:
   blueprint: default_chat
   truncation: full
   custom_template: true
-  context_length: 262144
-  offload: 1
+  context_length: 1048576
+  offload: 1.0
   num_parallel: 1
   file_size_bytes: 7390331744
+  useUnifiedKvCache: false
+  n_layers: 40
+  hidden_dim: 1536
 
 unsloth/granite-4.0-h-tiny-ud:
   publisher: "unsloth"
@@ -667,6 +696,8 @@ unsloth/granite-4.0-h-tiny-ud:
   offload: 1
   num_parallel: 1
   context_length: 262144
+  n_layers: 40
+  hidden_dim: 1536
 
 "['ibm-granite', 'lmstudio-community', 'unsloth']/granite-4.1-8b":
   publisher: ["ibm-granite", "lmstudio-community", "unsloth"]
@@ -676,16 +707,19 @@ unsloth/granite-4.0-h-tiny-ud:
   template: "granite-4.1-30b_template.jinja"
   k_cache: "q8_0"
   v_cache: "q5_1"
-  offload: 1
+  offload: 1.0
   notes: "Architektur: Granite-4.1 | Dense 8B | 131K Kontext | Code-, Math- & Multilingual-Faehigkeiten"
   reasoning: instruct
   capabilities: coding, text
   blueprint: default_chat
   truncation: full
   custom_template: true
-  context_length: 131072
+  context_length: 16384
   num_parallel: 1
   file_size_bytes: 9345610400
+  useUnifiedKvCache: true
+  n_layers: 40
+  hidden_dim: 4096
 
 unsloth/granite-4.1-8b-ud:
   publisher: "unsloth"
@@ -705,6 +739,8 @@ unsloth/granite-4.1-8b-ud:
   offload: 1
   num_parallel: 1
   context_length: 131072
+  n_layers: 40
+  hidden_dim: 4096
 
 "['ibm-granite', 'mradermacher']/granite-4.1-30b":
   publisher: ["ibm-granite", "mradermacher"]
@@ -714,7 +750,7 @@ unsloth/granite-4.1-8b-ud:
   template: "granite-4.1-30b_template.jinja"
   k_cache: "q5_1"
   v_cache: "iq4_nl"
-  offload: 1
+  offload: 1.0
   notes: "Architektur: Granite-4.1 | Dense 30B | 131K Kontext | Code-, Math- & Multilingual-Faehigkeiten"
   reasoning: instruct
   capabilities: coding, text
@@ -724,6 +760,9 @@ unsloth/granite-4.1-8b-ud:
   context_length: 49152
   num_parallel: 1
   file_size_bytes: 12569273568
+  useUnifiedKvCache: true
+  n_layers: 64
+  hidden_dim: 4096
 
 mradermacher/granite-4.1-30b-i1:
   publisher: "mradermacher"
@@ -744,6 +783,8 @@ mradermacher/granite-4.1-30b-i1:
   context_length: 49152
   num_parallel: 1
   file_size_bytes: 12569274368
+  n_layers: 64
+  hidden_dim: 4096
 
 unsloth/januscoder-14b:
   publisher: "unsloth"
@@ -757,10 +798,13 @@ unsloth/januscoder-14b:
   capabilities: coding, text
   blueprint: coding_agent
   truncation: full
-  context_length: 49152
-  offload: 1
+  context_length: 32768
+  offload: 1.0
   num_parallel: 1
   file_size_bytes: 12121938112
+  useUnifiedKvCache: true
+  n_layers: 40
+  hidden_dim: 5120
 
 "['mradermacher', 'unsloth']/januscoder-14b.i1":
   publisher: ["mradermacher", "unsloth"]
@@ -777,6 +821,8 @@ unsloth/januscoder-14b:
   context_length: 32768
   offload: 1
   num_parallel: 1
+  n_layers: 40
+  hidden_dim: 5120
 
 unsloth/januscoder-14b-ud:
   publisher: "unsloth"
@@ -793,6 +839,8 @@ unsloth/januscoder-14b-ud:
   offload: 1
   num_parallel: 1
   context_length: 32768
+  n_layers: 40
+  hidden_dim: 5120
 
 mradermacher/lfm2-24b-a2b-reap.i1:
   publisher: "mradermacher"
@@ -802,15 +850,16 @@ mradermacher/lfm2-24b-a2b-reap.i1:
   experts: 12
   k_cache: "q8_0"
   v_cache: "q5_1"
-  offload: 1
+  offload: 1.0
   notes: "Architektur: LFM2 MoE | 10,2 GB | max 32 Experts"
   reasoning: instruct
   capabilities: text
   blueprint: default_chat
   truncation: medium
-  context_length: 22685
+  context_length: 98304
   num_parallel: 4
   file_size_bytes: 10155065344
+  useUnifiedKvCache: true
 
 "['liquid', 'liquidai']/lfm2-24b-a2b":
   publisher: ["liquid", "LiquidAI"]
@@ -825,8 +874,8 @@ mradermacher/lfm2-24b-a2b-reap.i1:
   capabilities: text
   blueprint: default_chat
   truncation: medium
-  context_length: 32768
-  offload: 1
+  context_length: 16384
+  offload: 1.0
   num_parallel: 4
 
 bartowski/liquidai_lfm2-24b-a2b:
@@ -859,9 +908,10 @@ mradermacher/llama-3.1-13b-instruct:
   capabilities: coding, text
   blueprint: coding_agent
   truncation: medium
-  context_length: 32768
-  offload: 1
+  context_length: 16384
+  offload: 1.0
   num_parallel: 1
+  useUnifiedKvCache: true
 
 mradermacher/llama-3.3-8b-instruct:
   publisher: "mradermacher"
@@ -874,8 +924,8 @@ mradermacher/llama-3.3-8b-instruct:
   capabilities: coding, text
   blueprint: coding_agent
   truncation: medium
-  context_length: 32768
-  offload: 1
+  context_length: 16384
+  offload: 1.0
   num_parallel: 1
 
 mistralai/magistral-small:
@@ -889,9 +939,12 @@ mistralai/magistral-small:
   capabilities: coding, vision, text
   blueprint: magistral_reasoning
   truncation: full
-  context_length: 32768
-  offload: 1
+  context_length: 16384
+  offload: 1.0
   num_parallel: 1
+  useUnifiedKvCache: false
+  n_layers: 40
+  hidden_dim: 5120
 
 mistralai/magistral-small-2509:
   publisher: "mistralai"
@@ -907,6 +960,9 @@ mistralai/magistral-small-2509:
   context_length: 32768
   offload: 1
   num_parallel: 1
+  file_size_bytes: 13604714112
+  n_layers: 40
+  hidden_dim: 5120
 
 "['bartowski', 'lmstudio-community']/mathstral-7b-v0.1":
   publisher: ["bartowski", "lmstudio-community"]
@@ -919,8 +975,8 @@ mistralai/magistral-small-2509:
   capabilities: coding, text
   blueprint: reasoning_coding
   truncation: medium
-  context_length: 32768
-  offload: 1
+  context_length: 16384
+  offload: 1.0
   num_parallel: 1
 
 jetbrains/mellum2-12b-a2.5b-instruct:
@@ -931,15 +987,18 @@ jetbrains/mellum2-12b-a2.5b-instruct:
   experts: 16
   k_cache: "q8_0"
   v_cache: "q5_1"
-  offload: 1
+  offload: 1.0
   notes: "Architektur: Mellum2 MoE | Experts: max 64, Activated: 8 per Token"
   reasoning: instruct
   capabilities: coding, text
   blueprint: coding_agent
   truncation: medium
   num_parallel: 4
-  context_length: 60494
+  context_length: 131072
   file_size_bytes: 8071293600
+  useUnifiedKvCache: true
+  n_layers: 28
+  hidden_dim: 2304
 
 jetbrains/mellum2-12b-a2.5b-thinking:
   publisher: "JetBrains"
@@ -954,9 +1013,10 @@ jetbrains/mellum2-12b-a2.5b-thinking:
   capabilities: coding, text
   blueprint: reasoning_coding
   truncation: full
-  offload: 1
+  offload: 1.0
   num_parallel: 4
   context_length: 32768
+  useUnifiedKvCache: true
 
 bartowski/meta-llama-3.1-8b-instruct:
   publisher: "bartowski"
@@ -970,8 +1030,8 @@ bartowski/meta-llama-3.1-8b-instruct:
   capabilities: coding, text
   blueprint: coding_agent
   truncation: medium
-  context_length: 32768
-  offload: 1
+  context_length: 16384
+  offload: 1.0
   num_parallel: 1
 
 mradermacher/mimo-vl-7b-rl-2508:
@@ -987,8 +1047,8 @@ mradermacher/mimo-vl-7b-rl-2508:
   capabilities: vision, text
   blueprint: default_chat
   truncation: medium
-  context_length: 32768
-  offload: 1
+  context_length: 16384
+  offload: 1.0
   num_parallel: 1
 
 unsloth/mimo-vl-7b-rl-ud:
@@ -1017,7 +1077,7 @@ mradermacher/mimo-vl-7b-sft-2508:
   capabilities: vision, text
   blueprint: default_chat
   truncation: full
-  offload: 1
+  offload: 1.0
   num_parallel: 1
   context_length: 32768
 
@@ -1028,16 +1088,19 @@ mradermacher/mimo-vl-7b-sft-2508:
   arch: "Mistral Dense"
   k_cache: "q5_1"
   v_cache: "iq4_nl"
-  offload: 1
+  offload: 1.0
   notes: "max. 262K Kontext | Text+Vision Multimodal | Code- & Tool-Calling-Faehigkeiten
     | np=4 (sonst zu langsam)"
   reasoning: thinking
   capabilities: vision, coding, text
   blueprint: reasoning_coding
   truncation: full
-  context_length: 65536
+  context_length: 16384
   num_parallel: 1
   file_size_bytes: 11966462560
+  useUnifiedKvCache: true
+  n_layers: 40
+  hidden_dim: 5120
 
 "['mistralai', 'unsloth']/ministral-3-14b-reasoning-2512":
   publisher: ["mistralai", "unsloth"]
@@ -1046,15 +1109,18 @@ mradermacher/mimo-vl-7b-sft-2508:
   arch: "Mistral Dense"
   k_cache: "q8_0"
   v_cache: "iq4_nl"
-  offload: 1
+  offload: 1.0
   notes: "max 262K Kontext  | Text+Vision Multimodal | Thinking Mode mit [THINK] Tags
     | Code- & Tool-Calling"
   reasoning: thinking
   capabilities: vision, coding, text
   blueprint: ministral_reasoning
   truncation: medium
-  context_length: 32768
+  context_length: 16384
   num_parallel: 1
+  useUnifiedKvCache: true
+  n_layers: 40
+  hidden_dim: 5120
 
 mistralai/mistral-nemo-instruct-2407:
   publisher: "mistralai"
@@ -1062,14 +1128,17 @@ mistralai/mistral-nemo-instruct-2407:
   arch: "Mistral-Nemo Dense"
   k_cache: "q8_0"
   v_cache: "iq4_nl"
-  offload: 1
+  offload: 1.0
   notes: "12B Parameter; 128K Kontext; Nvidia-Mistral-Kollaboration; Tekken-Tokenizer"
   reasoning: instruct
   capabilities: coding, text
   blueprint: coding_agent
   truncation: medium
-  context_length: 32768
+  context_length: 16384
   num_parallel: 1
+  useUnifiedKvCache: true
+  n_layers: 40
+  hidden_dim: 5120
 
 bartowski/mistralai_mistral-small-3.2-24b-instruct-2506:
   publisher: "bartowski"
@@ -1082,8 +1151,8 @@ bartowski/mistralai_mistral-small-3.2-24b-instruct-2506:
   capabilities: coding, text
   blueprint: coding_agent
   truncation: medium
-  context_length: 32768
-  offload: 1
+  context_length: 16384
+  offload: 1.0
   num_parallel: 1
 
 bartowski/moonshotai_kimi-linear-48b-a3b-instruct:
@@ -1094,15 +1163,18 @@ bartowski/moonshotai_kimi-linear-48b-a3b-instruct:
   experts: 18
   k_cache: "q5_1"
   v_cache: "iq4_nl"
-  offload: 1
+  offload: 1.0
   notes: "# Experts: 256 total; activated: 8 per token + 1 shared"
   reasoning: instruct
   capabilities: coding, vision, text
   blueprint: coding_agent
   truncation: medium
-  context_length: 10922
+  context_length: 32768
   num_parallel: 4
   file_size_bytes: 13967426464
+  useUnifiedKvCache: true
+  n_layers: 27
+  hidden_dim: 2304
 
 mradermacher/kimi-linear-reap-35b-a3b-instruct.i1:
   publisher: "mradermacher"
@@ -1112,16 +1184,19 @@ mradermacher/kimi-linear-reap-35b-a3b-instruct.i1:
   experts: 18
   k_cache: "q8_0"
   v_cache: "q5_1"
-  offload: 1
+  offload: 1.0
   notes: "REAP-pruned version of base model Kimi-Linear-48B-A3B-Instruct; max 180
     Experts; Activated: 8 per token + 1 shared"
   reasoning: instruct
   capabilities: coding, vision, text
   blueprint: coding_agent
   truncation: medium
-  context_length: 7561
+  context_length: 32768
   num_parallel: 4
   file_size_bytes: 13620633088
+  useUnifiedKvCache: true
+  n_layers: 27
+  hidden_dim: 2304
 
 mradermacher/nemotron-cascade-14b-thinking:
   publisher: "mradermacher"
@@ -1130,7 +1205,7 @@ mradermacher/nemotron-cascade-14b-thinking:
   quants: [Q5_K_M]
   k_cache: "q8_0"
   v_cache: "q5_1"
-  offload: 1
+  offload: 1.0
   notes: "14B Parameter; [THINK]-Token-basiertes Reasoning"
   reasoning: thinking
   capabilities: coding, text
@@ -1139,6 +1214,7 @@ mradermacher/nemotron-cascade-14b-thinking:
   num_parallel: 1
   context_length: 98304
   file_size_bytes: 10514571040
+  useUnifiedKvCache: true
 
 nerdsking/nerdsking-python-coder-7b-i:
   publisher: "Nerdsking"
@@ -1152,10 +1228,13 @@ nerdsking/nerdsking-python-coder-7b-i:
   capabilities: coding, text
   blueprint: coding_agent
   truncation: full
-  offload: 1
+  offload: 1.0
   num_parallel: 1
   context_length: 262144
   file_size_bytes: 8098525344
+  useUnifiedKvCache: false
+  n_layers: 28
+  hidden_dim: 3584
 
 unsloth/north-mini-code-1.0-ud:
   publisher: "unsloth"
@@ -1165,7 +1244,7 @@ unsloth/north-mini-code-1.0-ud:
   experts: 16
   k_cache: "q5_1"
   v_cache: "iq4_nl"
-  offload: 1
+  offload: 1.0
   notes: "MoE Experts 128 total, 8 aktiv | Params 30B total, 3B aktiv | max 256K Kontext\
     \  | Agentic Software Engineering"
   reasoning: instruct
@@ -1173,7 +1252,10 @@ unsloth/north-mini-code-1.0-ud:
   blueprint: coding_agent
   truncation: full
   num_parallel: 4
-  context_length: 32768
+  context_length: 65536
+  useUnifiedKvCache: false
+  n_layers: 49
+  hidden_dim: 2048
 
 quantfactory/numinamath-7b-cot:
   publisher: "QuantFactory"
@@ -1185,7 +1267,7 @@ quantfactory/numinamath-7b-cot:
   capabilities: coding, text
   blueprint: reasoning_coding
   truncation: full
-  offload: 1
+  offload: 1.0
   num_parallel: 1
   context_length: 32768
 
@@ -1199,7 +1281,7 @@ thebloke/pandalyst-7b-v1.2:
   capabilities: text
   blueprint: default_chat
   truncation: full
-  offload: 1
+  offload: 1.0
   num_parallel: 1
   context_length: 32768
 
@@ -1215,7 +1297,7 @@ thebloke/pandalyst_13b_v1.0:
   capabilities: text
   blueprint: default_chat
   truncation: full
-  offload: 1
+  offload: 1.0
   num_parallel: 1
   context_length: 32768
 
@@ -1231,10 +1313,13 @@ thebloke/pandalyst_13b_v1.0:
   capabilities: coding, text
   blueprint: reasoning_coding
   truncation: full
-  context_length: 98304
-  offload: 1
+  context_length: 16384
+  offload: 1.0
   num_parallel: 1
   file_size_bytes: 10412707392
+  useUnifiedKvCache: true
+  n_layers: 40
+  hidden_dim: 5120
 
 microsoft/phi-4-reasoning-plus:
   publisher: "microsoft"
@@ -1250,6 +1335,8 @@ microsoft/phi-4-reasoning-plus:
   context_length: 32768
   offload: 1
   num_parallel: 1
+  n_layers: 40
+  hidden_dim: 5120
 
 mradermacher/pythia-12b:
   publisher: "mradermacher"
@@ -1261,7 +1348,7 @@ mradermacher/pythia-12b:
   capabilities: text
   blueprint: default_chat
   truncation: full
-  offload: 1
+  offload: 1.0
   num_parallel: 1
   context_length: 32768
 
@@ -1275,7 +1362,7 @@ lmstudio-community/qwen2.5-coder-7b-instruct:
   capabilities: coding, text
   blueprint: coding_agent
   truncation: full
-  offload: 1
+  offload: 1.0
   num_parallel: 1
   context_length: 32768
 
@@ -1289,7 +1376,7 @@ lmstudio-community/qwen2.5-math-7b-instruct:
   capabilities: coding, text
   blueprint: reasoning_coding
   truncation: full
-  offload: 1
+  offload: 1.0
   num_parallel: 1
   context_length: 32768
 
@@ -1304,8 +1391,8 @@ mradermacher/qwen2.5-vl-8b-ocr:
   capabilities: vision, coding, text
   blueprint: none
   truncation: medium
-  context_length: 32768
-  offload: 1
+  context_length: 16384
+  offload: 1.0
   num_parallel: 1
 
 lmstudio-community/qwen2.5-14b-instruct-1m:
@@ -1320,8 +1407,8 @@ lmstudio-community/qwen2.5-14b-instruct-1m:
   capabilities: coding, text
   blueprint: coding_agent
   truncation: medium
-  context_length: 32768
-  offload: 1
+  context_length: 16384
+  offload: 1.0
   num_parallel: 1
 
 "['qwen', 'unsloth']/qwen2.5-coder-14b-instruct":
@@ -1331,14 +1418,17 @@ lmstudio-community/qwen2.5-14b-instruct-1m:
   arch: "Qwen2.5 Dense (Coder)"
   k_cache: "q5_1"
   v_cache: "iq4_nl"
-  offload: 1
+  offload: 1.0
   notes: "Architektur: Qwen2.5 Dense (Coder)"
   reasoning: instruct
   capabilities: coding, text
   blueprint: coding_agent
   truncation: full
-  context_length: 32768
+  context_length: 84000
   num_parallel: 1
+  useUnifiedKvCache: false
+  n_layers: 48
+  hidden_dim: 5120
 
 qwen/qwen3-14b:
   publisher: "qwen"
@@ -1351,9 +1441,11 @@ qwen/qwen3-14b:
   capabilities: coding, vision, text
   blueprint: coding_agent
   truncation: medium
-  context_length: 32768
-  offload: 1
+  context_length: 16384
+  offload: 1.0
   num_parallel: 1
+  n_layers: 40
+  hidden_dim: 5120
 
 unsloth/qwen3-14b-ud:
   publisher: "unsloth"
@@ -1384,7 +1476,7 @@ bartowski/qwen2.5-coder-32b-instruct:
   capabilities: coding, text
   blueprint: coding_agent
   truncation: full
-  offload: 1
+  offload: 1.0
   num_parallel: 1
   context_length: 32768
 
@@ -1396,15 +1488,20 @@ unsloth/qwen3-30b-a3b-instruct-2507:
   experts: 16
   k_cache: "q5_1"
   v_cache: "iq4_nl"
-  offload: 1
-  notes: "MoE Experts 128 total, 8 activ"
+  offload: 1.0
+  notes: "MoE Experts max 128 total, 8 activ. General capabilities including instruction
+    following, logical reasoning, text comprehension, mathematics, science, coding
+    and tool usage."
   reasoning: instruct
   capabilities: coding, vision, text
   blueprint: coding_agent
   truncation: full
-  context_length: 10922
+  context_length: 32768
   num_parallel: 4
   file_size_bytes: 13292468640
+  useUnifiedKvCache: true
+  n_layers: 48
+  hidden_dim: 2048
 
 unsloth/qwen3-coder-30b-a3b-instruct:
   publisher: "unsloth"
@@ -1414,15 +1511,20 @@ unsloth/qwen3-coder-30b-a3b-instruct:
   experts: 16
   k_cache: "q5_1"
   v_cache: "iq4_nl"
-  offload: 1
-  notes: "Architektur: Qwen3 MoE | 16 Experts"
+  offload: 1.0
+  notes: "Architektur: Qwen3 MoE | 16 Experts. General capabilities including instruction
+    following, logical reasoning, text comprehension, mathematics, science, coding
+    and tool usage."
   reasoning: instruct
   capabilities: coding, vision, text
   blueprint: coding_agent
   truncation: medium
-  context_length: 10922
+  context_length: 16384
   num_parallel: 4
   file_size_bytes: 13292471456
+  useUnifiedKvCache: true
+  n_layers: 48
+  hidden_dim: 2048
 
 mradermacher/qwen3-coder-reap-25b-a3b-i1:
   publisher: "mradermacher"
@@ -1439,9 +1541,12 @@ mradermacher/qwen3-coder-reap-25b-a3b-i1:
   blueprint: coding_agent
   truncation: full
   context_length: 16384
-  offload: 1
+  offload: 1.0
   num_parallel: 4
   file_size_bytes: 12003574816
+  useUnifiedKvCache: true
+  n_layers: 48
+  hidden_dim: 2048
 
 mradermacher/qwen3-coder-reap-25b-a3b:
   publisher: "mradermacher"
@@ -1461,6 +1566,8 @@ mradermacher/qwen3-coder-reap-25b-a3b:
   offload: 1
   num_parallel: 4
   file_size_bytes: 12003574528
+  n_layers: 48
+  hidden_dim: 2048
 
 maziyarpanahi/solar-pro-preview-instruct:
   publisher: "MaziyarPanahi"
@@ -1488,8 +1595,8 @@ lmstudio-community/starcoder2-15b-instruct-v0.1:
   capabilities: coding, text
   blueprint: coding_agent
   truncation: medium
-  context_length: 32768
-  offload: 1
+  context_length: 16384
+  offload: 1.0
   num_parallel: 1
 
 mradermacher/translategemma-12b-it:
@@ -1503,9 +1610,10 @@ mradermacher/translategemma-12b-it:
   capabilities: text
   blueprint: none
   truncation: medium
-  context_length: 32768
-  offload: 1
+  context_length: 16384
+  offload: 1.0
   num_parallel: 1
+  useUnifiedKvCache: true
 
 mradermacher/translategemma-27b-it:
   publisher: "mradermacher"
@@ -1514,13 +1622,13 @@ mradermacher/translategemma-27b-it:
   arch: "TranslateGemma Dense"
   k_cache: "iq4_nl"
   v_cache: "iq4_nl"
-  offload: 1
+  offload: 1.0
   notes: "Architektur: TranslateGemma Dense; 27B Parameter; Fuer Uebersetzung optimiert"
   reasoning: none
   capabilities: text
   blueprint: none
   truncation: medium
-  context_length: 32768
+  context_length: 16384
   num_parallel: 1
 
 handy-computer/whisper-large-v3:
@@ -1535,8 +1643,8 @@ handy-computer/whisper-large-v3:
   capabilities: audio
   blueprint: none
   truncation: medium
-  context_length: 32768
-  offload: 1
+  context_length: 16384
+  offload: 1.0
   num_parallel: 1
 
 vonjack/whisper-large-v3-f16:
@@ -1582,7 +1690,7 @@ handy-computer/whisper-large-v3-turbo:
   capabilities: coding, text
   blueprint: coding_agent
   truncation: full
-  offload: 1
+  offload: 1.0
   num_parallel: 1
   context_length: 32768
 
@@ -1633,6 +1741,8 @@ mradermacher/gemma-4-26b-a4b-it-i1:
   context_length: 3072
   num_parallel: 4
   file_size_bytes: 13917721664
+  n_layers: 30
+  hidden_dim: 2816
 
 unsloth/glm-4.7-flash-reap-23b-a3b@q3_k_m:
   publisher: unsloth
@@ -1682,6 +1792,9 @@ unsloth/north-mini-code-1.0:
   truncation: full
   context_length: 32768
   num_parallel: 4
+  file_size_bytes: 12765339744
+  n_layers: 49
+  hidden_dim: 2048
 
 nexaai/qwen2-audio-7b:
   publisher: NexaAI
@@ -1689,7 +1802,7 @@ nexaai/qwen2-audio-7b:
   arch: Qwen2 Dense
   k_cache: q8_0
   v_cache: iq4_nl
-  offload: 1
+  offload: 1.0
   notes: 'Architektur: Qwen2 Dense | 7.8B Parameter'
   reasoning: instruct
   capabilities: text
@@ -1698,6 +1811,7 @@ nexaai/qwen2-audio-7b:
   num_parallel: 1
   context_length: 262144
   file_size_bytes: 8247536096
+  useUnifiedKvCache: false
 
 qwen/qwen2.5-coder-14b-instruct@q5_0:
   publisher: Qwen
@@ -1714,6 +1828,8 @@ qwen/qwen2.5-coder-14b-instruct@q5_0:
   context_length: 98304
   num_parallel: 1
   file_size_bytes: 10266553792
+  n_layers: 48
+  hidden_dim: 5120
 
 qwen/qwen2.5-coder-14b-instruct@q5_k_m:
   publisher: Qwen
@@ -1730,6 +1846,8 @@ qwen/qwen2.5-coder-14b-instruct@q5_k_m:
   context_length: 98304
   num_parallel: 1
   file_size_bytes: 10508873152
+  n_layers: 48
+  hidden_dim: 5120
 
 qwen/qwen2.5-coder-14b-instruct@q6_k:
   publisher: Qwen
@@ -1746,6 +1864,8 @@ qwen/qwen2.5-coder-14b-instruct@q6_k:
   context_length: 49152
   num_parallel: 1
   file_size_bytes: 12124683712
+  n_layers: 48
+  hidden_dim: 5120
 
 mradermacher/qwen3.5-9b-deepseek-v4-flash:
   publisher: "mradermacher"
@@ -1759,8 +1879,8 @@ mradermacher/qwen3.5-9b-deepseek-v4-flash:
   capabilities: coding, vision, text
   blueprint: coding_agent
   truncation: medium
-  context_length: 32768
-  offload: 1
+  context_length: 16384
+  offload: 1.0
   num_parallel: 4
 
 Qwen/Qwen3.5-9B-GGUF:
@@ -1778,6 +1898,8 @@ Qwen/Qwen3.5-9B-GGUF:
   context_length: 32768
   offload: 1
   num_parallel: 4
+  n_layers: 32
+  hidden_dim: 4096
 
 unsloth/qwen3.6-27b:
   publisher: "unsloth"
@@ -1786,7 +1908,7 @@ unsloth/qwen3.6-27b:
   arch: "Qwen3.5 Dense"
   k_cache: "q5_1"
   v_cache: "iq4_nl"
-  offload: 1
+  offload: 1.0
   notes: "Architektur: Qwen3.6 Dense (Basis-Version) | Agentic Coding, strong text
     and multimodal reasoning ability"
   reasoning: instruct
@@ -1796,6 +1918,9 @@ unsloth/qwen3.6-27b:
   context_length: 16384
   num_parallel: 1
   file_size_bytes: 14201668384
+  useUnifiedKvCache: true
+  n_layers: 64
+  hidden_dim: 5120
 
 unsloth/qwen3.6-27b-mtp:
   publisher: "unsloth"
@@ -1814,6 +1939,8 @@ unsloth/qwen3.6-27b-mtp:
   truncation: medium
   context_length: 16384
   file_size_bytes: 14417428160
+  n_layers: 65
+  hidden_dim: 5120
 
 bytkim/qwen3.6-27b-mtp-pi-tune:
   publisher: bytkim
@@ -1832,6 +1959,8 @@ bytkim/qwen3.6-27b-mtp-pi-tune:
   truncation: medium
   context_length: 49152
   file_size_bytes: 12289712320
+  n_layers: 65
+  hidden_dim: 5120
 
 unsloth/qwen3.6-27b-ud:
   publisher: "unsloth"
@@ -1849,6 +1978,8 @@ unsloth/qwen3.6-27b-ud:
   offload: 1
   num_parallel: 1
   context_length: 32768
+  n_layers: 64
+  hidden_dim: 5120
 
 bartowski/qwen_qwen3.6-27b-imatrix:
   publisher: "bartowski"
@@ -1863,6 +1994,8 @@ bartowski/qwen_qwen3.6-27b-imatrix:
   offload: 1
   num_parallel: 1
   context_length: 32768
+  n_layers: 64
+  hidden_dim: 5120
 
 mradermacher/qwen3.6-27b-i1:
   publisher: mradermacher
@@ -1879,6 +2012,8 @@ mradermacher/qwen3.6-27b-i1:
   truncation: full
   context_length: 49152
   file_size_bytes: 12073953248
+  n_layers: 64
+  hidden_dim: 5120
 
 mradermacher/qwen3.6-28b-reap-i1@iq3_s:
   publisher: mradermacher
@@ -1887,16 +2022,19 @@ mradermacher/qwen3.6-28b-reap-i1@iq3_s:
   experts: 18
   k_cache: q8_0
   v_cache: iq4_nl
-  offload: 1
+  offload: 1.0
   notes: 'Architektur: Qwen3.5 MoE (REAP) | REAP-pruned from Qwen/Qwen3.6-35B-A3B
     | max. 205 Experts | Tool-Use'
   reasoning: instruct
   capabilities: coding, vision, text
   blueprint: coding_agent
   truncation: medium
-  context_length: 12288
+  context_length: 65536
   num_parallel: 4
   file_size_bytes: 12476285920
+  useUnifiedKvCache: true
+  n_layers: 40
+  hidden_dim: 2048
 
 mradermacher/qwen3.6-28b-reap-i1@q3_k_s:
   publisher: mradermacher
@@ -1915,6 +2053,8 @@ mradermacher/qwen3.6-28b-reap-i1@q3_k_s:
   context_length: 12288
   num_parallel: 4
   file_size_bytes: 12408046560
+  n_layers: 40
+  hidden_dim: 2048
 
 mradermacher/qwen3.6-28b-reap.i1:
   publisher: "mradermacher"
@@ -1933,6 +2073,8 @@ mradermacher/qwen3.6-28b-reap.i1:
   truncation: medium
   context_length: 32768
   num_parallel: 4
+  n_layers: 40
+  hidden_dim: 2048
 
 mradermacher/qwen3-30b-a3b-python-coder:
   publisher: mradermacher
@@ -1941,7 +2083,7 @@ mradermacher/qwen3-30b-a3b-python-coder:
   experts: 16
   k_cache: q5_1
   v_cache: iq4_nl
-  offload: 1
+  offload: 1.0
   num_parallel: 4
   notes: 'Architektur: Qwen3 MoE | 30B-A3B Parameter | Python Coder'
   reasoning: instruct
@@ -1965,6 +2107,8 @@ bartowski/mistralai_magistral-small-2509:
   capabilities: coding, vision, text
   blueprint: magistral_reasoning
   truncation: full
+  n_layers: 40
+  hidden_dim: 5120
 
 unsloth/north-mini-code-1.0@iq3_s:
   publisher: unsloth
@@ -1983,6 +2127,8 @@ unsloth/north-mini-code-1.0@iq3_s:
   truncation: full
   context_length: 12288
   file_size_bytes: 12765339744
+  n_layers: 49
+  hidden_dim: 2048
 
 nomic-ai/text-embedding-nomic-embed-text-v1.5:
   publisher: nomic-ai
@@ -1999,3 +2145,23 @@ nomic-ai/text-embedding-nomic-embed-text-v1.5:
   num_parallel: 1
   context_length: 262144
   file_size_bytes: 84106624
+
+lmstudio-community/deepseek-r1-distill-qwen-14b:
+  publisher: "lmstudio-community"
+  hf_url: "https://huggingface.co/lmstudio-community/DeepSeek-R1-Distill-Qwen-14B-GGUF"
+  quants: Q6_K
+  arch: "DeepSeek R1 Distill"
+  k_cache: "q8_0"
+  v_cache: "q5_1"
+  notes: "Architektur: DeepSeek R1 Distill"
+  reasoning: thinking
+  capabilities: text
+  blueprint: reasoning_assistant
+  truncation: full
+  context_length: 16384
+  offload: 1.0
+  num_parallel: 1
+  file_size_bytes: 12124683392
+  useUnifiedKvCache: true
+  n_layers: 48
+  hidden_dim: 5120

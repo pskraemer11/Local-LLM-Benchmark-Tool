@@ -6,7 +6,12 @@ Commands:
   compare       Compare registry vs LMS vs JSON configs (report only)
   add           Add new LMS models to registry
   configs       Write load.fields (offloadRatio, numParallelSessions) to JSON configs
-  sync-ctx      Sync context_length from JSON configs into registry
+  sync-ctx      Sync context_length from JSON configs into registry (only missing)
+  sync-from-configs
+                Sync context_length, offload, num_parallel, useUnifiedKvCache
+                from JSON configs into registry (overwrites existing)
+  fill-arch     Fetch n_layers and hidden_dim from HuggingFace config.json for
+                each registry entry
   fill-ctx      Add default context_length to entries missing it
                 (size-based rule or 16384 fallback)
   fill-size     Look up file_size_bytes from LMS for registry entries missing it
@@ -16,7 +21,7 @@ Commands:
   sync          Full sync: add → configs → sync-ctx → fill-ctx → fmt
 """
 
-import csv, json, os, re, sys, subprocess, tempfile
+import csv, json, os, re, sys, subprocess, tempfile, concurrent.futures
 from pathlib import Path
 from collections import OrderedDict
 
@@ -318,7 +323,7 @@ def cmd_add(models: list[dict]) -> dict:
     skipped: list[tuple[str, str]] = []
 
     for m in models:
-        mk = str(m.get("key", "")).strip()
+        mk = str(m.get("key") or m.get("modelKey") or "").strip()
         if not mk:
             skipped.append(("?", "leerer Key"))
             continue
@@ -357,6 +362,17 @@ def cmd_add(models: list[dict]) -> dict:
                 int(size_bytes), num_p,
                 entry["k_cache"], entry["v_cache"]
             )
+
+        # Auto-fill arch data from GGUF file if available
+        model_path = m.get("path", "")
+        if model_path:
+            full_path = str(MODELS_CACHE / model_path)
+            if os.path.isfile(full_path):
+                nl, hd = _read_gguf_arch(full_path)
+                if nl and hd:
+                    entry["n_layers"] = int(nl)
+                    entry["hidden_dim"] = int(hd)
+
         reg[canonical] = entry
         added.append(canonical)
 
@@ -410,12 +426,29 @@ def cmd_configs() -> dict:
             if "num_parallel" in entry:
                 set_field("llm.load.numParallelSessions", entry["num_parallel"])
 
-            # Unified KV Cache: OFF for models <9 GB (enough VRAM headroom)
+            # useUnifiedKvCache decision
             fs = entry.get("file_size_bytes", 0)
-            if fs and fs < 9_000_000_000:
-                set_field("llm.load.useUnifiedKvCache", False)
-            elif fs and fs > 0:
-                set_field("llm.load.useUnifiedKvCache", True)
+            np_val = entry.get("num_parallel", 1)
+            nl = entry.get("n_layers")
+            hd = entry.get("hidden_dim")
+            ctx = entry.get("context_length") or 16384
+            kc = entry.get("k_cache", "q8_0")
+            vc = entry.get("v_cache", "iq4_nl")
+            kv_bytes = _KV_BYTES.get(kc, 1.0) + _KV_BYTES.get(vc, 0.5)
+            model_gb = fs / 1_000_000_000 if fs else 0
+
+            if np_val > 1 and nl and hd and model_gb > 0:
+                # Estimate total VRAM: model + np × per-session KV cache
+                kv_gb = nl * hd * 2 * kv_bytes * ctx / 1_000_000_000
+                total_gb = model_gb + kv_gb * np_val
+                ukv = bool(total_gb >= 14.5)
+            elif model_gb > 0:
+                ukv = bool(model_gb >= 9.0)
+            else:
+                ukv = None
+
+            if ukv is not None:
+                set_field("llm.load.useUnifiedKvCache", ukv)
 
             with open(jp, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
@@ -426,6 +459,78 @@ def cmd_configs() -> dict:
     result = {"updated": updated, "skipped": skipped, "errors": errors}
     print(json.dumps(result, ensure_ascii=False))
     return result
+
+
+# ── sync-from-configs command ────────────────────────────────────
+
+def cmd_sync_from_configs() -> None:
+    """Sync context_length, offload, num_parallel, useUnifiedKvCache from JSON configs into registry."""
+    if not REGISTRY_PATH.exists():
+        print(f"[ERROR] Registry not found: {REGISTRY_PATH}")
+        sys.exit(1)
+
+    print("[1] Registry laden ...")
+    reg = load_registry()
+    if not reg:
+        print("[ERROR] Leere Registry")
+        sys.exit(1)
+
+    print("[2] JSON-Configs scannen ...")
+    configs = read_lms_configs(CONFIG_ROOT)
+    print(f"  -> {len(configs)} Config-Dateien gefunden")
+
+    rk = {normalize_model_name(k): k for k, v in reg.items() if isinstance(v, dict)}
+
+    print("[3] Registry-Einträge aktualisieren ...")
+    updated_ctx = updated_offload = updated_np = updated_ukv = 0
+    skipped_no_match = 0
+    for cfg in configs:
+        cn = normalize_model_name(cfg["dir_name"])
+        match = None
+        for rn2, rnk in rk.items():
+            if cn == rn2 or (cn in rn2) or (rn2 in cn):
+                match = rnk
+                break
+        if not match:
+            skipped_no_match += 1
+            continue
+        entry = reg[match]
+        if not isinstance(entry, dict):
+            continue
+
+        ctx = cfg.get("context_length")
+        if ctx is not None:
+            entry["context_length"] = int(ctx)
+            updated_ctx += 1
+
+        off = cfg.get("offload")
+        if off is not None:
+            entry["offload"] = float(off)
+            updated_offload += 1
+
+        np_val = cfg.get("num_parallel")
+        if np_val is not None:
+            entry["num_parallel"] = int(np_val)
+            updated_np += 1
+
+        ukv = cfg.get("use_unified_kv")
+        if ukv is not None:
+            entry["useUnifiedKvCache"] = bool(ukv)
+            updated_ukv += 1
+
+    print(f"  -> context_length:   {updated_ctx} aktualisiert")
+    print(f"  -> offload:          {updated_offload} aktualisiert")
+    print(f"  -> num_parallel:     {updated_np} aktualisiert")
+    print(f"  -> useUnifiedKvCache:{updated_ukv} aktualisiert")
+    print(f"  -> kein Match:       {skipped_no_match} uebersprungen")
+
+    if updated_ctx or updated_offload or updated_np or updated_ukv:
+        print("[4] Registry speichern ...")
+        save_registry(reg)
+        print("  [OK] Gespeichert")
+    else:
+        print("  Keine Änderungen")
+    print("Fertig.")
 
 
 # ── sync-ctx command ───────────────────────────────────────────────
@@ -601,10 +706,176 @@ def cmd_migrate_keys() -> None:
     print(f"[OK] Migriert: {migrated}, gemerged: {merged}, kein Publisher: {skipped_no_pub}")
 
 
+# ── fill-arch command ──────────────────────────────────────────────
+
+def _read_gguf_arch(model_path: str) -> tuple:
+    """Read n_layers (block_count) and hidden_dim (embedding_length) from a GGUF file header.
+
+    Lightweight header-only parser (~140ms/file) vs GGUFReader which memory-maps the
+    entire file (~12GB, taking 5-7s).
+    """
+    _GGUF_SIZES = {0: 1, 1: 1, 2: 2, 3: 2, 4: 4, 5: 4, 6: 4, 7: 1, 10: 8, 11: 8, 12: 8}
+
+    def _skip_value(f, vt):
+        """Properly skip a GGUF metadata value of the given type."""
+        if vt in _GGUF_SIZES:
+            f.read(_GGUF_SIZES[vt])
+        elif vt == 8:  # STRING
+            s_raw = f.read(8)
+            if len(s_raw) < 8:
+                return
+            f.read(int.from_bytes(s_raw, "little"))
+        elif vt == 9:  # ARRAY
+            raw = f.read(4)
+            if len(raw) < 4:
+                return
+            elem_type = int.from_bytes(raw, "little")
+            raw = f.read(8)
+            if len(raw) < 8:
+                return
+            arr_len = int.from_bytes(raw, "little")
+            for _ in range(arr_len):
+                _skip_value(f, elem_type)
+
+    try:
+        with open(model_path, "rb") as f:
+            if f.read(4) != b"GGUF":
+                return None, None
+            f.read(4 + 8 + 8)  # version, tensor_count, metadata_count
+            block_count = embedding_length = None
+            for _ in range(10_000):
+                raw = f.read(8)
+                if len(raw) < 8:
+                    break
+                key_len = int.from_bytes(raw, "little")
+                key = f.read(key_len).decode("utf-8", errors="replace")
+                raw = f.read(4)
+                if len(raw) < 4:
+                    break
+                val_type = int.from_bytes(raw, "little")
+
+                if val_type == 8:
+                    s_raw = f.read(8)
+                    s_len = int.from_bytes(s_raw, "little")
+                    val = f.read(s_len).decode("utf-8", errors="replace")
+                    _skip = False
+                elif val_type == 4:  # UINT32 - common for block_count/embedding_length
+                    val = int.from_bytes(f.read(4), "little")
+                    _skip = False
+                elif val_type == 9:  # ARRAY (skip)
+                    _skip_value(f, val_type)
+                    val = None
+                elif val_type in (0, 1, 7):  # U8, I8, BOOL
+                    val = int.from_bytes(f.read(1), "little")
+                elif val_type in (2, 3):  # U16, I16
+                    val = int.from_bytes(f.read(2), "little")
+                elif val_type in (5, 6):  # I32, F32
+                    val = int.from_bytes(f.read(4), "little")
+                elif val_type in (10, 11, 12):  # U64, I64, F64
+                    val = int.from_bytes(f.read(8), "little")
+                else:
+                    val = None
+
+                if key.endswith(".block_count"):
+                    block_count = int(val)
+                elif key.endswith(".embedding_length"):
+                    embedding_length = int(val)
+                if block_count and embedding_length:
+                    break
+        return block_count, embedding_length
+    except Exception:
+        return None, None
+
+
+MODELS_CACHE = Path.home() / ".lmstudio" / "models"
+
+
+def cmd_fill_arch() -> None:
+    """Read n_layers and hidden_dim from local GGUF files (via lms ls).
+
+    Modelle ohne GGUF-Datei (z.B. gelöschte) erhalten keine Architektur-Daten.
+    """
+    if not REGISTRY_PATH.exists():
+        print(f"[ERROR] Registry not found: {REGISTRY_PATH}")
+        sys.exit(1)
+
+    print("[1] Registry laden ...")
+    reg = load_registry()
+    if not reg:
+        print("[ERROR] Leere Registry")
+        sys.exit(1)
+
+    print("[2] LM Studio-Modelle scannen ...")
+    lms_models = _run_lms_ls()
+    unique: dict[str, str] = {}
+    for m in lms_models:
+        rp = m.get("path", "")
+        if not rp:
+            continue
+        full_path = str(MODELS_CACHE / rp)
+        if not os.path.isfile(full_path):
+            continue
+        key = normalize_model_name(m.get("modelKey", "")).lower()
+        base = key.split("@")[0]
+        if base not in unique:
+            unique[base] = full_path
+    print(f"  -> {len(unique)} einzigartige Modelle (von {len(lms_models)} GGUF-Dateien)")
+
+    print("[3] GGUF-Header parallel parsen ...")
+    gguf_arch: dict[str, tuple[int, int]] = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+        fut_to_base = {pool.submit(_read_gguf_arch, p): b for b, p in unique.items()}
+        for i, fut in enumerate(concurrent.futures.as_completed(fut_to_base), 1):
+            base = fut_to_base[fut]
+            nl, hd = fut.result()
+            if nl and hd:
+                gguf_arch[base] = (nl, hd)
+            if i % 10 == 0:
+                print(f"     ({i}/{len(unique)})")
+    print(f"  -> {len(gguf_arch)} mit n_layers/hidden_dim")
+
+    total = len([k for k, v in reg.items() if isinstance(v, dict)])
+    updated = skipped_has = skipped_no = 0
+    print(f"[4] {total} Registry-Einträge durchgehen ...")
+
+    for key, entry in reg.items():
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("n_layers") and entry.get("hidden_dim"):
+            skipped_has += 1
+            continue
+        nk = normalize_model_name(key)
+        found = gguf_arch.get(nk)
+        if not found:
+            base = nk.split("@")[0]
+            found = gguf_arch.get(base)
+        if not found:
+            for gk, gv in gguf_arch.items():
+                if nk in gk or gk in nk:
+                    found = gv
+                    break
+        if found:
+            entry["n_layers"] = int(found[0])
+            entry["hidden_dim"] = int(found[1])
+            updated += 1
+        else:
+            skipped_no += 1
+
+    print(f"  -> {updated} aktualisiert")
+    print(f"  -> {skipped_has} bereits vorhanden")
+    print(f"  -> {skipped_no} kein GGUF-Match (nur per add+path möglich)")
+
+    if updated:
+        print("[5] Registry speichern ...")
+        save_registry(reg)
+        print("  [OK] Gespeichert")
+    print("Fertig.")
+
+
 # ── sync command (full) ────────────────────────────────────────────
 
 def cmd_sync() -> None:
-    """Full sync: add → configs → sync-ctx → fill-ctx → fmt"""
+    """Full sync: add → fill-arch → configs → sync-ctx → sync-from-configs → fill-ctx → fmt"""
     lms = _run_lms_ls()
     reg = load_registry()
     rk = {normalize_model_name(k): k for k, v in reg.items() if isinstance(v, dict)}
@@ -625,11 +896,17 @@ def cmd_sync() -> None:
     else:
         print("[add] Keine neuen Modelle")
 
-    print("[configs] load.fields in JSON-Configs schreiben ...")
+    print("[fill-arch] n_layers/hidden_dim aus GGUF-Headern in Registry ...")
+    cmd_fill_arch()
+
+    print("[configs] load.fields in JSON-Configs schreiben (inkl. useUnifiedKvCache über VRAM-Formel) ...")
     cmd_configs()
 
-    print("[sync-ctx] context_length aus JSON-Configs in Registry ...")
+    print("[sync-ctx] context_length aus JSON-Configs in Registry (nur fehlende) ...")
     cmd_sync_ctx()
+
+    print("[sync-from-configs] context_length, offload, num_parallel, useUnifiedKvCache aus JSON-Configs in Registry (overwrite) ...")
+    cmd_sync_from_configs()
 
     print("[fill-ctx] Default context_length für fehlende Einträge ...")
     cmd_fill_ctx()
@@ -665,6 +942,8 @@ def main() -> None:
         cmd_configs()
     elif cmd == "sync-ctx":
         cmd_sync_ctx()
+    elif cmd == "sync-from-configs":
+        cmd_sync_from_configs()
     elif cmd == "fill-ctx":
         cmd_fill_ctx()
     elif cmd == "fix-np":
@@ -673,6 +952,8 @@ def main() -> None:
         cmd_fix_ctx()
     elif cmd == "fill-size":
         cmd_fill_size()
+    elif cmd == "fill-arch":
+        cmd_fill_arch()
     elif cmd == "fmt":
         cmd_fmt()
     elif cmd == "migrate-keys":

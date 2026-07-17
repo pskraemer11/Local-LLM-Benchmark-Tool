@@ -2,6 +2,11 @@
 
 > **Version:** see [`VERSION`](./VERSION) (currently 13.0.0-p3).  
 > **Release date:** 2026-07-12  
+> **Last doc update:** 2026-07-17  
+> - New `registry_tool.py` commands: `fill-arch` (GGUF-Header-Reader for n_layers/hidden_dim), `sync-from-configs` (overwrite registry from JSON configs)  
+> - `add` command now auto-reads architecture data from GGUF header  
+> - VRAM-aware `useUnifiedKvCache` decision via architecture-based formula (see doc-git/)  
+> - HF fallback removed from `fill-arch` (models without GGUF stay without arch data)  
 > **Status:** see [`Doku-intern/Reviews/Code-Review_2026-07-12.md`](./Doku-intern/Reviews/Code-Review_2026-07-12.md) for the most recent code-review and fix history.
 
 Local benchmark framework for LLMs via LM Studio REST API (OpenAI-compatible). Tests coding, reasoning, knowledge, and agentic capabilities across **4 pipelines** with **9 benchmarks** (MMLU-Pro is archived).
@@ -18,14 +23,15 @@ Over 50 LLM models were tested on an HP Omen gaming PC with an NVIDIA RTX 5070 T
 
 ## Features
 
-- **4 independent pipelines**: Custom (DS1000, CoderEval), EvalPlus (HumanEval+, MBPP+), LM-Eval (ARC, HellaSwag, TruthfulQA, MathQA, MMLU-Pro), Agentic (tool-eval-bench)
-- **Reasoning support**: Thinking mode (`--thinking`) for MathQA/MMLU-Pro on AceMath, DeepSeek, Gemma 4
-- **Stratified subsampling**: Random but category-balanced task selection for DS1000, MathQA, MMLU-Pro
+- **4 independent pipelines**: Custom (DS1000, CoderEval), EvalPlus (HumanEval+, MBPP+), LM-Eval (ARC, HellaSwag, TruthfulQA, MATH-500), Agentic (tool-eval-bench)
+- **Reasoning support**: Thinking mode (`--thinking`) for MATH-500 on reasoning models
+- **Stratified subsampling**: Random but category-balanced task selection for DS1000
 - **System metrics**: CPU/GPU/RAM/VRAM/temperature per task (median + P90)
 - **Thinking token analysis**: `<think>`/`<|channel|>` extraction, percentage thinking ratio
 - **Task retry**: 3 attempts with exponential backoff on API errors
 - **Consolidation**: Weighted leaderboard (Coding 35%, Math 25%, Agentic 25%, Knowledge 15%)
 - **Bootstrap confidence intervals**: 95% CI from per-item data (DS1000/CoderEval) via `--bootstrap`
+- **Registry tool**: `registry_tool.py` for model registry management, JSON config sync, architecture data extraction from GGUF headers
 
 ## Prerequisites
 
@@ -65,46 +71,67 @@ git clone https://github.com/xlangai/DS-1000.git ds1000_official
 ## Quick Start
 
 ```bash
+# Registry maintenance (add new models, sync configs, extract GGUF arch data)
+python registry_tool.py sync
+
 # Interactive mode (select model + benchmarks)
-python run_benchmarks_v12.py
+python run_benchmarks_v13.py
 
 # Direct run (model + all benchmarks)
-python run_benchmarks_v12.py --model "qwen2.5-coder-14b-instruct" --sample-size 20
+python run_benchmarks_v13.py --model "qwen2.5-coder-14b-instruct" --sample-size 20
 
-# With thinking mode for reasoning models (MathQA/MMLU-Pro)
-python run_benchmarks_v12.py --model "gemma-4-26b-a4b-it" --sample-size 20 --thinking
+# With thinking mode for reasoning models (MATH-500)
+python run_benchmarks_v13.py --model "gemma-4-26b-a4b-it" --sample-size 20 --thinking
 
 # Specific benchmarks
-python run_benchmarks_v12.py --model "qwen2.5-coder-14b-instruct" --benchmarks DS1000,CoderEval --sample-size 10
+python run_benchmarks_v13.py --model "qwen2.5-coder-14b-instruct" --benchmarks DS1000,CoderEval --sample-size 10
 
 # Consolidate results (with bootstrap CI)
-python consolidate_results_v12.py --bootstrap
+python consolidate_results_v13.py --bootstrap
 ```
 
-## CLI Options
+## CLI Options (run_benchmarks)
 
 | Flag                | Description                                                                                                  |
 |---------------------|--------------------------------------------------------------------------------------------------------------|
 | `--model`           | Model key (from `lms ls --json`)                                                                             |
-| `--benchmarks`      | Comma-separated: DS1000, CoderEval, HumanEval+, MBPP+, ARC, HellaSwag, TruthfulQA, MathQA, MMLU-Pro, Agentic |
+| `--benchmarks`      | Comma-separated: DS1000, CoderEval, HumanEval+, MBPP+, ARC, HellaSwag, TruthfulQA, MATH-500, Agentic         |
 | `--sample-size`     | Tasks per benchmark (default: 10)                                                                            |
-| `--thinking`        | Enable thinking mode for MathQA/MMLU-Pro (reasoning models)                                                  |
+| `--thinking`        | Enable thinking mode for reasoning models                                                                    |
 | `--bootstrap`       | Enable Bootstrap 95% CI for DS1000/CoderEval (consolidation only)                                            |
 | `--non-interactive` | No user prompts                                                                                              |
 | `--output-dir`      | Results directory (default: `ergebnisse/`)                                                                   |
+| `--unload-between`  | Unload model between benchmarks (default: on)                                                                |
+
+## Registry Tool (registry_tool.py)
+
+| Command            | Description                                                                 |
+|--------------------|-----------------------------------------------------------------------------|
+| `sync`             | Full pipeline: add → fill-arch → configs → sync-from-configs → sync-ctx → fill-ctx → fmt |
+| `add`              | Add new models from LMS to registry (auto-reads GGUF arch data)             |
+| `fill-arch`        | Extract n_layers/hidden_dim from all local GGUF headers (~1ms/file)         |
+| `configs`          | Write load.fields (offload, np, useUnifiedKvCache) into JSON configs        |
+| `sync-from-configs`| Overwrite registry values from JSON configs                                 |
+| `fix-np` / `fix-ctx` | Recompute num_parallel or context_length for all entries                  |
+| `compare`          | Registry vs LMS vs JSON configs comparison report                           |
 
 ## Architecture
 
 ```
 LM Studio REST API (localhost:1234)
 |
-run_benchmarks_v12.py  (Launcher – load/unload HERE ONLY)
-├── custom_benchmark_v12.py   (DS1000, CoderEval)
-├── lm_eval                   (ARC, HellaSwag, TruthfulQA, MathQA, MMLU-Pro)
+registry_tool.py            (Model registry + JSON config management)
+├── add / fill-arch         (GGUF header reader for n_layers/hidden_dim)
+├── configs / sync-from-configs  (Bidirectional JSON ↔ Registry sync)
+└── sync                    (Full maintenance pipeline)
+|
+run_benchmarks_v13.py       (Launcher – load/unload HERE ONLY)
+├── custom_benchmark_v13.py   (DS1000, CoderEval)
+├── lm_eval                   (ARC, HellaSwag, TruthfulQA, MATH-500)
 ├── evalplus                  (HumanEval+, MBPP+)
 └── tool_eval_bench           (Agentic)
 |
-consolidate_results_v12.py    (Weighted leaderboard + bootstrap CI)
+consolidate_results_v13.py   (Weighted leaderboard + bootstrap CI)
     → ergebnisse/konsolidiert_*.csv + *.md
 ```
 
@@ -113,7 +140,7 @@ consolidate_results_v12.py    (Weighted leaderboard + bootstrap CI)
 | Pipeline  | Benchmarks                                    | Evaluation                                |
 |-----------|-----------------------------------------------|-------------------------------------------|
 | Custom    | DS1000, CoderEval                             | `exec_sandboxed()` + namespace comparison |
-| lm-eval   | ARC, HellaSwag, TruthfulQA, MathQA, MMLU-Pro  | `generate_until` + regex extraction       |
+| lm-eval   | ARC, HellaSwag, TruthfulQA, MATH-500          | `generate_until` + regex extraction       |
 | evalplus  | HumanEval+, MBPP+                             | Differential testing with plus_input      |
 | Agentic   | Agentic (69 scenarios)                        | tool-eval-bench final_score               |
 
@@ -122,39 +149,42 @@ consolidate_results_v12.py    (Weighted leaderboard + bootstrap CI)
 | Category  | Weight | Benchmarks                                                   |
 |-----------|--------|--------------------------------------------------------------|
 | Coding    |   35%  | DS1000 (25%), CoderEval (25%), HumanEval+ (25%), MBPP+ (25%) |
-| Math      |   25%  | MathQA (100%)                                                |
+| Math      |   25%  | MATH-500 (100%)                                              |
 | Agentic   |   25%  | Agentic (100%)                                               |
-| Knowledge |   15%  | ARC (25%), HellaSwag (25%), TruthfulQA (25%), MMLU-Pro (25%) |
+| Knowledge |   15%  | ARC (33%), HellaSwag (33%), TruthfulQA (33%)                 |
 
 ## Thinking Mode
 
-Activates `enable_thinking=True` for AceMath, DeepSeek, and Gemma 4 on MathQA + MMLU-Pro:
+Activates `--thinking` for reasoning models on supported benchmarks:
 
 ```bash
-python run_benchmarks_v12.py --model "acemath-7b-instruct" --thinking
+python run_benchmarks_v13.py --model "gemma-4-26b-a4b-it" --thinking
 ```
 
-Implementation:
-- `custom_benchmark_v12.py`: `REASONING_PATTERNS = {"acemath", "deepseek", "gemma"}` in `_get_model_config()`
-- `run_benchmarks_v12.py`: `_is_reasoning_model()` + `_is_gemma_model()` in `_get_lmeval_params()`
-- Qwen3.6/Qwen3.5 are excluded (`enable_thinking=False` enforced)
+Implementation is in `run_benchmarks_v13.py` and `custom_benchmark_v13.py`.
+Reasoning model detection uses model-name keywords (r1, thinking, qwq, reasoning, cot).
 
 ## Project Structure
 
 ```
 Benchmarks/
-├── run_benchmarks_v12.py           # Launcher
-├── custom_benchmark_v12.py         # Custom pipeline (DS1000, CoderEval)
-├── consolidate_results_v12.py      # Consolidation + bootstrap CI
-├── benchmark_config.py             # Weights, MMLU-Pro-Subsets, Tool-Eval-Scenarios
+├── run_benchmarks_v13.py           # Launcher
+├── custom_benchmark_v13.py         # Custom pipeline (DS1000, CoderEval)
+├── consolidate_results_v13.py      # Consolidation + bootstrap CI
+├── registry_tool.py                # Model registry + JSON config management
+├── assemble_blueprint.py           # Blueprint/classify/validate assembly
+├── benchmark_config.py             # Weights, Tool-Eval-Scenarios
 ├── model_manager.py                # LM Studio load/unload
 ├── csv_writer.py                   # CSV output
 ├── simple_evals/                   # JSONL datasets
-├── lm_eval_tasks/                  # Custom YAML tasks
+├── lm_eval_tasks/                  # Custom YAML tasks (minerva_math500, etc.)
 ├── ergebnisse/                     # Results + consolidation
-├── doc-git/                        # Documentation
-│   ├── Architektur+Flow_*.md        # Full architecture description (German)
-│   └── Modell_Steckbriefe*.md      # Model reference (40+ entries, German)
+├── doc-git/                        # Documentation (German)
+│   ├── Architecture-and-Flow.md    # Full architecture + flow description
+│   ├── HowTo-Install-and-Configure-New-LLM.md # Model installation guide
+│   ├── Parallel-Slots-Optimization.md # numParallel & KV-Cache optimization
+│   ├── thinking-config.md          # Thinking mode configuration
+│   └── model_registry.yaml         # YAML model registry (source of truth)
 └── tests/                          # Pytest tests
 ```
 
