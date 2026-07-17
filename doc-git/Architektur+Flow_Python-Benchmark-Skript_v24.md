@@ -1,6 +1,6 @@
-# Architektur & Flow – Stand 15.07.2026 (v13.0.0-p5)
+# Architektur & Flow – Stand 15.07.2026 (v13.0.0-p6)
 
-> **Versions-Konvention:** siehe [`../VERSION`](../VERSION) – Single Source of Truth für Projekt-Version. Der Dateiname `_v24.md` ist Legacy und wird in einer zukünftigen Major-Version auf `_v13.md` umgestellt.
+> **Versions-Konvention:** siehe [`../VERSION`](../VERSION) – Single Source of Truth für Projekt-Version. Der Dateiname `_v24.md` ist Legacy (letzte Aktualisierung 15.07.2026) – in einer zukünftigen Major-Version Umstellung auf `_v13.md` geplant.
 
 ## 1. Uberblick
 
@@ -145,12 +145,13 @@ Nach dem Review am 28.06. wurden folgende Architekturanderungen umgesetzt:
 - **all_summary-Bug gefixt**: `all_summary.append()` war falschlich im `if is_custom:`-Block – alle 4 Pipelines landen jetzt im Summary.
 - **Pytest-Tests**: 15 Tests fur compute_category_scores, read_custom_csv, Percentile, CSV-Parsing.
 - **Granite 4.0 H Tiny**: Experts=64 verursacht `ggml_new_object: not enough space` bei 1M Context; erst mit Experts=16 lauffahig.
-- **Thinking-Mode per CLI**: `--thinking`-Flag aktiviert `enable_thinking=True` fur MATH-500 bei **allen Reasoning-Modellen** (AceMath, DeepSeek, Gemma 4) – nicht nur Gemma 4. Gesteuert uber `REASONING_PATTERNS`-Set in `custom_benchmark_v13.py` und "Raisonierende" Modell-Erkennung in `run_benchmarks_v13.py`.
+- **Thinking-Mode per CLI**: `--thinking`-Flag forciert `enable_thinking=True` fur MATH-500 bei allen Reasoning-Modellen (gesteuert uber `REASONING_PATTERNS` in `benchmark_config.py`).
 - **Strukturierter Output (v30)**: Custom-Pipeline nutzt `response_format` mit JSON-Schema (`{"code": "..."}`) uber LM Studio API. Garantiert valides JSON, eliminiert ~12% Parsing-Fehler (leere Antworten, Markdown-Extraktion). Fallback via `--no-structured-output`.
 - **Paired Bootstrap Vergleich (v30)**: `consolidate_results_v13.py --compare "key1,key2,key3"` vergleicht alle Paare mit gepaartem Bootstrap-CI. `--seed` sorgt fur identische Task-Subsets.
 - **--seed fur Reproduzierbarkeit (v30)**: `run_benchmarks_v13.py --seed 42` und `custom_benchmark_v13.py --seed 42` ermoeglichen reproduzierbare Task-Auswahl.
 - **--bootstrap entfernt (v30)**: CIs werden immer berechnet, wenn Per-Item-Daten vorhanden sind. Keine Flag noetig.
 - **Context Length (v32)**: Wird aus den `user-concrete-model-default-config`-JSONs ubernommen (kein CLI-Parameter mehr). Typisch 8192-16384 – ausreichend fur alle Benchmarks (DS1000~1.2K, MATH-500~1K, Agentic~9K), reduziert VRAM-Druck bei 128K-Modellen massiv.
+- **Variante C+ (p6)**: Sampling-Parameter werden nicht mehr modellspezifisch, sondern benchmark-kategorieabhangig gesteuert. Vier Kategorie-Defaults (`coding`, `math`, `knowledge`, `agentic`) in `BENCHMARK_CATEGORY_DEFAULTS` + optionale Modell-Overrides in `MODEL_TEMP_OVERRIDES`. Vereinheitlichte `get_model_config()`-Funktion ersetzt die getrennten `_get_model_config()` und `_get_lmeval_params()` (siehe §2.10).
 
 ---
 
@@ -254,24 +255,18 @@ Nachteil: Beide Versionen (alt + neu) mussen wahrend des Laufs existieren, da er
 ### 2.6 Modell-Klassifizierung
 
 ```python
-REASONING_KEYWORDS = ["reasoning", "think", "r1"]
-MOE_PATTERN = re.compile(r"\d+b-a\d+b", re.IGNORECASE)  # z.B. "8b-a1b"
+REASONING_KEYWORDS = ["reasoning", "think", "r1", "rnj"]
+MOE_PATTERN = re.compile(r"\d+b-a\d+b", re.IGNORECASE)
 
-_is_reasoning_model()   # -> Timeout x2 (2x eval_timeout) + Thinking-Mode via --thinking
+_is_reasoning_model()   # -> Timeout x2
 _is_moe_model()         # -> nur Anzeige "(erkannt)"
-_is_qwen3_5_model()     # -> systemlose Prompt-Einbettung
-_is_qwen3_6_model()     # -> enable_thinking=False, max_tokens=8192
-_is_gptoss_model()      # -> temperature=1.0, max_tokens=4096
-_is_gemma_model()       # -> Thinking-Mode via --thinking (separat von _is_reasoning_model)
+_is_qwen3_5_model()     # -> systemlose Prompt-Einbettung (no_system_msg)
+_is_gptoss_model()      # -> stop-Tokens fuer evalplus/lmeval
 ```
 
-**Zusatzlich in `custom_benchmark_v11.py`:**
+Die **Sampling-Parameter** werden nicht mehr per Modell-Klasse vergeben, sondern uber das Kategorie-System (siehe §2.10). Die frueheren `_is_qwen3_6_model`, `_is_gemma_model`, `_is_magistral_model` etc. in `_get_lmeval_params()` wurden entfernt – deren Overrides leben jetzt in `benchmark_config.MODEL_TEMP_OVERRIDES`.
 
-```python
-REASONING_PATTERNS = {"acemath", "deepseek", "gemma"}
-```
-
-Wird von `_get_model_config()` genutzt: Wenn `--thinking` aktiv ist UND der Modell-Key eines der REASONING_PATTERNS enthalt, wird `enable_thinking=True` gesetzt. `deepseek` hat standardmassig `enable_thinking=True`, `gemma` standardmassig `False` (umschaltbar via `--thinking`). Modelle mit explizitem `enable_thinking=False` (qwen3.6, qwen3.5) bleiben ausgeschlossen.
+**Reasoning-Erkennung fur `--thinking`-Flag:** `REASONING_PATTERNS` in `benchmark_config.py` (Zentral, 15 Eintrage). Wenn `--thinking` aktiv ist, forciert `get_model_config()` `enable_thinking=True` – ausser ein Modell-Override (z.B. `qwen3.6: {enable_thinking: False}`) hat Vorrang.
 
 ### 2.7 Task-Retry-Mechanismus (NEU in v10, nach Review)
 
@@ -307,7 +302,63 @@ for attempt in range(1, MAX_RETRIES + 1):
 
 **Referenz:** `run_benchmarks_v13.py:709-754`, `openai_completions.py:189-206` (LocalChatCompletion._create_payload)
 
-### 2.9 Fehlerbehandlung
+### 2.9 Sampling-Parameter: Variante C+ (p6, 15.07.2026)
+
+**Problem:** Bisher wurden Sampling-Parameter (`temperature`, `top_p`, `max_tokens`) entweder modellspezifisch in `THINKING_CONFIG` (43 Eintrage) oder per if-else-Kaskade in `_get_lmeval_params()` (7+ Zweige) vergeben. Das war wartungsintensiv und wissenschaftlich fragwurdig: Coding-Benchmarks laufen deterministisch (`temp=0.0`), wahrend Reasoning-Benchmarks Sampling brauchen (`temp=0.6–1.0`).
+
+**Losung (Variante C+):** Die Temperatur wird jetzt von der **Benchmark-Kategorie** bestimmt, nicht vom Modell:
+
+```
+BENCHMARK_CATEGORY_DEFAULTS  (global, 4 Eintraege)
+  ├── "coding":    temp=0.0,  top_p=1.0,   max_tokens=2048, enable_thinking=False
+  ├── "math":      temp=0.7,  top_p=0.95,  max_tokens=8192, enable_thinking=True
+  ├── "knowledge": temp=0.0,  top_p=1.0,   max_tokens=2048, enable_thinking=False
+  └── "agentic":   temp=0.3,  top_p=0.95,  max_tokens=4096, enable_thinking=False
+                          │
+                 MODEL_TEMP_OVERRIDES  (additiver Merge)
+                          │
+              (z.B. phi-4-reasoning: temp=0.8, top_k=50)
+                          │
+               --thinking-Flag  (forciert enable_thinking)
+```
+
+**Kategorie-Mapping:**
+
+| Pipeline | Benchmarks | Kategorie |
+|----------|------------|-----------|
+| Custom | DS1000, CoderEval | `coding` |
+| EvalPlus | HumanEval+, MBPP+ | `coding` |
+| LM-Eval | ARC-Challenge, HellaSwag, TruthfulQA | `knowledge` |
+| LM-Eval | MATH-500 | `math` |
+| LM-Eval | IFEval | `agentic` |
+| Agentic | tool-eval-bench | `agentic` |
+
+**Modell-Overrides** (nur bei Hersteller-Empfehlung vs. Kategorie-Default):
+
+| Pattern | Uberschreibt | Grund |
+|---------|-------------|-------|
+| `phi-4-reasoning` | temp=0.8, top_k=50 | Model Card: "do_sample=True fur alle Tasks" |
+| `gpt-oss` | temp=1.0, top_k=0, stop/Harmony | Harmony-Format setzt Sampling voraus |
+| `magistral` | temp=0.7 | Mistral-Empfehlung |
+| `ministral` | temp=0.7 | Mistral-Empfehlung |
+| `nemotron` | temp=0.7 | [THINK]-Token-basiertes Reasoning |
+| `apriel` | temp=0.6 | [BEGIN FINAL RESPONSE]-Format |
+| `deepseek` | temp=0.6, min_p=0.02 | Reasoning braucht moderate Temp |
+| `qwen3.6` | enable_thinking=False | Thinking-Tokens blockieren Token-Budget |
+| `qwen3.5` | temp=0.2, no_system_msg | Systemlose Prompt-Einbettung |
+| `gemma` | enable_thinking=False | Thinking stort Coding-Benchmarks |
+
+**Merge-Reihenfolge** (hohere gewinnt):
+1. `BENCHMARK_CATEGORY_DEFAULTS[category]` – globaler Default
+2. `MODEL_TEMP_OVERRIDES[pattern]` – Modell-Override (additiv, per Substring-Match)
+3. `--thinking` CLI-Flag – forciert `enable_thinking=True` fur Reasoning-Modelle
+
+**Umsetzung:**
+- `benchmark_config.py`: `get_model_config(model_key, category, thinking)` – einzige Merge-Funktion
+- `custom_benchmark_v13.py`: `_get_model_config()` delegiert an `get_model_config()`; benchmark_category wird im `benchmark_model()` via `get_benchmark_category(benchmark_name)` ermittelt
+- `run_benchmarks_v13.py`: `_get_lmeval_params()` leitet category aus `bench_name` ab und ruft `get_model_config()` – die alte if-else-Kaskade entfallt
+
+### 2.10 Fehlerbehandlung
 
 | Fehler                  | Behandlung                              |
 |-------------------------|-----------------------------------------|
@@ -408,10 +459,12 @@ bleibt das Modell geladen – nützlich bei vielen kleinen Benchmarks, aber risk
 | Befehl | Herkunft | Funktion |
 |--------|----------|----------|
 | `compare` | Bisher embedded Python in `sync_model_configs.ps1` | Registry vs LMS vs JSON-Configs vergleichen |
-| `add` | Bisher embedded Python in `sync_model_configs.ps1` | Neue LMS-Modelle in Registry aufnehmen (canonical Key = `publisher/model-name`) |
-| `configs` | Bisher embedded Python in `sync_model_configs.ps1` | `load.fields` (offloadRatio, numParallelSessions) in JSON-Configs schreiben |
+| `add` | Bisher embedded Python in `sync_model_configs.ps1` | Neue LMS-Modelle in Registry aufnehmen (canonical Key = `publisher/model-name`), np via `_infer_num_parallel()` |
+| `configs` | Bisher embedded Python in `sync_model_configs.ps1` | `load.fields` (offloadRatio, numParallelSessions, useUnifiedKvCache) in JSON-Configs schreiben |
+| `fix-np` | **NEU 17.07.** | `num_parallel` für ALLE Einträge anhand Architektur + Model-Key neu setzen (`_infer_num_parallel()`) |
+| `fix-ctx` | **NEU 17.07.** | `context_length` für ALLE Einträge anhand aktueller np-/KV-Quant-Werte neu berechnen |
 | `sync-ctx` | `sync_context_length.py` | `context_length` aus JSON-Configs in Registry uebernehmen |
-| `fill-ctx` | `fmt_registry.py` | Fehlende `context_length: 16384` in der Registry erganzen (size-basierte Regel) |
+| `fill-ctx` | `fmt_registry.py` | Fehlende `context_length` in der Registry ergänzen (size-basierte Formel) |
 | `fill-size` | **NEU 15.07.** | `file_size_bytes` aus LMS-Cache fur Registry-Eintrage ohne size erganzen |
 | `migrate-keys` | **NEU 15.07.** | Eintrage ohne Publisher-Prafix auf `publisher/model-name` umstellen (119 Keys migriert) |
 | `fmt` | `fmt_registry.py` | Leerzeilen normalisieren (keine innerhalb, eine zwischen Eintragen) |
@@ -433,8 +486,12 @@ python registry_tool.py sync-ctx      # Nur context_length syncen
 | Feld | Typ | Default | Beschreibung |
 |------|-----|---------|-------------|
 | `offload` | int (0-1) | 1 | GPU-Offload-Ratio (1 = voller GPU-Offload) |
-| `num_parallel` | int | 1 (Dense) / 4 (MoE) | Max Concurrent Prediction Sessions |
-| `context_length` | int | 16384 | Kontextlange aus JSON-Config (Default bei fehlendem Eintrag) |
+| `num_parallel` | int | MoE=4, Dense=1, ERNIE=1, GPT-OSS=4 | Max Concurrent Prediction Sessions (via `_infer_num_parallel()`) |
+| `k_cache` | str | `q8_0` | KV-Cache-Quantisierung (K) – Gemma-4/GPT-OSS: `f16` |
+| `v_cache` | str | `iq4_nl` | KV-Cache-Quantisierung (V) – Gemma-4/GPT-OSS: `f16` |
+| `file_size_bytes` | int | – | GGUF-Dateigröße (für context_length-Formel + useUnifiedKvCache) |
+| `context_length` | int | Formel-basiert | Aus `file_size_bytes`, np, KV-Quant berechnet (Default 16384 bei fehlender Größe) |
+| `useUnifiedKvCache` | bool | `<9 GB = false` | Wird via `configs` in JSON-Config geschrieben (nicht in Registry) |
 
 **Leerzeilen-Formatierung:** Innerhalb eines Eintrags keine Leerzeilen, zwischen Eintragen genau eine. Wird automatisch von `registry_tool.py fmt` bzw. `save_registry()` in `registry_tool.py` sichergestellt.
 
@@ -537,16 +594,20 @@ exec_sandboxed(code, timeout=30)
 
 **Modell-ID:** `model = model_info.get("_api_model") or model_key` - exakte ID aus `lms ps`.
 
-**Parameter pro Modellklasse (via `--gen_kwargs`) (v13):**
+**Parameter via `--gen_kwargs` (v13, Variante C+ p6):**
+Seit p6 werden Sampling-Parameter **benchmark-kategoriebasiert** vergeben. Die Kategorie-Defaults
+aus `BENCHMARK_CATEGORY_DEFAULTS` werden durch `MODEL_TEMP_OVERRIDES` (modellspezifisch) ergänzt.
+Siehe §2.9 für Details.
 
-| Klasse | temperature | top_p | max_tokens | enable_thinking | Besonderheit |
-|--------|-------------|-------|------------|-----------------|--------------|
-| Default | 0.0 | 1.0 | 1024 | None | greedy |
-| Reasoning | 0.1 | 0.9 | - | per `--thinking` | min_p=0.02, Timeout x2 |
-| Gemma 4 | 0.0 | 1.0 | 4096 | per `--thinking` | Thinking aktivierbar fur MATH-500 |
-| Qwen3.6 | 0.1 | 0.9 | 8192 | False (erzwungen) | Thinking-Tokens blockieren Token-Budget |
-| GPT-OSS | 1.0 | 1.0 | 4096 | None | temperature=1.0, top_k=0, until=`<|return|>`/`<|call|>` |
-| Qwen3.5 | 0.2 | 0.9 | - | False (erzwungen) | top_k=20, no_system_msg |
+| Kategorie | temperature | top_p | max_tokens | enable_thinking |
+|-----------|-------------|-------|------------|-----------------|
+| **coding** | 0.0 | 1.0 | 2048 | False |
+| **math** | 0.7 | 0.95 | 8192 | True |
+| **knowledge** | 0.0 | 1.0 | 2048 | False |
+| **agentic** | 0.3 | 0.95 | 4096 | False |
+
+Modell-Overrides (aus `MODEL_TEMP_OVERRIDES`) überschreiben einzelne Felder, z.B.:
+`deepseek` → temp=0.6, min_p=0.02 | `gpt-oss` → temp=1.0, top_k=0 | `qwen3.6` → enable_thinking=False
 
 **Wichtig (v13):** `--thinking` hat NUR Wirkung bei:
 - **Gemma 4** (fur MATH-500) – aktiviert `<|channel>thought` Tags
@@ -967,7 +1028,13 @@ pytest tests/ -v
 | 05.07. | `custom_benchmark_v12.py`                     | v12 aus v11: Stale Refs gefixt, EXCLUDE_KEYWORDS aus Config |
 | 05.07. | `model_manager.py`                            | German/English-Mix bereinigt |
 | 04.07. | `Architektur+Flow_v24.md`                     | Thinking-Mode fur alle Reasoning-Modelle, REASONING_PATTERNS, enable_thinking-Tabelle |
-| 15.07. | `Architektur+Flow_v24.md`                     | p5: MATH-500 SIGALRM-Fix (lm_eval_tasks/minerva_math500/), registry_tool.py fill-size/migrate-keys, Orphan mradermacher/qwen3-30b-a3b-python-coder, consolidate Bugfixes (DS1000/CoderEval pairing, --merge default, IFEval-Metriken) |
+| 15.07. | `Architektur+Flow_v24.md`                     | p5: MATH-500 SIGALRM-Fix, registry_tool.py fill-size/migrate-keys, consolidate Bugfixes |
+| 15.07. | `benchmark_config.py`                        | **Variante C+**: NEU `BENCHMARK_CATEGORY_DEFAULTS`, `MODEL_TEMP_OVERRIDES`, `get_model_config()`. `THINKING_CONFIG` als backward-compat alias. `REASONING_PATTERNS` von custom_benchmark_v13 hierher verlegt. |
+| 15.07. | `custom_benchmark_v13.py`                    | `_get_model_config()` delegiert an `benchmark_config.get_model_config()` mit benchmark_category. `BENCHMARK_CATEGORY_MAP` und `get_benchmark_category()` neu. `REASONING_PATTERNS` entfernt (nach benchmark_config.py). |
+| 15.07. | `run_benchmarks_v13.py`                      | `_get_lmeval_params()` komplett ersetzt: category-basierter lookup statt if-else-Kaskade. 5 obsolete Helper entfernt (`_is_magistral_model`, `_is_phi4_model`, `_is_ministral_model`, `_is_nemotron_model`, `_is_apriel_model`). |
+| 15.07. | `assemble_blueprint.py`                      | `select_blueprint()` erkennt 4 neue Modellfamilien: phi-4-reasoning, ministral, nemotron, apriel. `REASONING_KEYWORDS` um `rnj` erganzt. |
+| 15.07. | `doc-git/blueprint_definitions.yaml`         | 4 neue Reasoning-Blueprints: `phi4_reasoning`, `ministral_reasoning`, `nemotron_reasoning`, `apriel_reasoning`. |
+| 15.07. | `doc-git/model_registry.yaml`                | 4 neue Blueprint-Zuordnungen fur Phi-4-Reasoning-Plus, Ministral, Nemotron, Apriel. |
 | 14.07. | `Architektur+Flow_v24.md`                     | p4: registry_tool.py, new CLI args in consolidate, offload/num_parallel in Registry, Blank-Line-Formatting |
 | 14.07. | `registry_tool.py`                            | **NEU:** Konsolidiert sync_model_configs.ps1-embedded-Python + sync_context_length.py + fmt_registry.py |
 | 14.07. | `sync_model_configs.ps1`                      | Rewrite: ruft registry_tool.py statt embedded Python; neuer Schritt 4 (configs) |
@@ -1013,6 +1080,6 @@ pytest tests/ -v
 ---
 
 *Erstellt: 28.06.2026 | Aktualisiert: 15.07.2026*
-*Basiert auf: v13.0.0-p5 – MATH-500 SIGALRM-Fix, registry_tool.py fill-size/migrate-keys, consolidate Bugfixes*
+*Basiert auf: v13.0.0-p6 – Variante C+ (BENCHMARK_CATEGORY_DEFAULTS), 4 neue Reasoning-Blueprints, _get_lmeval_params() vereinfacht*
 *Bugfix 11.07.: lm_eval `--gen_kwargs` statt `--model_args` fur Generation-Parameter; HellaSwag/MathQA YAML-Fixes*
 *Bugfix 15.07.: MATH-500=0.0% durch Windows-SIGALRM-Inkompatibilitat – eigener Task in lm_eval_tasks/minerva_math500/*

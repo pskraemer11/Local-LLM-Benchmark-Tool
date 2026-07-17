@@ -20,24 +20,31 @@ Gemma 4 Modelle ignorieren `enable_thinking=False` über API, weil `<|channel>th
 "System: Do NOT use thinking or reasoning. Answer directly without <|channel>thought tags."
 ```
 
-## Aktuelle Patterns (MODEL_CONFIG)
+## Aktuelle Patterns (MODEL_TEMP_OVERRIDES)
 
-| Pattern | enable_thinking | max_tokens | Besonderheit |
-|---------|----------------|------------|-------------|
-| default | **False** | 2048 | Default seit 2026-07-11 |
-| qwen3.5 | False | 2048 | temperature=0.2, top_p=0.9, no_system_msg |
-| qwen3.6 | False | 8192 | Reasoning verbraucht sonst Budget → 0% Score |
-| gemma | False | 4096 | + System-Prompt-Override |
+Die `max_tokens` werden seit v13 von der **Benchmark-Kategorie** bestimmt (Variante C+, p6):
+- **coding**: 2048 | **math**: 8192 | **knowledge**: 2048 | **agentic**: 4096
+
+Die folgenden Overrides überschreiben nur abweichende Kategorie-Defaults:
+
+| Pattern | enable_thinking | max_tokens (Override) | Besonderheit |
+|---------|----------------|----------------------|-------------|
+| default | **False** | – | Default seit 2026-07-11 |
+| qwen3.5 | False | – | temperature=0.2, top_p=0.9, no_system_msg |
+| qwen3.6 | False | 8192 | Thinking verbraucht sonst Budget → 0% Score |
+| gemma | False | – | + System-Prompt-Override |
 | deepseek | **True** | 2048 | Einziger Default mit Thinking=an |
 | gpt-oss | False | 4096 | stop: <\|return\|>, <\|call\|> |
 | apriel | False | 4096 | |
 | nemotron | False | 4096 | |
-| falcon3 | False | 2048 | |
-| codestral | False | 2048 | |
-| devstral | False | 2048 | |
-| ernie | False | 2048 | |
-| rnj | False | 2048 | THOUGHT:/RESPONSE: Parsing-Format (hub model.yaml) |
-| python-coder | False | 2048 | Fängt qwen3-*-python-coder u.ä. |
+| falcon3 | False | – | |
+| codestral | False | – | |
+| devstral | False | – | |
+| ernie | False | – | |
+| rnj | False | – | THOUGHT:/RESPONSE: Parsing-Format (hub model.yaml) |
+| python-coder | False | – | Fängt qwen3-*-python-coder u.ä. |
+
+> `–` in der max_tokens-Spalte = Kategorie-Default gilt (kein Override).
 
 ## --thinking Flag Verhalten (v13 Klarstellung)
 
@@ -64,7 +71,7 @@ zwischen Custom-Pipeline und lm_eval-Pipeline.
 Die Modell-Klassifizierung (_is_reasoning_model, _is_qwen3_6_model, _is_gptoss_model, _is_gemma_model, 
 _is_qwen3_5_model) steuert:
 - enable_thinking (True/False/None)
-- max_tokens (2048/4096/8192)
+- Kategorie-Defaults: coding=2048, math=8192, knowledge=2048, agentic=4096
 - temperature/top_p/min_p
 - stop-Strings (until)
 - no_system_msg

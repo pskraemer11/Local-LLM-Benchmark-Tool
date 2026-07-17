@@ -124,116 +124,134 @@ EXCLUDE_KEYWORDS = [
 ]
 
 
-# ── Per-Modell-Defaults (Custom-Pipeline) ──
-# Prio 3.13 (Code-Review_2026-07-12.md §3.1 D2): zentralisierte
-# Thinking-Konfiguration. Vorher gab es zwei Stellen
-# (`custom_benchmark_v13.py:MODEL_CONFIG` und
-# `run_benchmarks_v13.py:_get_lmeval_params`), die ähnliche Defaults
-# hielten. Jetzt ist die Single Source of Truth hier.
-#
-# Struktur: pattern -> {temperature, top_p, top_k, max_tokens, ...}
-#   - "default" wird benutzt wenn kein Pattern matched
-#   - "qwen3.6" hat "enable_thinking": False erzwungen (sonst 0% Score
-#     weil Thinking-Tokens das Token-Budget verbrauchen)
-#   - "gpt-oss" hat "stop": ["<|return|>", "<|call|>"] für Harmony-Format
-THINKING_CONFIG = {
-    "default": {
+# ── Benchmark-Kategorie-Defaults (Variante C+, 2026-07-15) ──
+# Jede Benchmark-Kategorie bekommt pauschal eine Temperatur/Parametrisierung.
+# Das ersetzt die fruehere Per-Modell-Konfiguration (THINKING_CONFIG).
+# Modelle mit abweichenden Hersteller-Empfehlungen werden via MODEL_TEMP_OVERRIDES
+# uebersteuert (additives Merge).
+BENCHMARK_CATEGORY_DEFAULTS = {
+    "coding": {
         "temperature": 0.0,
         "top_p": 1.0,
         "max_tokens": 2048,
         "enable_thinking": False,
     },
-    "qwen3.5": {
-        "temperature": 0.2,
-        "top_p": 0.9,
-        "top_k": 20,
-        "max_tokens": 2048,
-        "enable_thinking": False,
-        "no_system_msg": True,
-    },
-    "qwen3.6": {
-        "temperature": 0.0,
-        "top_p": 1.0,
+    "math": {
+        "temperature": 0.7,
+        "top_p": 0.95,
         "max_tokens": 8192,
-        "enable_thinking": False,
+        "enable_thinking": True,
     },
-    "gemma": {
+    "knowledge": {
         "temperature": 0.0,
         "top_p": 1.0,
+        "max_tokens": 2048,
+        "enable_thinking": False,
+    },
+    "agentic": {
+        "temperature": 0.3,
+        "top_p": 0.95,
         "max_tokens": 4096,
         "enable_thinking": False,
     },
-    "deepseek": {
-        "temperature": 0.1,
-        "top_p": 0.9,
-        "min_p": 0.02,
-        "max_tokens": 2048,
-        "enable_thinking": False,
-    },
-    "glm": {
-        "temperature": 0.0,
-        "top_p": 1.0,
-        "max_tokens": 2048,
-        "enable_thinking": False,
-        "no_system_msg": True,
+}
+
+# Modell-spezifische Overrides (flach, keine Kategorie-Differenzierung).
+# Werden per Substring-Match auf den Model-Key gemerged.
+# Nur hier eintragen, wenn die Hersteller-Empfehlung substantiell vom
+# Kategorie-Default abweicht (z.B. Phi-4 empfiehlt do_sample=True fuer alles).
+MODEL_TEMP_OVERRIDES = {
+    "phi-4-reasoning": {
+        "temperature": 0.8,
+        "top_p": 0.95,
+        "top_k": 50,
     },
     "gpt-oss": {
         "temperature": 1.0,
         "top_p": 1.0,
         "top_k": 0,
-        "max_tokens": 4096,
-        "enable_thinking": False,
         "stop": ["<|return|>", "<|call|>"],
+        "reasoning_effort": "medium",
     },
-    "apriel": {
-        "temperature": 0.0,
-        "top_p": 1.0,
-        "max_tokens": 4096,
-        "enable_thinking": False,
+    "magistral": {
+        "temperature": 0.7,
+        "top_p": 0.95,
+    },
+    "ministral": {
+        "temperature": 0.7,
+        "top_p": 0.95,
     },
     "nemotron": {
-        "temperature": 0.0,
-        "top_p": 1.0,
-        "max_tokens": 4096,
+        "temperature": 0.7,
+        "top_p": 0.95,
+    },
+    "apriel": {
+        "temperature": 0.6,
+        "top_p": 0.95,
+    },
+    "deepseek": {
+        "temperature": 0.6,
+        "top_p": 0.95,
+        "min_p": 0.02,
+    },
+    # Qwen3.6-27b (dicht, nativ thinking): keine enable_thinking-Override → nutzt Kategorie-Defaults
+    "qwen3.6-27b": {
+    },
+    # Qwen3.6-28b-reap (MoE von 35B, instruct): thinking deaktivieren
+    "qwen3.6-28b-reap": {
         "enable_thinking": False,
     },
-    "falcon3": {
-        "temperature": 0.0,
-        "top_p": 1.0,
-        "max_tokens": 2048,
+    # Qwen3.5 braucht no_system_msg
+    "qwen3.5": {
+        "temperature": 0.2,
+        "top_p": 0.9,
+        "top_k": 20,
+        "no_system_msg": True,
         "enable_thinking": False,
     },
-    "codestral": {
-        "temperature": 0.0,
-        "top_p": 1.0,
-        "max_tokens": 2048,
+    # Gemma: enable_thinking=False als Default (nur bei MATH-500 mit --thinking)
+    "gemma": {
         "enable_thinking": False,
     },
-    "devstral": {
-        "temperature": 0.0,
-        "top_p": 1.0,
-        "max_tokens": 2048,
-        "enable_thinking": False,
-    },
-    "ernie": {
-        "temperature": 0.0,
-        "top_p": 1.0,
-        "max_tokens": 2048,
-        "enable_thinking": False,
-    },
-    "rnj": {
-        "temperature": 0.0,
-        "top_p": 1.0,
-        "max_tokens": 2048,
-        "enable_thinking": False,
-    },
-    "python-coder": {
-        "temperature": 0.0,
-        "top_p": 1.0,
-        "max_tokens": 2048,
-        "enable_thinking": False,
+    # LFM (z.B. LFM2-24B-A2B-REAP, LFM2.5-8B): kein Override nötig → Kategorie-Defaults greifen
+    "lfm": {
     },
 }
+
+# Reasoning-Muster fuer enable_thinking-Override via --thinking-Flag
+REASONING_PATTERNS = {
+    "acemath", "deepseek", "gemma", "phi-4-reasoning", "ministral",
+    "nemotron", "apriel", "magistral", "gpt-oss", "reasoning", "think",
+    "r1", "rnj", "qwq", "cascade", "cot", "qwen3.6-27b",
+}
+
+
+def get_model_config(model_key: str, category: str = "coding", thinking: bool = False) -> dict:
+    """Merge category defaults + model override + thinking flag.
+    
+    Priority (lower = higher):
+      1. BENCHMARK_CATEGORY_DEFAULTS[category]  (Basis)
+      2. MODEL_TEMP_OVERRIDES[pattern]           (additiver Merge)
+      3. thinking=True + REASONING_PATTERNS      (force enable_thinking)
+    """
+    key_lower = model_key.lower() if model_key else ""
+    cat = category if category in BENCHMARK_CATEGORY_DEFAULTS else "coding"
+    config = dict(BENCHMARK_CATEGORY_DEFAULTS[cat])
+    # Apply model override (flacher Merge)
+    for pattern, override in MODEL_TEMP_OVERRIDES.items():
+        if pattern in key_lower:
+            config.update(override)
+            break
+    # Thinking-Flag: force enable_thinking=True fuer Reasoning-Modelle
+    if thinking and any(p in key_lower for p in REASONING_PATTERNS):
+        config["enable_thinking"] = True
+    return config
+
+
+# ── Backward-Compat: THINKING_CONFIG bleibt als Alias ──
+# Wird noch von custom_benchmark_v13.py importiert (MODEL_CONFIG = THINKING_CONFIG).
+# Neu: Nutze get_model_config() statt direktem Dict-Zugriff.
+THINKING_CONFIG = BENCHMARK_CATEGORY_DEFAULTS
 
 LB_MEANS_BLACKLIST = {"Granite 4.0 H Tiny"}
 

@@ -3,17 +3,16 @@
 ## Problem
 
 LM Studio setzt `Max Concurrent Predictions` (np/parallel) standardmäßig auf **4**.
-Bei **sequentiellen Batch-Jobs** (z.B. Benchmarks, ein Request nach dem anderen)
-hängt die optimale Einstellung von der **Architektur** ab.
+Bei **sequentiellen Batch-Jobs** (z.B. Benchmarks, ein Request nach dem anderen) hängt die optimale Einstellung von der *LLM-Architektur* und der *Art der Anfragen* ab.
 
 ## Kern-Erkenntnis: Dense vs MoE
 
-| Architektur | Optimales np | Grund |
-|---|---|---|
-| **Dense** (alle Parameter aktiv) | **np=1** | LCP-Cache-Reuse spart Prompt-Tokens; GPU ist bereits ausgelastet |
-| **MoE** (nur Subset aktiv) | **np=4** | LCP-Cache-Reuse nicht unterstützt; Batching füllt die GPU besser |
+| Architektur                      | Optimales np | Grund                                                            |
+|----------------------------------|--------------|------------------------------------------------------------------|
+| **Dense** (alle Parameter aktiv) | **np=1**     | LCP-Cache-Reuse spart Prompt-Tokens; GPU ist bereits ausgelastet |
+| **MoE** (nur Subset aktiv)       | **np=4**     | LCP-Cache-Reuse nicht unterstützt; Batching füllt die GPU besser |
 
-### Messung Dense: Qwen2.5 Coder 14B, zwei Qauntisierungsvarianten (08./09.07.2026)
+### Messung Dense: Qwen2.5 Coder 14B, zwei Quantisierungsvarianten (08./09.07.2026)
 
 | Merkmal                     | Q5_0 (np=4)    | Q6_K (np=1)                |
 |-----------------------------|----------------|----------------------------|
@@ -22,8 +21,7 @@ hängt die optimale Einstellung von der **Architektur** ab.
 | LCP-Cache-Treffer (f_keep)  | Slot-wechselnd | **0.52–0.94**              |
 | VRAM-Auslastung             | Höher          | Geringer (~3-4 GB weniger) |
 
-> **Hinweis:** Q6_K ist rechenintensiver als Q5_0 – die gemessene
-> Geschwindigkeitssteigerung ist **allein auf np=1** zurückzuführen.
+> **Hinweis:** Q6_K ist rechenintensiver als Q5_0 – die gemessene Geschwindigkeitssteigerung ist **allein auf np=1** zurückzuführen.
 
 ### Messung MoE: google_gemma-4-26b-a4b-it Q3_K_S (04./09.07.2026)
 
@@ -33,92 +31,143 @@ hängt die optimale Einstellung von der **Architektur** ab.
 | Prompt Eval    | 21.8 t/s                | 98 t/s (LCP hilft prompt, aber nicht eval) |
 | KV-Cache-Reuse | Nicht unterstützt (MoE) | Nicht unterstützt (MoE)                    |
 
-np=4 ist **2.5× schneller** bei MoE, weil die GPU durch Batchen von 4 Tokens
-besser ausgelastet wird. LCP-Cache-Reuse entfällt bei MoE ohnehin.
+np=4 ist **2.5× schneller** bei MoE, weil die GPU durch Batchen von 4 Tokens besser ausgelastet wird. 
+LCP-Cache-Reuse entfällt bei MoE ohnehin.
 
 ## Mechanismus
 
 ### KV-Cache & Slots
 
-LM Studio nutzt llama.cpp mit **Slot-basiertem KV-Cache**. Jeder Slot
-besitzt einen eigenen KV-Cache-Bereich. Bei np=N werden N Slots alloziert,
-auch wenn nur einer gleichzeitig aktiv ist.
+LM Studio nutzt llama.cpp mit **Slot-basiertem KV-Cache**. Jeder Slot besitzt einen eigenen KV-Cache-Bereich. 
+Bei np=N werden N Slots alloziert, auch wenn nur einer gleichzeitig aktiv ist.
+
+**KV-Cache-VRAM (pro Slot):**
+```
+context_length × layers × KV_heads × head_dim × (bytes_K + bytes_V) / 1024³   (Ergebnis in GB)
+```
+
+**Gesamt-VRAM für KV-Cache = np × VRAM pro Slot**
+
+Beispiel (24B Llama-Dense, ~64 Layer, 8 KV-Heads, head_dim=128, k_cache=q8_0=1B, v_cache=iq4_nl=0.5B):
+- Pro Token: 64 × 8 × 128 × (1 + 0.5) = 98.304 Bytes ≈ **96 KB**
+- Pro Slot bei 49K Kontext: 49.000 × 96 KB ≈ **4,7 GB**
+- **np=4 → 18,8 GB** KV-Cache (vs. np=1 → 4,7 GB)
 
 ### Slot-Selection
 
 Bei jedem Request wählt der Server einen Slot aus:
-
-- **LCP-Similarity** (Longest Common Prefix): Der Prompt des vorherigen
-  Requests wird mit dem aktuellen verglichen. Bei Übereinstimmung wird
-  der KV-Cache des Prefix wiederverwendet (`f_keep` = Anteil aus Cache).
+- **LCP-Similarity** (Longest Common Prefix): Der Prompt des vorherigen Requests wird mit dem aktuellen verglichen. 
+  Bei Übereinstimmung wird der KV-Cache des Prefix wiederverwendet (`f_keep` = Anteil aus Cache).
   **Funktioniert nur bei Dense-Modellen** – MoE unterstützt kein Cache-Reuse.
-- **LRU** (Least Recently Used): Falls kein passender Prefix gefunden wird,
-  wird der am längsten ungenutzte Slot gewählt → Cache verloren.
+- **LRU** (Least Recently Used): Falls kein passender Prefix gefunden wird, wird der am längsten ungenutzte Slot gewählt → Cache verloren.
 
 ### np=1 vs np=4 – Dense
 
-| Aspekt | np=4 | np=1 |
-|---|---|---|
-| Slot-Bestand | 4 Slots | 1 Slot |
-| LCP-Treffer | Zufällig (je nach LRU-Rotation) | **Immer** (keine Alternative) |
-| f_keep | Stark schwankend | 0.80–0.95 (stabil) |
-| KV-Cache VRAM | 4× Grundbedarf | 1× Grundbedarf |
+| Aspekt        | np=4                            | np=1                          |
+|---------------|---------------------------------|-------------------------------|
+| Slot-Bestand  | 4 Slots                         | 1 Slot                        |
+| LCP-Treffer   | Zufällig (je nach LRU-Rotation) | **Immer** (keine Alternative) |
+| f_keep        | Stark schwankend                | 0.80–0.95 (stabil)            |
+| KV-Cache VRAM | 4× Grundbedarf                  | 1× Grundbedarf                |
 
 ### np=1 vs np=4 – MoE
 
-| Aspekt | np=4 | np=1 |
-|---|---|---|
+| Aspekt         | np=4                         | np=1              |
+|----------------|------------------------------|-------------------|
 | GPU-Auslastung | **Hoch** (4 Tokens parallel) | Niedrig (1 Token) |
-| Cache-Reuse | Entfällt (MoE) | Entfällt (MoE) |
-| Eval Speed | **~2-3× höher** | Niedriger |
+| Cache-Reuse    | Entfällt (MoE)               | Entfällt (MoE)    |
+| Eval Speed     | **~2-3× höher**              | Niedriger         |
 
-### Log-Beleg Dense
+## Spezialfall: Benchmarks (lm_eval, EvalPlus) – LCP=0
 
-**Mit np=1:** Ausschließlich LCP-Selection – der Prefix bleibt erhalten:
+### Problem
 
-```
-selected slot by LCP similarity, sim_best = 0.959 (> 0.100 thold), f_keep = 0.936
-selected slot by LCP similarity, sim_best = 0.941 (> 0.100 thold), f_keep = 0.897
-```
-
-`f_keep = 0.936` bedeutet: 93,6 % der Prompt-Tokens wurden aus dem KV-Cache
-übernommen – nur 6,4 % mussten neu prefilled werden.
-
-**Mit np=4:** Häufig LRU-Selection (Slot-Wechsel):
+lm_eval-Benchmarks (ARC-Challenge, HellaSwag, TruthfulQA, MATH-500, IFEval) arbeiten mit **Few-Shot-Prompts**:
 
 ```
-selected slot by LRU, t_last = 337789914
+Frage: Was ist 2+2?
+Antwort: 4
+
+Frage: Was ist 3+5?
+Antwort: 8
+
+Frage: <aktuelle Frage>
+Antwort:
 ```
 
-Auch bei LCP-Treffern wird zwischen verschiedenen Slots (0,1,2,3)
-gewechselt, was den nutzbaren Cache verkleinert.
+Jede Frage hat **andere Few-Shot-Beispiele** (werden zufällig aus dem Trainingsset gezogen oder rotiert). Der Prompt unterscheidet sich daher **ab dem ersten Zeichen**. 
 
-### Log-Beleg MoE
+**Konsequenz:**
+- LCP zwischen Anfrage N und Anfrage N+1 = **0** (kein gemeinsames Präfix)
+- **Kein Slot-Match** möglich
+- Bei **jeder einzelnen Frage** wird der LRU-Slot evicted und der gesamte Prompt von Grund auf neu berechnet (Prefill)
+- Alle N Slots werden durchrotiert, aber nie wiederverwendet
 
-```
-slot print_timing: id 0 | eval time = 81194.31 ms / 174 tokens (2.14 t/s)   # np=1
-slot print_timing: id 3 | eval time = 41573.83 ms / 220 tokens (5.29 t/s)   # np=4
-```
+**np=4 vs np=1 bei Benchmark-Load:**
+
+| Aspekt               | np=4                                   | np=1                     |
+|----------------------|----------------------------------------|--------------------------|
+| LCP-Treffer          | **0** (nie)                            | **0** (nie)              |
+| Effektive Nutzung    | 1 Slot aktiv, 3 Slots ungenutzt        | 1 Slot aktiv             |
+| KV-Cache VRAM        | **4× Grundbedarf** (3× Verschwendung)  | 1× Grundbedarf           |
+| Progressive Slowdown | **Ja** – VRAM-Druck steigt mit der Zeit | Nein (minimaler Cache)   |
+| Ergebnis             | Gleiche Geschwindigkeit wie np=1, aber höherer VRAM-Verbrauch | Gleiche Geschwindigkeit, minimaler VRAM |
+
+### Progressive Verlangsamung
+
+Bei np=4 und Benchmarks wurde ein signifikanter **progresiver Slowdown** beobachtet:
+- Modell `bartowski/mistralai_magistral-small-2509` (24B Dense): Start **15 tok/s → Ende 5 tok/s**
+
+**Ursache:**
+1. Anfangs: KV-Cache fast leer, ~11,5 GB VRAM für Compute-Buffer → 15 tok/s
+2. Mit jeder Frage wächst der Page-Table-basierte KV-Cache in den 4 Slots
+3. Sobald der freie VRAM zur Neige geht, beginnt **Paging über PCIe** zu System-RAM (36× langsamer als GPU-RAM)
+4. Gleichzeitig: Weniger VRAM für Compute-Buffer → kleinere Batches → niedrigerer Durchsatz
+5. Ergebnis: **Drastischer Einbruch** der Token-Rate im Laufe eines Benchmarks
+
+**np=2 mildert** den Effekt (halbiert KV-Cache), beseitigt ihn aber nicht bei langen Benchmarks.
 
 ## Empfehlung
 
-1. **Dense Modelle** (Qwen, Llama, Mistral, Phi, Granite-4.1): **np=1**
-   → LCP-Cache-Reuse senkt Prompt-Overhead, GPU bereits ausgelastet
-2. **MoE Modelle** (Gemma-4, LFM, Qwen3-Coder-REAP, Mellum2,
-   North-Mini-Code, GLM-4.7-Flash-REAP, DeepSeek-Coder-V2-Lite,
-   **Kimi-Linear**): **np=4**
-   → Batching nutzt GPU besser, kein Cache-Reuse zu verlieren
-3. **Ausnahme ERNIE** (`ernie4_5-moe`): **np=1** – Shared-Expert-Architektur +
-   heterogene Text/Vision-Experten verursachen ineffiziente CUDA-Kernel bei np=4.
-   Gemessen 09.07.2026: np=4 → 0.9-2.7 tok/s (DS1000, 35min), np=1 → erwartet ~15-20+ tok/s.
+### Allgemein
+
+1. **Dense Modelle**: **np=1** – LCP-Cache-Reuse senkt Prompt-Overhead (außer bei Benchmarks, s.u.), GPU bereits ausgelastet
+2. **MoE Modelle**: **np=4** – Batching nutzt GPU besser, kein Cache-Reuse zu verlieren
+3. **Ausnahme ERNIE** (`ernie4_5-moe`): **np=1** – Shared-Expert-Architektur + heterogene Text/Vision-Experten verursachen ineffiziente CUDA-Kernel bei np=4
 4. **Interaktiver Chat / parallele Nutzer:** np=4 (Default) belassen
+
+### Für Benchmark-Load (sequentiell, diverse Prompts)
+
+1. **Dense Modelle**: **np=1** – kein LCP-Vorteil bei Benchmarks, aber minimaler KV-Cache-VRAM
+2. **MoE Modelle**: **np=2–4**, je nach verfügbarem VRAM – Batching-Vorteil bleibt, aber VRAM-Grenze beachten
+
+### Context-Length in Abhängigkeit von np
+
+KV-Cache-VRAM skaliert linear mit np:
+```
+VRAM_KV = np × context_length × (Kosten pro Token)
+```
+
+Daher muss die Context-Length bei höherem np **reduziert** werden. Faustregel:
+```
+sichere_context_length = np=1_context_length / np
+```
+
+Beispiel für 16 GB VRAM-GPU (Richtwerte, abhängig von Modellgröße und KV-Quantisierung):
+
+| np  | Maximale Context Length (Richtwert) |
+|-----|-------------------------------------|
+| 1   | wie bisherige Tabelle (16k–262k)    |
+| 2   | ~50 % der np=1-Werte                |
+| 4   | ~25 % der np=1-Werte                |
 
 ## Automatische Konfiguration
 
-Die JSON-Configs in `user-concrete-model-default-config` sind per Skript
-korrigiert: MoE-Modelle haben `numParallelSessions=4`, Dense-Modelle `=1`.
-Die Erkennung erfolgt über das Feld `llm.load.numExperts` – ist es vorhanden,
-gilt das Modell als MoE.
+Die JSON-Configs in `user-concrete-model-default-config` sind per Skript korrigiert: 
+MoE-Modelle haben `numParallelSessions=4`, Dense-Modelle `=1`.
+
+**Hinweis:** Die automatische Konfiguration berücksichtigt keine Benchmark-Spezialfälle.
+Pro Modell kann `num_parallel` in der Registry (`model_registry.yaml`) überschrieben werden.
 
 ## Anhang: Fix für PowerShell-Logging
 

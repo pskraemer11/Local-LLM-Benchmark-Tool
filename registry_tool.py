@@ -138,13 +138,39 @@ def cmd_fill_ctx(default: int = 16384) -> None:
             continue
         size_bytes = entry.get("file_size_bytes")
         if size_bytes and size_bytes > 0:
-            entry["context_length"] = _default_ctx_from_size(int(size_bytes))
+            np_val = entry.get("num_parallel", 1)
+            kc = entry.get("k_cache", "q8_0")
+            vc = entry.get("v_cache", "iq4_nl")
+            entry["context_length"] = _default_ctx_from_size(int(size_bytes), np_val, kc, vc)
         else:
             entry["context_length"] = default
         updated += 1
     if updated:
         save_registry(reg)
     print(f"[OK] {updated} entries got context_length")
+
+
+# ── fix-ctx command ──────────────────────────────────────────────
+
+def cmd_fix_ctx() -> None:
+    """Recompute context_length for ALL entries based on current np and KV-cache settings."""
+    reg = load_registry()
+    updated = 0
+    for entry in reg.values():
+        if not isinstance(entry, dict):
+            continue
+        sb = entry.get("file_size_bytes")
+        if sb and sb > 0:
+            np_val = entry.get("num_parallel", 1)
+            kc = entry.get("k_cache", "q8_0")
+            vc = entry.get("v_cache", "iq4_nl")
+            new_ctx = _default_ctx_from_size(int(sb), np_val, kc, vc)
+            if entry.get("context_length") != new_ctx:
+                entry["context_length"] = new_ctx
+                updated += 1
+    if updated:
+        save_registry(reg)
+    print(f"[OK] {updated} entries updated context_length")
 
 
 # ── fill-size command ──────────────────────────────────────────────
@@ -177,6 +203,27 @@ def cmd_fill_size() -> None:
     if updated:
         save_registry(reg)
     print(f"[OK] {updated} entries got file_size_bytes from LMS")
+
+
+# ── fix-np command ─────────────────────────────────────────────────
+
+def cmd_fix_np() -> None:
+    """Recompute num_parallel for ALL entries based on architecture."""
+    reg = load_registry()
+    updated = 0
+    for key, entry in reg.items():
+        if not isinstance(entry, dict):
+            continue
+        arch = entry.get("arch", "")
+        current = entry.get("num_parallel")
+        expected = _infer_num_parallel(arch, key)
+        if current != expected:
+            entry["num_parallel"] = expected
+            updated += 1
+            print(f"  {key}: np {current} → {expected}  (arch={arch})")
+    if updated:
+        save_registry(reg)
+    print(f"[OK] {updated} entries updated num_parallel")
 
 
 # ── compare command ────────────────────────────────────────────────
@@ -234,6 +281,35 @@ def cmd_compare() -> dict:
     return report
 
 
+# ── np inference helper ────────────────────────────────────────────
+
+def _infer_num_parallel(arch: str, model_key: str = "") -> int:
+    """Determine num_parallel from architecture string + model key.
+    
+    Rules:
+      - ERNIE                 → 1 (CUDA kernel overhead)
+      - arch contains "moe"   → 4
+      - model key contains MoE indicators (a4b, a3b, a2b, kimi, glm flash) → 4
+      - GPT-OSS               → 4 (special: 20B MoE-like Dense, benefits from parallel)
+      - Dense                 → 1 (LCP=0 in benchmarks, wastes VRAM)
+    """
+    al = arch.lower()
+    kl = model_key.lower()
+    if "ernie" in al:
+        return 1
+    if "moe" in al:
+        return 4
+    # Model-key-based MoE detection (arch field may not say "moe")
+    # Gemma-4/Kimi/GLM Flash variants: "a4b", "a3b", "a2b" = active params → MoE
+    # and known-MoE model families
+    if any(x in kl for x in ["a4b", "a3b", "a2b", "kimi", "glm-4.7-flash"]):
+        return 4
+    # GPT-OSS override: despite Dense arch, np=4 is empirically better
+    if "gpt-oss" in kl or "gpt_oss" in kl:
+        return 4
+    return 1
+
+
 # ── add command ────────────────────────────────────────────────────
 
 def cmd_add(models: list[dict]) -> dict:
@@ -263,7 +339,7 @@ def cmd_add(models: list[dict]) -> dict:
             nt += " | Vision"
         if m.get("tools"):
             nt += " | Tool-Use"
-        num_p = 4 if ("MoE" in ar) or is_mtp else 1
+        num_p = _infer_num_parallel(ar, mk)
         size_bytes = m.get("size_bytes", 0) or m.get("sizeBytes", 0)
         entry = {
             "publisher": pub,
@@ -277,7 +353,10 @@ def cmd_add(models: list[dict]) -> dict:
         }
         if size_bytes and size_bytes > 0:
             entry["file_size_bytes"] = int(size_bytes)
-            entry["context_length"] = _default_ctx_from_size(int(size_bytes))
+            entry["context_length"] = _default_ctx_from_size(
+                int(size_bytes), num_p,
+                entry["k_cache"], entry["v_cache"]
+            )
         reg[canonical] = entry
         added.append(canonical)
 
@@ -331,6 +410,13 @@ def cmd_configs() -> dict:
             if "num_parallel" in entry:
                 set_field("llm.load.numParallelSessions", entry["num_parallel"])
 
+            # Unified KV Cache: OFF for models <9 GB (enough VRAM headroom)
+            fs = entry.get("file_size_bytes", 0)
+            if fs and fs < 9_000_000_000:
+                set_field("llm.load.useUnifiedKvCache", False)
+            elif fs and fs > 0:
+                set_field("llm.load.useUnifiedKvCache", True)
+
             with open(jp, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
             updated += 1
@@ -369,13 +455,35 @@ _CTX_FROM_SIZE: list[tuple[float, int]] = [
     (9, 131072),
 ]
 
+# Bytes per KV-cache element per quantization type
+_KV_BYTES: dict[str, float] = {
+    "q8_0": 1.0, "q8_1": 2.0,
+    "q5_1": 0.625, "q5_l": 0.625,
+    "iq4_nl": 0.5,
+    "q4_0": 0.5, "q4_1": 0.625,
+    "f16": 2.0,
+}
 
-def _default_ctx_from_size(size_bytes: int) -> int:
+
+def _default_ctx_from_size(size_bytes: int, np: int = 1,
+                           k_cache: str = "q8_0", v_cache: str = "iq4_nl") -> int:
     gb = size_bytes / 1_000_000_000
     for limit, ctx in _CTX_FROM_SIZE:
         if gb > limit:
-            return ctx
-    return 262144
+            base_ctx = ctx
+            break
+    else:
+        base_ctx = 262144
+
+    if np == 1:
+        return base_ctx
+
+    # Scale: np factor × KV-quantization correction
+    # Baseline: 1.5 B/element (q8_0 + iq4_nl, the most common case)
+    kv_ref = 1.5
+    kv_actual = _KV_BYTES.get(k_cache, 2.0) + _KV_BYTES.get(v_cache, 2.0)
+    scale = (kv_ref / kv_actual) / np
+    return max(2048, int(base_ctx * scale))
 
 
 def _canonical_key(mk: str, pub: str) -> str:
@@ -559,6 +667,10 @@ def main() -> None:
         cmd_sync_ctx()
     elif cmd == "fill-ctx":
         cmd_fill_ctx()
+    elif cmd == "fix-np":
+        cmd_fix_np()
+    elif cmd == "fix-ctx":
+        cmd_fix_ctx()
     elif cmd == "fill-size":
         cmd_fill_size()
     elif cmd == "fmt":

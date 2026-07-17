@@ -82,7 +82,8 @@ from typing import Any, Optional
 #   /v1/models                  GET  – OpenAI-Compat: model list
 #
 from benchmark_config import (PIPELINE_DISCOVERY, TOOL_EVAL_SCENARIO_IDS,
-                             EXCLUDE_KEYWORDS, MMLU_PRO_SUBSETS, MMLU_PRO_ENABLED)
+                             EXCLUDE_KEYWORDS, MMLU_PRO_SUBSETS, MMLU_PRO_ENABLED,
+                             get_model_config, BENCHMARK_CATEGORY_DEFAULTS)
 from model_manager import (
     API_BASE, TIMEOUT_CLI, TIMEOUT_MODEL_READY, PIPELINE_TIMEOUTS,
     get_current_loaded_model, unload_all_models,
@@ -91,7 +92,7 @@ from model_manager import (
 )
 
 # Model classification helper functions
-REASONING_KEYWORDS = ["reasoning", "think", "r1", "rnj"]
+REASONING_KEYWORDS = ["reasoning", "think", "r1", "rnj", "magistral"]
 
 def _is_qwen3_6_model(model_key: str) -> bool:
     return "qwen3.6" in model_key.lower()
@@ -424,45 +425,53 @@ def select_benchmarks_interactive() -> Optional[list[dict[str, Any]]]:
 THINKING_ENABLED = False
 
 def _get_lmeval_params(model_key: str, bench_name: str = "") -> dict[str, Any]:
-    """Returns LM-Eval parameters for the given model class.
+    """Returns LM-Eval parameters via category-based config (Variante C+).
     
-    NOTE: The parameters must match the behavior in custom_benchmark_v13.py
-    (MODEL_CONFIG). Especially important:
-      - Qwen3.6: enable_thinking=False AND max_tokens=8192 (both needed!)
-      - GPT-OSS: temperature=1.0, until=["<|return|>","<|call|>"], top_k=0
-      - Reasoning: min_p=0.02, timeout x2
-      - Thinking mode for MATH-500 via --thinking (all reasoning models)
+    Derives benchmark category from bench_name, then calls
+    get_model_config() which merges BENCHMARK_CATEGORY_DEFAULTS[category]
+    + MODEL_TEMP_OVERRIDES[model] + thinking flag.
     
     Returned keys are split by the caller into --model_args (constructor) and
     --gen_kwargs (generation kwargs). See run_lmeval() for the split logic.
     """
-    gptoss = _is_gptoss_model(model_key)
-    if gptoss:
-        return {"max_tokens": 4096, "temperature": 1.0, "top_p": 1.0, "top_k": 0,
-                "until": ["<|return|>", "<|call|>"],
-                "extra_body": {"chat_template_kwargs": {"enable_thinking": False}}}
-    if _is_qwen3_6_model(model_key):
-        return {"max_tokens": 8192, "temperature": 0.0, "top_p": 1.0, "until": [],
-                "extra_body": {"chat_template_kwargs": {"enable_thinking": False}}}
-    if _is_qwen3_5_model(model_key):
-        return {"temperature": 0.2, "top_p": 0.9, "top_k": 20,
-                "extra_body": {"chat_template_kwargs": {"enable_thinking": False}}}
-    if _is_gemma_model(model_key):
-        base = {"max_tokens": 4096, "temperature": 0.0, "top_p": 1.0, "until": [],
-                "extra_body": {"chat_template_kwargs": {"enable_thinking": False}}}
-        if THINKING_ENABLED and bench_name == "MATH-500":
-            return {**base, "max_tokens": 8192,
-                    "extra_body": {"chat_template_kwargs": {"enable_thinking": True}}}
-        return base
-    if _is_reasoning_model(model_key):
-        base = {"temperature": 0.1, "top_p": 0.9, "min_p": 0.02,
-                "extra_body": {"chat_template_kwargs": {"enable_thinking": False}}}
-        if THINKING_ENABLED and bench_name == "MATH-500":
-            return {**base, "max_tokens": 8192, "until": [],
-                    "extra_body": {"chat_template_kwargs": {"enable_thinking": True}}}
-        return base
-    return {"max_tokens": 1024, "temperature": 0.0, "top_p": 1.0,
-            "extra_body": {"chat_template_kwargs": {"enable_thinking": False}}}
+    # Derive category from benchmark name
+    bench_name_lower = bench_name.lower()
+    categories = {"coding": {"ds1000", "codereval", "humaneval", "mbpp"},
+                  "math": {"math-500", "math"},
+                  "knowledge": {"arc", "hellaswag", "truthfulqa"},
+                  "agentic": {"ifeval", "agentic"}}
+    category = "coding"
+    for cat, keywords in categories.items():
+        if any(kw in bench_name_lower for kw in keywords):
+            category = cat
+            break
+
+    # Get merged config
+    config = get_model_config(model_key, category=category, thinking=THINKING_ENABLED)
+
+    # Convert to lm_eval format (extra_body wrapping)
+    gen_kwargs = {
+        "temperature": config.get("temperature", 0.0),
+        "top_p": config.get("top_p", 1.0),
+        "max_tokens": config.get("max_tokens", 2048),
+    }
+    if config.get("top_k") is not None:
+        gen_kwargs["top_k"] = config["top_k"]
+    if config.get("min_p") is not None:
+        gen_kwargs["min_p"] = config["min_p"]
+    if config.get("stop"):
+        gen_kwargs["until"] = config["stop"]
+
+    # extra_body for chat_template_kwargs
+    extra_kwargs = {}
+    if config.get("enable_thinking") is not None:
+        extra_kwargs["enable_thinking"] = config["enable_thinking"]
+    if config.get("reasoning_effort") is not None:
+        extra_kwargs["reasoning_effort"] = config["reasoning_effort"]
+    if extra_kwargs:
+        gen_kwargs["extra_body"] = {"chat_template_kwargs": extra_kwargs}
+
+    return gen_kwargs
 
 
 def _build_lmeval_cmd(model_key: str, api_model: str, subset_task: str, per_limit: int, output_dir: str, bench_name: str = "") -> list[str]:
@@ -830,6 +839,7 @@ def run_lmeval(model_info: dict[str, Any], bench: dict[str, Any], limit: int = 5
     ]
     if gen_kwargs:
         cmd.extend(["--gen_kwargs", json.dumps(gen_kwargs, ensure_ascii=False)])
+    # Prio: custom YAML überschreibt built-in (inkl. MATH-500 V2.0 statt V3.0)
     yaml_path = None
     for p in [os.path.join(LMEVAL_TASKS_DIR, f"{task_name}.yaml"),
               os.path.join(LMEVAL_TASKS_DIR, task_name, f"{task_name}.yaml")]:
@@ -837,6 +847,7 @@ def run_lmeval(model_info: dict[str, Any], bench: dict[str, Any], limit: int = 5
             yaml_path = p
             break
     if yaml_path:
+        print(f"  [CFG] Custom task YAML: {yaml_path}")
         cmd.extend(["--include_path", os.path.dirname(yaml_path)])
 
     lm_env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
@@ -892,7 +903,11 @@ def run_lmeval(model_info: dict[str, Any], bench: dict[str, Any], limit: int = 5
                     for metric in ["exact_match,custom-extract",
                                 "bleu_acc,none", "rouge1_acc,none",
                                "exact_match,remove_whitespace",
-                               "exact_match,none", "math_verify,none"]:
+                               "exact_match,none", "math_verify,none",
+                               "inst_level_loose_acc,none",
+                               "inst_level_strict_acc,none",
+                               "prompt_level_loose_acc,none",
+                               "prompt_level_strict_acc,none"]:
                         if metric in task_data:
                             score = task_data[metric]
                             break

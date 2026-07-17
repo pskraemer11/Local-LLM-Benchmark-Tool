@@ -682,23 +682,41 @@ def _find_dir_ci(prefix: str, model_key: str) -> Optional[str]:
     
     Tries in order:
     1. Exact match: {prefix}_{model_key_safe}
-    2. Base key (without @variant)
-    3. Case-insensitive scan of RESULTS_DIR for the prefix
+    2. Case-insensitive exact match
+    3. Prefix scan: find any {prefix}_* dir whose name (after prefix_) starts with safe
+       (handles double-@ variant naming like lmeval_base@var@QUANT)
+    4. Base key fallback (without @variant)
     """
     safe = model_key.replace("/", "_")
-    candidates = [f"{prefix}_{safe}"]
+    target_prefix = f"{prefix}_"
+    
+    # Step 1: exact match
+    exact = f"{target_prefix}{safe}"
+    if os.path.isdir(os.path.join(RESULTS_DIR, exact)):
+        return os.path.join(RESULTS_DIR, exact)
+    
+    # Step 2: case-insensitive exact match
+    exact_lower = exact.lower()
+    for dname in os.listdir(RESULTS_DIR):
+        if dname.lower() == exact_lower and os.path.isdir(os.path.join(RESULTS_DIR, dname)):
+            return os.path.join(RESULTS_DIR, dname)
+    
+    # Step 3: prefix scan – find dir whose content after prefix_ starts with safe
+    # This catches variant-specific dirs with extra @ (e.g. base@var@QUANT)
+    for dname in os.listdir(RESULTS_DIR):
+        if not dname.startswith(target_prefix):
+            continue
+        rest = dname[len(target_prefix):]
+        if rest.lower().startswith(safe.lower()) and os.path.isdir(os.path.join(RESULTS_DIR, dname)):
+            return os.path.join(RESULTS_DIR, dname)
+    
+    # Step 4: base key fallback (without @variant)
     base = model_key.split("@")[0].replace("/", "_")
     if base != safe:
-        candidates.append(f"{prefix}_{base}")
-    for cand in candidates:
-        path = os.path.join(RESULTS_DIR, cand)
-        if os.path.isdir(path):
-            return path
-    # Case-insensitive fallback: scan RESULTS_DIR for prefix match
-    target_lower = candidates[0].lower()
-    for dname in os.listdir(RESULTS_DIR):
-        if dname.lower() == target_lower and os.path.isdir(os.path.join(RESULTS_DIR, dname)):
-            return os.path.join(RESULTS_DIR, dname)
+        base_dir = f"{target_prefix}{base}"
+        if os.path.isdir(os.path.join(RESULTS_DIR, base_dir)):
+            return os.path.join(RESULTS_DIR, base_dir)
+    
     return None
 
 
@@ -770,7 +788,8 @@ def read_lmeval_per_model(model_key: str) -> Optional[Dict[str, float]]:
                 if fname.startswith("results_") and fname.endswith(".json"):
                     fpath = os.path.join(sub, fname)
                     json_files.append(fpath)
-    # Sort by modification time descending (newest first)
+    # Sort by modification time descending (newest first) so stale data
+    # from old runs is overridden by fresh results.
     json_files.sort(key=lambda p: os.path.getmtime(p), reverse=True)
     for fpath in json_files:
         try:
@@ -779,16 +798,18 @@ def read_lmeval_per_model(model_key: str) -> Optional[Dict[str, float]]:
         except Exception:
             continue
         for task_name, task_data in data.get("results", {}).items():
+            alias = {"arc_challenge_chat": "ARC-Challenge",
+                      "hellaswag_gen": "HellaSwag",
+                      "truthfulqa_gen": "TruthfulQA",
+                      "truthfulqa_mc1": "TruthfulQA",
+                      "truthfulqa_mc2": "TruthfulQA",
+                      "ifeval": "IFEval",
+                      "bbh_zeroshot": "BBH",
+                      "minerva_math500": "MATH-500"}.get(task_name, task_name)
+            if alias in results:
+                continue  # keep the newest (first encountered) value
             for metric in METRICS:
                 if metric in task_data:
-                    alias = {"arc_challenge_chat": "ARC-Challenge",
-                              "hellaswag_gen": "HellaSwag",
-                              "truthfulqa_gen": "TruthfulQA",
-                              "truthfulqa_mc1": "TruthfulQA",
-                              "truthfulqa_mc2": "TruthfulQA",
-                              "ifeval": "IFEval",
-                              "bbh_zeroshot": "BBH",
-                              "minerva_math500": "MATH-500"}.get(task_name, task_name)
                     results[alias] = task_data[metric]
                     break
 
@@ -1001,10 +1022,10 @@ def read_data(model_keys: Optional[List[str]] = None, min_sample_size: int = 0,
         tok_speeds = {}
         latencies = []
 
-        # DS1000 – match by model_key
+        # DS1000 – match by model_key (handle missing @variant in CSV)
         ds_scores: List[float] = []
         for mk, fn in ds1000_files.items():
-            if mk == model_key:
+            if mk == model_key or ("@" not in mk and mk.split("@")[0] == model_key.split("@")[0]):
                 ds_score, ds_tps, ds_lat, ds_m = read_custom_csv(os.path.join(RESULTS_DIR, fn),
                                                                   out_scores=ds_scores)
                 if ds_score is not None:
@@ -1016,10 +1037,10 @@ def read_data(model_keys: Optional[List[str]] = None, min_sample_size: int = 0,
             ds_score = ds_tps = None
             ds_m = {}
 
-        # CoderEval – match by model_key
+        # CoderEval – match by model_key (handle missing @variant in CSV)
         ce_scores: List[float] = []
         for mk, fn in codereval_files.items():
-            if mk == model_key:
+            if mk == model_key or ("@" not in mk and mk.split("@")[0] == model_key.split("@")[0]):
                 ce_score, ce_tps, ce_lat, ce_m = read_custom_csv(os.path.join(RESULTS_DIR, fn),
                                                                   out_scores=ce_scores)
                 if ce_score is not None:

@@ -82,7 +82,7 @@ from model_manager import (
     unload_all_models, load_model_via_lms, wait_for_model_ready,
     get_available_models, parse_selection
 )
-from benchmark_config import EXCLUDE_KEYWORDS, THINKING_CONFIG
+from benchmark_config import EXCLUDE_KEYWORDS, get_model_config
 
 import psutil
 import pynvml
@@ -144,11 +144,8 @@ BENCHMARKS = [
 # Prio 3.13 (Code-Review_2026-07-12.md §3.1 D2): zentralisierte
 # Thinking-Konfiguration. Vorher gab es eine doppelte Pflege in
 # `MODEL_CONFIG` (hier) und `_get_lmeval_params()` (im Launcher).
-# Jetzt ist die Single Source of Truth `benchmark_config.THINKING_CONFIG`.
-# Wir behalten `MODEL_CONFIG` als Alias für Backward-Compat.
-MODEL_CONFIG = THINKING_CONFIG
-
-REASONING_PATTERNS = {"acemath", "deepseek", "gemma"}
+# Jetzt in benchmark_config.get_model_config() vereinheitlicht (Variante C+).
+# Siehe BENCHMARK_CATEGORY_DEFAULTS + MODEL_TEMP_OVERRIDES.
 
 def parse_tests_field(tests_field: Any) -> list[str]:
     if isinstance(tests_field, list):
@@ -638,7 +635,8 @@ def _non_streaming_fallback(url: str, body: dict[str, Any], timeout: int) -> tup
 def generate_answer(prompt: Optional[str] = None, model_key: Optional[str] = None, timeout: int = TIMEOUT_HTTP,
                     max_tokens: int = MAX_TOKENS_GENERAL, system_msg: Optional[str] = None, messages: Optional[list[dict[str, Any]]] = None,
                     temperature: float = 0.0, top_p: float = 1.0, top_k: Optional[int] = None, min_p: Optional[float] = None,
-                    enable_thinking: Optional[bool] = None, use_streaming: bool = True, stop: Optional[list[str]] = None,
+                    enable_thinking: Optional[bool] = None, reasoning_effort: Optional[str] = None,
+                    use_streaming: bool = True, stop: Optional[list[str]] = None,
                     response_format: Optional[dict] = None) -> tuple[Optional[str], float, int, int, float, int, Optional[str], Optional[str]]:
     if messages is None:
         messages = []
@@ -656,9 +654,14 @@ def generate_answer(prompt: Optional[str] = None, model_key: Optional[str] = Non
         body["top_k"] = top_k
     if min_p is not None:
         body["min_p"] = min_p
+    extra_chat_kwargs = {}
     if enable_thinking is not None:
+        extra_chat_kwargs["enable_thinking"] = enable_thinking
+    if reasoning_effort is not None:
+        extra_chat_kwargs["reasoning_effort"] = reasoning_effort
+    if extra_chat_kwargs:
         body.setdefault("extra_body", {})
-        body["extra_body"]["chat_template_kwargs"] = {"enable_thinking": enable_thinking}
+        body["extra_body"]["chat_template_kwargs"] = extra_chat_kwargs
     # Gemma 4: <|channel>thought tag is hardcoded in GGUF jinja template,
     # extra_body override is ignored. Force-disable via system prompt.
     if enable_thinking is False and model_key and "gemma" in model_key.lower():
@@ -1305,33 +1308,28 @@ def evaluate_code(generated_code: str, entry_point: str, tests_field: Any, refer
     return passed / total if total > 0 else 1.0, f"Tests: {passed}/{total}"
 
 
-def _get_model_config(model_key: Optional[str], thinking: bool = False) -> dict[str, Any]:
-    key_lower = model_key.lower() if model_key else ""
-    # First pass: find a specific MODEL_CONFIG entry that matches.
-    # If the model is also in REASONING_PATTERNS, the thinking=True
-    # override is applied (Bug fix 12.07.2026: previously the override
-    # was only applied for matched entries, not for the default fallback.
-    # This meant models like "acemath-7b" — which are in
-    # REASONING_PATTERNS but NOT in MODEL_CONFIG — silently lost the
-    # thinking=True setting).
-    for pattern, cfg in MODEL_CONFIG.items():
-        if pattern in key_lower:
-            cfg_copy = dict(cfg)
-            if thinking and any(p in key_lower for p in REASONING_PATTERNS):
-                cfg_copy["enable_thinking"] = True
-            return cfg_copy
-    # Second pass: fall back to the default config. Apply the
-    # thinking=True override if the model is in REASONING_PATTERNS.
-    cfg_copy = dict(MODEL_CONFIG["default"])
-    if thinking and any(p in key_lower for p in REASONING_PATTERNS):
-        cfg_copy["enable_thinking"] = True
-    return cfg_copy
+def _get_model_config(model_key: Optional[str], benchmark_category: str = "coding", thinking: bool = False) -> dict[str, Any]:
+    """Get merged config via benchmark_config.get_model_config()."""
+    return get_model_config(model_key or "", category=benchmark_category, thinking=thinking)
 
 
-def run_task(task: dict[str, Any], task_type: str, model_key: Optional[str] = None, api_model: Optional[str] = None, model_config: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+# ── Benchmark-Name → Kategorie-Mapping (Custom-Pipeline) ──
+# DS1000 und CoderEval sind beide Coding-Benchmarks.
+BENCHMARK_CATEGORY_MAP = {
+    "DS1000": "coding",
+    "CoderEval": "coding",
+}
+
+
+def get_benchmark_category(benchmark_name: str) -> str:
+    return BENCHMARK_CATEGORY_MAP.get(benchmark_name, "coding")
+
+
+def run_task(task: dict[str, Any], task_type: str, model_key: Optional[str] = None, api_model: Optional[str] = None,
+             model_config: Optional[dict[str, Any]] = None, benchmark_category: str = "coding") -> dict[str, Any]:
     prompt = task["prompt"]
     if model_config is None:
-        model_config = _get_model_config(model_key, thinking=THINKING_MODE)
+        model_config = _get_model_config(model_key, benchmark_category=benchmark_category, thinking=THINKING_MODE)
 
     gen_kwargs = {
         "model_key": api_model or model_key,
@@ -1340,7 +1338,8 @@ def run_task(task: dict[str, Any], task_type: str, model_key: Optional[str] = No
         "top_k": model_config.get("top_k"),
         "min_p": model_config.get("min_p"),
         "enable_thinking": model_config.get("enable_thinking"),
-        "stop": STOP_TOKENS_CODING,
+        "reasoning_effort": model_config.get("reasoning_effort"),
+        "stop": model_config.get("stop", STOP_TOKENS_CODING),
     }
 
     no_system_msg = model_config.get("no_system_msg", False)
@@ -1477,9 +1476,10 @@ def benchmark_model(model_info: Any, tasks: list[dict[str, Any]], task_type: str
     model_key = model_info["key"] if is_dict else model_info
     # Prefer exact API ID, fall back to model_key
     api_model = model_info.get("_api_model") if is_dict else model_key
-    model_config = _get_model_config(model_key, thinking=THINKING_MODE)
+    benchmark_category = get_benchmark_category(benchmark_name)
+    model_config = _get_model_config(model_key, benchmark_category=benchmark_category, thinking=THINKING_MODE)
     print(f"\n{'=' * 60}")
-    print(f"  Benchmark: {benchmark_name}")
+    print(f"  Benchmark: {benchmark_name} ({benchmark_category})")
     print(f"  Model:     {display_name}")
     print(f"  Tasks:     {len(tasks)}")
     print(f"{'=' * 60}")

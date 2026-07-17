@@ -58,9 +58,12 @@ python assemble_blueprint.py assemble   # → Prompt geschrieben
 | `capabilities` | Model-Name (vl/vision/ocr, coder/code)                   | `qwen2.5-coder-14b` → `[coding, text]` |
 | `blueprint`    | Aus reasoning + capabilities                             | `thinking` → `reasoning_assistant`     |
 | `truncation`   | contextLength aus JSON-Config                            | `16384` (≥8192) → `medium`             |
-| `offload`      | Default 1 (voller GPU-Offload) bei `add` / `fill-ctx`    | `1`                                    |
-| `num_parallel` | 4 bei MoE-Architektur, sonst 1                           | `4` (MoE) / `1` (Dense)               |
-| `context_length` | Aus JSON-Config via `sync-ctx`, Default 16384 via `fill-ctx` | `16384`                             |
+| `offload`      | Default 1 (voller GPU-Offload) bei `add` / `fill-ctx`        | `1`                                              |
+| `num_parallel` | MoE=4 (außer ERNIE→1), Dense=1, GPT-OSS=4                   | `4` (MoE) / `1` (Dense) / `1` (ERNIE)              |
+| `k_cache`      | `q8_0` (Default), Gemma-4/GPT-OSS = `f16`                   | `q8_0`, `f16`                                    |
+| `v_cache`      | `iq4_nl` (Default), Gemma-4/GPT-OSS = `f16`                 | `iq4_nl`, `q5_1`, `f16`                          |
+| `context_length` | Per Formel aus `file_size_bytes`, `num_parallel`, KV-Quant | `16384` (Default bei fehlender Größe)             |
+| `useUnifiedKvCache` | `<9 GB Datei → false`, sonst `true` (wird via `configs` in JSON geschrieben) | `false` / `true` |
 
 ### Phase C – Nur bei Spezialfällen
 
@@ -100,6 +103,15 @@ mkdir -p ~/.lmstudio/hub/models/{publisher}/{model-name}/
 ```bash
 # Vollwartung (Registry + Configs)
 python registry_tool.py sync
+
+# np-Korrektur für alle Einträge (nach Architektur-Änderungen)
+python registry_tool.py fix-np
+
+# context_length neu berechnen (z.B. nach np-Änderung)
+python registry_tool.py fix-ctx
+
+# JSON-Configs aus Registry schreiben (offload, np, unified KV cache)
+python registry_tool.py configs
 
 # Regisrty vs LMS vs Configs vergleichen
 python registry_tool.py compare

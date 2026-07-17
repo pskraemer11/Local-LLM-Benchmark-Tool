@@ -34,7 +34,7 @@ INVENTORY_PATH = REPO_ROOT / "prompt_inventory.csv"
 REASONING_KEYWORDS = [
     "r1", "thinker", "thinking", "qwq", "cascade",
     "cot", "reasoning", "reasoning-plus", "reasoningplus", "rnj",
-    "math", "gpt-oss"
+    "math", "gpt-oss", "magistral", "phi-4", "ministral"
 ]
 NON_REASONING_MODELS = [
     "whisper", "flux", "ocr", "translategemma"
@@ -116,7 +116,7 @@ def classify_capabilities(model_name: str, arch: str = "", notes: str = "") -> s
         caps.append("coding")
 
     # Model families with vision + coding support (verified via HF cards)
-    vision_coding_families = ["ministral", "apriel", "kimi", "devstral", "qwen3"]
+    vision_coding_families = ["ministral", "apriel", "kimi", "devstral", "qwen3", "magistral"]
     for fam in vision_coding_families:
         if fam in name_lower:
             if "coding" not in caps:
@@ -129,7 +129,7 @@ def classify_capabilities(model_name: str, arch: str = "", notes: str = "") -> s
     coding_families = ["llama-3", "phi-4", "falcon3", "glm-4.7", "nemotron",
                        "mistral-nemo", "mistral-small", "solar-pro",
                        "qwen2.5", "ernie", "mellum",
-                       "acemath", "mathstral", "numina"]
+                       "acemath", "mathstral", "numina", "gpt-oss"]
     for fam in coding_families:
         if fam in name_lower and "coding" not in caps:
             caps.append("coding")
@@ -161,6 +161,30 @@ def select_blueprint(reasoning: str, capabilities: str, arch: str = "", model_na
         if reasoning == "thinking":
             return "gemma_reasoning"
         return "gemma_assistant"
+
+    # GPT-OSS (Harmony-Format, Configurable Reasoning Effort)
+    if "gpt-oss" in name_lower:
+        return "gptoss_reasoning"
+
+    # Magistral (model-spezifischer System-Prompt mit [THINK]/[/THINK])
+    if "magistral" in name_lower:
+        return "magistral_reasoning"
+
+    # Phi-4-Reasoning-Plus (ChatML, <think>/</think>-Tags, temp=0.8, top_k=50)
+    if "phi-4-reasoning" in name_lower or "phi4-reasoning" in name_lower:
+        return "phi4_reasoning"
+
+    # Ministral Reasoning ([THINK]-Tags wie Magistral)
+    if "ministral" in name_lower and "reasoning" in name_lower:
+        return "ministral_reasoning"
+
+    # Nemotron Cascade ([THINK]-Token-basiertes Reasoning)
+    if "nemotron" in name_lower and "thinking" in name_lower:
+        return "nemotron_reasoning"
+
+    # Apriel Thinker ([BEGIN FINAL RESPONSE]-Format)
+    if "apriel" in name_lower and "thinker" in name_lower:
+        return "apriel_reasoning"
 
     # Reasoning models
     if reasoning == "thinking":

@@ -31,8 +31,21 @@ def process_results(doc: dict, results: list[str]) -> dict[str, int]:
 
 
 def _extract_boxed(text: str) -> str | None:
-    m = re.search(r"\\boxed\{([^}]+)\}", text)
-    return m.group(1) if m else None
+    m = re.search(r"\\boxed\{", text)
+    if not m:
+        return None
+    start = m.end()
+    depth = 1
+    i = start
+    while i < len(text) and depth > 0:
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+        i += 1
+    if depth == 0:
+        return text[start : i - 1]
+    return None
 
 
 def _extract_final_answer(text: str) -> str | None:

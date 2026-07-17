@@ -1,4 +1,4 @@
-# Model Registry â€“ Single Source of Truth
+# Model Registry - Single Source of Truth
 
 # Generated from ~/.lmstudio/.internal/user-concrete-model-default-config
 
@@ -17,7 +17,7 @@ essentialai/rnj-1:
   blueprint: reasoning_assistant
   truncation: full
   num_parallel: 1
-  context_length: 32768
+  context_length: 262144
   file_size_bytes: 8839561735
 
 mistralai/codestral-22b-v0.1:
@@ -33,41 +33,41 @@ mistralai/codestral-22b-v0.1:
   blueprint: coding_agent
   truncation: full
   num_parallel: 1
-  context_length: 32768
+  context_length: 65536
   file_size_bytes: 11935315327
 
 openai/gpt-oss-20b:
   publisher: openai
   hf_url: https://huggingface.co/openai/openai/gpt-oss-20b
   arch: GPT-OSS Dense
-  k_cache: q8_0
-  v_cache: iq4_nl
+  k_cache: f16
+  v_cache: f16
   offload: 1
-  notes: 'Architektur: GPT-OSS Dense | 20B Parameter | Tool-Use | Configurable Reasoning
-    Effort (low/medium/high) | Harmony Response Format'
+  notes: '20B Parameter | Tool-Use | Configurable Reasoning Effort (low/medium/high)
+    | Harmony Response Format'
   reasoning: thinking
-  capabilities: text
-  blueprint: reasoning_assistant
+  capabilities: coding, text
+  blueprint: gptoss_reasoning
   truncation: medium
-  num_parallel: 1
-  context_length: 32768
+  num_parallel: 4
+  context_length: 4608
   file_size_bytes: 12109568811
 
 unsloth/gpt-oss-20b:
   publisher: unsloth
   hf_url: https://huggingface.co/unsloth/unsloth/gpt-oss-20b
   arch: GPT-OSS Dense
-  k_cache: q8_0
-  v_cache: iq4_nl
+  k_cache: f16
+  v_cache: f16
   offload: 1
-  notes: 'Architektur: GPT-OSS Dense | 20B Parameter | Tool-Use | Configurable Reasoning
-    Effort (low/medium/high) | Harmony Response Format'
+  notes: '20B Parameter | Tool-Use | Configurable Reasoning Effort (low/medium/high)
+    | Harmony Response Format'
   reasoning: thinking
-  capabilities: text
-  blueprint: reasoning_assistant
+  capabilities: coding, text
+  blueprint: gptoss_reasoning
   truncation: medium
-  num_parallel: 1
-  context_length: 32768
+  num_parallel: 4
+  context_length: 4608
   file_size_bytes: 12109568811
 
 unsloth/phi-4:
@@ -78,12 +78,12 @@ unsloth/phi-4:
   v_cache: iq4_nl
   offload: 1
   notes: 'Architektur: Llama Dense | 15B Parameter'
-  reasoning: instruct
+  reasoning: thinking
   capabilities: coding, text
-  blueprint: coding_agent
+  blueprint: reasoning_coding
   truncation: full
   num_parallel: 1
-  context_length: 32768
+  context_length: 98304
   file_size_bytes: 10412707392
 
 mradermacher/acemath-7b-instruct:
@@ -110,10 +110,10 @@ unsloth/apriel-1.5-15b-thinker:
   offload: 1
   reasoning: thinking
   capabilities: vision, coding, text
-  blueprint: reasoning_coding
+  blueprint: apriel_reasoning
   truncation: full
-  notes: "Architektur: Multimodal (Text+Vision) | Depth-upscaled from Pixtral-12B
-    | max. 131K Kontext | Thinking Mode: [BEGIN FINAL RESPONSE]"
+  notes: "Multimodal (Text+Vision) | Depth-upscaled from Pixtral-12B  | max. 131K
+    Kontext | Thinking Mode: [BEGIN FINAL RESPONSE]"
   context_length: 73728
   num_parallel: 1
 
@@ -205,7 +205,7 @@ bartowski/codestral-rag-19b-pruned:
   capabilities: coding, text
   blueprint: coding_agent
   truncation: medium
-  context_length: 32768
+  context_length: 16384
   num_parallel: 1
   file_size_bytes: 14421773824
 
@@ -242,24 +242,6 @@ thebloke/deepseek-coder-6.7b-instruct:
   num_parallel: 1
   context_length: 32768
 
-"['bartowski', 'lmstudio-community']/deepseek-coder-v2-lite-instruct":
-  publisher: ["bartowski", "lmstudio-community"]
-  hf_url: "https://huggingface.co/bartowski/DeepSeek-Coder-V2-Lite-Instruct-GGUF"
-  arch: "DeepSeek MoE"
-  quants: [Q5_K_M, Q6_K]
-  experts: 16
-  k_cache: "f16"
-  v_cache: "f16"
-  notes: "Architektur: DeepSeek MoE; 16 MoE-Experten, davon 2 aktiv; 2,4B aktive Parameter;
-    Kontexlänge max. 128K; Code-spezialisiert"
-  reasoning: instruct
-  capabilities: coding, text
-  blueprint: coding_agent
-  truncation: medium
-  context_length: 32768
-  offload: 1
-  num_parallel: 4
-
 ggml-org/deepseek-ocr:
   publisher: "ggml-org"
   hf_url: "https://huggingface.co/ggml-org/DeepSeek-OCR-GGUF"
@@ -274,19 +256,19 @@ ggml-org/deepseek-ocr:
   offload: 1
   num_parallel: 1
 
-"['lmstudio-community', 'unsloth']/deepseek-r1-distill-qwen-14b":
-  publisher: ["lmstudio-community", "unsloth"]
+deepseek-r1-distill-qwen-14b:
+  publisher: "lmstudio-community"
   hf_url: "https://huggingface.co/lmstudio-community/DeepSeek-R1-Distill-Qwen-14B-GGUF"
-  quants: [Q6_K, Q4_K_M, Q5_K_M]
+  quants: Q6_K
   arch: "DeepSeek R1 Distill"
-  k_cache: "iq4_nl"
-  v_cache: "iq4_nl"
+  k_cache: "q8_0"
+  v_cache: "q5_1"
   notes: "Architektur: DeepSeek R1 Distill"
   reasoning: thinking
   capabilities: text
   blueprint: reasoning_assistant
-  truncation: medium
-  context_length: 32768
+  truncation: full
+  context_length: 65536
   offload: 1
   num_parallel: 1
 
@@ -314,12 +296,12 @@ unsloth/devstral-small-2-24b-instruct-2512:
   k_cache: "q5_1"
   v_cache: "iq4_nl"
   offload: 1
-  notes: "Architektur: Mistral Dense (Coder)"
+  notes: "Architektur: Mistral Dense (Coder); 12.2 GB"
   reasoning: instruct
   capabilities: coding, vision, text
   blueprint: coding_agent
   truncation: full
-  context_length: 32768
+  context_length: 49152
   num_parallel: 1
   file_size_bytes: 12156681873
 
@@ -354,36 +336,6 @@ mistralai/devstral-small-2-2512:
   offload: 1
   num_parallel: 1
 
-mistralai/devstral-small-2505:
-  publisher: "mistralai"
-  hf_url: "https://huggingface.co/mistralai/devstral-small-2505"
-  arch: "Mistral Dense (Coder)"
-  k_cache: "q5_1"
-  v_cache: "f16"
-  notes: "Architektur: Mistral Dense (Coder)"
-  reasoning: instruct
-  capabilities: coding, vision, text
-  blueprint: coding_agent
-  truncation: medium
-  context_length: 32768
-  offload: 1
-  num_parallel: 1
-
-mistralai/devstral-small-2507:
-  publisher: "mistralai"
-  hf_url: "https://huggingface.co/mistralai/devstral-small-2507"
-  arch: "Mistral Dense (Coder)"
-  k_cache: "q5_1"
-  v_cache: "q8_0"
-  notes: "Architektur: Mistral Dense (Coder)"
-  reasoning: instruct
-  capabilities: coding, vision, text
-  blueprint: coding_agent
-  truncation: medium
-  context_length: 32768
-  offload: 1
-  num_parallel: 1
-
 "['lmstudio-community', 'unsloth']/ernie-4.5-21b-a3b-pt":
   publisher: ["lmstudio-community", "unsloth"]
   hf_url: "https://huggingface.co/lmstudio-community/ERNIE-4.5-21B-A3B-PT-GGUF"
@@ -392,15 +344,14 @@ mistralai/devstral-small-2507:
   experts: 14
   k_cache: "q8_0"
   v_cache: "q5_1"
-  notes: "Architektur: ERNIE MoE | Experts: 64 (Text) + 64 (Vision), activ: 2x6 (+2
-    shared)"
+  notes: "Experts: 64 (Text) + 64 (Vision), activ: 2x6 (+2 shared)"
   reasoning: instruct
   capabilities: vision, coding, text
   blueprint: coding_agent
   truncation: medium
-  context_length: 32768
+  context_length: 49152
   offload: 1
-  num_parallel: 4
+  num_parallel: 1
   file_size_bytes: 12475596576
 
 unsloth/ernie-4.5-21b-a3b-thinking:
@@ -411,20 +362,19 @@ unsloth/ernie-4.5-21b-a3b-thinking:
   experts: 14
   k_cache: "q8_0"
   v_cache: "q5_1"
-  notes: "Architektur: ERNIE MoE | Experts: 64 (Text) + 64 (Vision), activ: 2x6 (+2
-    shared)"
+  notes: "Experts: 64 (Text) + 64 (Vision), activ: 2x6 (+2 shared)"
   reasoning: thinking
   capabilities: vision, coding, text
   blueprint: reasoning_coding
   truncation: full
   offload: 1
-  num_parallel: 4
+  num_parallel: 1
   context_length: 32768
 
-"['lmstudio-community', 'tiiuae']/falcon3-10b-instruct":
-  publisher: ["lmstudio-community", "tiiuae"]
+tiiuae/falcon3-10b-instruct:
+  publisher: tiiuae
   hf_url: "https://huggingface.co/lmstudio-community/Falcon3-10B-Instruct-GGUF"
-  quants: [Q8_0, q8_0]
+  quants: Q8_0
   arch: "Falcon3 Dense"
   notes: "Architektur: Falcon3 Dense"
   reasoning: instruct
@@ -433,7 +383,7 @@ unsloth/ernie-4.5-21b-a3b-thinking:
   truncation: full
   offload: 1
   num_parallel: 1
-  context_length: 32768
+  context_length: 98304
   file_size_bytes: 10955241088
 
 unsloth/flux-2-klein-9b:
@@ -446,7 +396,7 @@ unsloth/flux-2-klein-9b:
   capabilities: vision
   blueprint: none
   truncation: minimal
-  context_length: 2048
+  context_length: 262144
   offload: 1
   num_parallel: 1
   file_size_bytes: 7865424160
@@ -457,11 +407,11 @@ google/gemma-4-12b-qat:
   quants: [Q4_0]
   arch: "Gemma-4 (12B)"
   template: "gemma4_12b_template_minijinja.jinja"
-  k_cache: "q8_0"
-  v_cache: "iq4_nl"
+  k_cache: "f16"
+  v_cache: "f16"
   offload: 1
-  notes: "Architektur: Gemma-4 12B Unified (dense, encoder-free multimodal) |  max.
-    256K Kontext | Text, Image, Audio, Video"
+  notes: "Architektur: Gemma-4 12B Unified (dense, encoder-free multimodal) |  max.\
+    \  256K Kontext | Text, Image, Audio, Video"
   reasoning: instruct
   capabilities: coding, vision, audio, text
   blueprint: gemma_assistant
@@ -477,8 +427,8 @@ mradermacher/gemma-4-19b-a4b-it-reap:
   arch: "Gemma-4 (19B)"
   template: "gemma4-19b-template_minijinja.jinja"
   experts: 18
-  k_cache: "q8_0"
-  v_cache: "q5_1"
+  k_cache: "f16"
+  v_cache: "f16"
   offload: 1
   notes: "Architektur: MoE, REAP-compressed to ~19B | max. 128 Experts | max. 256K
     Kontext | Text, Image (dedicated vision encoder)"
@@ -487,8 +437,8 @@ mradermacher/gemma-4-19b-a4b-it-reap:
   blueprint: gemma_assistant
   truncation: full
   custom_template: true
-  context_length: 65536
-  num_parallel: 1
+  context_length: 4608
+  num_parallel: 4
   file_size_bytes: 12534643616
 
 google/gemma-4-26b-a4b-it-quat:
@@ -498,17 +448,17 @@ google/gemma-4-26b-a4b-it-quat:
   arch: "Gemma-4 (26B)"
   template: "gemma4-26b-template_minijinja.jinja"
   experts: 18
-  k_cache: "q8_0"
-  v_cache: "q5_1"
+  k_cache: "f16"
+  v_cache: "f16"
   offload: 1
   notes: "Architektur: MoE (QAT-optimiert) | Experts: 128 total, 8 active + 1 shared
-    | max. 256K Kontext | Text, Image (dedicated vision encoder ~550M)"
+    | max. 256K Kontext | Text, Image"
   reasoning: instruct
-  capabilities: vision, coding, text
+  capabilities: coding, vision, text
   blueprint: gemma_assistant
   truncation: full
   custom_template: true
-  num_parallel: 1
+  num_parallel: 4
   context_length: 32768
 
 google/gemma-4-26b-a4b-it:
@@ -519,16 +469,18 @@ google/gemma-4-26b-a4b-it:
   template: "gemma4-26b-template_minijinja.jinja"
   experts: 18
   notes: "Architektur: MoE | Experts: 128 total, 8 active + 1 shared | max. 256K Kontext
-    | Text, Image (dedicated vision encoder ~550M)"
+    | Text, Image"
   reasoning: instruct
-  capabilities: vision, coding, text
+  capabilities: coding, vision, text
   blueprint: gemma_assistant
   truncation: full
   custom_template: true
-  context_length: 49152
+  context_length: 3072
   offload: 1
-  num_parallel: 1
+  num_parallel: 4
   file_size_bytes: 13580873493
+  k_cache: f16
+  v_cache: f16
 
 unsloth/gemma-4-26b-a4b-it-ud:
   publisher: "unsloth"
@@ -537,17 +489,17 @@ unsloth/gemma-4-26b-a4b-it-ud:
   arch: "Gemma-4 (26B)"
   template: "gemma4-26b-template_minijinja.jinja"
   experts: 18
-  k_cache: "q8_0"
-  v_cache: "q5_1"
+  k_cache: "f16"
+  v_cache: "f16"
   offload: 1
   notes: "Architektur: MoE (Unsloth UD) | Experts: 128 total, 8 active + 1 shared
-    | max. 256K Kontext | Text, Image (dedicated vision encoder ~550M)"
+    | max. 256K Kontext | Text, Image"
   reasoning: instruct
-  capabilities: vision, coding, text
+  capabilities: coding, vision, text
   blueprint: gemma_assistant
   truncation: full
   custom_template: true
-  num_parallel: 1
+  num_parallel: 4
   context_length: 32768
 
 mradermacher/gemma-4-31b.i1:
@@ -556,8 +508,8 @@ mradermacher/gemma-4-31b.i1:
   quants: [IQ3_M]
   arch: "Gemma-4 (31B)"
   template: "gemma4-26b-template_minijinja.jinja"
-  k_cache: "q8_0"
-  v_cache: "iq4_nl"
+  k_cache: "f16"
+  v_cache: "f16"
   offload: 1
   notes: "Architektur: Gemma-4 31B (dense) | 256K Kontext | Text, Image (dedicated
     vision encoder)"
@@ -575,13 +527,15 @@ google/gemma-4-e4b:
   arch: "Gemma-4 (E4B)"
   offload: 1
   notes: "Architektur: Gemma-4 E4B (dense, Per-Layer Embeddings PLE) | max 128K Kontext
-    | Text, Image, Audio (dedicated vision ~150M + audio ~300M encoders)"
-  capabilities: vision, coding, audio, text
+    | Text, Image, Audio"
+  capabilities: coding, vision, audio, text
   blueprint: gemma_assistant
   truncation: medium
   context_length: 32768
   num_parallel: 1
   reasoning: instruct
+  k_cache: f16
+  v_cache: f16
 
 unsloth/glm-4.7-flash:
   publisher: "unsloth"
@@ -597,7 +551,7 @@ unsloth/glm-4.7-flash:
   capabilities: coding, text
   blueprint: coding_agent
   truncation: full
-  context_length: 32768
+  context_length: 8192
   num_parallel: 4
   file_size_bytes: 13288618336
 
@@ -614,7 +568,7 @@ unsloth/glm-4.7-flash:
   capabilities: coding, text
   blueprint: coding_agent
   truncation: full
-  context_length: 32768
+  context_length: 12288
   offload: 1
   num_parallel: 4
   file_size_bytes: 12337317920
@@ -640,18 +594,18 @@ bartowski/google_gemma-4-26b-a4b-it:
   arch: "Gemma-4 (26B)"
   template: "gemma4-26b-template_minijinja.jinja"
   experts: 9
-  k_cache: "iq4_nl"
-  v_cache: "q8_0"
+  k_cache: "f16"
+  v_cache: "f16"
   offload: 1
   notes: "Architektur: MoE (bartowski repack) | Experts: 128 total, 8 active + 1 shared
-    | max 256K Kontext | Text, Image (dedicated vision encoder ~550M)"
+    | max 256K Kontext | Text, Image"
   reasoning: instruct
-  capabilities: vision, coding, text
+  capabilities: coding, vision, text
   blueprint: gemma_assistant
   truncation: full
   custom_template: true
-  context_length: 32768
-  num_parallel: 1
+  context_length: 3072
+  num_parallel: 4
   file_size_bytes: 13746291840
 
 "['lmstudio-community', 'openai', 'unsloth']/gpt-oss-20b":
@@ -660,34 +614,18 @@ bartowski/google_gemma-4-26b-a4b-it:
   quants: [MXFP4, Q6_K, Q8_0]
   arch: "GPT-OSS MoE"
   experts: 16
-  k_cache: "q8_0"
-  v_cache: "q8_0"
+  k_cache: "f16"
+  v_cache: "f16"
   notes: "Architektur: GPT-OSS MoE | 21B total, 3.6B aktiv | 131K Kontext | Configurable
     Reasoning Effort (low/medium/high) | Harmony Response Format"
   reasoning: thinking
-  capabilities: text
-  blueprint: reasoning_assistant
+  capabilities: coding, text
+  blueprint: gptoss_reasoning
   truncation: medium
-  context_length: 32768
+  context_length: 4608
   offload: 1
   num_parallel: 4
   file_size_bytes: 12109568811
-
-bartowski/granite-20b-code-instruct:
-  publisher: "bartowski"
-  hf_url: "https://huggingface.co/bartowski/granite-20b-code-instruct-GGUF"
-  quants: [Q5_K_S]
-  arch: "Granite-2.0"
-  k_cache: "q8_0"
-  reasoning: instruct
-  capabilities: coding, text
-  blueprint: coding_agent
-  truncation: medium
-  notes: "Architektur: Granite-2.0 | Dense 20B | 8K Kontext | Code-spezialisiert (veraltet,
-    Granite 4.x empfohlen)"
-  context_length: 32768
-  offload: 1
-  num_parallel: 1
 
 ibm-granite/granite-4.0-h-tiny:
   publisher: "ibm-granite"
@@ -697,7 +635,7 @@ ibm-granite/granite-4.0-h-tiny:
   template: "granite-4.0-h-tiny_template.jinja"
   experts: 24
   k_cache: "q8_0"
-  v_cache: "q8_0"
+  v_cache: "q5_1"
   notes: "Architektur: MoE Hybrid (4 Attn + 36 Mamba2) | Experts: 64 total, 6 aktiv
     | max. 128K Kontext | Code-, Math- & Multilingual-Faehigkeiten"
   reasoning: instruct
@@ -737,7 +675,7 @@ unsloth/granite-4.0-h-tiny-ud:
   arch: "Granite-4.1"
   template: "granite-4.1-30b_template.jinja"
   k_cache: "q8_0"
-  v_cache: "q8_0"
+  v_cache: "q5_1"
   offload: 1
   notes: "Architektur: Granite-4.1 | Dense 8B | 131K Kontext | Code-, Math- & Multilingual-Faehigkeiten"
   reasoning: instruct
@@ -783,7 +721,7 @@ unsloth/granite-4.1-8b-ud:
   blueprint: default_chat
   truncation: full
   custom_template: true
-  context_length: 32768
+  context_length: 49152
   num_parallel: 1
   file_size_bytes: 12569273568
 
@@ -803,7 +741,7 @@ mradermacher/granite-4.1-30b-i1:
   blueprint: default_chat
   truncation: full
   custom_template: true
-  context_length: 32768
+  context_length: 49152
   num_parallel: 1
   file_size_bytes: 12569274368
 
@@ -813,13 +751,13 @@ unsloth/januscoder-14b:
   quants: [Q5_K_M, Q6_K]
   arch: "JanusCoder Dense"
   k_cache: "q8_0"
-  v_cache: "q8_0"
+  v_cache: "q5_1"
   notes: "Architektur: JanusCoder Dense | Coder-Modell"
   reasoning: instruct
   capabilities: coding, text
   blueprint: coding_agent
   truncation: full
-  context_length: 32768
+  context_length: 49152
   offload: 1
   num_parallel: 1
   file_size_bytes: 12121938112
@@ -846,7 +784,7 @@ unsloth/januscoder-14b-ud:
   quants: [Q5_K_XL]
   arch: "JanusCoder Dense"
   k_cache: "q8_0"
-  v_cache: "q8_0"
+  v_cache: "q5_1"
   notes: "Architektur: JanusCoder Dense"
   reasoning: instruct
   capabilities: coding, text
@@ -863,14 +801,14 @@ mradermacher/lfm2-24b-a2b-reap.i1:
   arch: "LFM2 MoE"
   experts: 12
   k_cache: "q8_0"
-  v_cache: "q8_0"
+  v_cache: "q5_1"
   offload: 1
   notes: "Architektur: LFM2 MoE | 10,2 GB | max 32 Experts"
   reasoning: instruct
   capabilities: text
   blueprint: default_chat
   truncation: medium
-  context_length: 32768
+  context_length: 22685
   num_parallel: 4
   file_size_bytes: 10155065344
 
@@ -947,10 +885,10 @@ mistralai/magistral-small:
   k_cache: "q5_1"
   v_cache: "f16"
   notes: "Architektur: Magistral Dense; Kleines effizientes Modell von Mistral AI"
-  reasoning: instruct
-  capabilities: text
-  blueprint: default_chat
-  truncation: medium
+  reasoning: thinking
+  capabilities: coding, vision, text
+  blueprint: magistral_reasoning
+  truncation: full
   context_length: 32768
   offload: 1
   num_parallel: 1
@@ -962,10 +900,10 @@ mistralai/magistral-small-2509:
   k_cache: "iq4_nl"
   v_cache: "iq4_nl"
   notes: "Architektur: Magistral Dense; Kleines effizientes Modell von Mistral AI"
-  reasoning: instruct
-  capabilities: text
-  blueprint: default_chat
-  truncation: medium
+  reasoning: thinking
+  capabilities: coding, vision, text
+  blueprint: magistral_reasoning
+  truncation: full
   context_length: 32768
   offload: 1
   num_parallel: 1
@@ -992,7 +930,7 @@ jetbrains/mellum2-12b-a2.5b-instruct:
   arch: "Mellum2 MoE"
   experts: 16
   k_cache: "q8_0"
-  v_cache: "q8_0"
+  v_cache: "q5_1"
   offload: 1
   notes: "Architektur: Mellum2 MoE | Experts: max 64, Activated: 8 per Token"
   reasoning: instruct
@@ -1000,7 +938,7 @@ jetbrains/mellum2-12b-a2.5b-instruct:
   blueprint: coding_agent
   truncation: medium
   num_parallel: 4
-  context_length: 32768
+  context_length: 60494
   file_size_bytes: 8071293600
 
 jetbrains/mellum2-12b-a2.5b-thinking:
@@ -1010,7 +948,7 @@ jetbrains/mellum2-12b-a2.5b-thinking:
   arch: "Mellum2 MoE"
   experts: 16
   k_cache: "q8_0"
-  v_cache: "q8_0"
+  v_cache: "q5_1"
   notes: "Architektur: Mellum2 MoE | Experts: max 64, Activated: 8 per Token"
   reasoning: thinking
   capabilities: coding, text
@@ -1091,12 +1029,13 @@ mradermacher/mimo-vl-7b-sft-2508:
   k_cache: "q5_1"
   v_cache: "iq4_nl"
   offload: 1
-  notes: "max. 262K Kontext | Text+Vision Multimodal | Code- & Tool-Calling-Faehigkeiten"
-  reasoning: instruct
+  notes: "max. 262K Kontext | Text+Vision Multimodal | Code- & Tool-Calling-Faehigkeiten
+    | np=4 (sonst zu langsam)"
+  reasoning: thinking
   capabilities: vision, coding, text
-  blueprint: coding_agent
+  blueprint: reasoning_coding
   truncation: full
-  context_length: 32768
+  context_length: 65536
   num_parallel: 1
   file_size_bytes: 11966462560
 
@@ -1112,7 +1051,7 @@ mradermacher/mimo-vl-7b-sft-2508:
     | Code- & Tool-Calling"
   reasoning: thinking
   capabilities: vision, coding, text
-  blueprint: reasoning_coding
+  blueprint: ministral_reasoning
   truncation: medium
   context_length: 32768
   num_parallel: 1
@@ -1152,16 +1091,16 @@ bartowski/moonshotai_kimi-linear-48b-a3b-instruct:
   hf_url: "https://huggingface.co/moonshotai/Kimi-Linear-48B-A3B-Instruct"
   arch: "Kimi"
   quants: [IQ2_S]
-  experts: 9
-  k_cache: "q8_0"
-  v_cache: "q5_1"
+  experts: 18
+  k_cache: "q5_1"
+  v_cache: "iq4_nl"
   offload: 1
   notes: "# Experts: 256 total; activated: 8 per token + 1 shared"
   reasoning: instruct
   capabilities: coding, vision, text
   blueprint: coding_agent
   truncation: medium
-  context_length: 32768
+  context_length: 10922
   num_parallel: 4
   file_size_bytes: 13967426464
 
@@ -1170,15 +1109,17 @@ mradermacher/kimi-linear-reap-35b-a3b-instruct.i1:
   hf_url: "https://huggingface.co/mradermacher/Kimi-Linear-REAP-35B-A3B-Instruct-i1-GGUF"
   arch: "Kimi MoE (REAP)"
   quants: [IQ3_XXS]
-  experts: 8
+  experts: 18
+  k_cache: "q8_0"
+  v_cache: "q5_1"
   offload: 1
   notes: "REAP-pruned version of base model Kimi-Linear-48B-A3B-Instruct; max 180
     Experts; Activated: 8 per token + 1 shared"
   reasoning: instruct
   capabilities: coding, vision, text
   blueprint: coding_agent
-  truncation: full
-  context_length: 32768
+  truncation: medium
+  context_length: 7561
   num_parallel: 4
   file_size_bytes: 13620633088
 
@@ -1193,10 +1134,10 @@ mradermacher/nemotron-cascade-14b-thinking:
   notes: "14B Parameter; [THINK]-Token-basiertes Reasoning"
   reasoning: thinking
   capabilities: coding, text
-  blueprint: reasoning_coding
+  blueprint: nemotron_reasoning
   truncation: full
   num_parallel: 1
-  context_length: 32768
+  context_length: 98304
   file_size_bytes: 10514571040
 
 nerdsking/nerdsking-python-coder-7b-i:
@@ -1213,7 +1154,7 @@ nerdsking/nerdsking-python-coder-7b-i:
   truncation: full
   offload: 1
   num_parallel: 1
-  context_length: 32768
+  context_length: 262144
   file_size_bytes: 8098525344
 
 unsloth/north-mini-code-1.0-ud:
@@ -1221,12 +1162,12 @@ unsloth/north-mini-code-1.0-ud:
   hf_url: "https://huggingface.co/unsloth/North-Mini-Code-1.0-UD"
   quants: [Q3_K_M]
   arch: "Cohere2MoE (Coder)"
-  experts: 128
+  experts: 16
   k_cache: "q5_1"
   v_cache: "iq4_nl"
   offload: 1
-  notes: "MoE Experts 128 total, 8 aktiv | Params 30B total, 3B aktiv | max 256K Kontext
-    | Agentic Software Engineering | "
+  notes: "MoE Experts 128 total, 8 aktiv | Params 30B total, 3B aktiv | max 256K Kontext\
+    \  | Agentic Software Engineering"
   reasoning: instruct
   capabilities: coding, agentic, text
   blueprint: coding_agent
@@ -1268,7 +1209,7 @@ thebloke/pandalyst_13b_v1.0:
   quants: [Q5_0, Q6_K]
   arch: "Pandalyst Dense"
   k_cache: "q8_0"
-  v_cache: "q8_0"
+  v_cache: "q5_1"
   notes: "Architektur: Pandalyst Dense"
   reasoning: instruct
   capabilities: text
@@ -1286,11 +1227,11 @@ thebloke/pandalyst_13b_v1.0:
   k_cache: "q8_0"
   v_cache: "q5_1"
   notes: "Architektur: Phi-4 Dense"
-  reasoning: instruct
+  reasoning: thinking
   capabilities: coding, text
-  blueprint: coding_agent
+  blueprint: reasoning_coding
   truncation: full
-  context_length: 32768
+  context_length: 98304
   offload: 1
   num_parallel: 1
   file_size_bytes: 10412707392
@@ -1304,7 +1245,7 @@ microsoft/phi-4-reasoning-plus:
   notes: "Architektur: Phi-4 Dense"
   reasoning: thinking
   capabilities: coding, text
-  blueprint: reasoning_coding
+  blueprint: phi4_reasoning
   truncation: full
   context_length: 32768
   offload: 1
@@ -1461,7 +1402,7 @@ unsloth/qwen3-30b-a3b-instruct-2507:
   capabilities: coding, vision, text
   blueprint: coding_agent
   truncation: full
-  context_length: 32768
+  context_length: 10922
   num_parallel: 4
   file_size_bytes: 13292468640
 
@@ -1479,7 +1420,7 @@ unsloth/qwen3-coder-30b-a3b-instruct:
   capabilities: coding, vision, text
   blueprint: coding_agent
   truncation: medium
-  context_length: 32768
+  context_length: 10922
   num_parallel: 4
   file_size_bytes: 13292471456
 
@@ -1492,12 +1433,12 @@ mradermacher/qwen3-coder-reap-25b-a3b-i1:
   k_cache: "q5_1"
   v_cache: "iq4_nl"
   notes: "Architektur: Qwen3 MoE (Coder) | Experts: 103 (REAP-pruned from 128), active:
-    8, shared -"
+    8, shared none"
   reasoning: instruct
   capabilities: coding, vision, text
   blueprint: coding_agent
   truncation: full
-  context_length: 32768
+  context_length: 16384
   offload: 1
   num_parallel: 4
   file_size_bytes: 12003574816
@@ -1511,143 +1452,15 @@ mradermacher/qwen3-coder-reap-25b-a3b:
   k_cache: "q5_1"
   v_cache: "iq4_nl"
   notes: "Architektur: Qwen3 MoE (Coder) | Experts: 103 (REAP-pruned from 128), active:
-    8, shared -"
+    8, shared none"
   reasoning: instruct
   capabilities: coding, vision, text
   blueprint: coding_agent
   truncation: full
-  context_length: 32768
+  context_length: 16384
   offload: 1
   num_parallel: 4
   file_size_bytes: 12003574528
-
-"['lmstudio-community', 'qwen', 'unsloth']/qwen3.5-9b":
-  publisher: ["lmstudio-community", "qwen", "unsloth"]
-  hf_url: "https://huggingface.co/lmstudio-community/Qwen3.5-9B-GGUF"
-  quants: [Q6_K, Q5_K_M]
-  arch: "Qwen3.5 Hybrid MoE"
-  k_cache: "q5_1"
-  v_cache: "q8_0"
-  notes: "Architektur: Qwen3.5 Hybrid MoE"
-  reasoning: instruct
-  capabilities: coding, vision, text
-  blueprint: coding_agent
-  truncation: medium
-  context_length: 32768
-  offload: 1
-  num_parallel: 4
-
-mradermacher/qwen3.5-9b-deepseek-v4-flash:
-  publisher: "mradermacher"
-  hf_url: "https://huggingface.co/mradermacher/Qwen3.5-9B-DeepSeek-V4-Flash-GGUF"
-  quants: [Q8_0]
-  arch: "Qwen3.5 Hybrid MoE"
-  k_cache: "q8_0"
-  v_cache: "iq4_nl"
-  notes: "Architektur: Qwen3.5 Hybrid MoE"
-  reasoning: instruct
-  capabilities: coding, vision, text
-  blueprint: coding_agent
-  truncation: medium
-  context_length: 32768
-  offload: 1
-  num_parallel: 4
-
-unsloth/qwen3.6-27b-mtp:
-  publisher: "unsloth"
-  hf_url: "https://huggingface.co/unsloth/Qwen3.6-27B-MTP-GGUF"
-  quants: [Q3_K_S]
-  arch: "Qwen3.5 Dense"
-  k_cache: "q5_1"
-  v_cache: "iq4_nl"
-  offload: 1
-  notes: "Architektur: Qwen3.6 MoE, MTP-Modell"
-  reasoning: instruct
-  capabilities: coding, vision, text
-  blueprint: coding_agent
-  truncation: full
-  num_parallel: 4
-  context_length: 16384
-  file_size_bytes: 14417428160
-
-unsloth/qwen3.6-27b-ud:
-  publisher: "unsloth"
-  hf_url: "https://huggingface.co/unsloth/Qwen3.6-27B-UD"
-  quants: [IQ3_XXS]
-  arch: "Qwen3.5 Dense"
-  k_cache: "q5_1"
-  v_cache: "iq4_nl"
-  notes: "Architektur: Qwen3.6 MoE (REAP)"
-  reasoning: instruct
-  capabilities: coding, vision, text
-  blueprint: coding_agent
-  truncation: medium
-  offload: 1
-  num_parallel: 1
-  context_length: 32768
-
-mradermacher/qwen3.6-28b-reap.i1:
-  publisher: "mradermacher"
-  hf_url: "https://huggingface.co/mradermacher/Qwen3.6-28B-REAP-i1-GGUF"
-  quants: [IQ3_S, Q3_K_S]
-  arch: "Qwen3.6 MoE (REAP)"
-  experts: 18
-  k_cache: "q5_1"
-  v_cache: "iq4_nl"
-  offload: 1
-  notes: "Architektur: Qwen3.6 MoE (REAP) | 18 Experts"
-  reasoning: instruct
-  capabilities: coding, vision, text
-  blueprint: coding_agent
-  truncation: medium
-  context_length: 32768
-  num_parallel: 4
-
-lennyhans/qwen3.6-35b-reap-pruned-ratio-0.5:
-  publisher: "lennyhans"
-  hf_url: "https://huggingface.co/lennyhans/Qwen3.6-35B-REAP-Pruned-ratio-0.5-Q4_K_M-GGUF"
-  quants: [q4_k_m]
-  arch: "Qwen3.6 MoE (REAP)"
-  k_cache: "q8_0"
-  v_cache: "q5_1"
-  notes: "Architektur: Qwen3.6 MoE (REAP)"
-  reasoning: instruct
-  capabilities: coding, vision, text
-  blueprint: coding_agent
-  truncation: full
-  offload: 1
-  num_parallel: 4
-  context_length: 32768
-
-unsloth/qwen3.6-27b:
-  publisher: "unsloth"
-  hf_url: "https://huggingface.co/unsloth/Qwen3.6-27B-GGUF"
-  quants: [Q3_K_S]
-  arch: "Qwen3.5 Dense"
-  k_cache: "q5_1"
-  v_cache: "iq4_nl"
-  offload: 1
-  notes: "Architektur: Qwen3.6 MoE (REAP) | nicht-MTP (Basis-Version)"
-  reasoning: instruct
-  capabilities: coding, vision, text
-  blueprint: coding_agent
-  truncation: medium
-  context_length: 32768
-  num_parallel: 1
-  file_size_bytes: 14201668384
-
-bartowski/qwen_qwen3.6-27b-imatrix:
-  publisher: "bartowski"
-  hf_url: "https://huggingface.co/bartowski/Qwen_Qwen3.6-27B-imatrix"
-  arch: "Qwen3.5 Dense"
-  notes: "Architektur: Qwen3.6 MoE (REAP)"
-  reasoning: instruct
-  capabilities: coding, vision, text
-  blueprint: coding_agent
-  truncation: medium
-  offload: 1
-  num_parallel: 1
-  context_length: 32768
 
 maziyarpanahi/solar-pro-preview-instruct:
   publisher: "MaziyarPanahi"
@@ -1717,8 +1530,7 @@ handy-computer/whisper-large-v3:
   arch: "Whisper Dense (Audio)"
   k_cache: "f16"
   v_cache: "f16"
-  notes: "OpenAI Whisper Large v3; 1,5B Parameter; Multilinguales Speech-to-Text;
-    100+ Sprachen"
+  notes: "OpenAI Whisper Large v3; 1,5B Parameter; Multilinguales Speech-to-Text"
   reasoning: none
   capabilities: audio
   blueprint: none
@@ -1778,48 +1590,48 @@ mradermacher/gemma-4-19b-a4b-it-reap-i1@iq4_nl:
   publisher: mradermacher
   hf_url: https://huggingface.co/mradermacher/gemma-4-19b-a4b-it-reap-i1@iq4_nl
   arch: Gemma-4 Dense
-  k_cache: q8_0
-  v_cache: iq4_nl
+  k_cache: f16
+  v_cache: f16
   offload: 1
   notes: 'Architektur: Gemma-4 Dense | 19B-a4B Parameter | Tool-Use'
   reasoning: instruct
   capabilities: coding, vision, text
   blueprint: gemma_assistant
   truncation: full
-  context_length: 49152
-  num_parallel: 1
+  context_length: 9216
+  num_parallel: 4
   file_size_bytes: 10612747936
 
 mradermacher/gemma-4-19b-a4b-it-reap-i1@q4_k_s:
   publisher: mradermacher
   hf_url: https://huggingface.co/mradermacher/gemma-4-19b-a4b-it-reap-i1@q4_k_s
   arch: Gemma-4 Dense
-  k_cache: q8_0
-  v_cache: iq4_nl
+  k_cache: f16
+  v_cache: f16
   offload: 1
   notes: 'Architektur: Gemma-4 Dense | 19B-a4B Parameter | Tool-Use'
   reasoning: instruct
   capabilities: coding, vision, text
   blueprint: gemma_assistant
   truncation: full
-  context_length: 49152
-  num_parallel: 1
+  context_length: 6144
+  num_parallel: 4
   file_size_bytes: 11341585056
 
 mradermacher/gemma-4-26b-a4b-it-i1:
   publisher: mradermacher
   hf_url: https://huggingface.co/mradermacher/gemma-4-26b-a4b-it-i1
   arch: Gemma-4 Dense
-  k_cache: q8_0
-  v_cache: iq4_nl
+  k_cache: f16
+  v_cache: f16
   offload: 1
   notes: 'Architektur: Gemma-4 Dense | 26B-A4B Parameter | Tool-Use'
   reasoning: instruct
   capabilities: coding, vision, text
   blueprint: gemma_assistant
   truncation: full
-  context_length: 65536
-  num_parallel: 1
+  context_length: 3072
+  num_parallel: 4
   file_size_bytes: 13917721664
 
 unsloth/glm-4.7-flash-reap-23b-a3b@q3_k_m:
@@ -1834,8 +1646,8 @@ unsloth/glm-4.7-flash-reap-23b-a3b@q3_k_m:
   capabilities: coding, text
   blueprint: coding_agent
   truncation: full
-  context_length: 32768
-  num_parallel: 1
+  context_length: 16384
+  num_parallel: 4
   file_size_bytes: 11273383648
 
 unsloth/glm-4.7-flash-reap-23b-a3b@q4_k_s:
@@ -1850,24 +1662,42 @@ unsloth/glm-4.7-flash-reap-23b-a3b@q4_k_s:
   capabilities: coding, text
   blueprint: coding_agent
   truncation: full
-  context_length: 32768
-  num_parallel: 1
+  context_length: 8192
+  num_parallel: 4
   file_size_bytes: 13328455392
 
 unsloth/north-mini-code-1.0:
   publisher: unsloth
   hf_url: https://huggingface.co/unsloth/north-mini-code-1.0
   arch: Cohere 2 MoE
+  experts: 16
   k_cache: q8_0
   v_cache: iq4_nl
   offload: 1
-  notes: 'Architektur: Cohere 2 MoE | ? Parameter'
+  notes: 'MoE Experts 128 total, 8 aktiv | Params 30B total, 3B aktiv | max 256K Kontext  |
+    Agentic Software Engineering'
   reasoning: instruct
   capabilities: coding, text
   blueprint: coding_agent
   truncation: full
-  context_length: 98304
+  context_length: 32768
   num_parallel: 4
+
+nexaai/qwen2-audio-7b:
+  publisher: NexaAI
+  hf_url: https://huggingface.co/NexaAI/qwen2-audio-7b
+  arch: Qwen2 Dense
+  k_cache: q8_0
+  v_cache: iq4_nl
+  offload: 1
+  notes: 'Architektur: Qwen2 Dense | 7.8B Parameter'
+  reasoning: instruct
+  capabilities: text
+  blueprint: default_chat
+  truncation: full
+  num_parallel: 1
+  context_length: 262144
+  file_size_bytes: 8247536096
 
 qwen/qwen2.5-coder-14b-instruct@q5_0:
   publisher: Qwen
@@ -1881,7 +1711,7 @@ qwen/qwen2.5-coder-14b-instruct@q5_0:
   capabilities: coding, text
   blueprint: coding_agent
   truncation: full
-  context_length: 32768
+  context_length: 98304
   num_parallel: 1
   file_size_bytes: 10266553792
 
@@ -1897,7 +1727,7 @@ qwen/qwen2.5-coder-14b-instruct@q5_k_m:
   capabilities: coding, text
   blueprint: coding_agent
   truncation: full
-  context_length: 32768
+  context_length: 98304
   num_parallel: 1
   file_size_bytes: 10508873152
 
@@ -1913,125 +1743,126 @@ qwen/qwen2.5-coder-14b-instruct@q6_k:
   capabilities: coding, text
   blueprint: coding_agent
   truncation: full
-  context_length: 32768
+  context_length: 49152
   num_parallel: 1
   file_size_bytes: 12124683712
 
-nexaai/qwen2-audio-7b:
-  publisher: NexaAI
-  hf_url: https://huggingface.co/NexaAI/qwen2-audio-7b
-  arch: Qwen2 Dense
-  k_cache: q8_0
-  v_cache: iq4_nl
-  offload: 1
-  notes: 'Architektur: Qwen2 Dense | 7.8B Parameter'
-  reasoning: instruct
-  capabilities: text
-  blueprint: default_chat
-  truncation: full
-  num_parallel: 1
-  context_length: 32768
-  file_size_bytes: 8247536096
-
-mradermacher/qwen3.6-28b-reap-i1@iq3_s:
-  publisher: mradermacher
-  hf_url: https://huggingface.co/mradermacher/qwen3.6-28b-reap-i1@iq3_s
-  arch: Qwen3.5 MoE
-  k_cache: q8_0
-  v_cache: iq4_nl
-  offload: 1
-  notes: 'Architektur: Qwen3.5 MoE | 28B Parameter | Tool-Use'
+mradermacher/qwen3.5-9b-deepseek-v4-flash:
+  publisher: "mradermacher"
+  hf_url: "https://huggingface.co/mradermacher/Qwen3.5-9B-DeepSeek-V4-Flash-GGUF"
+  quants: [Q8_0]
+  arch: "Qwen3.5 Hybrid MoE"
+  k_cache: "q8_0"
+  v_cache: "iq4_nl"
+  notes: "Architektur: Qwen3.5 Hybrid MoE"
   reasoning: instruct
   capabilities: coding, vision, text
   blueprint: coding_agent
   truncation: medium
   context_length: 32768
-  num_parallel: 4
-  file_size_bytes: 12476285920
-
-mradermacher/qwen3.6-28b-reap-i1@q3_k_s:
-  publisher: mradermacher
-  hf_url: https://huggingface.co/mradermacher/qwen3.6-28b-reap-i1@q3_k_s
-  arch: Qwen3.5 MoE
-  k_cache: q8_0
-  v_cache: iq4_nl
   offload: 1
-  notes: 'Architektur: Qwen3.5 MoE | 28B Parameter | Tool-Use'
+  num_parallel: 4
+
+Qwen/Qwen3.5-9B-GGUF:
+  publisher: qwen
+  hf_url: "https://huggingface.co/Qwen/Qwen3.5-9B"
+  quants: [Q6_K, Q5_K_M]
+  arch: "Qwen3.5 Hybrid MoE"
+  k_cache: "q5_1"
+  v_cache: "q8_0"
+  notes: "Architektur: Qwen3.5 Hybrid Gated Delta Networks combined with sparse Mixture-of-Experts"
   reasoning: instruct
   capabilities: coding, vision, text
   blueprint: coding_agent
   truncation: medium
   context_length: 32768
-  num_parallel: 4
-  file_size_bytes: 12408046560
-
-nomic-ai/text-embedding-nomic-embed-text-v1.5:
-  publisher: nomic-ai
-  hf_url: https://huggingface.co/nomic-ai/text-embedding-nomic-embed-text-v1.5
-  arch: Nomic BERT
-  k_cache: q8_0
-  v_cache: iq4_nl
   offload: 1
-  notes: 'Architektur: Nomic BERT | ? Parameter'
+  num_parallel: 4
+
+unsloth/qwen3.6-27b:
+  publisher: "unsloth"
+  hf_url: "https://qwen.ai/blog?id=qwen3.6-27b"
+  quants: [Q3_K_S]
+  arch: "Qwen3.5 Dense"
+  k_cache: "q5_1"
+  v_cache: "iq4_nl"
+  offload: 1
+  notes: "Architektur: Qwen3.6 Dense (Basis-Version) | Agentic Coding, strong text
+    and multimodal reasoning ability"
   reasoning: instruct
-  capabilities: text
-  blueprint: default_chat
-  truncation: full
+  capabilities: coding, vision, agentic, text
+  blueprint: coding_agent
+  truncation: medium
+  context_length: 16384
   num_parallel: 1
-  context_length: 32768
-  file_size_bytes: 84106624
+  file_size_bytes: 14201668384
 
-unsloth/north-mini-code-1.0@iq3_s:
-  publisher: unsloth
-  hf_url: https://huggingface.co/unsloth/north-mini-code-1.0@iq3_s
-  arch: Cohere 2 MoE
-  experts: 16
-  k_cache: q8_0
-  v_cache: iq4_nl
+unsloth/qwen3.6-27b-mtp:
+  publisher: "unsloth"
+  hf_url: "https://huggingface.co/unsloth/Qwen3.6-27B-MTP-GGUF"
+  quants: [Q3_K_S]
+  arch: "Qwen3.5 Dense"
+  k_cache: "q5_1"
+  v_cache: "iq4_nl"
   offload: 1
-  num_parallel: 4
-  notes: 'Architektur: Cohere 2 MoE; decoder-only Transformer-based sparse Mixture-of-Experts
-    | 128 experts, 8 activated per token'
+  num_parallel: 1
+  notes: "Architektur: Qwen3.6 Dense | MTP-Modell: np >= # max draft token | Agentic
+    Coding, strong text and multimodal reasoning ability"
   reasoning: instruct
-  capabilities: coding, text
+  capabilities: coding, vision, agentic, text
   blueprint: coding_agent
-  truncation: full
-  context_length: 32768
-  file_size_bytes: 12765339744
-
-unsloth/north-mini-code-1.0@q3_k_m:
-  publisher: unsloth
-  hf_url: https://huggingface.co/CohereLabs/North-Mini-Code-1.0
-  arch: Cohere 2 MoE
-  experts: 16
-  k_cache: q8_0
-  v_cache: iq4_nl
-  offload: 1
-  num_parallel: 4
-  notes: 'Architektur: Cohere 2 MoE; decoder-only Transformer-based sparse Mixture-of-Experts
-    | 128 experts, 8 activated per token'
-  reasoning: instruct
-  capabilities: coding, text
-  blueprint: coding_agent
-  truncation: full
-  context_length: 32768
-  file_size_bytes: 14213013600
+  truncation: medium
+  context_length: 16384
+  file_size_bytes: 14417428160
 
 bytkim/qwen3.6-27b-mtp-pi-tune:
   publisher: bytkim
   hf_url: https://huggingface.co/bytkim/qwen3.6-27b-mtp-pi-tune
   arch: Qwen3.5 Dense
-  k_cache: q8_0
+  k_cache: q5_1
   v_cache: iq4_nl
   offload: 1
-  num_parallel: 4
-  notes: 'Architektur: Qwen3.5 Dense | 27B Parameter | Tool-Use | Multi-Token Prediction'
+  num_parallel: 1
+  notes: 'Architektur: Qwen3.5 Dense | A 4-bit QLoRA SFT Multi-Token Prediction tune
+    of Qwen3.6-27B fine-tuned | no-thinking agentic coding through a PI-style harness.
+    | Tool-Use | MTP=Multi-Token Prediction'
   reasoning: instruct
-  capabilities: coding, vision, text
+  capabilities: coding, vision, agentic, text
   blueprint: coding_agent
-  truncation: full
-  context_length: 32768
+  truncation: medium
+  context_length: 49152
   file_size_bytes: 12289712320
+
+unsloth/qwen3.6-27b-ud:
+  publisher: "unsloth"
+  hf_url: "https://qwen.ai/blog?id=qwen3.6-27b"
+  quants: [IQ3_XXS]
+  arch: "Qwen3.5 Dense"
+  k_cache: "q5_1"
+  v_cache: "iq4_nl"
+  notes: "Architektur: Qwen3.6 Dense | Agentic Coding, strong text and multimodal
+    reasoning ability "
+  reasoning: instruct
+  capabilities: coding, vision, agentic, text
+  blueprint: coding_agent
+  truncation: medium
+  offload: 1
+  num_parallel: 1
+  context_length: 32768
+
+bartowski/qwen_qwen3.6-27b-imatrix:
+  publisher: "bartowski"
+  hf_url: "https://huggingface.co/bartowski/Qwen_Qwen3.6-27B-imatrix"
+  arch: "Qwen3.5 Dense"
+  notes: "Architektur: Qwen3.6 Dense, i-matrix quant | Agentic Coding, strong text
+    and multimodal reasoning ability"
+  reasoning: instruct
+  capabilities: coding, vision, agentic, text
+  blueprint: coding_agent
+  truncation: medium
+  offload: 1
+  num_parallel: 1
+  context_length: 32768
 
 mradermacher/qwen3.6-27b-i1:
   publisher: mradermacher
@@ -2046,8 +1877,62 @@ mradermacher/qwen3.6-27b-i1:
   capabilities: coding, vision, text
   blueprint: coding_agent
   truncation: full
-  context_length: 32768
+  context_length: 49152
   file_size_bytes: 12073953248
+
+mradermacher/qwen3.6-28b-reap-i1@iq3_s:
+  publisher: mradermacher
+  hf_url: https://huggingface.co/mradermacher/qwen3.6-28b-reap-i1@iq3_s
+  arch: Qwen3.5 MoE
+  experts: 18
+  k_cache: q8_0
+  v_cache: iq4_nl
+  offload: 1
+  notes: 'Architektur: Qwen3.5 MoE (REAP) | REAP-pruned from Qwen/Qwen3.6-35B-A3B
+    | max. 205 Experts | Tool-Use'
+  reasoning: instruct
+  capabilities: coding, vision, text
+  blueprint: coding_agent
+  truncation: medium
+  context_length: 12288
+  num_parallel: 4
+  file_size_bytes: 12476285920
+
+mradermacher/qwen3.6-28b-reap-i1@q3_k_s:
+  publisher: mradermacher
+  hf_url: https://huggingface.co/mradermacher/qwen3.6-28b-reap-i1@q3_k_s
+  arch: Qwen3.5 MoE
+  experts: 18
+  k_cache: q8_0
+  v_cache: iq4_nl
+  offload: 1
+  notes: 'Architektur: Qwen3.5 MoE (REAP) REAP-pruned from Qwen/Qwen3.6-35B-A3B |
+    max. 205 Experts | Tool-Use'
+  reasoning: instruct
+  capabilities: coding, vision, text
+  blueprint: coding_agent
+  truncation: medium
+  context_length: 12288
+  num_parallel: 4
+  file_size_bytes: 12408046560
+
+mradermacher/qwen3.6-28b-reap.i1:
+  publisher: "mradermacher"
+  hf_url: "https://huggingface.co/mradermacher/Qwen3.6-28B-REAP-i1-GGUF"
+  quants: [IQ3_S, Q3_K_S]
+  arch: "Qwen3.6 MoE (REAP)"
+  experts: 18
+  k_cache: "q5_1"
+  v_cache: "iq4_nl"
+  offload: 1
+  notes: "Architektur: Qwen3.6 MoE (REAP), REAP-pruned from Qwen/Qwen3.6-35B-A3B |
+    max. 205 Experts"
+  reasoning: instruct
+  capabilities: coding, vision, text
+  blueprint: coding_agent
+  truncation: medium
+  context_length: 32768
+  num_parallel: 4
 
 mradermacher/qwen3-30b-a3b-python-coder:
   publisher: mradermacher
@@ -2060,3 +1945,57 @@ mradermacher/qwen3-30b-a3b-python-coder:
   num_parallel: 4
   notes: 'Architektur: Qwen3 MoE | 30B-A3B Parameter | Python Coder'
   reasoning: instruct
+  capabilities: coding, vision, text
+  blueprint: coding_agent
+  truncation: medium
+  context_length: 16384
+
+bartowski/mistralai_magistral-small-2509:
+  publisher: bartowski
+  hf_url: https://huggingface.co/bartowski/mistralai_magistral-small-2509
+  arch: Llama Dense
+  k_cache: q8_0
+  v_cache: iq4_nl
+  offload: 1
+  num_parallel: 1
+  notes: 'Architektur: Llama Dense | 24B Parameter | Tool-Use | np=2 wg. VRAM-Druck'
+  file_size_bytes: 11474084832
+  context_length: 65536
+  reasoning: thinking
+  capabilities: coding, vision, text
+  blueprint: magistral_reasoning
+  truncation: full
+
+unsloth/north-mini-code-1.0@iq3_s:
+  publisher: unsloth
+  hf_url: https://huggingface.co/unsloth/north-mini-code-1.0@iq3_s
+  arch: Cohere 2 MoE
+  experts: 16
+  k_cache: q8_0
+  v_cache: iq4_nl
+  offload: 1
+  num_parallel: 4
+  notes: 'decoder-only | MoE Experts 128 total, 8 aktiv | Params 30B total, 3B aktiv
+    | max 256K Kontext  | Agentic Software Engineering'
+  reasoning: instruct
+  capabilities: coding, text
+  blueprint: coding_agent
+  truncation: full
+  context_length: 12288
+  file_size_bytes: 12765339744
+
+nomic-ai/text-embedding-nomic-embed-text-v1.5:
+  publisher: nomic-ai
+  hf_url: https://huggingface.co/nomic-ai/text-embedding-nomic-embed-text-v1.5
+  arch: Nomic BERT
+  k_cache: q8_0
+  v_cache: iq4_nl
+  offload: 1
+  notes: ' ? Parameter'
+  reasoning: instruct
+  capabilities: text
+  blueprint: default_chat
+  truncation: full
+  num_parallel: 1
+  context_length: 262144
+  file_size_bytes: 84106624
