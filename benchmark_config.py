@@ -171,7 +171,7 @@ BENCHMARK_CATEGORY_DEFAULTS = {
         "temperature": 0.7,
         "top_p": 0.95,
         "max_tokens": 8192,
-        "enable_thinking": True,
+        "enable_thinking": False,
     },
     "knowledge": {
         "temperature": 0.0,
@@ -244,7 +244,7 @@ MODEL_TEMP_OVERRIDES = {
         "no_system_msg": True,
         "enable_thinking": False,
     },
-    # Gemma: enable_thinking=False als Default (nur bei MATH-500 mit --thinking)
+    # Gemma: enable_thinking=False (Default fuer alle Kategorien seit p9)
     "gemma": {
         "enable_thinking": False,
     },

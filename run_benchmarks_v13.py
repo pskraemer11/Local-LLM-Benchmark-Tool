@@ -606,8 +606,8 @@ def run_custom_benchmark(model_info: dict[str, Any], bench: dict[str, Any], samp
     # Qwen3.5 compatibility: enable systemless prompt embedding
     if _is_qwen3_5_model(model_key):
         cmd.append("--qwen-prompt")
-    # Thinking mode only for reasoning models with enable_thinking=True as default
-    # Gemma models have enable_thinking=False (thinking disturbs coding benchmarks)
+    # Thinking mode only when --thinking flag is set (math default now False).
+    # Gemma models have enable_thinking=False (thinking disturbs coding benchmarks).
     if THINKING_ENABLED and _is_reasoning_model(model_key) and not _is_gemma_model(model_key):
         cmd.append("--thinking")
     # Only add --no-structured-output on retry (see fallback below)
@@ -1060,7 +1060,7 @@ def main() -> None:
     parser.add_argument("--benchmarks", "-b", type=str, default=None,
                         help="Benchmark selection: number(s), name(s) or 'all'")
     parser.add_argument("--thinking", action="store_true",
-                        help="Enable thinking mode for MATH-500 (reasoning models)")
+                        help="Force-enable thinking for MATH-500 reasoning models (default: off)")
     parser.add_argument("--seed", type=int, default=None,
                         help="Random seed for reproducible task selection (passed to custom benchmarks)")
     parser.add_argument("--exclude-benchmarks", "-x", type=str, default=None,
@@ -1091,7 +1091,7 @@ def main() -> None:
     print(f"  Unified Benchmark Launcher v{_version}")
     print(f"  SampleSize: {args.sample_size}")
     if args.thinking:
-        print("  Thinking mode: ON (MATH-500, reasoning models)")
+        print("  Thinking mode: ON (MATH-500, reasoning models, force-enabled via --thinking)")
         print("  Pipelines: Custom (DS1000/CoderEval), EvalPlus, LM-Eval (ARC/HS/TQA/IFEval/M500), Agentic (tool-eval-bench)")
     print("  CSV-Format: csv_writer (; Delimiter, utf-8)")
     print("=" * 60)
