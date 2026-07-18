@@ -984,24 +984,23 @@ def read_data(model_keys: Optional[List[str]] = None, min_sample_size: int = 0,
                 seen.add(mk)
 
         # Discover models from evalplus/lmeval/agentic directories.
-        # Skip when --since is active — directories have no embedded timestamp
-        # so we cannot reliably filter them.
+        # Always scan — --since and --sample-size filter only CSVs, not
+        # directories (which have no embedded timestamp). In --merge mode
+        # this ensures all available models appear even if their
+        # DS1000/CoderEval CSVs don't match the sample-size threshold.
         scan_dirs = ["evalplus_", "lmeval_", "agentic_"]
         added = 0
-        if not since:
-            for prefix in scan_dirs:
-                for dname in os.listdir(RESULTS_DIR):
-                    d = os.path.join(RESULTS_DIR, dname)
-                    if os.path.isdir(d) and dname.startswith(prefix):
-                        mk = dname[len(prefix):]
-                        if mk not in seen:
-                            model_keys.append(mk)
-                            seen.add(mk)
-                            added += 1
+        for prefix in scan_dirs:
+            for dname in os.listdir(RESULTS_DIR):
+                d = os.path.join(RESULTS_DIR, dname)
+                if os.path.isdir(d) and dname.startswith(prefix):
+                    mk = dname[len(prefix):]
+                    if mk not in seen:
+                        model_keys.append(mk)
+                        seen.add(mk)
+                        added += 1
         if added:
             print(f"  +{added} additional models from benchmark directories")
-        elif since:
-            print(f"  (directory scan skipped due to --since filter)")
 
         # Filter to only currently-installed models (unless --no-installed)
         if not no_installed:
@@ -1258,6 +1257,12 @@ def main() -> None:
                       f"{winner} wins ({r['mean_diff']:+.2f}%, p={r['p_value']:.4f} {sig})")
         sys.exit(0)
 
+    merge_runs = args.runs if args.runs > 0 else 0
+    if args.merge:
+        args.no_installed = True
+        if merge_runs == 0:
+            args.all_runs = True
+
     print("=" * 60)
     print("  Consolidating Dense-Run Results (v13)")
     print("  + Bootstrap 95% CI for DS1000 / CoderEval")
@@ -1276,12 +1281,6 @@ def main() -> None:
     filter_str = f" [{', '.join(filters)}]" if filters else ""
     print(f"  {datetime.now().strftime('%Y-%m-%d %H:%M')}{ss_str}{filter_str}")
     print("=" * 60)
-
-    merge_runs = args.runs if args.runs > 0 else 0
-    if args.merge:
-        args.no_installed = True
-        if merge_runs == 0:
-            args.all_runs = True
     rows = read_data(model_keys=model_keys, min_sample_size=args.sample_size,
                      exclude_benchmarks=exclude, since=args.since, until=args.until,
                      all_runs=args.all_runs, no_installed=args.no_installed,
