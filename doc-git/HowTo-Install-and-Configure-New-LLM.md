@@ -49,7 +49,7 @@ python registry_tool.py sync           # Full maintenance: add → fill-arch →
                                        #   add:        new models from LMS into registry (incl. GGUF architecture data)
                                        #   fill-arch:  n_layers/hidden_dim from GGUF headers for existing entries
                                        #   configs:    load.fields (offload, np, useUnifiedKvCache) into JSON configs
-                                       #   sync-from-configs:  JSON→Registry (overwrite)
+                                        #   sync-from-configs:  JSON→Registry (offload, np, ukv only; skips ctx)
                                        #   sync-ctx:   context_length from JSON configs (missing only)
                                        #   fill-ctx:   remaining context_length via formula
                                        #   fmt:        normalize blank lines
@@ -79,7 +79,7 @@ python assemble_blueprint.py assemble   # → Prompt written
 model_gb     = file_size / 1_000_000_000
 kv_gb        = n_layers × hidden_dim × 2 × kv_bytes × context_length / 1_000_000_000
 total_gb     = model_gb + kv_gb × num_parallel
-useUnifiedKvCache = total_gb ≥ 14.5   # ON when VRAM is tight (≥14.5 GB)
+useUnifiedKvCache = total_gb ≥ 14.0   # ON when VRAM is tight (≥14.0 GB; 15.2 GB usable)
 ```
 With np=1 or missing architecture data: `useUnifiedKvCache = model_gb ≥ 9.0` (old heuristic).
 

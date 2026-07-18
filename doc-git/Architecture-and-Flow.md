@@ -1,6 +1,7 @@
-# Architecture & Flow – Status 15.07.2026 (v13.0.0-p6)
+# Architecture & Flow – Status 18.07.2026 (v13.0.0-p8)
 
 > **Version Convention:** see [`../VERSION`](../VERSION) – Single Source of Truth for project version. The filename `_v24.md` is legacy (last updated 17.07.2026) – planned migration to `_v13.md` in a future major version.
+> **Review Reference:** See `Doku-intern/Code-Review-2026-07-18.md` for the full review that informed the 18.07. changes.
 
 ## 1. Overview
 
@@ -464,7 +465,7 @@ the model stays loaded – useful for many small benchmarks, but risky for model
 | `fix-np` | **NEW 17.07.** | Re-set `num_parallel` for ALL entries based on architecture + model key (`_infer_num_parallel()`) |
 | `fix-ctx` | **NEW 17.07.** | Re-calculate `context_length` for ALL entries based on current np/KV-quant values |
 | `sync-ctx` | `sync_context_length.py` | Adopt `context_length` from JSON configs into Registry |
-| `sync-from-configs` | **NEW 17.07.** | Overwrite context_length, offload, num_parallel, useUnifiedKvCache **from JSON configs into Registry** |
+| `sync-from-configs` | **NEW 17.07.** | Overwrite offload, num_parallel, useUnifiedKvCache **from JSON configs into Registry** (skips context_length to preserve native model limit) |
 | `fill-ctx` | `fmt_registry.py` | Fill missing `context_length` in the registry (size-based formula) |
 | `fill-size` | **NEW 15.07.** | Fill `file_size_bytes` from LMS cache for registry entries without size |
 | `fill-arch` | **NEW 17.07.** | Write `n_layers`/`hidden_dim` from **local GGUF files** (header reader, ~1ms/file) into registry |
@@ -508,10 +509,10 @@ model_gb     = file_size_bytes / 1_000_000_000         # Model size in GB
 kv_bytes     = bytes_K(cache) + bytes_V(cache)         # e.g. q8_0(1.0) + iq4_nl(0.5) = 1.5
 kv_gb        = n_layers × hidden_dim × 2 × kv_bytes × context_length / 1_000_000_000
 total_gb     = model_gb + kv_gb × num_parallel
-useUnifiedKvCache = total_gb ≥ 14.5                    # ON at VRAM scarcity
+useUnifiedKvCache = total_gb ≥ 14.0                    # ON at VRAM scarcity
 ```
 
-**Rationale:** With np>1, multiple parallel KV caches are allocated. When total VRAM requirement (model + np × KV cache) ≥ 14.5 GB of a 16 GB GPU, `useUnifiedKvCache` activates the shared cache (saves VRAM, costs some performance). With sufficient VRAM (<14.5 GB), the cache stays separate (faster).
+**Rationale:** With np>1, multiple parallel KV caches are allocated. When total VRAM requirement (model + np × KV cache) ≥ 14.0 GB of a 16 GB GPU (15.2 GB usable due to overhead), `useUnifiedKvCache` activates the shared cache (saves VRAM, costs some performance). With sufficient VRAM (<14.0 GB), the cache stays separate (faster).
 
 **Fallback** (without n_layers/hidden_dim): `useUnifiedKvCache = model_gb ≥ 9.0` (old heuristic).
 
@@ -883,17 +884,23 @@ Changes need ONLY be made in `model_manager.py` – no more searching for hardco
 | `CAT_WEIGHTS`            | `{"Coding": 0.35, "Math": 0.25, "Agentic": 0.25, "Knowledge": 0.15}` | Category weighting |
 | `OVERALL_WEIGHTS`        | `{"Coding": {"HumanEval+": 0.25, "MBPP+": 0.25, "DS1000": 0.25, "CoderEval": 0.25}, ...}` | Benchmark weighting per category |
 | `TOOL_EVAL_SCENARIO_IDS` | TC-01..TC-69               | Agentic scenarios                |
-| `EXCLUDE_KEYWORDS`       | whisper, vision, ocr, transcription, translat, audit, audio, embed, vl | Excluded modalities |
+| `EXCLUDE_KEYWORDS`       | whisper, vision, ocr, transcription, translat, audit, audio, embed, vl, flux, **german, rag** | Excluded modalities |
 | `REASONING_KEYWORDS`     | ["reasoning", "think", "r1"] | Reasoning detection             |
-| `QUANT_MAP`              | Dict model_key -> Quant label (static, ~45 entries) | Quant mapping for CSV and display. Source priority: QUANT_MAP > `lms ls --json` > Config files > GGUF cache. Auto-generatable via `generate_quant_map.py` |
+| `QUANT_MAP`              | Dict model_key -> Quant label (static, ~45 entries) | Quant mapping for CSV and display. Source priority: QUANT_MAP > `lms ls --json` > Config files > GGUF cache. Auto-generatable via `generate_quant_map.py`. **NEW 18.07.:** `get_quant()` 4-step look-up priority: QUANT_MAP exact → suffix → base → **registry fallback** (`model_registry.yaml:quants` first entry) |
 | `PIPELINE_DISCOVERY`     | Glob pattern + version regex | Dynamic script detection        |
 | `CUSTOM_BENCHMARK_SCRIPT` | dynamic via `glob()`       | Highest `custom_benchmark_v*.py` |
+| `USABLE_VRAM_GB`          | **15.3**                    | **NEW 18.07.:** RTX 5070 Ti 16 GB minus driver/overhead. Single source of truth |
+| `USE_UNIFIED_KV_CACHE_THRESHOLD_GB` | **14.0**       | **NEW 18.07.:** When `total_gb >= this`, UKV cache activates |
+| `LEGACY_MODEL_GB_THRESHOLD_GB` | **9.0**             | **NEW 18.07.:** Fallback for entries without `n_layers`/`hidden_dim` |
+| `KV_QUANT_REFERENCE_BYTES` | **1.5**                    | **NEW 18.07.:** Reference (q8_0 + iq4_nl) for ctx scaling in `_default_ctx_from_size` |
 
 **Removed in v29:** `DISPLAY_NAMES` + `WHITELIST` – replaced by dynamic auto-discovery:
 - **Model selection** (`consolidate_results_v13.py`): Automatically iterates over all model keys from the result CSVs. Optional filter via `--models key1,key2`.
 - **Display names**: Are queried live from `lms ls --json` (field `displayName`), fallback = readable key transformation.
 - **QUANT_MAP generator** (`generate_quant_map.py`): Fetches all keys dynamically from `lms ls --json` + result CSVs, no more static import from `benchmark_config.py`.
 - Background: Whitelist was redundant (selection also possible interactively/CLI), DISPLAY_NAMES replaceable by dynamic sources.
+
+**Removed in p8 (18.07.):** `MMLU_PRO_ENABLED = False` – was imported by `run_benchmarks_v13.py` and `consolidate_results_v13.py` but never read.
 
 ---
 
@@ -942,19 +949,33 @@ class ModelData:
 
 ## 17. Tests (NEW in v10, after review)
 
-15 pytest tests in `tests/`:
+**Status 18.07.2026 (p8):** **548 passing, 9 skipped, 0 failing** (412 → 548, +136 new tests in p8). 9 skipped tests are obsolete `_get_lmeval_params` if-else-cascade tests (replaced by Variante C+ in v13).
+
+Test files in `tests/`:
 
 | File | Tests | Tested functions |
-|------|-------|------------------|
+|------|-------:|------------------|
 | `test_scores.py` | 10 | `compute_category_scores()`, `_percentile()`, `_threshold_filtered()`, `_b5_named()` |
 | `test_csv.py` | 5 | `read_custom_csv()`, `auto_delimiter_detection()`, CSV parsing with fixtures |
+| `test_csv_writer.py` | – | `csv_writer.py` unified schema |
+| `test_consolidate.py` | – | `consolidate_results_v13.py` |
+| `test_consolidate_results.py` | – | `consolidate_results_v13.py` extended (incl. `TestGetQuant`) |
+| `test_custom_benchmark.py` | – | `custom_benchmark_v13.py` |
+| `test_custom_benchmark_io.py` | – | `exec_sandboxed` I/O |
+| `test_dependencies.py` | – | Required Python packages |
+| `test_model_manager.py` | 76 | `parse_selection`, `check_api_available`, `get_current_loaded_model`, `get_available_models`, `load_model_via_lms`, **`unload_all_models` (Bug 1 fix, 18.07.)**, **`_ensure_lmstudio_running` (Bug 2 fix, 18.07.)**, `wait_for_model_ready`, **`_validate_model_key` (18.07.)** |
+| `test_prio2.py` | – | Prio 2 (Variant C+ category defaults) |
+| `test_prio2_terminal.py` | 25 | Prio 0/2/3 terminal findings (incl. **Bug 6.4 fix, 18.07.**: `_unwrap_solution_for_insert` synthetic def for Granite) |
+| `test_run_benchmarks.py` | 51 | Launcher & resolve functions (9 obsolete tests skipped, 18.07.) |
+| `test_registry_tool.py` | **35** | **NEW 18.07.:** VRAM formula (`_max_ctx_from_vram`), KV-bytes table, match cascade in `cmd_configs`, `_infer_num_parallel` rules |
+| `test_assemble_blueprint.py` | **43** | **NEW 18.07.:** `normalize_model_name`, `classify_capabilities`, `extract_params`, format helpers, `read_lms_configs` cache (5s TTL) |
 
 **Execution:**
 ```
 pytest tests/ -v
 ```
 
-**Test framework:** pytest without additional plugins. Fixtures in `tests/fixtures/test_tasks.csv`.
+**Test framework:** pytest with `pytest-mock` and `pytest-timeout`. Shared fixtures in `tests/conftest.py` (`lms_cli`, `lms_http`, `subprocess_scripts`, `fake_lmeval_results`, `tmp_results_dir`).
 
 ---
 
@@ -967,13 +988,15 @@ pytest tests/ -v
 4. **Thinking token extraction:** `<think>...</think>` is stripped.
 5. **lm-eval regex:** `mmlu_pro_*` only extracts letters `[A-E]`. Since 11.07.: `mathqa_gen` + `hellaswag_gen` also support lowercase letters `[a-e]`, `[a-d]`.
 6. **Windows cp1252 encoding:** `PYTHONIOENCODING=utf-8` set globally.
-7. **`lms unload --all` unreliable:** Node processes sometimes remain active.
+7. **`lms unload --all` unreliable:** Node processes sometimes remain active. **FIXED 18.07. (Bug 1):** `model_manager.unload_all_models()` no longer uses the racy HTTP-ping with `model:"check"`; it polls `lms ps --json` (canonical LMS state) until the loaded-models list is empty.
 8. **MMLU-Pro modified (removed in v13):** Was replaced by MATH-500. MMLU-Pro was too expensive (14 subsets) and provided little differentiation.
 9. **API readiness:** `time.sleep(10)` is a hack; for very large models (>30B), initialization can take longer.
 10. **GLM 4.7 Flash:** Not runnable on 16 GB VRAM (GPU thrashing).
 11. **Gemma 4 19B:** Requires disabled KV quant to load.
+12. **llmster.exe hardcoded path (removed 18.07., Bug 2):** The legacy `_ensure_lmstudio_running()` used a hardcoded `.lmstudio/llmster/0.0.12-1/llmster.exe` path that broke on every LMS version update. The fixed implementation tries `lms server start` first (preferred – modern LMS manages the daemon internally), then falls back to discovering the newest `llmster.exe` under `.lmstudio/llmster/*/` via `iterdir()` sorted by version descending.
 12. **Granite 4.0 H Tiny:** Experts=64 causes `ggml_new_object: not enough space` at 1M Context. Workaround: set Experts=16. The `num_experts` parameter can only be set via LM Studio Python SDK/REST API, not in the GUI.
 13. **numExperts (MoE models):** In `model_registry.yaml` distinguish: `experts:` = LMS setting (reduced due to VRAM), `notes:` contains the architecture value (from specs). The `user-concrete-model-default-config` JSONs store the LMS value as `llm.load.numExperts`.
+14. **THINKING_ENABLED global (18.07.):** Module-level global set once in `main()`. Safe in current single-threaded launcher (sequential model iteration), but needs `threading.Lock` if parallel benchmarking is added.
 14. **Dynamic script resolution:** The launcher resolves the custom benchmark path only at startup. If the file is replaced during the run, the old version runs until completion.
 20. **Windows SIGALRM (minerva_math500):** The original lm-eval task `minerva_math500` uses `signal.SIGALRM` for timeouts in `is_equiv()`. On Windows, this causes every answer to be scored as incorrect (0.0%). Workaround: Custom override in `lm_eval_tasks/minerva_math500/` with SIGALRM-free `process_results()`.
 15. **Agentic scenario timeout:** `PIPELINE_TIMEOUTS["agentic_scenario"]` (600s) prevents timeout aborts for long contexts (previously: 120s hardcoded -> abort during tool call generation).
@@ -1087,6 +1110,34 @@ pytest tests/ -v
 | 05.07. | `custom_benchmark_v12.py`                     | v12 from v11: Stale refs fixed, EXCLUDE_KEYWORDS from config |
 | 05.07. | `model_manager.py`                            | German/English mix cleaned up |
 | 04.07. | `Architektur+Flow_v24.md`                     | Thinking mode for all reasoning models, REASONING_PATTERNS, enable_thinking table |
+| 18.07. | `Doku-intern/Code-Review-2026-07-18.md`         | **NEW:** Complete Code-Review report covering 6 blocks (architecture/drift/code-quality/performance/test-coverage/security) + 2 critical bug fixes |
+| 18.07. | `model_manager.py`                            | **Bug 1 Fix:** `unload_all_models()` Race-Condition – polling via `lms ps --json` (canonical LMS state) instead of HTTP-ping with `model:"check"` (which was racy because LMS answered bogus model with HTTP 400, misinterpreted as "model gone") |
+| 18.07. | `model_manager.py`                            | **Bug 2 Fix:** `_ensure_lmstudio_running()` 3-stage fallback: 1) `lms server start`, 2) `iterdir()` over `.lmstudio/llmster/*/` sorted by version desc, 3) error. Replaces hardcoded `0.0.12-1/llmster.exe` path that broke on LMS updates |
+| 18.07. | `model_manager.py`                            | **NEW:** `_validate_model_key()` – whitelist regex `[A-Za-z0-9._/\-@:+=#]{1,256}` for defensive input validation (subprocess calls already use list-form, but bad input should fail with clear message) |
+| 18.07. | `model_manager.py`                            | **NEW:** `safe_json_loads()` helper – uses `object_pairs_hook=OrderedDict` for deterministic parsing of LMS responses |
+| 18.07. | `model_manager.py`                            | **NEW:** `HEALTH_CHECK_SENTINEL_MODEL = "check"` constant (replaces magic string) |
+| 18.07. | `benchmark_config.py`                         | **NEW central constants:** `USABLE_VRAM_GB = 15.3`, `USE_UNIFIED_KV_CACHE_THRESHOLD_GB = 14.0`, `LEGACY_MODEL_GB_THRESHOLD_GB = 9.0`, `KV_QUANT_REFERENCE_BYTES = 1.5`. Was scattered across `registry_tool.py` and `cmd_configs` |
+| 18.07. | `benchmark_config.py`                         | **ENHANCED:** `get_quant()` now has 4-step look-up priority: QUANT_MAP exact → suffix → base → **registry fallback (first entry of `quants: [...]` from model_registry.yaml)**. New models with `quants: [...]` in registry are auto-discovered without manual QUANT_MAP updates |
+| 18.07. | `benchmark_config.py`                         | **REMOVED:** `MMLU_PRO_ENABLED` constant (imported but never read) |
+| 18.07. | `registry_tool.py`                            | **REFACTORED:** Dynamic `importlib.machinery.SourceFileLoader` → direct `from assemble_blueprint import …` (via `sys.path.insert(0, str(BASE_DIR))`). Enables IDE resolution, `__pycache__` reuse |
+| 18.07. | `registry_tool.py`                            | **REFACTORED:** `_normalize_ctx()` removed (was duplicate of `assemble_blueprint.normalize_model_name`). All call sites now use the canonical function |
+| 18.07. | `registry_tool.py`                            | **ENHANCED:** `cmd_configs` now also writes `llm.load.contextLength` (VRAM-aware via `_max_ctx_from_vram()`) and `llm.load.useUnifiedKvCache` (via central thresholds) |
+| 18.07. | `registry_tool.py`                            | **REFACTORED:** `_infer_num_parallel()` now handles MTP models (`mtp` in key → `np=2` to match Max Draft Tokens) |
+| 18.07. | `run_benchmarks_v13.py`                       | **REFACTORED:** Redundant `EXCLUDE_KEYWORDS` filtering removed from `resolve_models()` and `select_models_interactive()` – already applied by `get_available_models()`. `EVALPLUS_SENTINEL_MODEL = "local-model"` constant added |
+| 18.07. | `run_benchmarks_v13.py`                       | **DOCUMENTED:** `THINKING_ENABLED` global is single-threaded-safe in current launcher (sequential model iteration), but needs `threading.Lock` if parallel benchmarking is added |
+| 18.07. | `assemble_blueprint.py`                       | **NEW:** `read_lms_configs()` 5s TTL cache (was re-walking 158+ JSON files on every call; `cmd_sync()` invokes 4+ times) |
+| 18.07. | `custom_benchmark_v13.py`                     | **ENHANCED:** `Monitor._sample_loop` sampling interval 200ms → 500ms (60% fewer NVML syscalls) |
+| 18.07. | `custom_benchmark_v13.py`                     | **REFACTORED:** 4x repeated `try: x.append(float(...)) except (ValueError, TypeError, AttributeError): pass` blocks → single `_safe_float()` helper |
+| 18.07. | `custom_benchmark_v13.py`                     | **Bug 6.4 Fix:** `_unwrap_solution_for_insert` now correctly synthesizes `def expected_func(*args, **kwargs): <body>` when Granite emits bare statements without `def` (was only documented in docstring, never implemented) |
+| 18.07. | `consolidate_results_v13.py`                  | **CLEANUP:** `MMLU_PRO_ENABLED` import removed |
+| 18.07. | `tests/test_model_manager.py`                 | **+13 NEW tests** for `_validate_model_key()` (shell-meta, path-traversal, control-chars, length cap, integration with `load_model_via_lms`) |
+| 18.07. | `tests/test_model_manager.py`                 | **+10 NEW tests** for Bug-1 Fix (`unload_all_models` with `lms ps --json` polling) |
+| 18.07. | `tests/test_model_manager.py`                 | **+5 NEW tests** for `TestEnsureLmStudioRunning` (3-stage boot: lms server start / llmster fallback) |
+| 18.07. | `tests/test_registry_tool.py`                 | **NEW FILE:** 35 tests for VRAM formula, KV-bytes table, match cascade, `_infer_num_parallel` rules, end-to-end cmd_configs |
+| 18.07. | `tests/test_assemble_blueprint.py`            | **NEW FILE:** 43 tests for `normalize_model_name`, `classify_capabilities`, `extract_params`, format helpers, `read_lms_configs` cache |
+| 18.07. | `tests/test_run_benchmarks.py`                | **FIXED:** `SAFE_CONTEXT` → `SAFE_CONTEXT_FALLBACK` import (was `ImportError` blocking test collection). 9 obsolete `_get_lmeval_params` if-else-cascade tests marked `pytest.mark.skip` with explanation (replaced by Variante C+ in v13) |
+| 18.07. | `tests/test_prio2_terminal.py`               | **FIXED:** `test_no_def_in_solution_creates_synthetic` – corrected test expectation (verifies body in synthetic def, not literal `pass`) |
+| 18.07. | `tests/` (all files)                          | **+136 NEW tests** total: 412 → 548 passing, 0 failing (1 pre-existing failure in `test_prio2_terminal` resolved by Bug 6.4 fix) |
 | 15.07. | `Architektur+Flow_v24.md`                     | p5: MATH-500 SIGALRM fix, registry_tool.py fill-size/migrate-keys, consolidate bugfixes |
 | 15.07. | `benchmark_config.py`                         | **Variant C+**: NEW `BENCHMARK_CATEGORY_DEFAULTS`, `MODEL_TEMP_OVERRIDES`, `get_model_config()`. `THINKING_CONFIG` as backward-compat alias. `REASONING_PATTERNS` moved from custom_benchmark_v13 to here. |
 | 15.07. | `custom_benchmark_v13.py`                     | `_get_model_config()` delegates to `benchmark_config.get_model_config()` with benchmark_category. `BENCHMARK_CATEGORY_MAP` and `get_benchmark_category()` new. `REASONING_PATTERNS` removed (to benchmark_config.py). |

@@ -143,7 +143,8 @@ def helper(x):
 
     def test_no_def_in_solution_creates_synthetic(self):
         """Prio 2.2: Granite sometimes emits bare statements.
-        We create a synthetic function with the expected name.
+        We create a synthetic function with the expected name that
+        wraps the model output as its body.
         """
         setup = '''
 exec_context = """
@@ -154,7 +155,10 @@ def expected_func(x):
         solution = "return x * 2"
         result = _unwrap_solution_for_insert(solution, setup)
         assert "def expected_func" in result
-        assert "pass" in result
+        # The model's body (return x * 2) is wrapped inside the
+        # synthetic function. The pass-only-fallback would only
+        # apply if the body were empty (Code-Review 2026-07-18 §6.4).
+        assert "return x * 2" in result
 
     def test_no_insert_marker_returns_solution_unchanged(self):
         setup = '''

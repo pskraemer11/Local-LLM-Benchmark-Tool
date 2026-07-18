@@ -35,9 +35,11 @@ Imported by run_benchmarks_v13.py AND custom_benchmark_v13.py.
 
 import json
 import os
+import re
 import subprocess
 import sys
 import time
+from pathlib import Path
 from typing import Optional
 
 from benchmark_config import PIPELINE_TIMEOUTS
@@ -49,6 +51,12 @@ TIMEOUT_MODEL_READY = 120
 TIMEOUT_LOAD_MODEL = 180
 TIMEOUT_HEALTH_CHECK = 5
 TIMEOUT_UNLOAD_WAIT = 2
+
+# Magic strings (Code-Review 2026-07-18 §5.3): sentinel model name for
+# the readiness health-check. Not a valid LM Studio model, so the server
+# responds with HTTP 400 (no model loaded) – exactly the signal we
+# need to know that the server is reachable but no model is loaded yet.
+HEALTH_CHECK_SENTINEL_MODEL = "check"
 
 # ── Pipeline-specific timeouts ──────────────────────────────────
 # These values are imported by run_benchmarks_v13.py and used as
@@ -67,6 +75,22 @@ TIMEOUT_UNLOAD_WAIT = 2
 # (Values in benchmark_config.py)
 
 
+# Code-Review 2026-07-18 §6.2: central safe JSON loader. The LMS server
+# is trusted, but using object_pairs_hook=OrderedDict ensures that
+# all parsed objects preserve insertion order regardless of LMS
+# version changes (CPython 3.7+ guarantees this for regular dicts,
+# but a future JSON change with a `__getattr__`-style hook could
+# cause surprises). The cost is one wrapper class per object.
+def safe_json_loads(text: str) -> Any:
+    """Parse JSON text into Python objects with deterministic ordering.
+
+    Returns lists, OrderedDicts, and primitives. Top-level dicts are
+    also OrderedDicts. Safe against LMS schema changes.
+    """
+    from collections import OrderedDict
+    return json.loads(text, object_pairs_hook=OrderedDict)
+
+
 def check_api_available() -> bool:
     try:
         from urllib.request import Request, urlopen
@@ -83,7 +107,7 @@ def get_current_loaded_model() -> Optional[dict[str, str]]:
                            timeout=15, encoding="utf-8", errors="replace")
         if r.returncode != 0:
             return None
-        entries = json.loads(r.stdout)
+        entries = safe_json_loads(r.stdout)
         if not entries:
             return None
         entry = entries[0]
@@ -99,6 +123,14 @@ def get_current_loaded_model() -> Optional[dict[str, str]]:
 
 
 def unload_all_models() -> bool:
+    """Unload all models and wait until the LMS process reports no loaded models.
+
+    Polls `lms ps --json` (the canonical LMS state source) instead of pinging
+    /v1/chat/completions with `model:"check"`. The HTTP-ping approach is
+    racy because LM Studio can answer the bogus "check" model with HTTP 400,
+    which the old code misinterpreted as "model gone" while the old model
+    was still resident. See Code-Review 2026-07-18, Bug 1.
+    """
     print("  [INFO] Unloading all models...")
     try:
         r = subprocess.run(["lms", "unload", "--all"],
@@ -114,23 +146,54 @@ def unload_all_models() -> bool:
     except subprocess.TimeoutExpired:
         print("[WARN] lms unload --all timeout")
         return False
-    from urllib.request import Request, urlopen
-    from urllib.error import HTTPError, URLError
+
+    # Poll lms ps --json until no models are reported loaded. This is the
+    # single source of truth for LMS state (no HTTP 400 vs. 200 ambiguity).
     for attempt in range(15):
         time.sleep(2)
         try:
-            req = Request(f"{API_BASE}/chat/completions", method="POST",
-                          data=b'{"model":"check","messages":[{"role":"user","content":"ping"}],"max_tokens":1}',
-                          headers={"Content-Type": "application/json"})
-            with urlopen(req, timeout=3) as resp:
-                if resp.status == 200:
-                    print(f"  [WARN] Old model still active (attempt {attempt+1}/15)")
-                    continue
-        except (HTTPError, URLError, Exception):
-            print("  [OK] Old model fully unloaded")
-            return True
+            r = subprocess.run(["lms", "ps", "--json"],
+                               capture_output=True, text=True, timeout=10,
+                               encoding="utf-8", errors="replace")
+            if r.returncode != 0:
+                print(f"  [WARN] lms ps failed (attempt {attempt+1}/15): "
+                      f"{r.stderr.strip()[:80]}")
+                continue
+            try:
+                loaded_entries = safe_json_loads(r.stdout)
+            except json.JSONDecodeError:
+                print(f"  [WARN] lms ps: invalid JSON (attempt {attempt+1}/15)")
+                continue
+            if not loaded_entries:
+                print("  [OK] Old model fully unloaded")
+                return True
+            print(f"  [WARN] {len(loaded_entries)} model(s) still loaded "
+                  f"(attempt {attempt+1}/15)")
+        except subprocess.TimeoutExpired:
+            print(f"  [WARN] lms ps timeout (attempt {attempt+1}/15)")
     print("  [WARN] Could not confirm unload – continuing")
     return False
+
+
+def _registry_display_overrides() -> dict[str, str]:
+    """Load model_registry.yaml and return {normalized_key: display_name}."""
+    from assemble_blueprint import normalize_model_name
+    rpath = Path(__file__).resolve().parent / "doc-git" / "model_registry.yaml"
+    if not rpath.exists():
+        return {}
+    try:
+        from ruamel.yaml import YAML
+        y = YAML()
+        y.preserve_quotes = True
+        with open(rpath, "r", encoding="utf-8") as f:
+            data = y.load(f) or {}
+    except Exception:
+        return {}
+    overrides = {}
+    for key, entry in data.items():
+        if isinstance(entry, dict) and "display_name" in entry:
+            overrides[normalize_model_name(key)] = entry["display_name"]
+    return overrides
 
 
 def get_available_models(exclude_keywords: Optional[list[str]] = None) -> list[dict]:
@@ -147,7 +210,7 @@ def get_available_models(exclude_keywords: Optional[list[str]] = None) -> list[d
             encoding="utf-8", errors="replace"
         )
         if result.returncode == 0:
-            data = json.loads(result.stdout)
+            data = safe_json_loads(result.stdout)
             models = []
             for item in data if isinstance(data, list) else data.values():
                 if isinstance(item, dict):
@@ -175,9 +238,27 @@ def get_available_models(exclude_keywords: Optional[list[str]] = None) -> list[d
                         "publisher": item.get("publisher", ""),
                     })
             if models:
+                # Apply registry display_name overrides
+                overrides = _registry_display_overrides()
+                if overrides:
+                    from assemble_blueprint import normalize_model_name
+                    for m in models:
+                        nk = normalize_model_name(m["model_key"])
+                        if nk in overrides:
+                            m["display"] = overrides[nk]
+                            if m["quant"]:
+                                m["display"] = f"{m['display']}@{m['quant']}"
                 if exclude_keywords:
+                    # Code-Review 2026-07-18 §4.1: filter on BOTH key and
+                    # display, not just key. Some models have publisher
+                    # prefixes in `key` (e.g. "unsloth/phi-4") but the
+                    # filter keywords ("vision", "embed") may only appear
+                    # in `display`. Filter on the concatenation to catch
+                    # both.
                     models = [m for m in models
-                              if not any(kw in m["key"].lower() for kw in exclude_keywords)]
+                              if not any(
+                                  kw in (m["key"] + " " + m["display"]).lower()
+                                  for kw in exclude_keywords)]
                 return models
         print(f"[WARN] lms ls failed: {result.stderr.strip()}")
     except FileNotFoundError:
@@ -217,9 +298,22 @@ def parse_selection(choice: str, max_val: int) -> Optional[list[int]]:
 
 
 def _ensure_lmstudio_running() -> bool:
-    """Start llmster daemon + lms server if not available."""
+    """Ensure LM Studio server is reachable, starting it if necessary.
+
+    Order of operations (each step is a no-op if the previous succeeded):
+      1. Check whether /v1/models responds – if yes, return True.
+      2. Try `lms server start` directly. Modern LMS versions manage the
+         underlying daemon themselves.
+      3. Fall back to finding the latest installed `llmster.exe` under
+         `.lmstudio/llmster/` via glob, sorted by version directory name.
+
+    Previously this function relied on a hardcoded path
+    `.lmstudio/llmster/0.0.12-1/llmster.exe` which broke whenever LMS
+    shipped a new version. See Code-Review 2026-07-18, Bug 2.
+    """
     from urllib.request import Request, urlopen
     from urllib.error import URLError
+    # 1. Already running?
     try:
         req = Request(f"{API_BASE}/models", method="GET")
         with urlopen(req, timeout=3) as resp:
@@ -227,30 +321,103 @@ def _ensure_lmstudio_running() -> bool:
                 return True
     except (URLError, Exception):
         pass
-    print("  [INFO] LM Studio-Server nicht erreichbar – starte Daemon...")
-    llmster = os.path.join(os.path.dirname(os.path.dirname(__file__)),
-                           ".lmstudio", "llmster", "0.0.12-1", "llmster.exe")
-    if not os.path.exists(llmster):
-        print(f"  [WARN] llmster.exe not found at {llmster}")
-        return False
+
+    # 2. Try `lms server start` (preferred – LMS handles daemon internally)
+    print("  [INFO] LM Studio-Server nicht erreichbar – versuche 'lms server start'...")
     try:
-        subprocess.Popen([llmster])
+        r = subprocess.run(["lms", "server", "start"],
+                           capture_output=True, text=True, timeout=30,
+                           encoding="utf-8", errors="replace")
         time.sleep(5)
+        # Verify
+        try:
+            req = Request(f"{API_BASE}/models", method="GET")
+            with urlopen(req, timeout=3) as resp:
+                if resp.status == 200:
+                    print("  [OK] LM Studio-Server gestartet via 'lms server start'")
+                    return True
+        except (URLError, Exception):
+            pass
+        print(f"  [WARN] 'lms server start' brachte Server nicht hoch: "
+              f"{r.stderr.strip()[:120]}")
+    except FileNotFoundError:
+        print("  [WARN] lms.exe nicht im PATH – versuche llmster.exe direkt")
+    except subprocess.TimeoutExpired:
+        print("  [WARN] 'lms server start' Timeout")
     except Exception as e:
-        print(f"  [WARN] llmster start failed: {e}")
-        return False
-    print("  [INFO] Starting lms server...")
-    try:
-        subprocess.run(["lms", "server", "start"], capture_output=True, text=True,
-                       timeout=30, encoding="utf-8", errors="replace")
-        time.sleep(5)
-    except Exception as e:
-        print(f"  [WARN] lms server start failed: {e}")
-        return False
-    return True
+        print(f"  [WARN] 'lms server start' Fehler: {e}")
+
+    # 3. Fallback: find the newest llmster.exe under .lmstudio/llmster/*/
+    llmster_root = Path(os.path.dirname(os.path.dirname(__file__))) / ".lmstudio" / "llmster"
+    if llmster_root.exists():
+        # Find all version directories matching pattern "<version>/llmster.exe"
+        candidates = sorted(
+            (p for p in llmster_root.iterdir() if p.is_dir()),
+            key=lambda p: p.name,
+            reverse=True,  # newest version first (lexicographic – works for semver)
+        )
+        for ver_dir in candidates:
+            exe = ver_dir / "llmster.exe"
+            if exe.is_file():
+                print(f"  [INFO] Starte llmster {ver_dir.name}...")
+                try:
+                    subprocess.Popen([str(exe)])
+                    time.sleep(5)
+                    # Verify
+                    try:
+                        req = Request(f"{API_BASE}/models", method="GET")
+                        with urlopen(req, timeout=3) as resp:
+                            if resp.status == 200:
+                                # Now also start the LMS server
+                                subprocess.run(["lms", "server", "start"],
+                                               capture_output=True, text=True, timeout=30,
+                                               encoding="utf-8", errors="replace")
+                                time.sleep(5)
+                                print("  [OK] LM Studio-Server gestartet via llmster")
+                                return True
+                    except (URLError, Exception):
+                        # Server didn't respond yet after llmster start;
+                        # try the next version. This is intentionally
+                        # silent (Code-Review 2026-07-18 §5.2).
+                        pass
+                except Exception as e:
+                    print(f"  [WARN] llmster {ver_dir.name} start fehlgeschlagen: {e}")
+    print("  [ERROR] Konnte LM Studio-Server nicht starten")
+    return False
+
+
+# Code-Review 2026-07-18 §6.1: defensive model_key validation.
+# All subprocess calls in this module already use list-form (not
+# shell=True), so a malicious model_key cannot inject shell syntax.
+# But we still validate the character set to fail early on bad data
+# (typos, copy-paste errors, etc.) and to provide a clearer error
+# message than the underlying subprocess errors.
+_VALID_MODEL_KEY_RE = re.compile(r"^[A-Za-z0-9._/\-@:+=#]{1,256}$")
+
+
+def _validate_model_key(model_key: str) -> str:
+    """Return model_key if it contains only safe characters; raise ValueError otherwise.
+
+    Valid characters: ASCII letters/digits, `.`, `_`, `/`, `-`, `@`, `:`, `+`, `=`, `#`.
+    Max length 256 (longer-than-realistic for any model name on HF).
+    """
+    if not isinstance(model_key, str) or not _VALID_MODEL_KEY_RE.match(model_key):
+        raise ValueError(
+            f"Invalid model_key: {model_key!r}. "
+            f"Allowed: alphanumeric, '.', '_', '/', '-', '@', ':', '+', '=', '#'; max 256 chars."
+        )
+    return model_key
 
 
 def load_model_via_lms(model_key: str, context_length: Optional[int] = None, gpu_offload: Optional[float] = None) -> tuple[bool, Optional[str]]:
+    # Code-Review 2026-07-18 §6.1: validate input early. subprocess.run
+    # already uses list-form (no shell injection possible), but bad
+    # input should fail with a clear message, not a cryptic CLI error.
+    try:
+        _validate_model_key(model_key)
+    except ValueError as e:
+        print(f"  [ERROR] {e}")
+        return False, None
     print(f"\n  [INFO] Loading '{model_key}'...")
     cmd = ["lms", "load", model_key, "--yes"]
     if context_length is not None:
@@ -312,7 +479,7 @@ def wait_for_model_ready(timeout: int = TIMEOUT_MODEL_READY) -> bool:
         try:
             req = Request(f"{API_BASE}/chat/completions", method="POST",
                           data=json.dumps({
-                              "model": "check",
+                              "model": HEALTH_CHECK_SENTINEL_MODEL,
                               "messages": [{"role": "user", "content": "ping"}],
                               "max_tokens": 1,
                           }).encode("utf-8"),

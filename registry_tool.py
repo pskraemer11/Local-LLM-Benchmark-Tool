@@ -4,21 +4,25 @@ Consolidated tool for model_registry.yaml and LM Studio JSON config maintenance.
 
 Commands:
   compare       Compare registry vs LMS vs JSON configs (report only)
-  add           Add new LMS models to registry
-  configs       Write load.fields (offloadRatio, numParallelSessions) to JSON configs
+  add           Add LMS models to registry from piped JSON (lms ls --json | python registry_tool.py add)
+  configs       Write load.fields (contextLength, offloadRatio, numParallelSessions,
+                useUnifiedKvCache) into JSON configs (VRAM-aware formula)
   sync-ctx      Sync context_length from JSON configs into registry (only missing)
   sync-from-configs
-                Sync context_length, offload, num_parallel, useUnifiedKvCache
-                from JSON configs into registry (overwrites existing)
-  fill-arch     Fetch n_layers and hidden_dim from HuggingFace config.json for
-                each registry entry
+                Sync offload, num_parallel, useUnifiedKvCache from JSON configs
+                into registry (skips context_length to preserve native model limit)
+  fill-arch     Read n_layers and hidden_dim from local GGUF headers for
+                registry entries missing arch data
   fill-ctx      Add default context_length to entries missing it
                 (size-based rule or 16384 fallback)
+  fix-ctx       Recompute context_length for ALL entries (size-based formula)
+  fix-np        Recompute num_parallel for ALL entries (architecture-based)
   fill-size     Look up file_size_bytes from LMS for registry entries missing it
   fmt           Normalize blank lines in registry YAML (no blanks within entries,
                 one blank between entries)
   migrate-keys  Re-key entries without publisher prefix to publisher/model-name
-  sync          Full sync: add → configs → sync-ctx → fill-ctx → fmt
+  sync          Full sync: add → fill-arch → configs → sync-ctx →
+                sync-from-configs → fill-ctx → fmt
 """
 
 import csv, json, os, re, sys, subprocess, tempfile, concurrent.futures
@@ -36,11 +40,16 @@ y.preserve_quotes = True
 y.indent(mapping=2, sequence=4, offset=2)
 
 # ── assemble_blueprint helpers ─────────────────────────────────────
-import importlib.machinery
-_ASM_PATH = str(BASE_DIR / "assemble_blueprint.py")
-_asm = importlib.machinery.SourceFileLoader("asm", _ASM_PATH).load_module()
-normalize_model_name = _asm.normalize_model_name
-read_lms_configs = _asm.read_lms_configs
+# Direct import instead of dynamic SourceFileLoader (Code-Review 2026-07-18
+# §2.1): enables IDE resolution, `__pycache__` re-use, and normal
+# import-error reporting when assemble_blueprint.py is broken.
+sys.path.insert(0, str(BASE_DIR))
+from assemble_blueprint import normalize_model_name, read_lms_configs
+from benchmark_config import (
+    USABLE_VRAM_GB as _USABLE_VRAM_GB,
+    USE_UNIFIED_KV_CACHE_THRESHOLD_GB as _USE_UNIFIED_KV_CACHE_THRESHOLD_GB,
+    LEGACY_MODEL_GB_THRESHOLD_GB as _LEGACY_MODEL_GB_THRESHOLD_GB,
+)
 
 _ARCH_MAP = {
     "llama": "Llama Dense", "mistral3": "Mistral Dense",
@@ -296,6 +305,7 @@ def _infer_num_parallel(arch: str, model_key: str = "") -> int:
       - arch contains "moe"   → 4
       - model key contains MoE indicators (a4b, a3b, a2b, kimi, glm flash) → 4
       - GPT-OSS               → 4 (special: 20B MoE-like Dense, benefits from parallel)
+      - MTP (multi-token prediction) → 2 (np matches Max Draft Tokens)
       - Dense                 → 1 (LCP=0 in benchmarks, wastes VRAM)
     """
     al = arch.lower()
@@ -312,6 +322,9 @@ def _infer_num_parallel(arch: str, model_key: str = "") -> int:
     # GPT-OSS override: despite Dense arch, np=4 is empirically better
     if "gpt-oss" in kl or "gpt_oss" in kl:
         return 4
+    # MTP: needs np >= Max Draft Tokens for speculative decoding
+    if "mtp" in kl:
+        return 2
     return 1
 
 
@@ -390,15 +403,30 @@ def cmd_configs() -> dict:
     reg = load_registry()
     cfgs = read_lms_configs(CONFIG_ROOT)
     rk = {normalize_model_name(k): k for k, v in reg.items() if isinstance(v, dict)}
+    # Sort by descending normalized key length: more specific keys match first
+    rk_sorted = sorted(rk.items(), key=lambda x: -len(x[0]))
 
     updated = skipped = errors = 0
     for cfg in cfgs:
         cn = normalize_model_name(cfg["dir_name"])
         match = None
-        for rn2, rnk in rk.items():
-            if cn == rn2 or (cn in rn2) or (rn2 in cn):
+        # Phase 1: exact match
+        for rn2, rnk in rk_sorted:
+            if cn == rn2:
                 match = rnk
                 break
+        # Phase 2: config name has extra quantization suffix (e.g. -mxfp4, -Q3_K_M)
+        if not match:
+            for rn2, rnk in rk_sorted:
+                if cn.startswith(rn2 + '-'):
+                    match = rnk
+                    break
+        # Phase 3: config name stripped publisher that is embedded in registry key
+        if not match:
+            for rn2, rnk in rk_sorted:
+                if rn2.endswith('-' + cn):
+                    match = rnk
+                    break
         if not match:
             skipped += 1
             continue
@@ -437,13 +465,21 @@ def cmd_configs() -> dict:
             kv_bytes = _KV_BYTES.get(kc, 1.0) + _KV_BYTES.get(vc, 0.5)
             model_gb = fs / 1_000_000_000 if fs else 0
 
-            if np_val > 1 and nl and hd and model_gb > 0:
-                # Estimate total VRAM: model + np × per-session KV cache
-                kv_gb = nl * hd * 2 * kv_bytes * ctx / 1_000_000_000
+            # Benchmark context limit from VRAM formula
+            if np_val >= 1 and nl and hd and model_gb > 0:
+                bcl = _max_ctx_from_vram(model_gb, np_val, nl, hd, kv_bytes)
+            else:
+                bcl = ctx
+            bcl = entry.get("benchmark_context_limit") or bcl
+            ctx_effective = min(ctx, bcl)
+            set_field("llm.load.contextLength", ctx_effective)
+
+            if nl and hd and model_gb > 0:
+                kv_gb = nl * hd * 2 * kv_bytes * ctx_effective / 1_000_000_000
                 total_gb = model_gb + kv_gb * np_val
-                ukv = bool(total_gb >= 14.5)
+                ukv = bool(total_gb >= _USE_UNIFIED_KV_CACHE_THRESHOLD_GB)
             elif model_gb > 0:
-                ukv = bool(model_gb >= 9.0)
+                ukv = bool(model_gb >= _LEGACY_MODEL_GB_THRESHOLD_GB)
             else:
                 ukv = None
 
@@ -464,7 +500,7 @@ def cmd_configs() -> dict:
 # ── sync-from-configs command ────────────────────────────────────
 
 def cmd_sync_from_configs() -> None:
-    """Sync context_length, offload, num_parallel, useUnifiedKvCache from JSON configs into registry."""
+    """Sync offload, num_parallel, useUnifiedKvCache from JSON configs into registry (skips context_length to preserve native model limit)."""
     if not REGISTRY_PATH.exists():
         print(f"[ERROR] Registry not found: {REGISTRY_PATH}")
         sys.exit(1)
@@ -480,28 +516,34 @@ def cmd_sync_from_configs() -> None:
     print(f"  -> {len(configs)} Config-Dateien gefunden")
 
     rk = {normalize_model_name(k): k for k, v in reg.items() if isinstance(v, dict)}
+    rk_sorted = sorted(rk.items(), key=lambda x: -len(x[0]))
 
     print("[3] Registry-Einträge aktualisieren ...")
-    updated_ctx = updated_offload = updated_np = updated_ukv = 0
+    updated_offload = updated_np = updated_ukv = 0
     skipped_no_match = 0
     for cfg in configs:
         cn = normalize_model_name(cfg["dir_name"])
         match = None
-        for rn2, rnk in rk.items():
-            if cn == rn2 or (cn in rn2) or (rn2 in cn):
+        for rn2, rnk in rk_sorted:
+            if cn == rn2:
                 match = rnk
                 break
+        if not match:
+            for rn2, rnk in rk_sorted:
+                if cn.startswith(rn2 + '-'):
+                    match = rnk
+                    break
+        if not match:
+            for rn2, rnk in rk_sorted:
+                if rn2.endswith('-' + cn):
+                    match = rnk
+                    break
         if not match:
             skipped_no_match += 1
             continue
         entry = reg[match]
         if not isinstance(entry, dict):
             continue
-
-        ctx = cfg.get("context_length")
-        if ctx is not None:
-            entry["context_length"] = int(ctx)
-            updated_ctx += 1
 
         off = cfg.get("offload")
         if off is not None:
@@ -518,13 +560,12 @@ def cmd_sync_from_configs() -> None:
             entry["useUnifiedKvCache"] = bool(ukv)
             updated_ukv += 1
 
-    print(f"  -> context_length:   {updated_ctx} aktualisiert")
     print(f"  -> offload:          {updated_offload} aktualisiert")
     print(f"  -> num_parallel:     {updated_np} aktualisiert")
-    print(f"  -> useUnifiedKvCache:{updated_ukv} aktualisiert")
+    print(f"  -> useUnifiedKvCache:{updated_ukv} aktualisiert (context_length uebersprungen)")
     print(f"  -> kein Match:       {skipped_no_match} uebersprungen")
 
-    if updated_ctx or updated_offload or updated_np or updated_ukv:
+    if updated_offload or updated_np or updated_ukv:
         print("[4] Registry speichern ...")
         save_registry(reg)
         print("  [OK] Gespeichert")
@@ -534,17 +575,6 @@ def cmd_sync_from_configs() -> None:
 
 
 # ── sync-ctx command ───────────────────────────────────────────────
-
-def _normalize_ctx(name: str) -> str:
-    s = name.lower()
-    s = re.sub(r'\.gguf$', '', s)
-    s = re.sub(r'-(gguf|mxpr4)$', '', s)
-    s = re.sub(r'^[^/]+/', '', s)
-    s = s.replace('.', '-').replace('_', '-')
-    while '--' in s:
-        s = s.replace('--', '-')
-    return s
-
 
 def _strip_quant(norm_key: str) -> str:
     idx = norm_key.find('@')
@@ -591,6 +621,24 @@ def _default_ctx_from_size(size_bytes: int, np: int = 1,
     return max(2048, int(base_ctx * scale))
 
 
+# _USABLE_VRAM_GB is now imported from benchmark_config at the top of
+# this file (Code-Review 2026-07-18 §5.1: single source of truth for
+# VRAM constants).
+
+
+def _max_ctx_from_vram(model_gb: float, np_val: int, nl: int, hd: int,
+                       kv_bytes: float) -> int:
+    """Maximum context length that fits in usable VRAM.
+
+    Formula:  ctx = (usable_vram - model_gb) / (np × nl × hd × 2 × kv_bytes / 1e9)
+    """
+    kv_gb_per_token = np_val * nl * hd * 2 * kv_bytes / 1_000_000_000
+    if kv_gb_per_token <= 0:
+        return 2048
+    ctx = (_USABLE_VRAM_GB - model_gb) / kv_gb_per_token
+    return max(2048, int(ctx))
+
+
 def _canonical_key(mk: str, pub: str) -> str:
     """Build canonical registry key: publisher/model-name (cleaned)."""
     s = mk.strip().lower()
@@ -618,7 +666,7 @@ def cmd_sync_ctx() -> None:
 
     dir_to_ctx: dict[str, list[int]] = {}
     for c in configs:
-        norm_dir = _normalize_ctx(c["dir_name"])
+        norm_dir = normalize_model_name(c["dir_name"])
         ctx = c.get("context_length")
         if ctx is not None:
             dir_to_ctx.setdefault(norm_dir, []).append(int(ctx))
@@ -628,7 +676,7 @@ def cmd_sync_ctx() -> None:
     norm_reg: dict[str, str] = {}
     for key in reg:
         if isinstance(reg[key], dict):
-            norm_reg[_normalize_ctx(key)] = key
+            norm_reg[normalize_model_name(key)] = key
 
     print("[3] Registry-Einträge ergänzen ...")
     updated = skipped_no_config = skipped_has_value = 0
@@ -905,7 +953,7 @@ def cmd_sync() -> None:
     print("[sync-ctx] context_length aus JSON-Configs in Registry (nur fehlende) ...")
     cmd_sync_ctx()
 
-    print("[sync-from-configs] context_length, offload, num_parallel, useUnifiedKvCache aus JSON-Configs in Registry (overwrite) ...")
+    print("[sync-from-configs] offload, num_parallel, useUnifiedKvCache from JSON configs into Registry (skipping context_length) ...")
     cmd_sync_from_configs()
 
     print("[fill-ctx] Default context_length für fehlende Einträge ...")

@@ -77,6 +77,7 @@ def get_quant(model_key: str) -> str:
       1. Exact match in QUANT_MAP (preserves publisher prefix and @quant suffix)
       2. Suffix-only match (strip publisher prefix, keep @quant)
       3. Base-only match (strip publisher prefix AND @quant)
+      4. Registry-based fallback (model_registry.yaml:quants first entry)
 
     This is the canonical way to look up a model quant and prevents the
     old `_lookup_vram` from picking the wrong quant when a model has
@@ -97,6 +98,30 @@ def get_quant(model_key: str) -> str:
         return QUANT_MAP[stripped]
     if base in QUANT_MAP:
         return QUANT_MAP[base]
+    # 4. Registry fallback (Code-Review 2026-07-18 §1.2): take the first
+    # entry from the registry's `quants` list. This makes
+    # model_registry.yaml the single source of truth for new models:
+    # when a model is added there with `quants: [Q4_K_M]`, get_quant()
+    # returns Q4_K_M without needing a manual QUANT_MAP update.
+    from pathlib import Path as _Path
+    registry_path = _Path(__file__).resolve().parent / "doc-git" / "model_registry.yaml"
+    try:
+        from ruamel.yaml import YAML
+        y = YAML()
+        with open(registry_path, "r", encoding="utf-8") as f:
+            data = y.load(f) or {}
+    except Exception:
+        data = {}
+    for key, entry in data.items():
+        if not isinstance(entry, dict):
+            continue
+        candidates = {key, _re.sub(r"^[a-z0-9_-]+[/\\]", "", key)}
+        # Note: we compare `base` against `candidates` (NOT `key` itself,
+        # since `key` is always trivially in `candidates`).
+        if base in candidates:
+            quants = entry.get("quants") or []
+            if quants:
+                return quants[0]
     return "?"
 
 
@@ -109,6 +134,12 @@ def get_quant(model_key: str) -> str:
 # die vollständige Logik als self-contained Skript ausgelagert.
 # Aufzurufen mit:
 #     python Archiv/run_mmlupro_benchmark.py --model gemma-4-26b-a4b-it
+#
+# Code-Review 2026-07-18 §4.3: The legacy `MMLU_PRO_ENABLED = False`
+# constant was imported but never read anywhere; it has been removed.
+# MMLU_PRO_SUBSETS itself is still used by consolidate_results_v13.py
+# as a defensive directory-exclusion list (`if item not in
+# MMLU_PRO_SUBSETS`) so it stays.
 MMLU_PRO_SUBSETS = [
     "mmlu_pro_biology", "mmlu_pro_business", "mmlu_pro_chemistry",
     "mmlu_pro_computer_science", "mmlu_pro_economics", "mmlu_pro_engineering",
@@ -116,11 +147,11 @@ MMLU_PRO_SUBSETS = [
     "mmlu_pro_math", "mmlu_pro_other", "mmlu_pro_philosophy",
     "mmlu_pro_physics", "mmlu_pro_psychology",
 ]
-MMLU_PRO_ENABLED = False  # Hardcoded OFF – siehe Doku oben
 
 EXCLUDE_KEYWORDS = [
     "whisper", "vision", "ocr", "transcription", "transcribe",
     "translat", "audit", "audio", "embed", "vl", "flux",
+    "german", "rag",
 ]
 
 
@@ -194,6 +225,10 @@ MODEL_TEMP_OVERRIDES = {
         "top_p": 0.95,
         "min_p": 0.02,
     },
+    # Kimi Linear REAP – enable_thinking=True führt zu "Content-only format" Fehler
+    "kimi": {
+        "enable_thinking": False,
+    },
     # Qwen3.6-27b (dicht, nativ thinking): keine enable_thinking-Override → nutzt Kategorie-Defaults
     "qwen3.6-27b": {
     },
@@ -253,7 +288,20 @@ def get_model_config(model_key: str, category: str = "coding", thinking: bool = 
 # Neu: Nutze get_model_config() statt direktem Dict-Zugriff.
 THINKING_CONFIG = BENCHMARK_CATEGORY_DEFAULTS
 
+# Code-Review 2026-07-18 §5.1: Centralised VRAM constants. Previously
+# scattered across registry_tool.py (`_USABLE_VRAM_GB = 15.3`) and
+# run_benchmarks_v13.py (in-line magic numbers). All VRAM-related
+# thresholds now live here as the single source of truth.
+USABLE_VRAM_GB = 15.3                # RTX 5070 Ti 16 GB minus driver overhead
+USE_UNIFIED_KV_CACHE_THRESHOLD_GB = 14.0   # When total_gb >= this, UKV activates
+LEGACY_MODEL_GB_THRESHOLD_GB = 9.0  # Fallback for entries without n_layers/hd
+KV_QUANT_REFERENCE_BYTES = 1.5      # Reference (q8_0 + iq4_nl) for ctx scaling
+
 LB_MEANS_BLACKLIST = {"Granite 4.0 H Tiny"}
+# Code-Review 2026-07-18 §4.2: Imported by consolidate_results_v13.py for
+# potential Granite-specific Lower-Bound-via-Means handling, but currently
+# unused (no `if model in LB_MEANS_BLACKLIST` checks downstream). Kept as
+# documentation of the special-case intent.
 
 CAT_WEIGHTS = {
     "coding": {

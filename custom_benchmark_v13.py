@@ -125,6 +125,10 @@ MAX_TOKENS_GENERAL = 2048
 MAX_TOKENS_MC = 64
 
 MONITOR_HISTORY_MAX = 500
+# Code-Review 2026-07-18 §4.1: sampling interval increased from 0.2s to
+# 0.5s to reduce NVML/syscall overhead by ~60%. Median/P90 over 5-10
+# samples per task is statistically equivalent for our 1-5s task windows.
+MONITOR_SAMPLE_INTERVAL_S = 0.5
 
 # --- Streaming / Timeout / Retry Configuration ---
 START_TIMEOUT = 30           # max seconds until first token
@@ -251,7 +255,7 @@ class Monitor:
 
         def _sample_loop() -> None:
             while self._sampling:
-                cpu = psutil.cpu_percent(interval=0.2)
+                cpu = psutil.cpu_percent(interval=MONITOR_SAMPLE_INTERVAL_S)
                 ram = psutil.virtual_memory().used / (1024 ** 3)
                 if cpu > self._peak["cpu"]:
                     self._peak["cpu"] = cpu
@@ -1147,9 +1151,23 @@ def _unwrap_solution_for_insert(solution: str, setup_code: str) -> str:
         if not has_real_stmt:
             return "    pass"
         return "\n".join(norm)
-    # No def/class in the solution – the model output IS the body.
-    # Indent it so it plugs correctly at the [insert] position
-    # inside the function.
+    # No def/class in the solution (Code-Review 2026-07-18 §6.4: Prio 2.2
+    # fix). Granite sometimes emits only bare statements (e.g. "return x * 2")
+    # without a wrapping def. When the setup expects a function with a
+    # known name, we wrap the body in a synthetic `def expected_func(...):`
+    # that contains the model's body, so the exec_context can be exec'd.
+    # When the setup has no recognizable def name (exec_func is None),
+    # we just indent the body so it plugs into the [insert] position.
+    if exec_func:
+        indent = "    "
+        body_lines = sol_lines
+        wrapped = (
+            f"def {exec_func}(*args, **kwargs):\n"
+            + "\n".join(indent + line if line.strip() else line
+                        for line in body_lines)
+        )
+        return wrapped
+    # Setup has no recognizable def → just indent the body.
     indent = "    "
     return indent + ("\n" + indent).join(sol_lines)
 
@@ -1611,17 +1629,27 @@ def benchmark_model(model_info: Any, tasks: list[dict[str, Any]], task_type: str
 # Direkt csv_writer.write_per_task_csv / write_per_model_csv nutzen.
 
 
+def _safe_float(value: Any) -> Optional[float]:
+    """Convert value to float, returning None for missing/non-numeric inputs.
+
+    Code-Review 2026-07-18 §5.2: replaces 4x repeated
+    `try: x.append(float(...)) except (ValueError, TypeError, AttributeError): pass`
+    blocks in parse_resource_avgs().
+    """
+    try:
+        return float(value)
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
 def parse_resource_avgs(task_results: list[dict[str, Any]]) -> tuple[Optional[float], Optional[float], Optional[float], Optional[float]]:
     cpu, ram, gpu, vram = [], [], [], []
     for t in task_results:
-        try: cpu.append(float(t.get("cpu_during", 0)))
-        except (ValueError, TypeError, AttributeError): pass
-        try: ram.append(float(t.get("ram_during", 0)))
-        except (ValueError, TypeError, AttributeError): pass
-        try: gpu.append(float(t.get("gpu_during", 0)))
-        except (ValueError, TypeError, AttributeError): pass
-        try: vram.append(float(t.get("vram_during", 0)))
-        except (ValueError, TypeError, AttributeError): pass
+        for buf, key in ((cpu, "cpu_during"), (ram, "ram_during"),
+                         (gpu, "gpu_during"), (vram, "vram_during")):
+            v = _safe_float(t.get(key, 0))
+            if v is not None:
+                buf.append(v)
     return (
         sum(cpu)/len(cpu) if cpu else None,
         sum(ram)/len(ram) if ram else None,
@@ -1655,8 +1683,10 @@ def select_benchmark() -> list[dict[str, Any]]:
 
 
 def select_models(available_models: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    filtered = [m for m in available_models
-                if not any(kw in m["key"].lower() for kw in EXCLUDE_KEYWORDS)]
+    # Code-Review 2026-07-18 §4.1: EXCLUDE_KEYWORDS filtering is already
+    # applied by get_available_models(); doing it again here is
+    # redundant and drift-prone.
+    filtered = available_models
     if not filtered:
         print("\n[WARN] No models found in LM Studio.")
         sys.exit(1)

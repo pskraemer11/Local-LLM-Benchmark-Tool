@@ -82,8 +82,8 @@ from typing import Any, Optional
 #   /v1/models                  GET  – OpenAI-Compat: model list
 #
 from benchmark_config import (PIPELINE_DISCOVERY, TOOL_EVAL_SCENARIO_IDS,
-                             EXCLUDE_KEYWORDS, MMLU_PRO_SUBSETS, MMLU_PRO_ENABLED,
-                             get_model_config, BENCHMARK_CATEGORY_DEFAULTS)
+                              EXCLUDE_KEYWORDS, get_model_config,
+                              BENCHMARK_CATEGORY_DEFAULTS)
 from model_manager import (
     API_BASE, TIMEOUT_CLI, TIMEOUT_MODEL_READY, PIPELINE_TIMEOUTS,
     get_current_loaded_model, unload_all_models,
@@ -126,6 +126,11 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 RESULTS_DIR = os.path.join(BASE_DIR, "ergebnisse")
 DATA_DIR = os.path.join(BASE_DIR, "simple_evals")
 os.makedirs(RESULTS_DIR, exist_ok=True)
+
+# Magic-string constants (Code-Review 2026-07-18 §5.3): sentinel model
+# name required by evalplus.provider.make_model(). The actual model
+# routing happens via the OpenAI-compatible request to LMS.
+EVALPLUS_SENTINEL_MODEL = "local-model"
 
 # Global: ensure all subprocesses inherit UTF-8 encoding (Windows cp1252 workaround)
 os.environ.setdefault("PYTHONIOENCODING", "utf-8")
@@ -280,8 +285,10 @@ def _model_family(model_key: str) -> str:
     return model_key.replace("\\", "/").split("/")[-1].lower()
 
 def resolve_models(available_models: list[dict[str, Any]], model_arg: Optional[str]) -> Optional[list[dict[str, Any]]]:
-    filtered = [m for m in available_models
-                if not any(kw in m["key"].lower() for kw in EXCLUDE_KEYWORDS)]
+    # Code-Review 2026-07-18 §4.1: EXCLUDE_KEYWORDS filtering is already
+    # done in get_available_models(); doing it again here would be
+    # redundant and drift-prone.
+    filtered = available_models
     if not filtered:
         print("\n[WARN] No models found.")
         return None
@@ -354,8 +361,8 @@ def resolve_benchmarks(bench_arg: Optional[str]) -> Optional[list[dict[str, Any]
 
 
 def select_models_interactive(available_models: list[dict[str, Any]]) -> Optional[list[dict[str, Any]]]:
-    filtered = [m for m in available_models
-                if not any(kw in m["key"].lower() for kw in EXCLUDE_KEYWORDS)]
+    # Code-Review 2026-07-18 §4.1: filtering already applied upstream.
+    filtered = available_models
     if not filtered:
         print("\n[WARN] No models found.")
         return None
@@ -422,6 +429,11 @@ def select_benchmarks_interactive() -> Optional[list[dict[str, Any]]]:
 
 
 # Global: Thinking mode for MATH-500 (reasoning models)
+# Code-Review 2026-07-18 §6.3: This is a module-level global, set once
+# in main() via args.thinking. It is NOT thread-safe (no Lock), but
+# the current launcher runs strictly single-threaded (one model at a
+# time, sequential benchmark calls), so it is safe in practice. If
+# parallel benchmarking is added, wrap mutations with a threading.Lock.
 THINKING_ENABLED = False
 
 def _get_lmeval_params(model_key: str, bench_name: str = "") -> dict[str, Any]:
@@ -676,8 +688,10 @@ def run_evalplus(model_info: dict[str, Any], bench: dict[str, Any], sample_size:
     from evalplus.provider import make_model
     from evalplus.codegen import codegen as evalplus_codegen
 
+    # Sentinel name required by evalplus; the actual model ID is sent
+    # via the OpenAI-compatible request (Code-Review 2026-07-18 §5.3).
     model_obj = make_model(
-        model="local-model",
+        model=EVALPLUS_SENTINEL_MODEL,
         backend="openai",
         dataset=dataset,
         base_url=API_BASE,

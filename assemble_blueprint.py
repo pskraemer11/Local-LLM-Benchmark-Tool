@@ -299,11 +299,29 @@ def truncation_from_context(ctx_len: int) -> str:
     return "minimal"
 
 
+_LMS_CONFIGS_CACHE: dict[str, tuple[float, list]] = {}
+_LMS_CONFIGS_TTL_S = 5.0  # Re-scan file system at most every 5 seconds
+
+
 def read_lms_configs(config_root: Path) -> list:
-    """Read all LM Studio JSON config files, return a list of config dicts."""
+    """Read all LM Studio JSON config files, return a list of config dicts.
+
+    Code-Review 2026-07-18 §4.2: results are cached for 5 seconds per
+    config_root path. cmd_sync() invokes this 4+ times in quick succession;
+    without the cache, every call would re-walk 158+ JSON files.
+    """
+    import time as _time
+    key = str(config_root)
+    now = _time.time()
+    cached = _LMS_CONFIGS_CACHE.get(key)
+    if cached is not None:
+        ts, models = cached
+        if now - ts < _LMS_CONFIGS_TTL_S:
+            return models
     models = []
     if not config_root.exists():
         print(f"[WARN] Config root not found: {config_root}")
+        _LMS_CONFIGS_CACHE[key] = (now, models)
         return models
 
     for publisher_dir in sorted(config_root.iterdir()):
@@ -377,6 +395,7 @@ def read_lms_configs(config_root: Path) -> list:
                 except Exception as e:
                     print(f"[WARN] Error parsing {json_path}: {e}")
 
+    _LMS_CONFIGS_CACHE[key] = (now, models)
     return models
 
 

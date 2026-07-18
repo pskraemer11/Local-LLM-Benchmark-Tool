@@ -32,9 +32,8 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 RESULTS_DIR = os.path.join(BASE_DIR, "ergebnisse")
 INSTALLED_CACHE = None
 
-from benchmark_config import (MMLU_PRO_SUBSETS, MMLU_PRO_ENABLED,
-                             LB_MEANS_BLACKLIST, CAT_WEIGHTS, OVERALL_WEIGHTS,
-                             QUANT_MAP, get_quant)
+from benchmark_config import (MMLU_PRO_SUBSETS, LB_MEANS_BLACKLIST,
+                             CAT_WEIGHTS, OVERALL_WEIGHTS, QUANT_MAP, get_quant)
 
 # --- Model info cache (from lms ls --json) ---
 _MODEL_INFO_CACHE = None
