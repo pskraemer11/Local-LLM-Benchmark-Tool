@@ -984,10 +984,12 @@ def read_data(model_keys: Optional[List[str]] = None, min_sample_size: int = 0,
                 seen.add(mk)
 
         # Discover models from evalplus/lmeval/agentic directories.
-        # Always scan — --since and --sample-size filter only CSVs, not
-        # directories (which have no embedded timestamp). In --merge mode
-        # this ensures all available models appear even if their
-        # DS1000/CoderEval CSVs don't match the sample-size threshold.
+        # When min_sample_size > 0, only add models that also have at
+        # least one qualifying CSV — otherwise unconstrained directory
+        # discovery shows models that never ran with the requested
+        # sample size (e.g. --sample-size 30 would include dozens of
+        # models from older evalplus runs with no sample_size=30 data).
+        csv_models: set[str] = set(ds1000_files) | set(codereval_files)
         scan_dirs = ["evalplus_", "lmeval_", "agentic_"]
         added = 0
         for prefix in scan_dirs:
@@ -995,7 +997,7 @@ def read_data(model_keys: Optional[List[str]] = None, min_sample_size: int = 0,
                 d = os.path.join(RESULTS_DIR, dname)
                 if os.path.isdir(d) and dname.startswith(prefix):
                     mk = dname[len(prefix):]
-                    if mk not in seen:
+                    if mk not in seen and (min_sample_size == 0 or mk in csv_models):
                         model_keys.append(mk)
                         seen.add(mk)
                         added += 1
