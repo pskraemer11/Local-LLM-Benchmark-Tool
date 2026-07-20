@@ -427,30 +427,6 @@ class TestLoadModelViaLMS:
         assert ok is True
         assert identifier == "test_model@q4_k_m"
 
-    def test_with_context_length(self, mocker):
-        # When context_length is provided, --context-length is appended
-        load_result = MagicMock()
-        load_result.returncode = 0
-        load_result.stderr = ""
-        ps_result = MagicMock()
-        ps_result.returncode = 0
-        ps_result.stdout = json.dumps([{
-            "identifier": "test@q4",
-            "modelKey": "test",
-            "displayName": "Test",
-        }])
-        mock_run = mocker.patch(
-            "subprocess.run",
-            side_effect=[load_result, ps_result],
-        )
-        load_model_via_lms("test", context_length=8192)
-        # The first call's command should include --context-length 8192
-        call_args = mock_run.call_args_list[0]
-        cmd = call_args.args[0] if call_args.args else call_args[0][0]
-        assert "--context-length" in cmd
-        assert "8192" in cmd
-        assert "--yes" in cmd
-
     def test_with_gpu_offload(self, mocker):
         # When gpu_offload is provided, --gpu is appended
         load_result = MagicMock()

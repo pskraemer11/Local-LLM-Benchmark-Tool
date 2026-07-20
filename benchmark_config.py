@@ -148,11 +148,19 @@ MMLU_PRO_SUBSETS = [
     "mmlu_pro_physics", "mmlu_pro_psychology",
 ]
 
-EXCLUDE_KEYWORDS = [
-    "whisper", "vision", "ocr", "transcription", "transcribe",
-    "translat", "audit", "audio", "embed", "vl", "flux",
-    "german", "rag",
+BLACKLIST = [
+    # Embedding-Modelle (separates Projekt embedding-eval/)
+    "text-embedding", "bge-m3", "granite-embedding",
+    # < 16K native context -> zu klein fuer Coding-Benchmarks
+    "em_german_13b", "datagemma-rig", "granitelib-rag",
+    # OCR / Vision / Audio
+    "ocr", "vision", "flux", "whisper", "translat",
+    "transcription", "transcribe", "audit", "audio", "vl",
+    # Rest
+    "german", "rag", "f2llm",
 ]
+
+EXCLUDE_KEYWORDS = BLACKLIST
 
 
 # ── Benchmark-Kategorie-Defaults (Variante C+, 2026-07-15) ──
@@ -225,15 +233,19 @@ MODEL_TEMP_OVERRIDES = {
         "top_p": 0.95,
         "min_p": 0.02,
     },
+    "deepseek-r1-distill": {
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "min_p": None,
+    },
     # Kimi Linear REAP – enable_thinking=True führt zu "Content-only format" Fehler
     "kimi": {
         "enable_thinking": False,
     },
-    # Qwen3.6-27b (dicht, nativ thinking): keine enable_thinking-Override → nutzt Kategorie-Defaults
-    "qwen3.6-27b": {
-    },
-    # Qwen3.6-28b-reap (MoE von 35B, instruct): thinking deaktivieren
-    "qwen3.6-28b-reap": {
+    # ALLE Qwen3.6-Modelle (und Derivate): GGUF-Default ist thinking=ON.
+    # Ohne explizites enable_thinking=False denkt das Modell bei jedem Task
+    # und verbraucht das komplette Token-Budget (6000+ Tokens/Task).
+    "qwen3.6": {
         "enable_thinking": False,
     },
     # Qwen3.5 braucht no_system_msg
@@ -257,7 +269,7 @@ MODEL_TEMP_OVERRIDES = {
 REASONING_PATTERNS = {
     "acemath", "deepseek", "gemma", "phi-4-reasoning", "ministral",
     "nemotron", "apriel", "magistral", "gpt-oss", "reasoning", "think",
-    "r1", "rnj", "qwq", "cascade", "cot", "qwen3.6-27b",
+    "r1", "rnj", "qwq", "cascade", "cot",
 }
 
 

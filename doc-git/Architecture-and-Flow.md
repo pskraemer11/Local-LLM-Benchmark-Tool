@@ -24,7 +24,8 @@ Added: **Agentic pipeline** (tool-eval-bench) and **MATH-500** (replaces MathQA)
 ## Structure 
 ```
 LM Studio (localhost:1234)
-├── REST API: POST /v1/chat/completions
+├── REST API: POST /v1/chat/completions (OpenAI-compatible)
+├── Native API: POST /api/v1/chat (used for reasoning=off thinking control)
 ├── Model management: lms load / unload / ps (CLI)
 ├── lms ls --json  -> modelKey + selectedVariant + variants[] + quantization.name
 │   → modelKey = base key (e.g. essentialai/rnj-1)
@@ -33,11 +34,12 @@ LM Studio (localhost:1234)
 └── No logprobs, no /v1/completions
 
 model_manager.py (SHARED, unversioned)
-├── load_model_via_lms(model_key) -> (bool, exact_identifier)
+├── load_model_via_lms(model_key, gpu_offload=None) -> (bool, exact_identifier)
 │   ├── model_key = base modelKey (without @) – lms load accepts no @-variants
-│   ├── Call: `lms load {model_key} --yes` (no --gpu max, no -c)
+│   ├── Call: `lms load {model_key} --yes` (no --gpu max, no --context-length)
 │   │   → GPU usage is controlled automatically via the `user-concrete-model-default-config` JSONs
 │   │   → Context length is taken automatically from the pre-config
+│   │   → --context-length was removed 19.07. – it permanently overwrote JSON configs
 │   └── --identifier is not set (not for variant selection)
 ├── unload_all_models()
 ├── wait_for_model_ready()     [unused]
@@ -57,7 +59,8 @@ benchmark_config.py (CENTRAL CONFIGURATION)
 ├── PIPELINE_DISCOVERY
 ├── TOOL_EVAL_SCENARIO_IDS
 ├── QUANT_MAP (auto-generated via generate_quant_map.py)
-└── EXCLUDE_KEYWORDS
+├── BLACKLIST (embedding models, <16K context, OCR/vision/audio/translation, rag/german)
+└── EXCLUDE_KEYWORDS = BLACKLIST (alias, backward-compat)
 
 run_benchmarks_v13.py (LAUNCHER - main(), v10)
 ├── ONLY HERE is load/unload called
@@ -1083,6 +1086,20 @@ pytest tests/ -v
 
 | Date   | File                                         | Change                                                                           |
 |--------|-----------------------------------------------|----------------------------------------------------------------------------------|
+| 20.07. | `custom_benchmark_v13.py`                     | **Native REST API** (`_generate_answer_native()`): when `enable_thinking=False`, routes to `/api/v1/chat` with `reasoning="off"` — garantiert Thinking-Aus. Fallback nachdem `chat_template_kwargs` vom OpenAI-Endpoint ignoriert wird |
+| 20.07. | `run_benchmarks_v13.py`                       | **Real-time MATH-500 progress:** `run_lmeval()` switched from `subprocess.run()` to `subprocess.Popen()` — lm_eval stdout wird zeilenweise live ausgegeben (0/30, 5/30, ..., 30/30) statt erst am Ende |
+| 20.07. | `run_benchmarks_v13.py`                       | **Double coverage reasoning:** `_get_lmeval_params()` sends `reasoning="off"` alongside `chat_template_kwargs.enable_thinking`; `"reasoning"` added to both `gen_kwargs_keys` sets |
+| 19.07. | `benchmark_config.py`                         | **BLACKLIST** (19 items) replaces `EXCLUDE_KEYWORDS`; `EXCLUDE_KEYWORDS = BLACKLIST` alias. Embedding models, <16K context, OCR/vision/audio, rag/german |
+| 19.07. | `model_registry.yaml`                         | 26 blacklisted entries (404 lines) deleted: embedding, OCR, vision, audio, translation, <16K context |
+| 19.07. | `registry_tool.py`                            | Blacklist skips in `cmd_add`, `cmd_configs`, `cmd_sync_from_configs` |
+| 19.07. | `assemble_blueprint.py`                       | Blacklist skip in `assemble_prompts()`; imports `BLACKLIST` from `benchmark_config` |
+| 19.07. | `model_manager.py`                            | `--context-length` flag **removed** from `load_model_via_lms()`. Root cause: `lms load --context-length N` permanently overwrote JSON configs. Context now exclusively from pre-config JSONs |
+| 19.07. | `run_benchmarks_v13.py`                     | All `context_length=` call sites removed; context-mismatch reload logic simplified away (no longer controllable via CLI) |
+| 19.07. | `run_benchmarks_v13.py`                     | **Bugfix Thinking lm_eval:** `extra_body` → `chat_template_kwargs` top-level in gen_kwargs. lm_eval nutzt `requests.post()` direkt (nicht OpenAI SDK) – `extra_body` wird als unbekannter HTTP-Key ignoriert. Betrifft MATH-500, ARC, HellaSwag, TruthfulQA |
+| 19.07. | `custom_benchmark_v13.py`                     | `_use_structured_output(model_key)` helper disables `response_format: json_schema` for reasoning (r1-distill, deepseek, think) and Mamba models; CoderEval regex fallback added; registry blueprint fixes (deepseek-r1-distill → reasoning_coding) |
+| 19.07. | `custom_benchmark_v13.py`                     | **Bugfix Thinking:** `extra_body` nesting entfernt in `generate_answer()`. `chat_template_kwargs` now at TOP level of HTTP body. Root cause: `extra_body` ist ein OpenAI-SDK-Konzept (wird entpackt), kein gültiger HTTP-JSON-Key — LM Studio ignorierte ihn still. Qwen3.6-27B (thinking=ON per GGUF) lief daher immer im Thinking-Modus (6000+ Tokens/Task) |
+| 19.07. | `benchmark_config.py`                         | Qwen3.6-Catch-All: `qwen3.6` → `enable_thinking=False` (ersetzt spezifische `qwen3.6-27b`/`qwen3.6-28b-reap`). GGUF-Default ist thinking=ON für alle Qwen3.6-Modelle |
+| 19.07. | `registry_tool.py`                            | Registry `context_length` fixed for 13 overestimated models (from GGUF headers); missing arch/reasoning/capabilities filled for 11 entries; JSON configs synced (165 updated) |
 | 17.07. | `Architektur+Flow_v24.md`                     | p7: fill-arch + sync-from-configs, VRAM formula for useUnifiedKvCache, GGUF header reader (1ms), sync pipeline extended |
 | 17.07. | `registry_tool.py`                            | NEW: fill-arch (GGUF header reader), sync-from-configs (overwrite from JSON). add reads n_layers/hidden_dim from GGUF. fill-arch in sync pipeline. HF fallback removed. |
 | 12.07. | `Architektur+Flow_v25.md`                     | v33: v12→v13, MATH-500 replaces MathQA, MMLU-Pro removed, --no-unload-between, --exclude-benchmarks, documentation updated |

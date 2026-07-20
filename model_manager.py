@@ -409,7 +409,7 @@ def _validate_model_key(model_key: str) -> str:
     return model_key
 
 
-def load_model_via_lms(model_key: str, context_length: Optional[int] = None, gpu_offload: Optional[float] = None) -> tuple[bool, Optional[str]]:
+def load_model_via_lms(model_key: str, gpu_offload: Optional[float] = None) -> tuple[bool, Optional[str]]:
     # Code-Review 2026-07-18 §6.1: validate input early. subprocess.run
     # already uses list-form (no shell injection possible), but bad
     # input should fail with a clear message, not a cryptic CLI error.
@@ -420,8 +420,6 @@ def load_model_via_lms(model_key: str, context_length: Optional[int] = None, gpu
         return False, None
     print(f"\n  [INFO] Loading '{model_key}'...")
     cmd = ["lms", "load", model_key, "--yes"]
-    if context_length is not None:
-        cmd.extend(["--context-length", str(context_length)])
     if gpu_offload is not None:
         cmd.extend(["--gpu", str(gpu_offload)])
     for attempt in range(2):

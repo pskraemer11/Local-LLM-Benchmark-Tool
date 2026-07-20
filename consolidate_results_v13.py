@@ -1462,67 +1462,34 @@ def main() -> None:
                         "%", "%",
                         "%", "%", "°C"]
 
-        def _fit(val: Any, width: int) -> str:
-            s = str(val)
-            if len(s) <= width:
-                return s
-            if width < 3:
-                return s[:width]
-            return s[:width-1] + "…"
+        md_widths = [45] + [13, 13] + [7] * (len(cols_md) - 3)
 
-        widths2 = {}
-        for i, c in enumerate(cols_md):
-            if c == "Model":
-                max_w = max(len(header_names[i]), len(header_units[i]))
-                for sr in str_rows:
-                    max_w = max(max_w, len(str(sr.get(c, ""))))
-                widths2[c] = max_w
-            elif c in ("DS1000", "CoderEval"):
-                max_w = max(len(header_names[i]), len(header_units[i]))
-                for sr in str_rows:
-                    max_w = max(max_w, len(str(sr.get(c, ""))))
-                widths2[c] = max_w
-            else:
-                widths2[c] = 6
+        def _md_cell(txt: str, w: int, is_model: bool = False) -> str:
+            s = str(txt)
+            if is_model:
+                return s.ljust(w)
+            return s.rjust(w)
 
-        header_cells = []
-        for i, c in enumerate(cols_md):
-            txt = header_names[i]
-            if c == "Model":
-                L = len(txt.ljust(widths2[c]))
-                header_cells.append(" " + txt.ljust(widths2[c]) + " ")
-            else:
-                L = len(txt)
-                if L <= 6:
-                    header_cells.append(" " + txt.rjust(6) + " ")
-                elif L == 7:
-                    header_cells.append(" " + txt)
-                elif L == 8:
-                    header_cells.append(txt)
-                else:
-                    header_cells.append(" " + _fit(txt, 6).rjust(6) + " ")
-        f.write("|" + "|".join(header_cells) + "|\n")
-
-        parts = []
-        for i, c in enumerate(cols_md):
-            txt = header_units[i]
-            parts.append(" " * widths2[c] if not txt else txt.rjust(widths2[c]))
+        # header row: abbreviated names
+        parts = [_md_cell(header_names[0], md_widths[0], True)]
+        parts += [_md_cell(h, w) for h, w in zip(header_names[1:], md_widths[1:])]
         f.write("| " + " | ".join(parts) + " |\n")
 
-        parts = []
-        for i, c in enumerate(cols_md):
-            parts.append("-" * widths2[c])
+        # units row
+        parts = [_md_cell(header_units[0], md_widths[0], True)]
+        parts += [_md_cell(h, w) for h, w in zip(header_units[1:], md_widths[1:])]
         f.write("| " + " | ".join(parts) + " |\n")
 
+        # separator
+        parts = ["-" * w for w in md_widths]
+        f.write("| " + " | ".join(parts) + " |\n")
+
+        # data rows
         for sr in str_rows:
             parts = []
-            for c in cols_md:
+            for i, c in enumerate(cols_md):
                 val = str(sr.get(c, ""))
-                fitted = _fit(val, widths2[c])
-                if c == "Model":
-                    parts.append(fitted.ljust(widths2[c]))
-                else:
-                    parts.append(fitted.rjust(widths2[c]))
+                parts.append(_md_cell(val, md_widths[i], c == "Model"))
             f.write("| " + " | ".join(parts) + " |\n")
 
         f.write("\n---\n")

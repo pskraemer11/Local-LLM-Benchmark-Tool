@@ -25,6 +25,8 @@ from datetime import datetime
 
 # === Pfade ===
 REPO_ROOT = Path(__file__).parent
+sys.path.insert(0, str(REPO_ROOT))
+from benchmark_config import BLACKLIST
 REGISTRY_PATH = REPO_ROOT / "doc-git" / "model_registry.yaml"
 BLUEPRINT_PATH = REPO_ROOT / "doc-git" / "blueprint_definitions.yaml"
 CONFIG_ROOT = Path.home() / ".lmstudio" / ".internal" / "user-concrete-model-default-config"
@@ -626,6 +628,9 @@ def assemble_prompts(preview_only: bool = False):
     for model_name in registry:
         entry = registry[model_name]
         if not isinstance(entry, dict):
+            continue
+        if any(kw in model_name.lower() for kw in BLACKLIST):
+            stats["skipped"] += 1
             continue
 
         bp_name = entry.get("blueprint", "default_chat")

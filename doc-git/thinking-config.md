@@ -11,7 +11,13 @@ The system controls Thinking on two levels:
 
 ### API Control
 
-The `enable_thinking` parameter is sent to LM Studio as `extra_body.chat_template_kwargs.enable_thinking`.
+The `enable_thinking` parameter is sent to LM Studio as `chat_template_kwargs.enable_thinking` at the top level of the JSON body.
+
+> **⚠ `extra_body` nesting (historical, fixed 19.07.):** The custom pipeline used to nest `chat_template_kwargs` under `extra_body` (`body["extra_body"]["chat_template_kwargs"] = {...}`). This is WRONG for direct HTTP requests — `extra_body` is an OpenAI Python SDK concept that gets UNWRAPPED to the top level. In a manually-constructed JSON body, `extra_body` is just another unknown key that the server ignores. Fix: `body["chat_template_kwargs"] = kwargs`.
+>
+> The lm_eval path (`gen_kwargs["extra_body"]`) is correct because lm_eval passes gen_kwargs to the OpenAI SDK, which properly unwraps `extra_body` to the top level.
+>
+> **Bug symptom:** Qwen3.6-27B (thinking=ON by default in GGUF) always ran in thinking mode (6000+ tokens/task) because `enable_thinking=False` never reached the Jinja template renderer.
 
 ### Gemma 4 Special Case
 
@@ -31,7 +37,7 @@ The following overrides only override deviating category defaults:
 |---------|----------------|----------------------|-------------|
 | default | **False** | – | Default since 2026-07-11 |
 | qwen3.5 | False | – | temperature=0.2, top_p=0.9, no_system_msg |
-| qwen3.6 | False | 8192 | Thinking consumes budget → 0% Score |
+| qwen3.6 (alle) | **False** | – | GGUF-Default thinking=ON → explizit False seit 19.07. Catch-all für alle Qwen3.6-Derivate |
 | gemma | False | – | + System prompt override |
 | deepseek | **True** | 2048 | Only default with Thinking=on |
 | gpt-oss | False | 4096 | stop: <\|return\|>, <\|call\|> |
@@ -54,7 +60,7 @@ The `--thinking` CLI flag has a limited effect since v13:
 |-------------|-------------------|------------|
 | **Reasoning models** (name contains "reasoning"/"think"/"r1"/"rnj") | ✅ Enables enable_thinking + Timeout ×2 | Native reasoning supported |
 | **Gemma 4** | ✅ Enables enable_thinking for MATH-500 | Gemma-4 template sets `<|channel>thought` |
-| **Qwen3.6** | ❌ Ignored (enable_thinking=False forced) | Thinking tokens block token budget → 0% Score |
+| **Qwen3.6 (alle)** | ❌ Ignored (enable_thinking=False forced) | qwen3.6-27b aus REASONING_PATTERNS entfernt. `--thinking` hat keinen Effekt auf Qwen3.6 |
 | **GPT-OSS** | ❌ Ignored (no thinking support) | GPT-OSS architecture has no thinking |
 | **Qwen3.5** | ❌ Ignored (enable_thinking=False forced) | No thinking support |
 | **Default (other models)** | ❌ No effect | enable_thinking=None (no extra_body) |
@@ -79,6 +85,17 @@ _is_qwen3_5_model) controls:
 MODEL_CONFIG in custom_benchmark_v13.py now only contains the custom pipeline parameters.
 
 ## History
+
+### 2026-07-20
+- **Native REST API (Option 2):** `custom_benchmark_v13.py:generate_answer()`: When `enable_thinking=False`, routes to `_generate_answer_native()` which uses LM Studio's native REST API (`/api/v1/chat`) with `reasoning: "off"` — a **dedicated, reliable** parameter that guarantees thinking is disabled. This is the fallback after `chat_template_kwargs` may be ignored by the OpenAI-compatible endpoint.
+- **lm_eval double coverage:** `run_benchmarks_v13.py`: Added `gen_kwargs["reasoning"] = "off"` alongside existing `chat_template_kwargs.enable_thinking`, plus `"reasoning"` in both `gen_kwargs_keys` sets. If LM Studio's OpenAI endpoint forwards `reasoning`, this provides a second path to disable thinking.
+- **Reason for native API:** The OpenAI-compatible endpoint (`/v1/chat/completions`) does not list `chat_template_kwargs` or `reasoning` as supported parameters. The native REST API (`/api/v1/chat`) has `reasoning: "off"|"low"|"medium"|"high"|"on"` as a first-class parameter.
+
+### 2026-07-19
+- **Bugfix Custom Pipeline:** `extra_body` nesting removed in `custom_benchmark_v13.py:generate_answer()` → `chat_template_kwargs` now at top level of HTTP body. Root cause: `extra_body` is an OpenAI SDK unwrap-mechanism, not a valid HTTP-level key — LM Studio ignored it silently. Betrifft DS1000, CoderEval.
+- **Bugfix lm_eval Pipeline:** Selber Fix in `run_benchmarks_v13.py:_get_lmeval_params()` und `gen_kwargs_keys` — `extra_body` → `chat_template_kwargs` top-level. lm_eval verwendet `requests.post()` direkt (nicht OpenAI SDK), daher gleicher Bug. Betrifft MATH-500, ARC, HellaSwag, TruthfulQA.
+- **Qwen3.6 Catch-All:** `MODEL_TEMP_OVERRIDES`: `"qwen3.6"` → `enable_thinking=False` für alle Qwen3.6-Modelle und Derivate.
+- **REASONING_PATTERNS:** `qwen3.6-27b` entfernt — `--thinking` hat keinen Effekt auf Qwen3.6.
 
 ### 2026-07-11
 - Default `enable_thinking`: None → **False** (previously: no extra_body sent)

@@ -84,6 +84,9 @@ from model_manager import (
 )
 from benchmark_config import EXCLUDE_KEYWORDS, get_model_config
 
+# Native REST API URL (for reasoning=off support – reliable thinking disable)
+NATIVE_CHAT_URL = API_BASE.replace("/v1", "/api/v1/chat")
+
 import psutil
 import pynvml
 
@@ -115,6 +118,20 @@ STRUCTURED_OUTPUT_SCHEMA = {
         }
     }
 }
+
+def _use_structured_output(model_key: str | None) -> bool:
+    if not STRUCTURED_OUTPUT:
+        return False
+    if THINKING_MODE:
+        return False
+    if model_key:
+        kl = model_key.lower()
+        if any(kw in kl for kw in ("r1-distill", "deepseek", "reasoning", "think")):
+            return False
+        if "mamba" in kl:
+            return False
+    return True
+
 
 SAMPLE_SIZE = 10
 random.seed()
@@ -647,6 +664,14 @@ def generate_answer(prompt: Optional[str] = None, model_key: Optional[str] = Non
         if system_msg:
             messages.append({"role": "system", "content": system_msg})
         messages.append({"role": "user", "content": prompt})
+    # Native REST API path: reliable thinking off via reasoning="off" parameter
+    if enable_thinking is False:
+        return _generate_answer_native(
+            model_key=model_key or "local-model",
+            messages=messages, prompt=prompt, system_msg=system_msg,
+            temperature=temperature, top_p=top_p, max_tokens=max_tokens,
+            top_k=top_k, min_p=min_p, timeout=timeout,
+        )
     body = {
         "model": model_key or "local-model",
         "messages": messages,
@@ -658,14 +683,13 @@ def generate_answer(prompt: Optional[str] = None, model_key: Optional[str] = Non
         body["top_k"] = top_k
     if min_p is not None:
         body["min_p"] = min_p
-    extra_chat_kwargs = {}
-    if enable_thinking is not None:
-        extra_chat_kwargs["enable_thinking"] = enable_thinking
-    if reasoning_effort is not None:
-        extra_chat_kwargs["reasoning_effort"] = reasoning_effort
-    if extra_chat_kwargs:
-        body.setdefault("extra_body", {})
-        body["extra_body"]["chat_template_kwargs"] = extra_chat_kwargs
+    if enable_thinking is not None or reasoning_effort is not None:
+        kwargs = {}
+        if enable_thinking is not None:
+            kwargs["enable_thinking"] = enable_thinking
+        if reasoning_effort is not None:
+            kwargs["reasoning_effort"] = reasoning_effort
+        body["chat_template_kwargs"] = kwargs
     # Gemma 4: <|channel>thought tag is hardcoded in GGUF jinja template,
     # extra_body override is ignored. Force-disable via system prompt.
     if enable_thinking is False and model_key and "gemma" in model_key.lower():
@@ -689,6 +713,89 @@ def generate_answer(prompt: Optional[str] = None, model_key: Optional[str] = Non
         tokens_per_sec = t_out / elapsed if elapsed > 0 else 0
         return content, elapsed, t_in, t_out, tokens_per_sec, think_tok, None, None
     return None, elapsed, t_in, t_out, 0, think_tok, "api_error", "Fallback also failed"
+
+
+def _generate_answer_native(
+    model_key: str,
+    messages: list[dict[str, Any]],
+    prompt: Optional[str],
+    system_msg: Optional[str],
+    temperature: float,
+    top_p: float,
+    max_tokens: int,
+    top_k: Optional[int],
+    min_p: Optional[float],
+    timeout: int,
+) -> tuple[Optional[str], float, int, int, float, int, Optional[str], Optional[str]]:
+    """Use LM Studio native REST API with reasoning='off' to disable thinking.
+
+    The native API has a dedicated reasoning parameter that reliably controls
+    thinking behavior, unlike chat_template_kwargs which may be ignored by
+    the OpenAI-compatible endpoint.
+    """
+    system_prompt = None
+    input_text = prompt or ""
+    for m in messages:
+        if m.get("role") == "system" and not system_prompt:
+            system_prompt = m.get("content", "")
+        elif m.get("role") == "user":
+            input_text = m.get("content", "")
+
+    body: dict[str, Any] = {
+        "model": model_key,
+        "input": input_text,
+        "temperature": temperature,
+        "top_p": top_p,
+        "max_output_tokens": max_tokens,
+        "reasoning": "off",
+    }
+    if system_prompt:
+        body["system_prompt"] = system_prompt
+    if top_k is not None:
+        body["top_k"] = top_k
+    if min_p is not None:
+        body["min_p"] = min_p
+
+    headers = {"Content-Type": "application/json"}
+    try:
+        payload = json.dumps(body).encode("utf-8")
+        req = Request(NATIVE_CHAT_URL, data=payload, headers=headers, method="POST")
+        start = time.time()
+        with urlopen(req, timeout=timeout) as resp:
+            result = json.loads(resp.read().decode("utf-8"))
+        elapsed = time.time() - start
+
+        output = result.get("output", [])
+        content_parts = []
+        thinking_content = ""
+        for item in output:
+            if item.get("type") == "message":
+                content_parts.append(item.get("content", ""))
+            elif item.get("type") == "reasoning":
+                thinking_content += item.get("content", "")
+
+        raw_content = "".join(content_parts)
+        content, think_tags = strip_thinking_tokens(raw_content)
+        thinking_tokens = len(thinking_content.split()) if thinking_content else 0
+        thinking_tokens += think_tags
+
+        stats = result.get("stats", {})
+        tokens_in = stats.get("input_tokens", 0)
+        tokens_out = stats.get("total_output_tokens", 0)
+        tokens_per_sec = stats.get("tokens_per_second", 0)
+        if tokens_per_sec == 0 and elapsed > 0:
+            tokens_per_sec = tokens_out / elapsed
+
+        return content, elapsed, tokens_in, tokens_out, tokens_per_sec, thinking_tokens, None, None
+    except (URLError, HTTPError, json.JSONDecodeError, KeyError, TimeoutError) as e:
+        err_text = str(e)
+        try:
+            if hasattr(e, "read"):
+                resp_body = e.read().decode("utf-8", errors="replace")[:300]
+                err_text = f"{err_text} | body={resp_body}"
+        except Exception:
+            pass
+        return None, 0, 0, 0, 0, 0, "api_error", err_text
 
 
 def extract_code(text: Optional[str], structured: bool = False) -> str:
@@ -1381,14 +1488,23 @@ def run_task(task: dict[str, Any], task_type: str, model_key: Optional[str] = No
             full_prompt += f"\n\nCreate the function `{entry_point}`."
         response, latency, t_in, t_out, tps, think_tok, err_type, err_detail = generate_answer(
             full_prompt, **gen_kwargs,
-            response_format=STRUCTURED_OUTPUT_SCHEMA if STRUCTURED_OUTPUT else None
+            response_format=STRUCTURED_OUTPUT_SCHEMA if _use_structured_output(model_key) else None
         )
         if response is None:
             return {"response": None, "extracted_code": "", "score": 0.0,
                     "score_detail": f"Timeout/API error ({latency:.1f}s)", "latency": latency,
                     "tokens_in": t_in, "tokens_out": t_out, "tokens_per_sec": tps,
                     "thinking_tokens": think_tok, "error_type": err_type, "error_detail": err_detail}
-        code = extract_code(response, structured=STRUCTURED_OUTPUT) if response else ""
+        code = extract_code(response, structured=_use_structured_output(model_key)) if response else ""
+        if not code and response:
+            m = re.search(r"```(?:python)?\s*\n(.*?)```", response, re.DOTALL)
+            if m:
+                code = m.group(1).strip()
+            else:
+                code = "\n".join(
+                    l for l in response.strip().split("\n")
+                    if _is_bare_statement(l.strip())
+                )
         score, detail = evaluate_code(code, entry_point, tests_field, "", setup_code=setup_code)
         return {
             "response": response,
@@ -1440,14 +1556,14 @@ def run_task(task: dict[str, Any], task_type: str, model_key: Optional[str] = No
 
         response, latency, t_in, t_out, tps, think_tok, err_type, err_detail = generate_answer(
             full_prompt, **gen_kwargs,
-            response_format=STRUCTURED_OUTPUT_SCHEMA if STRUCTURED_OUTPUT else None
+            response_format=STRUCTURED_OUTPUT_SCHEMA if _use_structured_output(model_key) else None
         )
         if response is None:
             return {"response": None, "extracted_code": "", "score": 0.0,
                     "score_detail": f"Timeout/API error ({latency:.1f}s)", "latency": latency,
                     "tokens_in": t_in, "tokens_out": t_out, "tokens_per_sec": tps,
                     "thinking_tokens": think_tok, "error_type": err_type, "error_detail": err_detail}
-        code = extract_code(response, structured=STRUCTURED_OUTPUT) if response else ""
+        code = extract_code(response, structured=_use_structured_output(model_key)) if response else ""
         if not code and response:
             m = re.search(r"```(?:python)?\s*\n(.*?)```", response, re.DOTALL)
             if m:

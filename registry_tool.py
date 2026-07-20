@@ -46,6 +46,7 @@ y.indent(mapping=2, sequence=4, offset=2)
 sys.path.insert(0, str(BASE_DIR))
 from assemble_blueprint import normalize_model_name, read_lms_configs
 from benchmark_config import (
+    BLACKLIST,
     USABLE_VRAM_GB as _USABLE_VRAM_GB,
     USE_UNIFIED_KV_CACHE_THRESHOLD_GB as _USE_UNIFIED_KV_CACHE_THRESHOLD_GB,
     LEGACY_MODEL_GB_THRESHOLD_GB as _LEGACY_MODEL_GB_THRESHOLD_GB,
@@ -346,6 +347,9 @@ def cmd_add(models: list[dict]) -> dict:
         if any(sk == normalize_model_name(k) for k in reg):
             skipped.append((mk, "bereits vorhanden"))
             continue
+        if any(kw in mk.lower() for kw in BLACKLIST):
+            skipped.append((mk, "blacklisted"))
+            continue
         ar = _ARCH_MAP.get(m.get("arch", ""), m.get("arch", "?"))
         is_mtp = "mtp" in mk.lower()
         nt = f"Architektur: {ar}"
@@ -406,7 +410,7 @@ def cmd_configs() -> dict:
     # Sort by descending normalized key length: more specific keys match first
     rk_sorted = sorted(rk.items(), key=lambda x: -len(x[0]))
 
-    updated = skipped = errors = 0
+    updated = skipped = blacklisted = errors = 0
     for cfg in cfgs:
         cn = normalize_model_name(cfg["dir_name"])
         match = None
@@ -429,6 +433,9 @@ def cmd_configs() -> dict:
                     break
         if not match:
             skipped += 1
+            continue
+        if any(kw in match.lower() for kw in BLACKLIST):
+            blacklisted += 1
             continue
         entry = reg[match]
         jp = cfg["json_path"]
@@ -492,7 +499,7 @@ def cmd_configs() -> dict:
         except Exception as e:
             errors += 1
 
-    result = {"updated": updated, "skipped": skipped, "errors": errors}
+    result = {"updated": updated, "skipped": skipped, "blacklisted": blacklisted, "errors": errors}
     print(json.dumps(result, ensure_ascii=False))
     return result
 
@@ -521,6 +528,7 @@ def cmd_sync_from_configs() -> None:
     print("[3] Registry-Einträge aktualisieren ...")
     updated_offload = updated_np = updated_ukv = 0
     skipped_no_match = 0
+    blacklisted = 0
     for cfg in configs:
         cn = normalize_model_name(cfg["dir_name"])
         match = None
@@ -540,6 +548,9 @@ def cmd_sync_from_configs() -> None:
                     break
         if not match:
             skipped_no_match += 1
+            continue
+        if any(kw in match.lower() for kw in BLACKLIST):
+            blacklisted += 1
             continue
         entry = reg[match]
         if not isinstance(entry, dict):
@@ -564,6 +575,7 @@ def cmd_sync_from_configs() -> None:
     print(f"  -> num_parallel:     {updated_np} aktualisiert")
     print(f"  -> useUnifiedKvCache:{updated_ukv} aktualisiert (context_length uebersprungen)")
     print(f"  -> kein Match:       {skipped_no_match} uebersprungen")
+    print(f"  -> blacklisted:      {blacklisted} uebersprungen")
 
     if updated_offload or updated_np or updated_ukv:
         print("[4] Registry speichern ...")
@@ -618,7 +630,7 @@ def _default_ctx_from_size(size_bytes: int, np: int = 1,
     kv_ref = 1.5
     kv_actual = _KV_BYTES.get(k_cache, 2.0) + _KV_BYTES.get(v_cache, 2.0)
     scale = (kv_ref / kv_actual) / np
-    return max(2048, int(base_ctx * scale))
+    return max(8192, int(base_ctx * scale))
 
 
 # _USABLE_VRAM_GB is now imported from benchmark_config at the top of

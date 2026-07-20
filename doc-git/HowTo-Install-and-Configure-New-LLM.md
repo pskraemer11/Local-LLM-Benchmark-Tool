@@ -18,6 +18,12 @@ grep -l "model-name" doc-git/model_registry.yaml
 
 **Case 1: Model is already in the registry**
 → `sync_model_configs.ps1 -FullSync` or manually:
+
+> **ℹ BLACKLIST check:** If the model name contains keywords like `embed`, `ocr`, `vision`,
+> `whisper`, `german`, `rag`, `translat`, `audio`, `vl`, `flux`, `bge-m3`, `datagemma-rig`,
+> `granitelib-rag`, or `em_german_13b`, it is in `BLACKLIST` and **will be skipped** by
+> `registry_tool.py` and `assemble_blueprint.py`. These models are not suitable for
+> coding/benchmark use (embeddings, <16K context, OCR/vision/audio, etc.).
 ```
 python assemble_blueprint.py classify   # Update classification
 python assemble_blueprint.py assemble   # Write prompt to JSON

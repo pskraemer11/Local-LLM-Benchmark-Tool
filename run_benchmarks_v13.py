@@ -102,6 +102,9 @@ def _is_reasoning_model(model_key: str) -> bool:
     kl = model_key.lower()
     return any(kw in kl for kw in REASONING_KEYWORDS)
 
+def _is_mamba_model(model_key: str) -> bool:
+    return "mamba" in model_key.lower()
+
 def _is_moe_model(model_key: str) -> bool:
     return bool(MOE_PATTERN.search(model_key))
 
@@ -474,14 +477,16 @@ def _get_lmeval_params(model_key: str, bench_name: str = "") -> dict[str, Any]:
     if config.get("stop"):
         gen_kwargs["until"] = config["stop"]
 
-    # extra_body for chat_template_kwargs
-    extra_kwargs = {}
+    # chat_template_kwargs for enable_thinking / reasoning_effort
+    ctw = {}
     if config.get("enable_thinking") is not None:
-        extra_kwargs["enable_thinking"] = config["enable_thinking"]
+        ctw["enable_thinking"] = config["enable_thinking"]
     if config.get("reasoning_effort") is not None:
-        extra_kwargs["reasoning_effort"] = config["reasoning_effort"]
-    if extra_kwargs:
-        gen_kwargs["extra_body"] = {"chat_template_kwargs": extra_kwargs}
+        ctw["reasoning_effort"] = config["reasoning_effort"]
+    if ctw:
+        gen_kwargs["chat_template_kwargs"] = ctw
+    if config.get("enable_thinking") is False:
+        gen_kwargs["reasoning"] = "off"
 
     return gen_kwargs
 
@@ -505,7 +510,7 @@ def _build_lmeval_cmd(model_key: str, api_model: str, subset_task: str, per_limi
         model_args_dict["eos_string"] = "<|endoftext|>"
     # Generation params go to --gen_kwargs (overrides YAML gen_kwargs via merge)
     gen_kwargs_keys = {"max_tokens", "temperature", "top_p", "top_k", "min_p",
-                       "until", "extra_body"}
+                       "until", "chat_template_kwargs", "reasoning"}
     gen_kwargs = {k: v for k, v in lmeval_params.items()
                   if k in gen_kwargs_keys and v is not None}
     model_args = json.dumps(model_args_dict, ensure_ascii=False)
@@ -578,7 +583,7 @@ def _ensure_model_still_loaded(model_key: str, load_key: str, bench_name: str = 
     if not ok:
         label = f" after {bench_name}" if bench_name else ""
         print(f"  [WARN] Model{label} no longer loaded – reloading...")
-        load_model_via_lms(load_key, context_length=_get_safe_context(load_key))
+        load_model_via_lms(load_key)
         if not wait_for_model_ready(timeout=60):
             print("  [WARN] Model readiness check timed out")
 
@@ -610,9 +615,13 @@ def run_custom_benchmark(model_info: dict[str, Any], bench: dict[str, Any], samp
     # Gemma models have enable_thinking=False (thinking disturbs coding benchmarks).
     if THINKING_ENABLED and _is_reasoning_model(model_key) and not _is_gemma_model(model_key):
         cmd.append("--thinking")
-    # Only add --no-structured-output on retry (see fallback below)
-    _do_retry = no_structured_output
-    if _do_retry:
+    # Pre-emptive --no-structured-output for reasoning and Mamba models
+    # (structured output grammar constraints break thinking tokens / SSM architectures)
+    if _is_reasoning_model(model_key) or _is_mamba_model(model_key):
+        cmd.append("--no-structured-output")
+        no_structured_output = True
+    # Fallback: retry with --no-structured-output on channel error (see below)
+    if no_structured_output and "--no-structured-output" not in cmd:
         cmd.append("--no-structured-output")
     if keep_response:
         cmd.append("--keep-response")
@@ -631,7 +640,7 @@ def run_custom_benchmark(model_info: dict[str, Any], bench: dict[str, Any], samp
     # Detection via the [CHANNEL-ERROR] marker printed by the subprozess
     # when error_detail contains "Cannot combine structured output" /
     # "Channel Error" (see custom_benchmark_v13.py run benchmark loop).
-    if not _do_retry and "[CHANNEL-ERROR]" in (result.stdout or ""):
+    if not no_structured_output and "[CHANNEL-ERROR]" in (result.stdout or ""):
         print(f"  [INFO] Channel-Error detected – retrying with --no-structured-output")
         return run_custom_benchmark(model_info, bench, sample_size=sample_size,
                                    seed=seed, no_structured_output=True)
@@ -837,7 +846,7 @@ def run_lmeval(model_info: dict[str, Any], bench: dict[str, Any], limit: int = 5
         model_args_dict["eos_string"] = "<|endoftext|>"
     # Gen_kwargs keys that should override YAML generation_kwargs per request.
     gen_kwargs_keys = {"max_tokens", "temperature", "top_p", "top_k", "min_p",
-                       "until", "extra_body"}
+                       "until", "chat_template_kwargs", "reasoning"}
     gen_kwargs = {k: v for k, v in lmeval_params.items()
                   if k in gen_kwargs_keys and v is not None}
     model_args = json.dumps(model_args_dict, ensure_ascii=False)
@@ -869,25 +878,43 @@ def run_lmeval(model_info: dict[str, Any], bench: dict[str, Any], limit: int = 5
     lmeval_base = PIPELINE_TIMEOUTS["lmeval_base"]
     base_timeout = (lmeval_base * 2 if reasoning else lmeval_base) * limit_scale
     timeout_mult = bench.get("timeout_mult", 1)
+    total_timeout = base_timeout * timeout_mult
     elapsed = 0
     stdout = ""
     stderr = ""
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=base_timeout * timeout_mult,
-                           encoding="utf-8", errors="replace", env=lm_env)
-        stdout = r.stdout or ""
-        stderr = r.stderr or ""
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                text=True, encoding="utf-8", errors="replace", env=lm_env)
+        stdout_lines = []
+        stderr_lines = []
+        def _stream_stdout():
+            for line in iter(proc.stdout.readline, ""):
+                print(line.rstrip())
+                stdout_lines.append(line)
+        def _collect_stderr():
+            for line in iter(proc.stderr.readline, ""):
+                stderr_lines.append(line)
+        tout = threading.Thread(target=_stream_stdout, daemon=True)
+        terr = threading.Thread(target=_collect_stderr, daemon=True)
+        tout.start()
+        terr.start()
+        proc.wait(timeout=total_timeout)
+        tout.join(timeout=2)
+        terr.join(timeout=2)
+        stdout = "".join(stdout_lines)
+        stderr = "".join(stderr_lines)
         elapsed = time.time() - t0
-        out = stdout[-2000:]
-        print(out)
-        if r.returncode != 0:
-            print(f"  [WARN] lm_eval returncode={r.returncode}")
-            print(f"  [WARN] lm_eval stderr ({len(stderr)} chars):")
-            for line in stderr.split("\n"):
-                print(f"    | {line}")
+        if proc.returncode != 0:
+            print(f"  [WARN] lm_eval returncode={proc.returncode}")
+            if stderr:
+                print(f"  [WARN] lm_eval stderr ({len(stderr)} chars):")
+                for line in stderr.split("\n"):
+                    print(f"    | {line}")
         else:
             print(f"  [OK] {bench['name']} done ({elapsed:.0f}s)")
     except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
         elapsed = time.time() - t0
         print(f"  [WARN] {bench['name']} TIMEOUT after {elapsed:.0f}s")
     except Exception as e:
@@ -1153,50 +1180,21 @@ def main() -> None:
             li = loaded["identifier"].lower()
             lk = loaded["model_key"].lower()
             mk = model_key.lower()
-            desired_ctx = _get_safe_context(load_key)
-            current_ctx = loaded.get("context_length")
-            # Check if this model is already loaded (key or identifier match)
             if mk in li or mk in lk or li in mk or lk in mk:
-                if current_ctx is not None and desired_ctx is not None and current_ctx != desired_ctx:
-                    print(f"  [INFO] '{model_display}' loaded with context={current_ctx}, need {desired_ctx} – reloading...")
-                    unload_all_models()
-                    ok, api_model = load_model_via_lms(load_key, context_length=desired_ctx)
-                    if not ok:
-                        print(f"  [ERROR] Loading failed. Skipping.")
-                        continue
-                else:
-                    api_model = loaded["identifier"]
-                    print(f"  [OK] '{model_display}' already loaded – ID: {api_model}")
+                api_model = loaded["identifier"]
+                print(f"  [OK] '{model_display}' already loaded – ID: {api_model}")
             else:
                 print(f"  [INFO] Different model loaded ({loaded['display_name']}) – unloading...")
                 unload_all_models()
-                ok, api_model = load_model_via_lms(load_key, context_length=desired_ctx)
+                ok, api_model = load_model_via_lms(load_key)
                 if not ok:
                     print(f"  [ERROR] Loading failed. Skipping.")
                     continue
         else:
-            ok, api_model = load_model_via_lms(load_key, context_length=_get_safe_context(load_key))
+            ok, api_model = load_model_via_lms(load_key)
             if not ok:
                 print(f"  [ERROR] Loading failed. Skipping.")
                 continue
-        # Verify loaded model context length matches desired value
-        desired_ctx = _get_safe_context(load_key)
-        if desired_ctx is not None:
-            loaded_after = get_current_loaded_model()
-            actual_ctx = loaded_after.get("context_length") if loaded_after else None
-            if actual_ctx is not None and actual_ctx != desired_ctx:
-                print(f"  [WARN] Model loaded with context={actual_ctx}, expected {desired_ctx} – reloading...")
-                unload_all_models()
-                ok, api_model = load_model_via_lms(load_key, context_length=desired_ctx)
-                if ok:
-                    loaded_after = get_current_loaded_model()
-                    actual_ctx = loaded_after.get("context_length") if loaded_after else None
-                    if actual_ctx is not None and actual_ctx != desired_ctx:
-                        print(f"  [ERROR] Still context={actual_ctx} after reload – continuing anyway")
-                    else:
-                        print(f"  [OK] Context now {desired_ctx}")
-                else:
-                    print(f"  [ERROR] Reload failed – continuing with context={actual_ctx}")
 
         # Short pause – the model is confirmed loaded via lms ps,
         # but the REST server needs a moment to initialize.
@@ -1224,7 +1222,7 @@ def main() -> None:
                 print(f"  [INFO] Unloading/reloading model between benchmarks...")
                 unload_all_models()
                 time.sleep(2)
-                ok, api_model = load_model_via_lms(load_key, context_length=_get_safe_context(load_key))
+                ok, api_model = load_model_via_lms(load_key)
                 if not ok:
                     print(f"  [ERROR] Reload before {bench['name']} failed. Skipping.")
                     continue
