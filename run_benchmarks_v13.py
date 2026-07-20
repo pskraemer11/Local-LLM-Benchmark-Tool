@@ -236,11 +236,13 @@ def _load_registry_for_context() -> tuple[dict[str, Any], dict[str, str]]:
 
     try:
         from ruamel.yaml import YAML
+        from ruamel.yaml.error import YAMLError
         y = YAML()
         y.preserve_quotes = True
         with open(rpath, "r", encoding="utf-8") as f:
             data = y.load(f) or {}
-    except Exception:
+    except (YAMLError, OSError, UnicodeDecodeError) as e:
+        print(f"  [WARN] model_registry.yaml fehlerhaft: {e}", file=sys.stderr)
         _REGISTRY_DATA = {}
         _REGISTRY_NORM = {}
         return _REGISTRY_DATA, _REGISTRY_NORM
@@ -720,8 +722,8 @@ def run_evalplus(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_siz
     for old_f in _glob.glob(os.path.join(out_dir, "*.jsonl")):
         try:
             os.remove(old_f)
-        except Exception:
-            pass
+        except OSError as e:
+            print(f"  [WARN] alte sample-Datei nicht loeschbar: {old_f}: {e}", file=sys.stderr)
 
     samples_path = os.path.join(out_dir, f"local-model_openai_temp_{temp_str}.jsonl")
 
@@ -747,7 +749,7 @@ def run_evalplus(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_siz
         print(f"  [ERROR] codegen timed out after {eval_timeout:.0f}s")
         executor.shutdown(wait=False)
         return None
-    except Exception as e:
+    except (subprocess.SubprocessError, OSError, ValueError, TypeError, json.JSONDecodeError) as e:
         print(f"  [ERROR] codegen failed: {e}")
         executor.shutdown(wait=False)
         return None
@@ -765,8 +767,8 @@ def run_evalplus(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_siz
     for old_result in glob.glob(eval_results_pattern):
         try:
             os.remove(old_result)
-        except Exception:
-            pass
+        except OSError as e:
+            print(f"  [WARN] alte eval_results-Datei nicht loeschbar: {old_result}: {e}", file=sys.stderr)
 
     print(f"  [evaluate] {dataset} ...")
     r2 = subprocess.run(
@@ -919,7 +921,7 @@ def run_lmeval(model_info: AvailableModelInfo, bench: BenchmarkDef, limit: int =
         proc.wait()
         elapsed = time.time() - t0
         print(f"  [WARN] {bench['name']} TIMEOUT after {elapsed:.0f}s")
-    except Exception as e:
+    except (subprocess.SubprocessError, OSError, ValueError, KeyError) as e:
         elapsed = time.time() - t0
         print(f"  [WARN] {bench['name']} ERROR: {e}")
 
@@ -958,7 +960,7 @@ def run_lmeval(model_info: AvailableModelInfo, bench: BenchmarkDef, limit: int =
                     break
             if score is not None:
                 break
-    except Exception as e:
+    except (OSError, json.JSONDecodeError, KeyError, ValueError) as e:
         print(f"  [WARN] lm_eval score parsing: {e}")
 
     return {"pipeline": "lmeval", "bench": bench["name"], "category": bench.get("category", ""),
@@ -999,12 +1001,15 @@ def run_agentic(model_info: AvailableModelInfo, limit: int = 5) -> Optional[Pipe
     t0 = time.time()
     cmd = [
         sys.executable, "-m", "tool_eval_bench",
-        "--base-url", "http://127.0.0.1:1234/v1",
+        "--base-url", API_BASE,
         "--scenarios", *selected,
         "--json-file", json_path,
         "--timeout", str(PIPELINE_TIMEOUTS["agentic_scenario"]),
         "--no-live",
     ]
+
+
+
     lm_env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
     score = None
     stdout = ""
@@ -1040,7 +1045,7 @@ def run_agentic(model_info: AvailableModelInfo, limit: int = 5) -> Optional[Pipe
     except subprocess.TimeoutExpired:
         elapsed = time.time() - t0
         print(f"  [WARN] Agentic TIMEOUT after {elapsed:.0f}s")
-    except Exception as e:
+    except (subprocess.SubprocessError, OSError, json.JSONDecodeError, KeyError, ValueError) as e:
         elapsed = time.time() - t0
         print(f"  [WARN] Agentic ERROR: {e}")
 
@@ -1262,7 +1267,7 @@ def main() -> None:
                 _ensure_model_still_loaded(model_identifier, model_load_key, bench_name=bname)
             except subprocess.TimeoutExpired:
                 print(f"  [ERROR] {bench['name']} timeout (expired)")
-            except Exception as e:
+            except (subprocess.SubprocessError, OSError, ValueError, TypeError, KeyError) as e:
                 print(f"  [ERROR] {bench['name']}: {e}")
 
         # Intermediate summary per model (csv_writer, uniform schema)

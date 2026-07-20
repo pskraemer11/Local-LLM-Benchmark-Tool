@@ -17,6 +17,7 @@ Bei neuen Modellen: python generate_quant_map.py --write ausfuehren.
 """
 
 from __future__ import annotations
+import sys
 from typing import Any
 
 from type_defs import ModelConfig
@@ -112,10 +113,12 @@ def get_quant(model_identifier: str) -> str:
     registry_path = _Path(__file__).resolve().parent / "doc-git" / "model_registry.yaml"
     try:
         from ruamel.yaml import YAML
+        from ruamel.yaml.error import YAMLError
         y = YAML()
         with open(registry_path, "r", encoding="utf-8") as f:
             data = y.load(f) or {}
-    except Exception:
+    except (YAMLError, OSError, UnicodeDecodeError) as _e:
+        print(f"  [WARN] model_registry.yaml fehlerhaft: {_e}", file=sys.stderr)
         data = {}
     for key, entry in data.items():
         if not isinstance(entry, dict):

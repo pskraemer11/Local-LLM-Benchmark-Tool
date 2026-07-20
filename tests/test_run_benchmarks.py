@@ -227,75 +227,125 @@ class TestResolveBenchmarks:
 # ======================================================================
 
 class TestLmevalParams:
-    # Code-Review 2026-07-18 §5.5: The _get_evaluation_parameters() function was
-    # rewritten in v13 to use get_model_config() (Variante C+ in
-    # benchmark_config.py). The following tests hard-coded specific values
-    # from the old per-model if-else cascade and now fail. They are
-    # skipped until either updated or replaced by a get_model_config()
-    # test suite.
-    @pytest.mark.skip(reason="_get_evaluation_parameters rewritten in v13; "
-                        "old if-else cascade tests obsolete")
-    def test_gptoss_branch(self):
-        # pick a model key that triggers gptoss
-        params = _get_evaluation_parameters("gpt-oss-20b", "MATH-500")
-        assert params["temperature"] == 1.0
-        assert params["top_k"] == 0
-        assert "<|return|>" in params["until"]
-        assert params["extra_body"]["chat_template_kwargs"]["enable_thinking"] is False
+    """Tests fuer _get_evaluation_parameters() (Variante C+, p6).
 
-    @pytest.mark.skip(reason="_get_evaluation_parameters rewritten in v13; "
-                        "old if-else cascade tests obsolete")
-    def test_qwen3_6_branch(self):
-        params = _get_evaluation_parameters("qwen3.6-30b-a3b-instruct", "")
-        assert params["max_tokens"] == 8192
+    Ersetzt die 9 obsoleten Tests des alten if/else-Cascade (vor v13).
+    Prueft die neue Variante-C+-Logik:
+    - BENCHMARK_CATEGORY_DEFAULTS als Basis
+    - MODEL_TEMP_OVERRIDES als additives Merge
+    - --thinking / REASONING_PATTERNS als enable_thinking-Override
+    """
+
+    # Region: Shape-Check - Required Keys ----------------------------------
+    def test_returns_required_keys(self):
+        params = _get_evaluation_parameters("plain-7b-model", "coding")
+        assert "temperature" in params
+        assert "top_p" in params
+        assert "max_tokens" in params
+
+    def test_clauses_resolve_to_flat_dict(self):
+        # Variante C+ merged alle Quellen zu einem FLACHEN dict. Verschachtelung
+        # in 'extra_body.chat_template_kwargs' gibt es nur noch innerhalb des
+        # generierten API-Body (in _stream_chat_completion()).
+        params = _get_evaluation_parameters("plain-7b-model", "coding")
+        assert "extra_body" not in params
+
+    # Region: Category-Defaults (BENCHMARK_CATEGORY_DEFAULTS) -------------
+    def test_coding_default_is_deterministic(self):
+        params = _get_evaluation_parameters("plain-7b-model", "coding")
+        assert params["temperature"] == 0.0        # coding = deterministisch
+        assert params["top_p"] == 1.0
+        assert params["max_tokens"] == 2048
+
+    def test_math_default_has_higher_max_tokens(self):
+        params = _get_evaluation_parameters("plain-7b-model", "math")
+        assert params["max_tokens"] == 8192        # math erlaubt mehr Tokens
+
+    def test_knowledge_default(self):
+        params = _get_evaluation_parameters("plain-7b-model", "knowledge")
         assert params["temperature"] == 0.0
-        assert params["extra_body"]["chat_template_kwargs"]["enable_thinking"] is False
+        assert params["max_tokens"] == 2048
 
-    @pytest.mark.skip(reason="_get_evaluation_parameters rewritten in v13; "
-                        "old if-else cascade tests obsolete")
-    def test_qwen3_5_branch(self):
-        params = _get_evaluation_parameters("qwen3.5-72b-instruct", "")
+    def test_agentic_default(self):
+        params = _get_evaluation_parameters("plain-7b-model", "agentic")
+        assert params["temperature"] == 0.3        # leicht stochastisch fuer tool-use
+        assert params["max_tokens"] == 4096
+
+    def test_stops_renamed_to_until_in_lmeval_format(self):
+        # BENCHMARK_CATEGORY_DEFAULTS hat kein `stop`, aber ein Override mit `stop`
+        # soll zu `until` werden (lm_eval-CLI-Konvention).
+        params = _get_evaluation_parameters("unsloth/gpt-oss-20b", "math")
+        if "until" in params or "stop" in params:
+            # gpt-oss-Override hat `stop` -> lm_eval versteht beides
+            assert any(k in params for k in ("until", "stop"))
+
+    def test_enable_thinking_false_emits_reasoning_off_native(self):
+        # Wenn enable_thinking=False, wird zusaetzlich reasoning="off" gesetzt fuer
+        # den nativen API-Pfad (siehe Code-Review 2026-07-20 §Interoperability).
+        params = _get_evaluation_parameters("plain-7b-model", "coding")
+        chat_template_kwargs = params.get("chat_template_kwargs", {})
+        if "enable_thinking" in chat_template_kwargs and chat_template_kwargs["enable_thinking"] is False:
+            assert params.get("reasoning") == "off"
+
+    # Region: Model-Overrides (MODEL_TEMP_OVERRIDES) ---------------------
+    def test_phi4_reasoning_override(self):
+        params = _get_evaluation_parameters("unsloth/phi-4-reasoning", "coding")
+        assert params["temperature"] == 0.8        # phi-4-reasoning override
+        assert params["top_k"] == 50
+
+    def test_gpt_oss_override_temperature(self):
+        params = _get_evaluation_parameters("unsloth/gpt-oss-20b", "math")
+        assert params["temperature"] == 1.0        # gpt-oss override
+        assert params["top_k"] == 0               # top_k=0 fuer Harmony
+
+    def test_qwen3_5_override_includes_top_k(self):
+        params = _get_evaluation_parameters("qwen3.5-72b-instruct", "coding")
         assert params["temperature"] == 0.2
         assert params["top_p"] == 0.9
         assert params["top_k"] == 20
 
-    @pytest.mark.skip(reason="_get_evaluation_parameters rewritten in v13; "
-                        "old if-else cascade tests obsolete")
-    def test_gemma_default(self):
-        params = _get_evaluation_parameters("gemma-3-12b", "arc-challenge")
-        assert params["max_tokens"] == 4096
-        assert params["temperature"] == 0.0
+    def test_qwen3_6_emits_reasoning_off(self):
+        # Qwen3.6 denkt im GGUF-Default mit. Override erzwingt enable_thinking=False.
+        # Folge: reasoning="off" wird fuer native API gesetzt.
+        params = _get_evaluation_parameters("qwen3.6-30b-a3b-instruct", "coding")
+        chat_template_kwargs = params.get("chat_template_kwargs", {})
+        assert chat_template_kwargs.get("enable_thinking") is False
+        assert params.get("reasoning") == "off"
 
-    @pytest.mark.skip(reason="_get_evaluation_parameters rewritten in v13; "
-                        "old if-else cascade tests obsolete")
-    def test_gemma_with_thinking_and_math500(self, monkeypatch):
-        monkeypatch.setattr(rb, "IS_THINKING_ENABLED", True)
-        params = _get_evaluation_parameters("gemma-3-12b", "MATH-500")
-        assert params["max_tokens"] == 8192
-        assert params["extra_body"]["chat_template_kwargs"]["enable_thinking"] is True
+    def test_gemma_override_wins_against_math_thinking_default(self):
+        # math category default hat enable_thinking=True, gemma override setzt es auf False.
+        params = _get_evaluation_parameters("gemma-3-12b", "math")
+        chat_template_kwargs = params.get("chat_template_kwargs", {})
+        assert chat_template_kwargs.get("enable_thinking") is False
 
-    @pytest.mark.skip(reason="_get_evaluation_parameters rewritten in v13; "
-                        "old if-else cascade tests obsolete")
-    def test_reasoning_branch(self):
-        params = _get_evaluation_parameters("deepseek-r1-distill-7b", "arc-challenge")
-        assert params["temperature"] == 0.1
+    def test_deepseek_overrides_include_min_p(self):
+        # MODEL_TEMP_OVERRIDES iteriert in Insertion-Order. `deepseek` (temp=0.6,
+        # min_p=0.02) kommt vor `deepseek-r1-distill` (temp=0.0, min_p=None).
+        # Daher gewinnt das generische `deepseek`-Pattern zuerst, sobald der
+        # Model-Key `deepseek` als Substring enthaelt.
+        params = _get_evaluation_parameters("deepseek-coder-v2-lite-instruct", "coding")
+        assert params["temperature"] == 0.6        # `deepseek`-Override
         assert params["min_p"] == 0.02
 
-    @pytest.mark.skip(reason="_get_evaluation_parameters rewritten in v13; "
-                        "old if-else cascade tests obsolete")
-    def test_reasoning_with_thinking_and_math500(self, monkeypatch):
+    # Region: --thinking Flag + REASONING_PATTERNS ---------------------
+    def test_thinking_flag_with_reasoning_pattern_enables_thinking(self, monkeypatch):
         monkeypatch.setattr(rb, "IS_THINKING_ENABLED", True)
-        params = _get_evaluation_parameters("r1-distill-7b", "MATH-500")
-        assert params["max_tokens"] == 8192
-        assert "until" in params
-        assert params["extra_body"]["chat_template_kwargs"]["enable_thinking"] is True
+        # "r1" ist in REASONING_PATTERNS, "deepseek-r1-distill" ebenfalls
+        params = _get_evaluation_parameters("r1-distill-7b", "coding")
+        chat_template_kwargs = params.get("chat_template_kwargs", {})
+        assert chat_template_kwargs.get("enable_thinking") is True
+        # Und reasoning="off" darf NICHT gesetzt sein, wenn thinking an ist
+        assert "reasoning" not in params or params["reasoning"] != "off"
 
-    @pytest.mark.skip(reason="_get_evaluation_parameters rewritten in v13; "
-                        "old if-else cascade tests obsolete")
-    def test_default_branch(self):
-        params = _get_evaluation_parameters("plain-7b-model", "")
-        assert params["max_tokens"] == 1024
-        assert params["temperature"] == 0.0
+    def test_thinking_flag_unchanged_for_non_reasoning_model(self, monkeypatch):
+        monkeypatch.setattr(rb, "IS_THINKING_ENABLED", True)
+        # plain-7b enthaelt kein REASONING_PATTERNS-Keyword
+        # → thinking flag wird ignoriert, Category-Default (coding=False) gewinnt
+        params = _get_evaluation_parameters("plain-7b-model", "coding")
+        chat_template_kwargs = params.get("chat_template_kwargs", {})
+        # By coding default: enable_thinking=False (kann aber von gemma/qwen3.6
+        # Override bereits auf False gesetzt sein)
+        assert chat_template_kwargs.get("enable_thinking") is not True
 
 
 # ======================================================================

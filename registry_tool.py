@@ -27,7 +27,7 @@ Commands:
 
 from __future__ import annotations
 
-import csv, json, os, re, sys, subprocess, tempfile, concurrent.futures
+import csv, json, os, re, struct, sys, subprocess, tempfile, concurrent.futures
 from pathlib import Path
 from collections import OrderedDict
 from typing import Any
@@ -501,7 +501,8 @@ def cmd_configs() -> dict[str, Any]:
             with open(json_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
             updated += 1
-        except Exception as e:
+        except (OSError, ValueError, KeyError, TypeError) as e:
+            print(f"  [WARN] cmd_configs Fehler fuer {label}: {e}", file=sys.stderr)
             errors += 1
 
     result = {"updated": updated, "skipped": skipped, "blacklisted": blacklisted, "errors": errors}
@@ -846,7 +847,8 @@ def _read_gguf_arch(model_path: str) -> tuple[Optional[int], Optional[int]]:
                 if block_count and embedding_length:
                     break
         return block_count, embedding_length
-    except Exception:
+    except (OSError, ValueError, struct.error):
+        # GGUF header parse failures (corrupt file, unsupported version, etc.)
         return None, None
 
 

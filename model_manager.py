@@ -100,7 +100,11 @@ def is_api_available() -> bool:
         req = Request(f"{API_BASE}/models", method="GET")
         with urlopen(req, timeout=TIMEOUT_HEALTH_CHECK) as resp:
             return resp.status == 200
-    except Exception:
+    except Exception as e:
+        # Vertrag: -> bool, True wenn erreichbar, sonst False.
+        # Bisheriger breiter Catch wird beibehalten, aber jetzt mit Logging
+        # damit unerwartete Fehler (z.B. Programmierfehler) sichtbar werden.
+        print(f"  [WARN] is_api_available: {type(e).__name__}: {e}", file=sys.stderr)
         return False
 
 
@@ -121,7 +125,10 @@ def get_current_loaded_model() -> Optional[LoadedModelInfo]:
             "status": entry.get("status", ""),
             "context_length": entry.get("contextLength"),
         }
-    except (json.JSONDecodeError, subprocess.TimeoutExpired, Exception):
+    except (json.JSONDecodeError, subprocess.TimeoutExpired, OSError, KeyError) as e:
+        # KeyError deckt den Fall ab, dass `lms ps --json` ein dict (statt Liste)
+        # liefert – siehe test_handles_dict_format. Vertrag: Optional[LoadedModelInfo].
+        print(f"  [WARN] lms ps --json fehlgeschlagen: {type(e).__name__}: {e}", file=sys.stderr)
         return None
 
 
@@ -181,16 +188,18 @@ def has_unloaded_all_models() -> bool:
 def _registry_display_overrides() -> dict[str, str]:
     """Load model_registry.yaml and return {normalized_key: display_name}."""
     from assemble_blueprint import normalize_model_name
+    from ruamel.yaml import YAML
+    from ruamel.yaml.error import YAMLError
     rpath = Path(__file__).resolve().parent / "doc-git" / "model_registry.yaml"
     if not rpath.exists():
         return {}
     try:
-        from ruamel.yaml import YAML
         y = YAML()
         y.preserve_quotes = True
         with open(rpath, "r", encoding="utf-8") as f:
             data = y.load(f) or {}
-    except Exception:
+    except (YAMLError, OSError, UnicodeDecodeError) as e:
+        print(f"  [WARN] model_registry.yaml fehlerhaft: {e}", file=sys.stderr)
         return {}
     overrides = {}
     for key, entry in data.items():
@@ -378,7 +387,7 @@ def _is_lmstudio_running() -> bool:
                                 time.sleep(5)
                                 print("  [OK] LM Studio-Server gestartet via llmster")
                                 return True
-                    except (URLError, Exception):
+                    except (URLError, OSError):
                         # Server didn't respond yet after llmster start;
                         # try the next version. This is intentionally
                         # silent (Code-Review 2026-07-18 §5.2).
@@ -492,7 +501,8 @@ def is_model_ready(timeout: int = TIMEOUT_MODEL_READY) -> bool:
         except (HTTPError, URLError, OSError) as e:
             # "No models loaded" (HTTP 400), 503, connection refused → keep waiting
             pass
-        except Exception:
-            pass
+        except (RuntimeError, ValueError, TimeoutError) as e:
+            # Server-side protocol errors (JSON parse, malformed response, etc.) → keep waiting
+            print(f"  [WARN] Health-check protocol error: {e}", file=sys.stderr)
     print(" TIMEOUT")
     return False

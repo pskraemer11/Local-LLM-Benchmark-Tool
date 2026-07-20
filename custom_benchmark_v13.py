@@ -86,7 +86,14 @@ from model_manager import (
 )
 from benchmark_config import EXCLUDE_KEYWORDS, get_model_config
 
-# Native REST API URL (for reasoning=off support – reliable thinking disable)
+# Native REST API URL (for reasoning=off support – reliable thinking disable).
+# Code-Review 2026-07-20 §Interoperability-Hinweis:
+#   Der Wechsel von OpenAI-kompatibler `/v1/chat/completions` auf die LM-Studio-
+#   native `/api/v1/chat` erfolgte, weil `enable_thinking=False` ueber
+#   `chat_template_kwargs` bei Qwen3.6 (und anderen Modellen) nicht zuverlaessig
+#   deaktiviert wurde. Die native API verfuegt ueber dedizierte `reasoning`- und
+#   `system_prompt`-Parameter, die direkt im Server verarbeitet werden und ohne
+#   Umweg ueber Jinja-Templates wirken.
 NATIVE_CHAT_URL = API_BASE.replace("/v1", "/api/v1/chat")
 
 import psutil
@@ -226,7 +233,7 @@ class Monitor:
             if count > 0:
                 self._nvml_handle = pynvml.nvmlDeviceGetHandleByIndex(0)
                 self._is_nvml_ok = True
-        except Exception:
+        except (pynvml.NVMLError, OSError):
             pass
         if not self._is_nvml_ok:
             print("  [WARN] GPU/VRAM monitoring via NVML not available")
@@ -238,7 +245,7 @@ class Monitor:
             util = pynvml.nvmlDeviceGetUtilizationRates(self._nvml_handle)
             mem = pynvml.nvmlDeviceGetMemoryInfo(self._nvml_handle)
             return util.gpu, mem.used / (1024 ** 3)
-        except Exception:
+        except (pynvml.NVMLError, OSError):
             return None, None
 
     def _read_cpu_ram(self, interval: float = 0.3) -> tuple[float, float]:
@@ -290,7 +297,7 @@ class Monitor:
                             self._peak["gpu"] = gpu_val
                         if vram_val > self._peak["vram"]:
                             self._peak["vram"] = vram_val
-                    except Exception:
+                    except (pynvml.NVMLError, OSError):
                         pass
 
         self._sampler = _thr.Thread(target=_sample_loop, daemon=True)
@@ -331,7 +338,7 @@ def collect_system_metrics() -> SystemMetrics:
                 gpu_mem_used_gb = float(parts[2]) / 1024
                 gpu_mem_total_gb = float(parts[3]) / 1024
                 gpu_temp = float(parts[4])
-    except Exception:
+    except (ValueError, IndexError, OSError):
         pass
     vram_gb = None
     try:
@@ -358,7 +365,7 @@ def collect_system_metrics() -> SystemMetrics:
                         break
                 if vram_gb is not None:
                     break
-    except Exception:
+    except (re.error, ValueError, IndexError, OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
         pass
     return {
         "cpu_percent": cpu_percent,
@@ -493,7 +500,7 @@ def _stream_chat_completion(url: str, headers: dict[str, str], body: dict[str, A
                         resp_body = e.response.text or ""
                         if resp_body:
                             err_text = f"{err_text} | body={resp_body[:300]}"
-                except Exception:
+                except (AttributeError, ValueError, TypeError):
                     pass
                 _set_result("error", err_text)
                 _set_result("done", True)
@@ -501,7 +508,7 @@ def _stream_chat_completion(url: str, headers: dict[str, str], body: dict[str, A
                 if sess is not None:
                     try:
                         sess.close()
-                    except Exception:
+                    except OSError:
                         pass
         start = time.time()
         thread = threading.Thread(target=_worker)
@@ -795,7 +802,7 @@ def _generate_answer_native(
             if hasattr(e, "read"):
                 resp_body = e.read().decode("utf-8", errors="replace")[:300]
                 err_text = f"{err_text} | body={resp_body}"
-        except Exception:
+        except (AttributeError, ValueError, UnicodeDecodeError):
             pass
         return None, 0, 0, 0, 0, 0, "api_error", err_text
 
@@ -1579,7 +1586,7 @@ def run_task(task: dict[str, Any], task_type: str, model_identifier: Optional[st
         try:
             import matplotlib.pyplot as _plt
             _plt.close("all")
-        except Exception:
+        except (ImportError, AttributeError, RuntimeError):
             pass
         return {
             "response": response,
@@ -1832,7 +1839,8 @@ def main() -> None:
     try:
         import sys as _sys
         _sys.stdout.reconfigure(encoding='utf-8')
-    except Exception:
+    except (AttributeError, OSError):
+        # Python <3.7 or non-reconfigurable stdout (subprocess without TTY)
         pass
     import argparse as _ap
     _parser = _ap.ArgumentParser(description="Benchmark tool v13 (DS1000 + CoderEval)")
