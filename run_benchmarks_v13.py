@@ -64,6 +64,8 @@ import warnings
 from datetime import datetime
 from typing import Any, Optional
 
+from type_defs import AvailableModelInfo, BenchmarkDef, PipelineResult
+
 # ── Model Management from Shared Module ──────────────────────
 # Load/Unload is ONLY initiated in main() of this script.
 # The subprocesses (custom_benchmark_v13.py, evalplus, lm_eval, tool_eval_bench)
@@ -86,40 +88,40 @@ from benchmark_config import (PIPELINE_DISCOVERY, TOOL_EVAL_SCENARIO_IDS,
                               BENCHMARK_CATEGORY_DEFAULTS)
 from model_manager import (
     API_BASE, TIMEOUT_CLI, TIMEOUT_MODEL_READY, PIPELINE_TIMEOUTS,
-    get_current_loaded_model, unload_all_models,
+    get_current_loaded_model, has_unloaded_all_models,
     load_model_via_lms, get_available_models, parse_selection,
-    wait_for_model_ready
+    is_model_ready
 )
 
 # Model classification helper functions
 REASONING_KEYWORDS = ["reasoning", "think", "r1", "rnj", "magistral"]
 
-def _is_qwen3_6_model(model_key: str) -> bool:
-    return "qwen3.6" in model_key.lower()
+def _is_qwen3_6_model(model_identifier: str) -> bool:
+    return "qwen3.6" in model_identifier.lower()
 MOE_PATTERN = re.compile(r"\d+b-a\d+b", re.IGNORECASE)  # e.g., "8b-a1b", "24b-a2b"
 
-def _is_reasoning_model(model_key: str) -> bool:
-    kl = model_key.lower()
+def _is_reasoning_model(model_identifier: str) -> bool:
+    kl = model_identifier.lower()
     return any(kw in kl for kw in REASONING_KEYWORDS)
 
-def _is_mamba_model(model_key: str) -> bool:
-    return "mamba" in model_key.lower()
+def _is_mamba_model(model_identifier: str) -> bool:
+    return "mamba" in model_identifier.lower()
 
-def _is_moe_model(model_key: str) -> bool:
-    return bool(MOE_PATTERN.search(model_key))
+def _is_moe_model(model_identifier: str) -> bool:
+    return bool(MOE_PATTERN.search(model_identifier))
 
-def _is_qwen3_5_model(model_key: str) -> bool:
-    return "qwen3.5" in model_key.lower() or "qwopus3" in model_key.lower()
+def _is_qwen3_5_model(model_identifier: str) -> bool:
+    return "qwen3.5" in model_identifier.lower() or "qwopus3" in model_identifier.lower()
 
-def _is_gptoss_model(model_key: str) -> bool:
-    return "gpt-oss" in model_key.lower()
+def _is_gptoss_model(model_identifier: str) -> bool:
+    return "gpt-oss" in model_identifier.lower()
 
-def _is_gemma_model(model_key: str) -> bool:
-    return "gemma" in model_key.lower()
+def _is_gemma_model(model_identifier: str) -> bool:
+    return "gemma" in model_identifier.lower()
 
-def _model_short_name(model_key: str) -> str:
+def _model_short_name(model_identifier: str) -> str:
     """Generates a short filename-compatible model name."""
-    s = model_key.replace("/", "_").replace("\\", "_").replace(" ", "_")
+    s = model_identifier.replace("/", "_").replace("\\", "_").replace(" ", "_")
     for sep in ("/", "\\"):
         if sep in s:
             s = s.rsplit(sep, 1)[-1]
@@ -218,7 +220,7 @@ SAFE_CONTEXT_FALLBACK: dict[str, int] = {
 _REGISTRY_DATA: Optional[dict] = None
 _REGISTRY_NORM: Optional[dict[str, str]] = None
 
-def _load_registry_for_context() -> tuple[dict, dict[str, str]]:
+def _load_registry_for_context() -> tuple[dict[str, Any], dict[str, str]]:
     global _REGISTRY_DATA, _REGISTRY_NORM
     if _REGISTRY_DATA is not None:
         return _REGISTRY_DATA, _REGISTRY_NORM
@@ -246,14 +248,14 @@ def _load_registry_for_context() -> tuple[dict, dict[str, str]]:
     norm = {}
     for key, entry in data.items():
         if isinstance(entry, dict) and "context_length" in entry:
-            nk = normalize_model_name(key)
-            norm[nk] = key
+            normalized_key = normalize_model_name(key)
+            norm[normalized_key] = key
     _REGISTRY_DATA = data
     _REGISTRY_NORM = norm
     return _REGISTRY_DATA, _REGISTRY_NORM
 
 
-def _get_safe_context(model_key: str) -> Optional[int]:
+def _get_safe_context(model_identifier: str) -> Optional[int]:
     """Return capped context length for VRAM-safe model loading.
 
     Priority:
@@ -264,28 +266,28 @@ def _get_safe_context(model_key: str) -> Optional[int]:
 
     # 1. Try registry
     registry, rnorm = _load_registry_for_context()
-    nk = normalize_model_name(model_key)
-    if nk in rnorm:
-        entry = registry[rnorm[nk]]
+    normalized_key = normalize_model_name(model_identifier)
+    if normalized_key in rnorm:
+        entry = registry[rnorm[normalized_key]]
         ctx = entry.get("context_length")
         if ctx is not None:
             return int(ctx)
 
     # 2. Try fallback (exact normalized match)
     for pattern, ctx in SAFE_CONTEXT_FALLBACK.items():
-        if normalize_model_name(pattern) == nk:
+        if normalize_model_name(pattern) == normalized_key:
             return ctx
 
     # 3. Try substring fallback matching (for patterns that are prefixes)
     for pattern, ctx in SAFE_CONTEXT_FALLBACK.items():
-        if pattern in model_key.lower():
+        if pattern in model_identifier.lower():
             return ctx
 
     return None
 
-def _model_family(model_key: str) -> str:
+def _model_family(model_identifier: str) -> str:
     """Extract model family (without publisher prefix) for deduplication."""
-    return model_key.replace("\\", "/").split("/")[-1].lower()
+    return model_identifier.replace("\\", "/").split("/")[-1].lower()
 
 def resolve_models(available_models: list[dict[str, Any]], model_arg: Optional[str]) -> Optional[list[dict[str, Any]]]:
     # Code-Review 2026-07-18 §4.1: EXCLUDE_KEYWORDS filtering is already
@@ -437,9 +439,9 @@ def select_benchmarks_interactive() -> Optional[list[dict[str, Any]]]:
 # the current launcher runs strictly single-threaded (one model at a
 # time, sequential benchmark calls), so it is safe in practice. If
 # parallel benchmarking is added, wrap mutations with a threading.Lock.
-THINKING_ENABLED = False
+IS_THINKING_ENABLED = False
 
-def _get_lmeval_params(model_key: str, bench_name: str = "") -> dict[str, Any]:
+def _get_evaluation_parameters(model_identifier: str, bench_name: str = "") -> dict[str, Any]:
     """Returns LM-Eval parameters via category-based config (Variante C+).
     
     Derives benchmark category from bench_name, then calls
@@ -447,7 +449,7 @@ def _get_lmeval_params(model_key: str, bench_name: str = "") -> dict[str, Any]:
     + MODEL_TEMP_OVERRIDES[model] + thinking flag.
     
     Returned keys are split by the caller into --model_args (constructor) and
-    --gen_kwargs (generation kwargs). See run_lmeval() for the split logic.
+    --generation_parameters (generation kwargs). See run_lmeval() for the split logic.
     """
     # Derive category from benchmark name
     bench_name_lower = bench_name.lower()
@@ -462,20 +464,20 @@ def _get_lmeval_params(model_key: str, bench_name: str = "") -> dict[str, Any]:
             break
 
     # Get merged config
-    config = get_model_config(model_key, category=category, thinking=THINKING_ENABLED)
+    config = get_model_config(model_identifier, category=category, is_thinking_enabled=IS_THINKING_ENABLED)
 
     # Convert to lm_eval format (extra_body wrapping)
-    gen_kwargs = {
+    generation_parameters = {
         "temperature": config.get("temperature", 0.0),
         "top_p": config.get("top_p", 1.0),
         "max_tokens": config.get("max_tokens", 2048),
     }
     if config.get("top_k") is not None:
-        gen_kwargs["top_k"] = config["top_k"]
+        generation_parameters["top_k"] = config["top_k"]
     if config.get("min_p") is not None:
-        gen_kwargs["min_p"] = config["min_p"]
+        generation_parameters["min_p"] = config["min_p"]
     if config.get("stop"):
-        gen_kwargs["until"] = config["stop"]
+        generation_parameters["until"] = config["stop"]
 
     # chat_template_kwargs for enable_thinking / reasoning_effort
     ctw = {}
@@ -484,36 +486,36 @@ def _get_lmeval_params(model_key: str, bench_name: str = "") -> dict[str, Any]:
     if config.get("reasoning_effort") is not None:
         ctw["reasoning_effort"] = config["reasoning_effort"]
     if ctw:
-        gen_kwargs["chat_template_kwargs"] = ctw
+        generation_parameters["chat_template_kwargs"] = ctw
     if config.get("enable_thinking") is False:
-        gen_kwargs["reasoning"] = "off"
+        generation_parameters["reasoning"] = "off"
 
-    return gen_kwargs
+    return generation_parameters
 
 
-def _build_lmeval_cmd(model_key: str, api_model: str, subset_task: str, per_limit: int, output_dir: str, bench_name: str = "") -> list[str]:
+def _build_lmeval_cmd(model_identifier: str, api_model: str, subset_task: str, per_limit: int, output_dir: str, bench_name: str = "") -> list[str]:
     """Like run_lmeval(), but returns the cmd list instead of executing it.
     
     Used by run_agentic() for per-scenario lm_eval invocations.
-    Mirrors the same --model_args / --gen_kwargs split as run_lmeval().
+    Mirrors the same --model_args / --generation_parameters split as run_lmeval().
     """
-    gptoss = _is_gptoss_model(model_key)
-    lmeval_params = _get_lmeval_params(model_key, bench_name=bench_name)
-    model_args_dict = {
+    gptoss = _is_gptoss_model(model_identifier)
+    evaluation_parameters = _get_evaluation_parameters(model_identifier, bench_name=bench_name)
+    model_settings = {
         "base_url": f"{API_BASE}/chat/completions",
         "model": api_model,
         "num_concurrent": 1,
-        "max_gen_toks": 512,   # fallback if YAML gen_kwargs has no max_gen_toks
+        "max_gen_toks": 512,   # fallback if YAML generation_parameters has no max_gen_toks
     }
-    # eos_string only for GPT-OSS; other models use YAML until sequences or gen_kwargs
-    if gptoss and "until" not in lmeval_params:
-        model_args_dict["eos_string"] = "<|endoftext|>"
-    # Generation params go to --gen_kwargs (overrides YAML gen_kwargs via merge)
-    gen_kwargs_keys = {"max_tokens", "temperature", "top_p", "top_k", "min_p",
+    # eos_string only for GPT-OSS; other models use YAML until sequences or generation_parameters
+    if gptoss and "until" not in evaluation_parameters:
+        model_settings["eos_string"] = "<|endoftext|>"
+    # Generation params go to --generation_parameters (overrides YAML generation_parameters via merge)
+    generation_parameters_keys = {"max_tokens", "temperature", "top_p", "top_k", "min_p",
                        "until", "chat_template_kwargs", "reasoning"}
-    gen_kwargs = {k: v for k, v in lmeval_params.items()
-                  if k in gen_kwargs_keys and v is not None}
-    model_args = json.dumps(model_args_dict, ensure_ascii=False)
+    generation_parameters = {k: v for k, v in evaluation_parameters.items()
+                  if k in generation_parameters_keys and v is not None}
+    model_args = json.dumps(model_settings, ensure_ascii=False)
     cmd = [
         sys.executable, "-m", "lm_eval",
         "--model", "local-chat-completions",
@@ -524,8 +526,8 @@ def _build_lmeval_cmd(model_key: str, api_model: str, subset_task: str, per_limi
         "--apply_chat_template",
         "--log_samples",
     ]
-    if gen_kwargs:
-        cmd.extend(["--gen_kwargs", json.dumps(gen_kwargs, ensure_ascii=False)])
+    if generation_parameters:
+        cmd.extend(["--generation_parameters", json.dumps(generation_parameters, ensure_ascii=False)])
     return cmd
 
 
@@ -567,41 +569,41 @@ def _parse_subset_score(sub_output_dir: str, subset_task: str) -> Optional[float
 #
 
 
-def _ensure_model_still_loaded(model_key: str, load_key: str, bench_name: str = "") -> None:
+def _ensure_model_still_loaded(model_identifier: str, model_load_key: str, bench_name: str = "") -> None:
     """After EVERY benchmark (Custom/EvalPlus/LM-Eval/Agentic) verify the
     model is still loaded. If not, transparently reload it. This avoids
     silent crashes when a sub-process accidentally unloads the model.
     """
-    cand_key = model_key.lower()
+    candidate_key = model_identifier.lower()
     loaded = get_current_loaded_model()
-    ok = False
+    is_ok = False
     if loaded:
-        lk = loaded["model_key"].lower()
+        lk = loaded["model_identifier"].lower()
         li = loaded["identifier"].lower()
-        if cand_key in lk or cand_key in li or lk in cand_key or li in cand_key:
-            ok = True
-    if not ok:
+        if candidate_key in lk or candidate_key in li or lk in candidate_key or li in candidate_key:
+            is_ok = True
+    if not is_ok:
         label = f" after {bench_name}" if bench_name else ""
         print(f"  [WARN] Model{label} no longer loaded – reloading...")
-        load_model_via_lms(load_key)
-        if not wait_for_model_ready(timeout=60):
+        load_model_via_lms(model_load_key)
+        if not is_model_ready(timeout=60):
             print("  [WARN] Model readiness check timed out")
 
 
 # Returns: dict with pipeline="custom", score (0-1).
-def run_custom_benchmark(model_info: dict[str, Any], bench: dict[str, Any], sample_size: int = 5, seed: Optional[int] = None, no_structured_output: bool = False, keep_response: bool = False) -> Optional[dict[str, Any]]:
-    model_key = model_info["key"]
+def run_custom_benchmark(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_size: int = 5, seed: Optional[int] = None, is_structured_output_disabled: bool = False, should_keep_response: bool = False) -> Optional[PipelineResult]:
+    model_identifier = model_info["key"]
     model_display = model_info["display"]
     fp = os.path.join(DATA_DIR, bench["file"])
     if not os.path.exists(fp):
         print(f"  [WARN] Missing: {fp}")
         return None
     print(f"\n  >>> Custom: {bench['name']} / {model_display}")
-    api_model = model_info.get("_api_model") or model_key
+    api_model = model_info.get("_api_model") or model_identifier
     cmd = [
         sys.executable, os.path.join(BASE_DIR, CUSTOM_BENCHMARK_SCRIPT),
         "--non-interactive",
-        "--model-key", model_key,
+        "--model-key", model_identifier,
         "--api-model", api_model,
         "--sample-size", str(sample_size),
         "--benchmark", bench["name"],
@@ -609,21 +611,21 @@ def run_custom_benchmark(model_info: dict[str, Any], bench: dict[str, Any], samp
     if seed is not None:
         cmd.extend(["--seed", str(seed)])
     # Qwen3.5 compatibility: enable systemless prompt embedding
-    if _is_qwen3_5_model(model_key):
+    if _is_qwen3_5_model(model_identifier):
         cmd.append("--qwen-prompt")
     # Thinking mode only when --thinking flag is set (math default now False).
     # Gemma models have enable_thinking=False (thinking disturbs coding benchmarks).
-    if THINKING_ENABLED and _is_reasoning_model(model_key) and not _is_gemma_model(model_key):
+    if IS_THINKING_ENABLED and _is_reasoning_model(model_identifier) and not _is_gemma_model(model_identifier):
         cmd.append("--thinking")
     # Pre-emptive --no-structured-output for reasoning and Mamba models
     # (structured output grammar constraints break thinking tokens / SSM architectures)
-    if _is_reasoning_model(model_key) or _is_mamba_model(model_key):
+    if _is_reasoning_model(model_identifier) or _is_mamba_model(model_identifier):
         cmd.append("--no-structured-output")
-        no_structured_output = True
+        is_structured_output_disabled = True
     # Fallback: retry with --no-structured-output on channel error (see below)
-    if no_structured_output and "--no-structured-output" not in cmd:
+    if is_structured_output_disabled and "--no-structured-output" not in cmd:
         cmd.append("--no-structured-output")
-    if keep_response:
+    if should_keep_response:
         cmd.append("--keep-response")
     t0 = time.time()
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=PIPELINE_TIMEOUTS["custom_subprocess"],
@@ -640,10 +642,10 @@ def run_custom_benchmark(model_info: dict[str, Any], bench: dict[str, Any], samp
     # Detection via the [CHANNEL-ERROR] marker printed by the subprozess
     # when error_detail contains "Cannot combine structured output" /
     # "Channel Error" (see custom_benchmark_v13.py run benchmark loop).
-    if not no_structured_output and "[CHANNEL-ERROR]" in (result.stdout or ""):
+    if not is_structured_output_disabled and "[CHANNEL-ERROR]" in (result.stdout or ""):
         print(f"  [INFO] Channel-Error detected – retrying with --no-structured-output")
         return run_custom_benchmark(model_info, bench, sample_size=sample_size,
-                                   seed=seed, no_structured_output=True)
+                                   seed=seed, is_structured_output_disabled=True)
     if result.returncode != 0:
         print(f"  [ERROR] Returncode {result.returncode}")
         print(stderr_text[-500:])
@@ -657,7 +659,7 @@ def run_custom_benchmark(model_info: dict[str, Any], bench: dict[str, Any], samp
     print(f"  [OK] {bench['name']} done ({elapsed:.0f}s)")
     return {"pipeline": "custom", "bench": bench["name"], "category": bench.get("category", ""),
             "model": model_display,
-            "score": score, "thinking": THINKING_ENABLED}
+            "score": score, "thinking": IS_THINKING_ENABLED}
 
 
 # ── Pipeline 2/4: EvalPlus (HumanEval+, MBPP+) ────────────────
@@ -667,17 +669,17 @@ def run_custom_benchmark(model_info: dict[str, Any], bench: dict[str, Any], samp
 #   3. evalplus.evaluate -> differential testing with plus_input
 # Uses evalplus-native datasets (humanEval, mbpp).
 # Returns: dict with pipeline="evalplus", score pass@1 (0-1).
-def run_evalplus(model_info: dict[str, Any], bench: dict[str, Any], sample_size: int = 5, seed: Optional[int] = None, reasoning: bool = False) -> Optional[dict[str, Any]]:
+def run_evalplus(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_size: int = 5, seed: Optional[int] = None, is_reasoning_model: bool = False) -> Optional[PipelineResult]:
     # Some models (e.g. DeepSeek Coder) generate regex patterns like "\d+"
     # instead of r"\d+", causing SyntaxWarning spam from Python 3.12+.
     warnings.filterwarnings("ignore", category=SyntaxWarning)
 
-    model_key = model_info["key"]
+    model_identifier = model_info["key"]
     model_display = model_info["display"]
     dataset = bench["dataset"]
-    gptoss = _is_gptoss_model(model_key)
+    gptoss = _is_gptoss_model(model_identifier)
     print(f"\n  >>> EvalPlus: {bench['name']} / {model_display}")
-    root_dir = os.path.join(RESULTS_DIR, f"evalplus_{model_key.replace('/', '_')}")
+    root_dir = os.path.join(RESULTS_DIR, f"evalplus_{model_identifier.replace('/', '_')}")
     os.makedirs(root_dir, exist_ok=True)
 
     # ── Load dataset & randomly sample tasks ─────────────────
@@ -725,7 +727,7 @@ def run_evalplus(model_info: dict[str, Any], bench: dict[str, Any], sample_size:
 
     limit_scale = max(1.0, n_select / 5.0)
     eval_base = PIPELINE_TIMEOUTS["evalplus_base"]
-    eval_timeout = (eval_base * 2 if reasoning else eval_base) * limit_scale
+    eval_timeout = (eval_base * 2 if is_reasoning_model else eval_base) * limit_scale
 
     from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FUTimeout
     executor = ThreadPoolExecutor(max_workers=1)
@@ -793,7 +795,7 @@ def run_evalplus(model_info: dict[str, Any], bench: dict[str, Any], sample_size:
     print(f"  [OK] {bench['name']} done ({elapsed:.0f}s)")
     return {"pipeline": "evalplus", "bench": bench["name"], "category": bench.get("category", ""),
             "model": model_display,
-            "samples": samples_path, "score": score, "thinking": THINKING_ENABLED}
+            "samples": samples_path, "score": score, "thinking": IS_THINKING_ENABLED}
 
 
 # ── Pipeline 3/4: LM-Eval (ARC, HellaSwag, TruthfulQA, MATH-500, BBH) ─
@@ -801,39 +803,39 @@ def run_evalplus(model_info: dict[str, Any], bench: dict[str, Any], sample_size:
 # For MMLU-Pro there is a separate modified function (see below),
 # which stratifies the benchmark across 14 subset tasks.
 # Returns: dict with pipeline="lmeval", score (0-1).
-def run_lmeval(model_info: dict[str, Any], bench: dict[str, Any], limit: int = 5, reasoning: bool = False) -> Optional[dict[str, Any]]:
-    model_key = model_info["key"]
+def run_lmeval(model_info: AvailableModelInfo, bench: BenchmarkDef, limit: int = 5, is_reasoning_model: bool = False) -> Optional[PipelineResult]:
+    model_identifier = model_info["key"]
     model_display = model_info["display"]
-    gptoss = _is_gptoss_model(model_key)
+    gptoss = _is_gptoss_model(model_identifier)
     # Use exact load ID from lms ps, fallback variant, fallback key
-    api_model = model_info.get("_api_model") or model_info.get("variant") or model_key
+    api_model = model_info.get("_api_model") or model_info.get("variant") or model_identifier
     task_name = bench["task"]
-    safe = model_key.replace("/", "_").replace("\\", "_")
+    safe = model_identifier.replace("/", "_").replace("\\", "_")
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_dir = os.path.join(RESULTS_DIR, f"lmeval_{safe}")
     os.makedirs(output_dir, exist_ok=True)
 
     print(f"\n  >>> LM-Eval: {bench['name']} / {model_display}")
     t0 = time.time()
-    lmeval_params = _get_lmeval_params(model_key, bench_name=bench['name'])
+    evaluation_parameters = _get_evaluation_parameters(model_identifier, bench_name=bench['name'])
     #
-    # Split params: constructor-level (--model_args) vs. generation-level (--gen_kwargs).
+    # Split params: constructor-level (--model_args) vs. generation-level (--generation_parameters).
     #
     # model_args is consumed by LocalChatCompletion.__init__(**kwargs).
     #   Keys like base_url, model, num_concurrent, max_gen_toks, eos_string
-    #   are constructor params. All other params in lmeval_params are silently
+    #   are constructor params. All other params in evaluation_parameters are silently
     #   dropped by the constructor (openai_completions.py:158 **kwargs).
     #
-    # gen_kwargs is merged by the evaluator into the YAML task's generation_kwargs
+    # generation_parameters is merged by the evaluator into the YAML task's generation_kwargs
     #   (evaluator.py:311: task_obj.set_config(update=True)), and then passed
-    #   as gen_kwargs to _create_payload(). The remaining **gen_kwargs are
+    #   as generation_parameters to _create_payload(). The remaining **generation_parameters are
     #   spread into the API payload dict (openai_completions.py:206).
     #
     # IMPORTANT: The model parameter MUST correspond to the exact load ID from lms ps,
     #           otherwise LM Studio responds with HTTP 400 "model not found".
     #           A test with "model=check" (invalid name) causes the request to HANG
     #           (no timeout, no error response) – therefore ALWAYS use api_model.
-    model_args_dict = {
+    model_settings = {
         "base_url": f"{API_BASE}/chat/completions",
         "model": api_model,
         "num_concurrent": 1,
@@ -841,15 +843,15 @@ def run_lmeval(model_info: dict[str, Any], bench: dict[str, Any], limit: int = 5
     }
     # Only set eos_string for models that explicitly need a fixed EOS token.
     # GPT-OSS uses <|endoftext|> as its primary stop; other chat models rely on
-    # the YAML's until sequences ("\n\n", "Question:") or explicit gen_kwargs.
-    if gptoss and "until" not in lmeval_params:
-        model_args_dict["eos_string"] = "<|endoftext|>"
+    # the YAML's until sequences ("\n\n", "Question:") or explicit generation_parameters.
+    if gptoss and "until" not in evaluation_parameters:
+        model_settings["eos_string"] = "<|endoftext|>"
     # Gen_kwargs keys that should override YAML generation_kwargs per request.
-    gen_kwargs_keys = {"max_tokens", "temperature", "top_p", "top_k", "min_p",
+    generation_parameters_keys = {"max_tokens", "temperature", "top_p", "top_k", "min_p",
                        "until", "chat_template_kwargs", "reasoning"}
-    gen_kwargs = {k: v for k, v in lmeval_params.items()
-                  if k in gen_kwargs_keys and v is not None}
-    model_args = json.dumps(model_args_dict, ensure_ascii=False)
+    generation_parameters = {k: v for k, v in evaluation_parameters.items()
+                  if k in generation_parameters_keys and v is not None}
+    model_args = json.dumps(model_settings, ensure_ascii=False)
     cmd = [
         sys.executable, "-m", "lm_eval",
         "--model", "local-chat-completions",
@@ -860,8 +862,8 @@ def run_lmeval(model_info: dict[str, Any], bench: dict[str, Any], limit: int = 5
         "--apply_chat_template",
         "--log_samples",
     ]
-    if gen_kwargs:
-        cmd.extend(["--gen_kwargs", json.dumps(gen_kwargs, ensure_ascii=False)])
+    if generation_parameters:
+        cmd.extend(["--generation_parameters", json.dumps(generation_parameters, ensure_ascii=False)])
     # Prio: custom YAML überschreibt built-in (inkl. MATH-500 V2.0 statt V3.0)
     yaml_path = None
     for p in [os.path.join(LMEVAL_TASKS_DIR, f"{task_name}.yaml"),
@@ -876,7 +878,7 @@ def run_lmeval(model_info: dict[str, Any], bench: dict[str, Any], limit: int = 5
     lm_env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
     limit_scale = max(1.0, limit / 5.0)
     lmeval_base = PIPELINE_TIMEOUTS["lmeval_base"]
-    base_timeout = (lmeval_base * 2 if reasoning else lmeval_base) * limit_scale
+    base_timeout = (lmeval_base * 2 if is_reasoning_model else lmeval_base) * limit_scale
     timeout_mult = bench.get("timeout_mult", 1)
     total_timeout = base_timeout * timeout_mult
     elapsed = 0
@@ -961,7 +963,7 @@ def run_lmeval(model_info: dict[str, Any], bench: dict[str, Any], limit: int = 5
 
     return {"pipeline": "lmeval", "bench": bench["name"], "category": bench.get("category", ""),
             "model": model_display,
-            "score": score, "thinking": THINKING_ENABLED}
+            "score": score, "thinking": IS_THINKING_ENABLED}
 
 
 # ── MMLU-Pro (ARCHIVIERT 12.07.2026) ──
@@ -979,15 +981,15 @@ def run_lmeval(model_info: dict[str, Any], bench: dict[str, Any], limit: int = 5
 # tool-use capabilities (function calls, API usage).
 # Result is extracted from JSON envelope (final_score 0-100 -> 0-1).
 # Returns: dict with pipeline="agentic", score (0-1).
-def run_agentic(model_info: dict[str, Any], limit: int = 5) -> Optional[dict[str, Any]]:
+def run_agentic(model_info: AvailableModelInfo, limit: int = 5) -> Optional[PipelineResult]:
     """Agentic: tool-eval-bench with sample_size random scenarios."""
-    model_key = model_info["key"]
+    model_identifier = model_info["key"]
     model_display = model_info["display"]
-    safe = model_key.replace("/", "_").replace("\\", "_")
+    safe = model_identifier.replace("/", "_").replace("\\", "_")
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_dir = os.path.join(RESULTS_DIR, f"agentic_{safe}")
     os.makedirs(output_dir, exist_ok=True)
-    json_path = os.path.join(output_dir, f"agentic_{model_key}_{ts}.json")
+    json_path = os.path.join(output_dir, f"agentic_{model_identifier}_{ts}.json")
 
     selected = random.sample(TOOL_EVAL_SCENARIO_IDS, min(limit, len(TOOL_EVAL_SCENARIO_IDS)))
 
@@ -1044,7 +1046,7 @@ def run_agentic(model_info: dict[str, Any], limit: int = 5) -> Optional[dict[str
 
     return {"pipeline": "agentic", "bench": "Agentic", "category": "agentic",
             "model": model_display,
-            "score": score, "thinking": THINKING_ENABLED}
+            "score": score, "thinking": IS_THINKING_ENABLED}
 
 
 def save_summary_csv(results: list[dict[str, Any]], model_info: Optional[dict[str, Any]] = None,
@@ -1101,8 +1103,8 @@ def main() -> None:
                         help="Write the full LLM response to per-task CSVs (default: truncated to 200 chars, see W1 in Code-Review_2026-07-12.md)")
     args = parser.parse_args()
 
-    global THINKING_ENABLED
-    THINKING_ENABLED = args.thinking
+    global IS_THINKING_ENABLED
+    IS_THINKING_ENABLED = args.thinking
 
     # Read version from VERSION file (Prio 4.17 – single source of truth)
     _version = "13.0.0-p3"
@@ -1160,15 +1162,15 @@ def main() -> None:
 
     all_summary = []
     for midx, model_info in enumerate(models, 1):
-        model_key = model_info["key"]
-        load_key = model_info.get("model_key", model_key)   # base key for lms load
+        model_identifier = model_info["key"]
+        model_load_key = model_info.get("model_identifier", model_identifier)   # base key for lms load
         model_display = model_info["display"]
-        reasoning = _is_reasoning_model(model_key) or _is_qwen3_6_model(model_key)
+        is_reasoning_model = _is_reasoning_model(model_identifier) or _is_qwen3_6_model(model_identifier)
         print(f"\n{'=' * 60}")
         print(f"  Model {midx}/{len(models)}: {model_display}")
-        if reasoning:
+        if is_reasoning_model:
             print(f"  * Reasoning model (detected) – timeout ×2")
-        if _is_moe_model(model_key):
+        if _is_moe_model(model_identifier):
             print(f"  * MoE model (detected)")
         print(f"{'=' * 60}")
 
@@ -1178,20 +1180,20 @@ def main() -> None:
 
         if loaded:
             li = loaded["identifier"].lower()
-            lk = loaded["model_key"].lower()
-            mk = model_key.lower()
+            lk = loaded["model_identifier"].lower()
+            mk = model_identifier.lower()
             if mk in li or mk in lk or li in mk or lk in mk:
                 api_model = loaded["identifier"]
                 print(f"  [OK] '{model_display}' already loaded – ID: {api_model}")
             else:
                 print(f"  [INFO] Different model loaded ({loaded['display_name']}) – unloading...")
-                unload_all_models()
-                ok, api_model = load_model_via_lms(load_key)
+                has_unloaded_all_models()
+                ok, api_model = load_model_via_lms(model_load_key)
                 if not ok:
                     print(f"  [ERROR] Loading failed. Skipping.")
                     continue
         else:
-            ok, api_model = load_model_via_lms(load_key)
+            ok, api_model = load_model_via_lms(model_load_key)
             if not ok:
                 print(f"  [ERROR] Loading failed. Skipping.")
                 continue
@@ -1201,7 +1203,7 @@ def main() -> None:
         # 30B models can take 30-60s to finish loading on RTX 5070 Ti
         # (see Server-Log 12.07.2026: 13x "No models loaded" with 30s timeout).
         print("  [INFO] Waiting for API readiness...")
-        if not wait_for_model_ready(timeout=60):
+        if not is_model_ready(timeout=60):
             print("  [WARN] Model readiness check timed out – continuing anyway")
         model_info["_api_model"] = api_model  # Unified ID for ALL pipelines
 
@@ -1220,14 +1222,14 @@ def main() -> None:
             # Unload/reload between benchmarks — off by default, opt-in via --unload-between
             if args.unload_between and bidx > 0:
                 print(f"  [INFO] Unloading/reloading model between benchmarks...")
-                unload_all_models()
+                has_unloaded_all_models()
                 time.sleep(2)
-                ok, api_model = load_model_via_lms(load_key)
+                ok, api_model = load_model_via_lms(model_load_key)
                 if not ok:
                     print(f"  [ERROR] Reload before {bench['name']} failed. Skipping.")
                     continue
                 print("  [INFO] Waiting for API re-initialization...")
-                if not wait_for_model_ready(timeout=60):
+                if not is_model_ready(timeout=60):
                     print("  [WARN] Model readiness check timed out – continuing anyway")
                 model_info["_api_model"] = api_model
 
@@ -1240,12 +1242,12 @@ def main() -> None:
                 if bname in agentic_names:
                     result = run_agentic(model_info, limit=args.sample_size)
                 elif bname in ep_names:
-                    result = run_evalplus(model_info, bench, sample_size=args.sample_size, seed=args.seed, reasoning=reasoning)
+                    result = run_evalplus(model_info, bench, sample_size=args.sample_size, seed=args.seed, is_reasoning_model=is_reasoning_model)
                 elif bname in lmeval_names:
                     per_limit = max(bench.get("min_limit", 0), args.sample_size)
-                    result = run_lmeval(model_info, bench, limit=per_limit, reasoning=reasoning)
+                    result = run_lmeval(model_info, bench, limit=per_limit, is_reasoning_model=is_reasoning_model)
                 else:
-                    result = run_custom_benchmark(model_info, bench, sample_size=args.sample_size, seed=args.seed, no_structured_output=args.no_structured_output, keep_response=args.keep_response)
+                    result = run_custom_benchmark(model_info, bench, sample_size=args.sample_size, seed=args.seed, is_structured_output_disabled=args.no_structured_output, should_keep_response=args.keep_response)
 
                 if result:
                     model_results.append(result)
@@ -1257,7 +1259,7 @@ def main() -> None:
                 # After EVERY benchmark: check whether the model is still loaded.
                 # Previously this was only for Custom – EvalPlus/LM-Eval/Agentic
                 # could silently lose the model between runs.
-                _ensure_model_still_loaded(model_key, load_key, bench_name=bname)
+                _ensure_model_still_loaded(model_identifier, model_load_key, bench_name=bname)
             except subprocess.TimeoutExpired:
                 print(f"  [ERROR] {bench['name']} timeout (expired)")
             except Exception as e:
@@ -1282,7 +1284,7 @@ def main() -> None:
 
     # Free memory: unload model
     print("\n  [INFO] Cleaning up – unloading model(s)...")
-    unload_all_models()
+    has_unloaded_all_models()
 
     # Consolidated overall overview (csv_writer)
     if all_summary and len(models) > 1:

@@ -64,7 +64,9 @@ import threading
 import time
 import traceback
 from datetime import datetime
-from typing import Any, Optional, TypedDict
+from typing import Any, Optional
+
+from type_defs import ModelConfig, SandboxResult, SystemMetrics, MetricsSummary, TaskResult
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -78,8 +80,8 @@ import requests
 from model_manager import (
     API_BASE, TIMEOUT_CLI, TIMEOUT_HTTP, TIMEOUT_MODEL_READY,
     TIMEOUT_HEALTH_CHECK, TIMEOUT_UNLOAD_WAIT,
-    check_api_available, get_current_loaded_model,
-    unload_all_models, load_model_via_lms, wait_for_model_ready,
+    is_api_available, get_current_loaded_model,
+    has_unloaded_all_models, load_model_via_lms, is_model_ready,
     get_available_models, parse_selection
 )
 from benchmark_config import EXCLUDE_KEYWORDS, get_model_config
@@ -100,9 +102,9 @@ TIMEOUT_SAMPLER_JOIN = 3
 TIMEOUT_EXEC = 30
 
 # Qwen3.5 compatibility: prompt embedding instead of system message
-QWEN_PROMPT_MODE = False
-THINKING_MODE = False
-STRUCTURED_OUTPUT = True
+IS_QWEN_PROMPT_MODE = False
+IS_THINKING_MODE = False
+HAS_STRUCTURED_OUTPUT = True
 
 STRUCTURED_OUTPUT_SCHEMA = {
     "type": "json_schema",
@@ -119,13 +121,13 @@ STRUCTURED_OUTPUT_SCHEMA = {
     }
 }
 
-def _use_structured_output(model_key: str | None) -> bool:
-    if not STRUCTURED_OUTPUT:
+def _can_use_structured_output(model_identifier: str | None) -> bool:
+    if not HAS_STRUCTURED_OUTPUT:
         return False
-    if THINKING_MODE:
+    if IS_THINKING_MODE:
         return False
-    if model_key:
-        kl = model_key.lower()
+    if model_identifier:
+        kl = model_identifier.lower()
         if any(kw in kl for kw in ("r1-distill", "deepseek", "reasoning", "think")):
             return False
         if "mamba" in kl:
@@ -215,22 +217,22 @@ class Monitor:
         self.gpu_percent = []
         self.ram_usage_gb = []
         self.vram_usage_gb = []
-        self._sampling = False
+        self._is_sampling = False
         self._peak = {"cpu": 0, "ram": 0, "gpu": 0, "vram": 0}
-        self._nvml_ok = False
+        self._is_nvml_ok = False
         try:
             pynvml.nvmlInit()
             count = pynvml.nvmlDeviceGetCount()
             if count > 0:
                 self._nvml_handle = pynvml.nvmlDeviceGetHandleByIndex(0)
-                self._nvml_ok = True
+                self._is_nvml_ok = True
         except Exception:
             pass
-        if not self._nvml_ok:
+        if not self._is_nvml_ok:
             print("  [WARN] GPU/VRAM monitoring via NVML not available")
 
     def _read_gpu(self) -> tuple[Optional[float], Optional[float]]:
-        if not self._nvml_ok:
+        if not self._is_nvml_ok:
             return None, None
         try:
             util = pynvml.nvmlDeviceGetUtilizationRates(self._nvml_handle)
@@ -267,18 +269,18 @@ class Monitor:
 
     def start_sampling(self) -> None:
         self._peak = {"cpu": 0, "ram": 0, "gpu": 0, "vram": 0}
-        self._sampling = True
+        self._is_sampling = True
         import threading as _thr
 
         def _sample_loop() -> None:
-            while self._sampling:
+            while self._is_sampling:
                 cpu = psutil.cpu_percent(interval=MONITOR_SAMPLE_INTERVAL_S)
                 ram = psutil.virtual_memory().used / (1024 ** 3)
                 if cpu > self._peak["cpu"]:
                     self._peak["cpu"] = cpu
                 if ram > self._peak["ram"]:
                     self._peak["ram"] = ram
-                if self._nvml_ok:
+                if self._is_nvml_ok:
                     try:
                         util = pynvml.nvmlDeviceGetUtilizationRates(self._nvml_handle)
                         mem = pynvml.nvmlDeviceGetMemoryInfo(self._nvml_handle)
@@ -295,7 +297,7 @@ class Monitor:
         self._sampler.start()
 
     def stop_sampling(self) -> dict[str, float]:
-        self._sampling = False
+        self._is_sampling = False
         if hasattr(self, "_sampler"):
             self._sampler.join(timeout=TIMEOUT_SAMPLER_JOIN)
         peak = dict(self._peak)
@@ -303,7 +305,7 @@ class Monitor:
         return peak
 
 
-def collect_system_metrics() -> dict[str, Any]:
+def collect_system_metrics() -> SystemMetrics:
     cpu_percent = psutil.cpu_percent(interval=0.5)
     mem = psutil.virtual_memory()
     ram_percent = mem.percent
@@ -417,7 +419,7 @@ class MetricsCollector:
         vals = self._values(key)
         return min(vals) if vals else None
 
-    def get_summary(self) -> dict[str, Any]:
+    def get_summary(self) -> MetricsSummary:
         result = {}
         for k in ("cpu_percent", "gpu_util", "ram_percent", "ram_used_gb", "gpu_mem_used_gb", "gpu_temp", "vram_gb"):
             result[f"{k}_avg"] = self.avg(k)
@@ -653,11 +655,11 @@ def _non_streaming_fallback(url: str, body: dict[str, Any], timeout: int) -> tup
         return None, 0, 0, 0
 
 
-def generate_answer(prompt: Optional[str] = None, model_key: Optional[str] = None, timeout: int = TIMEOUT_HTTP,
+def generate_answer(prompt: Optional[str] = None, model_identifier: Optional[str] = None, timeout: int = TIMEOUT_HTTP,
                     max_tokens: int = MAX_TOKENS_GENERAL, system_msg: Optional[str] = None, messages: Optional[list[dict[str, Any]]] = None,
                     temperature: float = 0.0, top_p: float = 1.0, top_k: Optional[int] = None, min_p: Optional[float] = None,
-                    enable_thinking: Optional[bool] = None, reasoning_effort: Optional[str] = None,
-                    use_streaming: bool = True, stop: Optional[list[str]] = None,
+                    is_thinking_enabled: Optional[bool] = None, reasoning_effort: Optional[str] = None,
+                    is_streaming: bool = True, stop: Optional[list[str]] = None,
                     response_format: Optional[dict] = None) -> tuple[Optional[str], float, int, int, float, int, Optional[str], Optional[str]]:
     if messages is None:
         messages = []
@@ -665,15 +667,15 @@ def generate_answer(prompt: Optional[str] = None, model_key: Optional[str] = Non
             messages.append({"role": "system", "content": system_msg})
         messages.append({"role": "user", "content": prompt})
     # Native REST API path: reliable thinking off via reasoning="off" parameter
-    if enable_thinking is False:
+    if is_thinking_enabled is False:
         return _generate_answer_native(
-            model_key=model_key or "local-model",
+            model_identifier=model_identifier or "local-model",
             messages=messages, prompt=prompt, system_msg=system_msg,
             temperature=temperature, top_p=top_p, max_tokens=max_tokens,
             top_k=top_k, min_p=min_p, timeout=timeout,
         )
     body = {
-        "model": model_key or "local-model",
+        "model": model_identifier or "local-model",
         "messages": messages,
         "temperature": temperature,
         "top_p": top_p,
@@ -683,16 +685,16 @@ def generate_answer(prompt: Optional[str] = None, model_key: Optional[str] = Non
         body["top_k"] = top_k
     if min_p is not None:
         body["min_p"] = min_p
-    if enable_thinking is not None or reasoning_effort is not None:
+    if is_thinking_enabled is not None or reasoning_effort is not None:
         kwargs = {}
-        if enable_thinking is not None:
-            kwargs["enable_thinking"] = enable_thinking
+        if is_thinking_enabled is not None:
+            kwargs["enable_thinking"] = is_thinking_enabled
         if reasoning_effort is not None:
             kwargs["reasoning_effort"] = reasoning_effort
         body["chat_template_kwargs"] = kwargs
     # Gemma 4: <|channel>thought tag is hardcoded in GGUF jinja template,
     # extra_body override is ignored. Force-disable via system prompt.
-    if enable_thinking is False and model_key and "gemma" in model_key.lower():
+    if is_thinking_enabled is False and model_identifier and "gemma" in model_identifier.lower():
         if not any(m.get("role") == "system" for m in messages):
             messages.append({"role": "system", "content": "Do NOT use thinking or reasoning. Answer directly without <|channel>thought tags."})
     if stop:
@@ -701,7 +703,7 @@ def generate_answer(prompt: Optional[str] = None, model_key: Optional[str] = Non
         body["response_format"] = response_format
     url = f"{API_BASE}/chat/completions"
     headers = {"Content-Type": "application/json"}
-    if use_streaming:
+    if is_streaming:
         content, elapsed, t_in, t_out, tps, think_tok, err_type, err_detail = _stream_chat_completion(url, headers, body)
         if content is not None:
             return content, elapsed, t_in, t_out, tps, think_tok, err_type, err_detail
@@ -716,7 +718,7 @@ def generate_answer(prompt: Optional[str] = None, model_key: Optional[str] = Non
 
 
 def _generate_answer_native(
-    model_key: str,
+    model_identifier: str,
     messages: list[dict[str, Any]],
     prompt: Optional[str],
     system_msg: Optional[str],
@@ -742,7 +744,7 @@ def _generate_answer_native(
             input_text = m.get("content", "")
 
     body: dict[str, Any] = {
-        "model": model_key,
+        "model": model_identifier,
         "input": input_text,
         "temperature": temperature,
         "top_p": top_p,
@@ -798,7 +800,7 @@ def _generate_answer_native(
         return None, 0, 0, 0, 0, 0, "api_error", err_text
 
 
-def extract_code(text: Optional[str], structured: bool = False) -> str:
+def extract_code(text: Optional[str], is_structured: bool = False) -> str:
     """Extract Python code from the model's response.
 
     Handles four output styles (see Code-Review_2026-07-12.md §7.7.7
@@ -819,7 +821,7 @@ def extract_code(text: Optional[str], structured: bool = False) -> str:
     """
     if not text:
         return ""
-    if structured:
+    if is_structured:
         try:
             parsed = json.loads(text)
             code = parsed.get("code", "")
@@ -845,18 +847,18 @@ def extract_code(text: Optional[str], structured: bool = False) -> str:
     # No code blocks at all — try to extract Python from plain text
     lines = text.strip().split("\n")
     result = []
-    started = False
+    is_started = False
     for line in lines:
         stripped = line.strip()
         if line.startswith(("def ", "class ", "import ", "from ")):
             result.append(line)
-            started = True
-        elif started and (line.startswith(("    ", "\t")) or stripped == ""):
+            is_started = True
+        elif is_started and (line.startswith(("    ", "\t")) or stripped == ""):
             result.append(line)
-        elif started and _is_bare_statement(stripped):
+        elif is_started and _is_bare_statement(stripped):
             # continue capturing non-indented code lines (else/elif/except/for/if etc.)
             result.append(line)
-        elif started:
+        elif is_started:
             break
     if result:
         joined = "\n".join(result).strip()
@@ -941,7 +943,7 @@ def _repair_indentation(code: str, max_iter: int = 10) -> str:
     return code
 
 
-def _looks_like_block_header(line: str) -> bool:
+def _is_block_header(line: str) -> bool:
     """Check whether a line is a block header without body (def, class, if, for, etc.)"""
     stripped = line.strip()
     return bool(re.match(
@@ -1023,7 +1025,7 @@ _SANDBOX_BLOCKED_MODULES = frozenset({
 })
 
 
-def _build_sandbox_script(code_string: str, capture_state: bool = False, tests: Optional[list[str]] = None) -> str:
+def _build_sandbox_script(code_string: str, should_capture_state: bool = False, tests: Optional[list[str]] = None) -> str:
     """Build a sandbox script that executes code_string in a restricted namespace."""
     safe_list = _json.dumps(sorted(_SANDBOX_SAFE_BUILTINS))
     blocked_list = _json.dumps(sorted(_SANDBOX_BLOCKED_MODULES))
@@ -1069,7 +1071,7 @@ def _build_sandbox_script(code_string: str, capture_state: bool = False, tests: 
         '    exec(' + code_json + ', _ns)',
     ]
 
-    if capture_state:
+    if should_capture_state:
         lines.extend([
             '    _state = {}',
             '    for _k, _v in _ns.items():',
@@ -1113,7 +1115,7 @@ def _build_sandbox_script(code_string: str, capture_state: bool = False, tests: 
     return '\n'.join(lines)
 
 
-def _run_sandbox(script: str, timeout: int = TIMEOUT_EXEC) -> dict[str, Any]:
+def _run_sandbox(script: str, timeout: int = TIMEOUT_EXEC) -> SandboxResult:
     """Run a sandbox script as a subprocess in a temporary directory."""
     with _tempfile.TemporaryDirectory(prefix='sandbox_') as _tmpdir:
         tmppath = _os.path.join(_tmpdir, 'sandbox_script.py')
@@ -1433,9 +1435,9 @@ def evaluate_code(generated_code: str, entry_point: str, tests_field: Any, refer
     return passed / total if total > 0 else 1.0, f"Tests: {passed}/{total}"
 
 
-def _get_model_config(model_key: Optional[str], benchmark_category: str = "coding", thinking: bool = False) -> dict[str, Any]:
+def _get_model_config(model_identifier: Optional[str], benchmark_category: str = "coding", is_thinking_enabled: bool = False) -> ModelConfig:
     """Get merged config via benchmark_config.get_model_config()."""
-    return get_model_config(model_key or "", category=benchmark_category, thinking=thinking)
+    return get_model_config(model_identifier or "", category=benchmark_category, is_thinking_enabled=is_thinking_enabled)
 
 
 # ── Benchmark-Name → Kategorie-Mapping (Custom-Pipeline) ──
@@ -1450,19 +1452,19 @@ def get_benchmark_category(benchmark_name: str) -> str:
     return BENCHMARK_CATEGORY_MAP.get(benchmark_name, "coding")
 
 
-def run_task(task: dict[str, Any], task_type: str, model_key: Optional[str] = None, api_model: Optional[str] = None,
-             model_config: Optional[dict[str, Any]] = None, benchmark_category: str = "coding") -> dict[str, Any]:
+def run_task(task: dict[str, Any], task_type: str, model_identifier: Optional[str] = None, api_model: Optional[str] = None,
+             model_config: Optional[ModelConfig] = None, benchmark_category: str = "coding") -> TaskResult:
     prompt = task["prompt"]
     if model_config is None:
-        model_config = _get_model_config(model_key, benchmark_category=benchmark_category, thinking=THINKING_MODE)
+        model_config = _get_model_config(model_identifier, benchmark_category=benchmark_category, is_thinking_enabled=IS_THINKING_MODE)
 
-    gen_kwargs = {
-        "model_key": api_model or model_key,
+    generation_parameters = {
+        "model_identifier": api_model or model_identifier,
         "temperature": model_config.get("temperature", 0.0),
         "top_p": model_config.get("top_p", 1.0),
         "top_k": model_config.get("top_k"),
         "min_p": model_config.get("min_p"),
-        "enable_thinking": model_config.get("enable_thinking"),
+        "is_thinking_enabled": model_config.get("enable_thinking"),
         "reasoning_effort": model_config.get("reasoning_effort"),
         "stop": model_config.get("stop", STOP_TOKENS_CODING),
     }
@@ -1471,7 +1473,7 @@ def run_task(task: dict[str, Any], task_type: str, model_key: Optional[str] = No
     max_tokens_task = model_config.get("max_tokens", MAX_TOKENS_GENERAL)
 
     # Qwen3.5 compatibility: embed system message in user prompt
-    if no_system_msg and QWEN_PROMPT_MODE:
+    if no_system_msg and IS_QWEN_PROMPT_MODE:
         qwen_prefix = "You are Qwen, a helpful AI assistant created by Alibaba Cloud. You are a coding expert. "
         prompt = qwen_prefix + prompt
 
@@ -1487,15 +1489,15 @@ def run_task(task: dict[str, Any], task_type: str, model_key: Optional[str] = No
         if entry_point:
             full_prompt += f"\n\nCreate the function `{entry_point}`."
         response, latency, t_in, t_out, tps, think_tok, err_type, err_detail = generate_answer(
-            full_prompt, **gen_kwargs,
-            response_format=STRUCTURED_OUTPUT_SCHEMA if _use_structured_output(model_key) else None
+            full_prompt, **generation_parameters,
+            response_format=STRUCTURED_OUTPUT_SCHEMA if _can_use_structured_output(model_identifier) else None
         )
         if response is None:
             return {"response": None, "extracted_code": "", "score": 0.0,
                     "score_detail": f"Timeout/API error ({latency:.1f}s)", "latency": latency,
                     "tokens_in": t_in, "tokens_out": t_out, "tokens_per_sec": tps,
                     "thinking_tokens": think_tok, "error_type": err_type, "error_detail": err_detail}
-        code = extract_code(response, structured=_use_structured_output(model_key)) if response else ""
+        code = extract_code(response, is_structured=_can_use_structured_output(model_identifier)) if response else ""
         if not code and response:
             m = re.search(r"```(?:python)?\s*\n(.*?)```", response, re.DOTALL)
             if m:
@@ -1555,15 +1557,15 @@ def run_task(task: dict[str, Any], task_type: str, model_key: Optional[str] = No
             setup_code = agg_setup + setup_code
 
         response, latency, t_in, t_out, tps, think_tok, err_type, err_detail = generate_answer(
-            full_prompt, **gen_kwargs,
-            response_format=STRUCTURED_OUTPUT_SCHEMA if _use_structured_output(model_key) else None
+            full_prompt, **generation_parameters,
+            response_format=STRUCTURED_OUTPUT_SCHEMA if _can_use_structured_output(model_identifier) else None
         )
         if response is None:
             return {"response": None, "extracted_code": "", "score": 0.0,
                     "score_detail": f"Timeout/API error ({latency:.1f}s)", "latency": latency,
                     "tokens_in": t_in, "tokens_out": t_out, "tokens_per_sec": tps,
                     "thinking_tokens": think_tok, "error_type": err_type, "error_detail": err_detail}
-        code = extract_code(response, structured=_use_structured_output(model_key)) if response else ""
+        code = extract_code(response, is_structured=_can_use_structured_output(model_identifier)) if response else ""
         if not code and response:
             m = re.search(r"```(?:python)?\s*\n(.*?)```", response, re.DOTALL)
             if m:
@@ -1604,14 +1606,14 @@ def get_task_type(benchmark_file: str) -> str:
     return mapping.get(benchmark_file, "unknown")
 
 
-def benchmark_model(model_info: Any, tasks: list[dict[str, Any]], task_type: str, benchmark_name: str, monitor: Monitor, quiet: bool = False) -> tuple[list[dict[str, Any]], Optional[float], float, float, dict[str, Any]]:
+def benchmark_model(model_info: Any, tasks: list[dict[str, Any]], task_type: str, benchmark_name: str, monitor: Monitor, is_quiet_mode: bool = False) -> tuple[list[dict[str, Any]], Optional[float], float, float, dict[str, Any]]:
     is_dict = isinstance(model_info, dict)
     display_name = model_info["display"] if is_dict else model_info
-    model_key = model_info["key"] if is_dict else model_info
-    # Prefer exact API ID, fall back to model_key
-    api_model = model_info.get("_api_model") if is_dict else model_key
+    model_identifier = model_info["key"] if is_dict else model_info
+    # Prefer exact API ID, fall back to model_identifier
+    api_model = model_info.get("_api_model") if is_dict else model_identifier
     benchmark_category = get_benchmark_category(benchmark_name)
-    model_config = _get_model_config(model_key, benchmark_category=benchmark_category, thinking=THINKING_MODE)
+    model_config = _get_model_config(model_identifier, benchmark_category=benchmark_category, is_thinking_enabled=IS_THINKING_MODE)
     print(f"\n{'=' * 60}")
     print(f"  Benchmark: {benchmark_name} ({benchmark_category})")
     print(f"  Model:     {display_name}")
@@ -1631,7 +1633,7 @@ def benchmark_model(model_info: Any, tasks: list[dict[str, Any]], task_type: str
         result = None
         for attempt in range(1, MAX_RETRIES + 1):
             try:
-                result = run_task(task, task_type, model_key=model_key, api_model=api_model, model_config=model_config)
+                result = run_task(task, task_type, model_identifier=model_identifier, api_model=api_model, model_config=model_config)
                 if result is not None and result.get("error_type") is None:
                     break
                 if result is not None and result.get("error_type"):
@@ -1708,8 +1710,8 @@ def benchmark_model(model_info: Any, tasks: list[dict[str, Any]], task_type: str
     # "Average score: XX%" in stdout.
     if avg_score is not None:
         print(f"  Average score: {avg_score:.1%}")
-    if not quiet:
-        print(f"\n  --- Result {benchmark_name} / {model_key} ---")
+    if not is_quiet_mode:
+        print(f"\n  --- Result {benchmark_name} / {model_identifier} ---")
         print(f"  Average latency: {avg_lat:.1f}s")
         print(f"  Average tokens/s: {avg_tps:.1f}")
         print(f"  \u2248{think_ratio:.0f}% Thinking ratio ({sum_think}/{sum_out} tokens)")
@@ -1857,15 +1859,15 @@ def main() -> None:
     _args, _ = _parser.parse_known_args()
     sample_size = _args.sample_size
     non_interactive = _args.non_interactive
-    model_key_override = _args.model_key
+    model_identifier_override = _args.model_identifier
     api_model_override = _args.api_model
     benchmark_override = _args.benchmark
     qwen_prompt_mode = _args.qwen_prompt
     thinking_mode = _args.thinking
-    global QWEN_PROMPT_MODE, THINKING_MODE, STRUCTURED_OUTPUT
-    QWEN_PROMPT_MODE = qwen_prompt_mode
-    THINKING_MODE = thinking_mode
-    STRUCTURED_OUTPUT = not _args.no_structured_output
+    global IS_QWEN_PROMPT_MODE, IS_THINKING_MODE, HAS_STRUCTURED_OUTPUT
+    IS_QWEN_PROMPT_MODE = qwen_prompt_mode
+    IS_THINKING_MODE = thinking_mode
+    HAS_STRUCTURED_OUTPUT = not _args.no_structured_output
     KEEP_RESPONSE = _args.keep_response
     if _args.seed is not None:
         _seed = _args.seed
@@ -1883,7 +1885,7 @@ def main() -> None:
     print(f"  Python: {sys.version.split()[0]} ({sys.executable})")
     print()
     monitor = Monitor()
-    if not check_api_available():
+    if not is_api_available():
         print(f"\n[ERROR] LM Studio API not reachable: {API_BASE}")
         sys.exit(1)
     print(f"\n[OK] LM Studio API: {API_BASE}")
@@ -1911,10 +1913,10 @@ def main() -> None:
                 print(f"\n[ERROR] Benchmark '{benchmark_override}' not found. Possible: {', '.join(b['name'] for b in BENCHMARKS)}")
                 sys.exit(1)
         available = get_available_models(exclude_keywords=EXCLUDE_KEYWORDS)
-        if model_key_override:
-            models = [m for m in available if m["key"] == model_key_override]
+        if model_identifier_override:
+            models = [m for m in available if m["key"] == model_identifier_override]
             if not models:
-                print(f"\n[ERROR] Model '{model_key_override}' not found.")
+                print(f"\n[ERROR] Model '{model_identifier_override}' not found.")
                 sys.exit(1)
         else:
             models = available
@@ -1932,7 +1934,7 @@ def main() -> None:
 
     summary = []
     for midx, model_info in enumerate(models, 1):
-        model_key = model_info["key"]
+        model_identifier = model_info["key"]
         model_display = model_info["display"]
         # Take exact API ID from parent (if set)
         if api_model_override:
@@ -1969,7 +1971,7 @@ def main() -> None:
                 cs = {}
             csv_p = csv_writer.write_per_task_csv(
                 res, bench["name"], model_display,
-                model_key=model_info.get("key", ""),
+                model_identifier=model_info.get("key", ""),
                 sample_size=sample_size,
                 keep_response=KEEP_RESPONSE,
             ) if res else ""
@@ -2022,7 +2024,7 @@ def main() -> None:
             bench_names = "+".join(sorted(set(r["benchmark_name"] for r in model_results)))
             csv_writer.write_per_model_csv(
                 model_results, model_display,
-                model_key=model_info.get("key", ""),
+                model_identifier=model_info.get("key", ""),
                 sample_size=sample_size,
             )
 
@@ -2058,7 +2060,7 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\n[INFO] Aborted.")
         print("[INFO] Unloading models...")
-        unload_all_models()
+        has_unloaded_all_models()
         sys.exit(0)
     except Exception as e:
         print(f"\n[ERROR] {e}")

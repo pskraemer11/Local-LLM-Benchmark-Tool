@@ -219,13 +219,13 @@ class TestExtractCodeGraniteFallbacks:
 
     def test_structured_json_uses_code_field(self):
         text = '{"code": "def foo():\\n    return 1"}'
-        result = extract_code(text, structured=True)
+        result = extract_code(text, is_structured=True)
         assert "def foo" in result
         assert "return 1" in result
 
     def test_structured_json_falls_back_on_bad_json(self):
         text = '```python\ndef foo():\n    return 1\n```'
-        result = extract_code(text, structured=True)
+        result = extract_code(text, is_structured=True)
         # Should still extract via regex even though structured failed
         assert "def foo" in result
 

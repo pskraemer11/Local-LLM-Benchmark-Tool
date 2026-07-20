@@ -151,14 +151,14 @@ class TestExtractCode:
     def test_extracts_structured_json(self):
         # Properly JSON-escaped string (json.dumps converts \n to \\n)
         text = json.dumps({"code": "def foo():\n    return 42"})
-        result = extract_code(text, structured=True)
+        result = extract_code(text, is_structured=True)
         assert "def foo():" in result
         assert "return 42" in result
 
     def test_structured_falls_through_to_text(self):
         # Invalid JSON → fall through to regex fallback
         text = "```python\nx = 1\n```"
-        result = extract_code(text, structured=True)
+        result = extract_code(text, is_structured=True)
         assert "x = 1" in result
 
     def test_extracts_bare_python(self):

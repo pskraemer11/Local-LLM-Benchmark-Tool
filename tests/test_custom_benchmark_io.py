@@ -71,8 +71,8 @@ class TestBuildSandboxScript:
             assert f"'{dangerous}'" in result
 
     def test_capture_state_adds_state_collection(self):
-        without_state = _build_sandbox_script("x = 1", capture_state=False)
-        with_state = _build_sandbox_script("x = 1", capture_state=True)
+        without_state = _build_sandbox_script("x = 1", should_capture_state=False)
+        with_state = _build_sandbox_script("x = 1", should_capture_state=True)
         # capture_state=True adds state-collection code
         assert "_state" in with_state
         assert "_state" not in without_state

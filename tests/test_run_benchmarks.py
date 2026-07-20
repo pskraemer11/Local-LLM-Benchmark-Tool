@@ -15,10 +15,10 @@ from run_benchmarks_v13 import (
     BENCH_LOOKUP,
     EXCLUDE_KEYWORDS,
     SAFE_CONTEXT_FALLBACK as SAFE_CONTEXT,
-    THINKING_ENABLED,
+    IS_THINKING_ENABLED,
     _build_lmeval_cmd,
     _ensure_model_still_loaded,
-    _get_lmeval_params,
+    _get_evaluation_parameters,
     _get_safe_context,
     _is_gemma_model,
     _is_gptoss_model,
@@ -223,77 +223,77 @@ class TestResolveBenchmarks:
 
 
 # ======================================================================
-# _get_lmeval_params
+# _get_evaluation_parameters
 # ======================================================================
 
 class TestLmevalParams:
-    # Code-Review 2026-07-18 §5.5: The _get_lmeval_params() function was
+    # Code-Review 2026-07-18 §5.5: The _get_evaluation_parameters() function was
     # rewritten in v13 to use get_model_config() (Variante C+ in
     # benchmark_config.py). The following tests hard-coded specific values
     # from the old per-model if-else cascade and now fail. They are
     # skipped until either updated or replaced by a get_model_config()
     # test suite.
-    @pytest.mark.skip(reason="_get_lmeval_params rewritten in v13; "
+    @pytest.mark.skip(reason="_get_evaluation_parameters rewritten in v13; "
                         "old if-else cascade tests obsolete")
     def test_gptoss_branch(self):
         # pick a model key that triggers gptoss
-        params = _get_lmeval_params("gpt-oss-20b", "MATH-500")
+        params = _get_evaluation_parameters("gpt-oss-20b", "MATH-500")
         assert params["temperature"] == 1.0
         assert params["top_k"] == 0
         assert "<|return|>" in params["until"]
         assert params["extra_body"]["chat_template_kwargs"]["enable_thinking"] is False
 
-    @pytest.mark.skip(reason="_get_lmeval_params rewritten in v13; "
+    @pytest.mark.skip(reason="_get_evaluation_parameters rewritten in v13; "
                         "old if-else cascade tests obsolete")
     def test_qwen3_6_branch(self):
-        params = _get_lmeval_params("qwen3.6-30b-a3b-instruct", "")
+        params = _get_evaluation_parameters("qwen3.6-30b-a3b-instruct", "")
         assert params["max_tokens"] == 8192
         assert params["temperature"] == 0.0
         assert params["extra_body"]["chat_template_kwargs"]["enable_thinking"] is False
 
-    @pytest.mark.skip(reason="_get_lmeval_params rewritten in v13; "
+    @pytest.mark.skip(reason="_get_evaluation_parameters rewritten in v13; "
                         "old if-else cascade tests obsolete")
     def test_qwen3_5_branch(self):
-        params = _get_lmeval_params("qwen3.5-72b-instruct", "")
+        params = _get_evaluation_parameters("qwen3.5-72b-instruct", "")
         assert params["temperature"] == 0.2
         assert params["top_p"] == 0.9
         assert params["top_k"] == 20
 
-    @pytest.mark.skip(reason="_get_lmeval_params rewritten in v13; "
+    @pytest.mark.skip(reason="_get_evaluation_parameters rewritten in v13; "
                         "old if-else cascade tests obsolete")
     def test_gemma_default(self):
-        params = _get_lmeval_params("gemma-3-12b", "arc-challenge")
+        params = _get_evaluation_parameters("gemma-3-12b", "arc-challenge")
         assert params["max_tokens"] == 4096
         assert params["temperature"] == 0.0
 
-    @pytest.mark.skip(reason="_get_lmeval_params rewritten in v13; "
+    @pytest.mark.skip(reason="_get_evaluation_parameters rewritten in v13; "
                         "old if-else cascade tests obsolete")
     def test_gemma_with_thinking_and_math500(self, monkeypatch):
-        monkeypatch.setattr(rb, "THINKING_ENABLED", True)
-        params = _get_lmeval_params("gemma-3-12b", "MATH-500")
+        monkeypatch.setattr(rb, "IS_THINKING_ENABLED", True)
+        params = _get_evaluation_parameters("gemma-3-12b", "MATH-500")
         assert params["max_tokens"] == 8192
         assert params["extra_body"]["chat_template_kwargs"]["enable_thinking"] is True
 
-    @pytest.mark.skip(reason="_get_lmeval_params rewritten in v13; "
+    @pytest.mark.skip(reason="_get_evaluation_parameters rewritten in v13; "
                         "old if-else cascade tests obsolete")
     def test_reasoning_branch(self):
-        params = _get_lmeval_params("deepseek-r1-distill-7b", "arc-challenge")
+        params = _get_evaluation_parameters("deepseek-r1-distill-7b", "arc-challenge")
         assert params["temperature"] == 0.1
         assert params["min_p"] == 0.02
 
-    @pytest.mark.skip(reason="_get_lmeval_params rewritten in v13; "
+    @pytest.mark.skip(reason="_get_evaluation_parameters rewritten in v13; "
                         "old if-else cascade tests obsolete")
     def test_reasoning_with_thinking_and_math500(self, monkeypatch):
-        monkeypatch.setattr(rb, "THINKING_ENABLED", True)
-        params = _get_lmeval_params("r1-distill-7b", "MATH-500")
+        monkeypatch.setattr(rb, "IS_THINKING_ENABLED", True)
+        params = _get_evaluation_parameters("r1-distill-7b", "MATH-500")
         assert params["max_tokens"] == 8192
         assert "until" in params
         assert params["extra_body"]["chat_template_kwargs"]["enable_thinking"] is True
 
-    @pytest.mark.skip(reason="_get_lmeval_params rewritten in v13; "
+    @pytest.mark.skip(reason="_get_evaluation_parameters rewritten in v13; "
                         "old if-else cascade tests obsolete")
     def test_default_branch(self):
-        params = _get_lmeval_params("plain-7b-model", "")
+        params = _get_evaluation_parameters("plain-7b-model", "")
         assert params["max_tokens"] == 1024
         assert params["temperature"] == 0.0
 
@@ -318,9 +318,9 @@ class TestBuildLmevalCmd:
 
     def test_gptoss_adds_eos_string_when_no_until(self):
         # The eos_string is only added when "until" is NOT already in
-        # lmeval_params. The default gpt-oss branch sets until=[...]
-        # so we override _get_lmeval_params to drop until.
-        with patch.object(rb, "_get_lmeval_params",
+        # evaluation_parameters. The default gpt-oss branch sets until=[...]
+        # so we override _get_evaluation_parameters to drop until.
+        with patch.object(rb, "_get_evaluation_parameters",
                           return_value={"max_tokens": 4096, "temperature": 1.0}):
             cmd = _build_lmeval_cmd("gpt-oss-20b", "gpt-oss-20b", "task1", 5, "/tmp/out")
             idx = cmd.index("--model_args")
@@ -347,7 +347,7 @@ class TestBuildLmevalCmd:
         assert args_json["base_url"] == f"{API_BASE}/chat/completions"
         assert args_json["num_concurrent"] == 1
 
-    @pytest.mark.skip(reason="_get_lmeval_params rewritten in v13; "
+    @pytest.mark.skip(reason="_get_evaluation_parameters rewritten in v13; "
                         "old if-else cascade tests obsolete")
     def test_gen_kwargs_added_when_present(self):
         cmd = _build_lmeval_cmd("qwen3.6-30b", "qwen3.6-30b", "task1", 5, "/tmp/out")
@@ -364,8 +364,8 @@ class TestBuildLmevalCmd:
         # is still added.
         # But if model returns a dict that doesn't have any keys in
         # gen_kwargs_keys (unlikely here), it could be empty.
-        # Use a tiny custom case: monkey-patch _get_lmeval_params
-        with patch.object(rb, "_get_lmeval_params", return_value={"foo": "bar"}):
+        # Use a tiny custom case: monkey-patch _get_evaluation_parameters
+        with patch.object(rb, "_get_evaluation_parameters", return_value={"foo": "bar"}):
             cmd = _build_lmeval_cmd("plain-7b", "p", "task", 1, "/o")
         assert "--gen_kwargs" not in cmd
 
@@ -414,12 +414,12 @@ class TestParseSubsetScore:
 class TestEnsureModelStillLoaded:
     def test_already_loaded_does_nothing(self, capsys):
         loaded = {
-            "model_key": "qwen3.6-30b",
+            "model_identifier": "qwen3.6-30b",
             "identifier": "qwen3.6-30b@q4_k_m",
         }
         with patch.object(rb, "get_current_loaded_model", return_value=loaded):
             with patch.object(rb, "load_model_via_lms") as ld:
-                with patch.object(rb, "wait_for_model_ready") as w:
+                with patch.object(rb, "is_model_ready") as w:
                     _ensure_model_still_loaded("qwen3.6-30b", "qwen3.6-30b")
                     ld.assert_not_called()
                     w.assert_not_called()
@@ -427,19 +427,19 @@ class TestEnsureModelStillLoaded:
     def test_reload_called_when_unloaded(self, capsys):
         with patch.object(rb, "get_current_loaded_model", return_value=None):
             with patch.object(rb, "load_model_via_lms") as ld:
-                with patch.object(rb, "wait_for_model_ready", return_value=True) as w:
+                with patch.object(rb, "is_model_ready", return_value=True) as w:
                     _ensure_model_still_loaded("qwen3.6-30b", "qwen3.6-30b")
                     ld.assert_called_once()
                     w.assert_called_once()
 
     def test_reload_called_when_different_model(self, capsys):
         loaded = {
-            "model_key": "some-other-model",
+            "model_identifier": "some-other-model",
             "identifier": "some-other-model@q4_k_m",
         }
         with patch.object(rb, "get_current_loaded_model", return_value=loaded):
             with patch.object(rb, "load_model_via_lms") as ld:
-                with patch.object(rb, "wait_for_model_ready", return_value=True) as w:
+                with patch.object(rb, "is_model_ready", return_value=True) as w:
                     _ensure_model_still_loaded("qwen3.6-30b", "qwen3.6-30b")
                     ld.assert_called_once()
                     w.assert_called_once()
@@ -447,7 +447,7 @@ class TestEnsureModelStillLoaded:
     def test_warning_printed_when_model_lost(self, capsys):
         with patch.object(rb, "get_current_loaded_model", return_value=None):
             with patch.object(rb, "load_model_via_lms"):
-                with patch.object(rb, "wait_for_model_ready", return_value=True):
+                with patch.object(rb, "is_model_ready", return_value=True):
                     _ensure_model_still_loaded("qwen3.6-30b", "qwen3.6-30b", "MATH-500")
                     out = capsys.readouterr().out
                     assert "[WARN]" in out

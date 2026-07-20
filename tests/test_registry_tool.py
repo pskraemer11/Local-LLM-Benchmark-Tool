@@ -356,7 +356,7 @@ class TestInferNumParallel:
         assert _infer_num_parallel("ERNIE MoE", "model-a4b") == 1
 
     def test_priority_moe_beats_a4b_keyword(self):
-        # arch says "moe" → 4 regardless of model_key
+        # arch says "moe" → 4 regardless of model_identifier
         assert _infer_num_parallel("Custom MoE", "model-a4b") == 4
 
     def test_priority_kimi_beats_a4b(self):

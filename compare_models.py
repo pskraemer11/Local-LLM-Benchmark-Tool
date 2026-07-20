@@ -31,9 +31,9 @@ print(f"=== Models with result CSVs (unique, normalized) ({len(benchmarked_norm)
 new_models = []
 already_done = []
 for m in current:
-    nk = normalize_key(m["key"])
+    normalized_key = normalize_key(m["key"])
     # Check if ANY benchmarked key matches (substring check)
-    done = any(nk in bk or bk in nk for bk in benchmarked_norm)
+    done = any(normalized_key in bk or bk in normalized_key for bk in benchmarked_norm)
     if done:
         already_done.append(m)
     else:

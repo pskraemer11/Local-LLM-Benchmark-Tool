@@ -22,12 +22,12 @@ from model_manager import (
     API_BASE,
     TIMEOUT_HEALTH_CHECK,
     parse_selection,
-    check_api_available,
+    is_api_available,
     get_current_loaded_model,
     get_available_models,
     load_model_via_lms,
-    unload_all_models,
-    wait_for_model_ready,
+    has_unloaded_all_models,
+    is_model_ready,
 )
 
 
@@ -37,14 +37,14 @@ from model_manager import (
 # prevent the 10-iteration load-wait loop (10 seconds of time.sleep)
 # and the 15-iteration unload-wait loop (30 seconds of time.sleep)
 # from blocking the test suite. We use a fake time.time that simply
-# increments per call so wait_for_model_ready's timeout logic works.
+# increments per call so is_model_ready's timeout logic works.
 @pytest.fixture(autouse=True)
 def _mock_time(mocker):
     """Auto-mock time.sleep AND time.time for all tests in this module.
 
     time.sleep is replaced with a no-op.
     time.time is replaced with a counter that increments by 1 per call,
-    so wait_for_model_ready's elapsed-time check (`time.time() - start > timeout`)
+    so is_model_ready's elapsed-time check (`time.time() - start > timeout`)
     quickly exceeds the timeout and breaks the polling loop.
     """
     mocker.patch("time.sleep")
@@ -118,7 +118,7 @@ class TestParseSelection:
 
 
 # ─────────────────────────────────────────────────────────────────────
-# check_api_available
+# is_api_available
 # ─────────────────────────────────────────────────────────────────────
 
 class TestCheckApiAvailable:
@@ -132,7 +132,7 @@ class TestCheckApiAvailable:
         mock_urlopen.__enter__ = MagicMock(return_value=mock_resp)
         mock_urlopen.__exit__ = MagicMock(return_value=False)
         mocker.patch("urllib.request.urlopen", return_value=mock_urlopen)
-        assert check_api_available() is True
+        assert is_api_available() is True
 
     def test_returns_false_on_non_200(self, mocker):
         mock_resp = MagicMock()
@@ -141,20 +141,20 @@ class TestCheckApiAvailable:
         mock_urlopen.__enter__ = MagicMock(return_value=mock_resp)
         mock_urlopen.__exit__ = MagicMock(return_value=False)
         mocker.patch("urllib.request.urlopen", return_value=mock_urlopen)
-        assert check_api_available() is False
+        assert is_api_available() is False
 
     def test_returns_false_on_url_error(self, mocker):
         from urllib.error import URLError
         mocker.patch("urllib.request.urlopen", side_effect=URLError("not found"))
-        assert check_api_available() is False
+        assert is_api_available() is False
 
     def test_returns_false_on_connection_refused(self, mocker):
         mocker.patch("urllib.request.urlopen", side_effect=ConnectionRefusedError())
-        assert check_api_available() is False
+        assert is_api_available() is False
 
     def test_returns_false_on_generic_exception(self, mocker):
         mocker.patch("urllib.request.urlopen", side_effect=Exception("unexpected"))
-        assert check_api_available() is False
+        assert is_api_available() is False
 
     def test_uses_correct_url(self, mocker):
         # The function should call /v1/models (not /v1/chat/completions)
@@ -165,7 +165,7 @@ class TestCheckApiAvailable:
             raise Exception("stop here")
 
         mocker.patch("urllib.request.urlopen", side_effect=fake_urlopen)
-        check_api_available()
+        is_api_available()
         assert captured_urls[0] == f"{API_BASE}/models"
 
 
@@ -230,7 +230,7 @@ class TestGetCurrentLoadedModel:
         # Only the first model is returned
         assert loaded is not None
         assert loaded["identifier"] == "model_a@q4_k_m"
-        assert loaded["model_key"] == "model_a"
+        assert loaded["model_identifier"] == "model_a"
         assert loaded["display_name"] == "Model A"
 
     def test_handles_dict_format(self, mocker):
@@ -296,7 +296,7 @@ class TestGetAvailableModels:
         models = get_available_models(exclude_keywords=["whisper", "vision"])
         # whisper and vision are filtered out
         assert len(models) == 1
-        assert models[0]["model_key"] == "good_model"
+        assert models[0]["model_identifier"] == "good_model"
 
     def test_includes_quant_in_display(self, mocker):
         result = MagicMock()
@@ -375,7 +375,7 @@ class TestLoadModelViaLMS:
         assert ok is True
         assert identifier == "test_model@q4_k_m"
 
-    def test_falls_back_to_model_key_if_ps_returns_nothing(self, mocker):
+    def test_falls_back_to_model_identifier_if_ps_returns_nothing(self, mocker):
         # lms load succeeds, but lms ps returns no loaded model
         # (this is a fallback case: the load succeeded but verification
         # did not return an identifier within 10 seconds)
@@ -469,8 +469,8 @@ class TestLoadModelViaLMS:
             "subprocess.run",
             side_effect=[load_result_1, load_result_2, ps_result],
         )
-        # _ensure_lmstudio_running is mocked to return True (restart succeeded)
-        mocker.patch("model_manager._ensure_lmstudio_running", return_value=True)
+        # _is_lmstudio_running is mocked to return True (restart succeeded)
+        mocker.patch("model_manager._is_lmstudio_running", return_value=True)
         ok, identifier = load_model_via_lms("test")
         assert ok is True
 
@@ -486,7 +486,7 @@ class TestLoadModelViaLMS:
 
 
 # ─────────────────────────────────────────────────────────────────────
-# unload_all_models
+# has_unloaded_all_models
 # ─────────────────────────────────────────────────────────────────────
 
 class TestUnloadAllModels:
@@ -515,7 +515,7 @@ class TestUnloadAllModels:
             "subprocess.run",
             side_effect=[unload_result, ps_empty],
         )
-        assert unload_all_models() is True
+        assert has_unloaded_all_models() is True
 
     def test_successful_unload_after_two_polls(self, mocker):
         # First lms ps still shows the model, second one is empty
@@ -528,12 +528,12 @@ class TestUnloadAllModels:
             "subprocess.run",
             side_effect=[unload_result, ps_with_model, ps_empty],
         )
-        assert unload_all_models() is True
+        assert has_unloaded_all_models() is True
 
     def test_lms_unload_command_not_found(self, mocker):
         # lms.exe not installed at all
         mocker.patch("subprocess.run", side_effect=FileNotFoundError())
-        assert unload_all_models() is False
+        assert has_unloaded_all_models() is False
 
     def test_lms_unload_timeout(self, mocker):
         # lms unload itself times out
@@ -541,7 +541,7 @@ class TestUnloadAllModels:
             "subprocess.run",
             side_effect=subprocess.TimeoutExpired(cmd="lms", timeout=30),
         )
-        assert unload_all_models() is False
+        assert has_unloaded_all_models() is False
 
     def test_lms_unload_non_zero_exit_still_polls(self, mocker):
         # Non-zero exit on `lms unload --all` is logged but we still poll
@@ -551,7 +551,7 @@ class TestUnloadAllModels:
             "subprocess.run",
             side_effect=[unload_result, ps_empty],
         )
-        assert unload_all_models() is True
+        assert has_unloaded_all_models() is True
 
     def test_returns_false_when_model_stays_loaded(self, mocker):
         # 15 polls all show the model is still loaded
@@ -563,7 +563,7 @@ class TestUnloadAllModels:
             "subprocess.run",
             side_effect=[unload_result] + [ps_with_model] * 15,
         )
-        assert unload_all_models() is False
+        assert has_unloaded_all_models() is False
 
     def test_lms_ps_failure_is_treated_as_inconclusive(self, mocker):
         # lms unload succeeded, but lms ps returns non-zero (LMS broken)
@@ -574,7 +574,7 @@ class TestUnloadAllModels:
             "subprocess.run",
             side_effect=[unload_result] + [ps_failure] * 15,
         )
-        assert unload_all_models() is False
+        assert has_unloaded_all_models() is False
 
     def test_lms_ps_invalid_json_is_treated_as_inconclusive(self, mocker):
         unload_result = self._make_lms_result(0)
@@ -583,7 +583,7 @@ class TestUnloadAllModels:
             "subprocess.run",
             side_effect=[unload_result] + [ps_bad] * 15,
         )
-        assert unload_all_models() is False
+        assert has_unloaded_all_models() is False
 
     def test_lms_ps_timeout_is_retried(self, mocker):
         unload_result = self._make_lms_result(0)
@@ -594,7 +594,7 @@ class TestUnloadAllModels:
                          subprocess.TimeoutExpired(cmd="lms", timeout=10),
                          ps_empty],
         )
-        assert unload_all_models() is True
+        assert has_unloaded_all_models() is True
 
     def test_no_longer_uses_chat_completions_http_ping(self, mocker):
         # Regression test: ensure urlopen is NOT called any more for the
@@ -607,7 +607,7 @@ class TestUnloadAllModels:
         )
         # If urlopen is called, the test fails
         mock_urlopen = mocker.patch("urllib.request.urlopen")
-        unload_all_models()
+        has_unloaded_all_models()
         mock_urlopen.assert_not_called()
         # Confirm we used `lms ps --json`
         ps_call_args = mock_run.call_args_list[1]
@@ -616,7 +616,7 @@ class TestUnloadAllModels:
 
 
 # ─────────────────────────────────────────────────────────────────────
-# _ensure_lmstudio_running
+# _is_lmstudio_running
 # ─────────────────────────────────────────────────────────────────────
 
 class TestEnsureLmStudioRunning:
@@ -645,7 +645,7 @@ class TestEnsureLmStudioRunning:
         self._mock_urlopen_status(mocker, 200)
         # If subprocess.run is called, fail the test
         mock_run = mocker.patch("subprocess.run")
-        assert mm._ensure_lmstudio_running() is True
+        assert mm._is_lmstudio_running() is True
         mock_run.assert_not_called()
 
     def test_lms_server_start_succeeds(self, mocker):
@@ -670,7 +670,7 @@ class TestEnsureLmStudioRunning:
         lms_start.returncode = 0
         lms_start.stderr = ""
         mock_run = mocker.patch("subprocess.run", return_value=lms_start)
-        assert mm._ensure_lmstudio_running() is True
+        assert mm._is_lmstudio_running() is True
         # `lms server start` was called exactly once
         assert any(
             call.args[0][:3] == ["lms", "server", "start"]
@@ -698,7 +698,7 @@ class TestEnsureLmStudioRunning:
         mock_run = mocker.patch("subprocess.run", return_value=lms_start)
         # No llmster.exe exists at the real path → returns False
         mock_popen = mocker.patch("subprocess.Popen")
-        result = mm._ensure_lmstudio_running()
+        result = mm._is_lmstudio_running()
         # The function tried lms server start (failed), then tried to find
         # llmster (none at the real path) → returns False
         assert result is False
@@ -716,15 +716,15 @@ class TestEnsureLmStudioRunning:
         mocker.patch("urllib.request.urlopen", side_effect=URLError("down"))
         # `lms server start` raises FileNotFoundError
         mocker.patch("subprocess.run", side_effect=FileNotFoundError())
-        # _ensure_lmstudio_running also catches FileNotFoundError on `lms`
+        # _is_lmstudio_running also catches FileNotFoundError on `lms`
         # and then falls through to llmster search; no llmster exists
         # → returns False
-        assert mm._ensure_lmstudio_running() is False
+        assert mm._is_lmstudio_running() is False
 
     def test_uses_newest_llmster_version(self, mocker):
         """When llmster is needed, the newest version directory is picked.
 
-        We reproduce the candidate-sorting logic from _ensure_lmstudio_running
+        We reproduce the candidate-sorting logic from _is_lmstudio_running
         in isolation: when the iterdir() yields two version directories
         ['0.0.11-1', '0.0.13-2'] in arbitrary order, the function must
         sort them by name descending, picking 0.0.13-2 first.
@@ -759,7 +759,7 @@ class TestEnsureLmStudioRunning:
 
 
 # ─────────────────────────────────────────────────────────────────────
-# wait_for_model_ready
+# is_model_ready
 # ─────────────────────────────────────────────────────────────────────
 
 class TestWaitForModelReady:
@@ -774,7 +774,7 @@ class TestWaitForModelReady:
         mock_urlopen.__exit__ = MagicMock(return_value=False)
         mocker.patch("urllib.request.urlopen", return_value=mock_urlopen)
         mocker.patch("time.sleep")  # don't actually sleep
-        assert wait_for_model_ready(timeout=5) is True
+        assert is_model_ready(timeout=5) is True
 
     def test_returns_true_after_retries(self, mocker):
         # First few calls fail (model not ready), then one succeeds
@@ -788,7 +788,7 @@ class TestWaitForModelReady:
         side_effect = [URLError("not ready")] * 3 + [success_urlopen]
         mocker.patch("urllib.request.urlopen", side_effect=side_effect)
         mocker.patch("time.sleep")
-        assert wait_for_model_ready(timeout=10) is True
+        assert is_model_ready(timeout=10) is True
 
     def test_returns_false_on_timeout(self, mocker):
         # All calls fail with URLError → timeout after duration
@@ -804,30 +804,30 @@ class TestWaitForModelReady:
 
 
 # ─────────────────────────────────────────────────────────────────────
-# _validate_model_key (Code-Review 2026-07-18 §6.1)
+# _validate_model_identifier (Code-Review 2026-07-18 §6.1)
 # ─────────────────────────────────────────────────────────────────────
 
 class TestValidateModelKey:
-    """Defensive validation of model_key before subprocess.run.
+    """Defensive validation of model_identifier before subprocess.run.
 
     The function rejects keys with shell-meta characters (even though
     we use list-form subprocess) and enforces a sensible length cap.
     """
 
     def test_simple_publisher_model(self):
-        assert mm._validate_model_key("unsloth/phi-4") == "unsloth/phi-4"
+        assert mm._validate_model_identifier("unsloth/phi-4") == "unsloth/phi-4"
 
     def test_with_at_quant(self):
         # "lms load <model> --yes" accepts quant suffixes
-        assert mm._validate_model_key("qwen3.6-27b@q3_k_s") == "qwen3.6-27b@q3_k_s"
+        assert mm._validate_model_identifier("qwen3.6-27b@q3_k_s") == "qwen3.6-27b@q3_k_s"
 
     def test_with_plus_and_colon(self):
         # Some HF model names include these
-        assert mm._validate_model_key("org/model+variant:v1") == "org/model+variant:v1"
+        assert mm._validate_model_identifier("org/model+variant:v1") == "org/model+variant:v1"
 
     def test_with_hash(self):
         # Hash-suffixed names are valid
-        assert mm._validate_model_key("google/gemma-4#hash") == "google/gemma-4#hash"
+        assert mm._validate_model_identifier("google/gemma-4#hash") == "google/gemma-4#hash"
 
     def test_rejects_shell_metachars(self):
         # Even though subprocess uses list-form, reject these
@@ -836,7 +836,7 @@ class TestValidateModelKey:
                     "model$(id)", "model'with-quotes'",
                     "model\"with-dquotes\""]:
             with pytest.raises(ValueError):
-                mm._validate_model_key(bad)
+                mm._validate_model_identifier(bad)
 
     def test_rejects_path_traversal(self):
         # The defensive regex accepts '.' and '/' (both common in HF
@@ -844,34 +844,34 @@ class TestValidateModelKey:
         # traversal with only those chars is technically allowed by
         # the regex. The lms CLI will reject it with its own error.
         # Verify that the helper at least doesn't crash on such input.
-        result = mm._validate_model_key("../../../etc/passwd")
+        result = mm._validate_model_identifier("../../../etc/passwd")
         assert result == "../../../etc/passwd"
 
     def test_rejects_control_characters(self):
         # Path-traversal via control chars (which are not in the
         # allowed character set) is rejected.
         with pytest.raises(ValueError):
-            mm._validate_model_key("model\x00name")  # null byte
+            mm._validate_model_identifier("model\x00name")  # null byte
         with pytest.raises(ValueError):
-            mm._validate_model_key("model\rname")   # carriage return
+            mm._validate_model_identifier("model\rname")   # carriage return
 
     def test_rejects_newlines(self):
         with pytest.raises(ValueError):
-            mm._validate_model_key("model\nname")
+            mm._validate_model_identifier("model\nname")
 
     def test_rejects_too_long(self):
         with pytest.raises(ValueError):
-            mm._validate_model_key("a" * 257)
+            mm._validate_model_identifier("a" * 257)
 
     def test_rejects_empty(self):
         with pytest.raises(ValueError):
-            mm._validate_model_key("")
+            mm._validate_model_identifier("")
 
     def test_rejects_non_string(self):
         with pytest.raises(ValueError):
-            mm._validate_model_key(None)
+            mm._validate_model_identifier(None)
         with pytest.raises(ValueError):
-            mm._validate_model_key(123)
+            mm._validate_model_identifier(123)
 
     def test_load_model_via_lms_rejects_bad_key(self, mocker):
         # load_model_via_lms should refuse a key with shell metachars
@@ -892,7 +892,7 @@ class TestValidateModelKey:
         ok, identifier = load_model_via_lms("unsloth/valid-model")
         assert ok is True
         assert identifier == "valid-model@q4"
-        assert wait_for_model_ready(timeout=5) is False
+        assert is_model_ready(timeout=5) is False
 
     def test_returns_false_on_500_error(self, mocker):
         # 500 errors are also retried (server not ready yet)
@@ -910,7 +910,7 @@ class TestValidateModelKey:
             return start_time[0]
         mocker.patch("model_manager.time.time", side_effect=fake_time)
         mocker.patch("time.sleep")
-        assert wait_for_model_ready(timeout=5) is False
+        assert is_model_ready(timeout=5) is False
 
     def test_uses_chat_completions_url(self, mocker):
         # The function should poll /v1/chat/completions (not /v1/models)
@@ -933,7 +933,7 @@ class TestValidateModelKey:
             return start_time[0]
         mocker.patch("model_manager.time.time", side_effect=fake_time)
         mocker.patch("time.sleep")
-        wait_for_model_ready(timeout=2)
+        is_model_ready(timeout=2)
         assert len(captured_urls) >= 1
         assert captured_urls[0] == f"{API_BASE}/chat/completions"
 
@@ -949,5 +949,5 @@ class TestValidateModelKey:
             return start_time[0]
         mocker.patch("model_manager.time.time", side_effect=fake_time)
         mocker.patch("time.sleep")
-        result = wait_for_model_ready()  # no timeout arg
+        result = is_model_ready()  # no timeout arg
         assert result is False

@@ -25,9 +25,14 @@ Commands:
                 sync-from-configs → fill-ctx → fmt
 """
 
+from __future__ import annotations
+
 import csv, json, os, re, sys, subprocess, tempfile, concurrent.futures
 from pathlib import Path
 from collections import OrderedDict
+from typing import Any
+
+from type_defs import RegistryEntry
 
 BASE_DIR = Path(__file__).resolve().parent
 REGISTRY_PATH = BASE_DIR / "doc-git" / "model_registry.yaml"
@@ -67,23 +72,23 @@ _ARCH_MAP = {
 
 # ── I/O helpers ────────────────────────────────────────────────────
 
-def load_registry(path: Path = REGISTRY_PATH) -> dict:
+def load_registry(path: Path = REGISTRY_PATH) -> dict[str, RegistryEntry]:
     with open(path, "r", encoding="utf-8") as f:
         return y.load(f) or {}
 
 
-def save_registry(reg: dict, path: Path = REGISTRY_PATH) -> None:
+def save_registry(reg: dict[str, Any], path: Path = REGISTRY_PATH) -> None:
     with open(path, "w", encoding="utf-8") as f:
         y.dump(reg, f)
     _format_blank_lines(path)
 
 
-def load_lms_json(path: str | Path) -> list:
+def load_lms_json(path: str | Path) -> list[Any]:
     with open(path, "r", encoding="utf-8-sig") as f:
         return json.load(f)
 
 
-def _run_lms_ls() -> list:
+def _run_lms_ls() -> list[dict[str, Any]]:
     r = subprocess.run(["lms", "ls", "--json"], capture_output=True, text=True, timeout=15)
     if r.returncode != 0:
         print(f"[WARN] lms ls fehlgeschlagen: {r.stderr.strip()}")
@@ -200,20 +205,20 @@ def cmd_fill_size() -> None:
     # Build LMS lookup: normalized name -> sizeBytes
     lms_sizes: dict[str, int] = {}
     for m in lms_models:
-        nk = normalize_model_name(m.get("modelKey", ""))
+        normalized_key = normalize_model_name(m.get("modelKey", ""))
         sb = m.get("sizeBytes", 0)
         if sb and sb > 0:
-            if nk not in lms_sizes:
-                lms_sizes[nk] = int(sb)
+            if normalized_key not in lms_sizes:
+                lms_sizes[normalized_key] = int(sb)
     updated = 0
     for key, entry in reg.items():
         if not isinstance(entry, dict):
             continue
         if "file_size_bytes" in entry and entry["file_size_bytes"]:
             continue
-        nk = normalize_model_name(key)
-        if nk in lms_sizes:
-            entry["file_size_bytes"] = lms_sizes[nk]
+        normalized_key = normalize_model_name(key)
+        if normalized_key in lms_sizes:
+            entry["file_size_bytes"] = lms_sizes[normalized_key]
             updated += 1
     if updated:
         save_registry(reg)
@@ -243,18 +248,18 @@ def cmd_fix_np() -> None:
 
 # ── compare command ────────────────────────────────────────────────
 
-def cmd_compare() -> dict:
+def cmd_compare() -> dict[str, Any]:
     reg = load_registry()
     lms = _run_lms_ls()
     cfgs = read_lms_configs(CONFIG_ROOT)
 
-    rk = {normalize_model_name(k): k for k, v in reg.items() if isinstance(v, dict)}
+    registry_key_map = {normalize_model_name(k): k for k, v in reg.items() if isinstance(v, dict)}
     lm = {normalize_model_name(m.get("modelKey", "")): m for m in lms}
     ck = {normalize_model_name(c["dir_name"]) for c in cfgs}
 
     new_models: list[dict] = []
     for lk, lm2 in sorted(lm.items()):
-        if not any(lk == r for r in rk):
+        if not any(lk == r for r in registry_key_map):
             new_models.append(lm2)
 
     missing: list[str] = []
@@ -268,12 +273,12 @@ def cmd_compare() -> dict:
     orphan: set[str] = set()
     for c in cfgs:
         n = normalize_model_name(c["dir_name"])
-        if not any(n in r or r in n for r in rk):
+        if not any(n in r or r in n for r in registry_key_map):
             orphan.add(f"{c['publisher']}/{c['dir_name']}")
 
     report = {
         "lms": len(lms),
-        "reg": len(rk),
+        "reg": len(registry_key_map),
         "cfg": len(cfgs),
         "new": len(new_models),
         "missing": len(missing),
@@ -298,7 +303,7 @@ def cmd_compare() -> dict:
 
 # ── np inference helper ────────────────────────────────────────────
 
-def _infer_num_parallel(arch: str, model_key: str = "") -> int:
+def _infer_num_parallel(arch: str, model_identifier: str = "") -> int:
     """Determine num_parallel from architecture string + model key.
     
     Rules:
@@ -310,7 +315,7 @@ def _infer_num_parallel(arch: str, model_key: str = "") -> int:
       - Dense                 → 1 (LCP=0 in benchmarks, wastes VRAM)
     """
     al = arch.lower()
-    kl = model_key.lower()
+    kl = model_identifier.lower()
     if "ernie" in al:
         return 1
     if "moe" in al:
@@ -331,7 +336,7 @@ def _infer_num_parallel(arch: str, model_key: str = "") -> int:
 
 # ── add command ────────────────────────────────────────────────────
 
-def cmd_add(models: list[dict]) -> dict:
+def cmd_add(models: list[dict[str, Any]]) -> dict[str, Any]:
     reg = load_registry()
     added: list[str] = []
     skipped: list[tuple[str, str]] = []
@@ -403,31 +408,31 @@ def cmd_add(models: list[dict]) -> dict:
 
 # ── configs command ────────────────────────────────────────────────
 
-def cmd_configs() -> dict:
+def cmd_configs() -> dict[str, Any]:
     reg = load_registry()
     cfgs = read_lms_configs(CONFIG_ROOT)
-    rk = {normalize_model_name(k): k for k, v in reg.items() if isinstance(v, dict)}
+    registry_key_map = {normalize_model_name(k): k for k, v in reg.items() if isinstance(v, dict)}
     # Sort by descending normalized key length: more specific keys match first
-    rk_sorted = sorted(rk.items(), key=lambda x: -len(x[0]))
+    registry_key_sorted = sorted(registry_key_map.items(), key=lambda x: -len(x[0]))
 
     updated = skipped = blacklisted = errors = 0
     for cfg in cfgs:
         cn = normalize_model_name(cfg["dir_name"])
         match = None
         # Phase 1: exact match
-        for rn2, rnk in rk_sorted:
+        for rn2, rnk in registry_key_sorted:
             if cn == rn2:
                 match = rnk
                 break
         # Phase 2: config name has extra quantization suffix (e.g. -mxfp4, -Q3_K_M)
         if not match:
-            for rn2, rnk in rk_sorted:
+            for rn2, rnk in registry_key_sorted:
                 if cn.startswith(rn2 + '-'):
                     match = rnk
                     break
         # Phase 3: config name stripped publisher that is embedded in registry key
         if not match:
-            for rn2, rnk in rk_sorted:
+            for rn2, rnk in registry_key_sorted:
                 if rn2.endswith('-' + cn):
                     match = rnk
                     break
@@ -438,9 +443,9 @@ def cmd_configs() -> dict:
             blacklisted += 1
             continue
         entry = reg[match]
-        jp = cfg["json_path"]
+        json_path = cfg["json_path"]
         try:
-            with open(jp, "r", encoding="utf-8-sig") as f:
+            with open(json_path, "r", encoding="utf-8-sig") as f:
                 data = json.load(f)
             load_section = data.setdefault("load", {})
             fields = load_section.get("fields")
@@ -484,16 +489,16 @@ def cmd_configs() -> dict:
             if nl and hd and model_gb > 0:
                 kv_gb = nl * hd * 2 * kv_bytes * ctx_effective / 1_000_000_000
                 total_gb = model_gb + kv_gb * np_val
-                ukv = bool(total_gb >= _USE_UNIFIED_KV_CACHE_THRESHOLD_GB)
+                is_ukv_enabled = bool(total_gb >= _USE_UNIFIED_KV_CACHE_THRESHOLD_GB)
             elif model_gb > 0:
-                ukv = bool(model_gb >= _LEGACY_MODEL_GB_THRESHOLD_GB)
+                is_ukv_enabled = bool(model_gb >= _LEGACY_MODEL_GB_THRESHOLD_GB)
             else:
-                ukv = None
+                is_ukv_enabled = None
 
-            if ukv is not None:
-                set_field("llm.load.useUnifiedKvCache", ukv)
+            if is_ukv_enabled is not None:
+                set_field("llm.load.useUnifiedKvCache", is_ukv_enabled)
 
-            with open(jp, "w", encoding="utf-8") as f:
+            with open(json_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
             updated += 1
         except Exception as e:
@@ -522,8 +527,8 @@ def cmd_sync_from_configs() -> None:
     configs = read_lms_configs(CONFIG_ROOT)
     print(f"  -> {len(configs)} Config-Dateien gefunden")
 
-    rk = {normalize_model_name(k): k for k, v in reg.items() if isinstance(v, dict)}
-    rk_sorted = sorted(rk.items(), key=lambda x: -len(x[0]))
+    registry_key_map = {normalize_model_name(k): k for k, v in reg.items() if isinstance(v, dict)}
+    registry_key_sorted = sorted(registry_key_map.items(), key=lambda x: -len(x[0]))
 
     print("[3] Registry-Einträge aktualisieren ...")
     updated_offload = updated_np = updated_ukv = 0
@@ -532,17 +537,17 @@ def cmd_sync_from_configs() -> None:
     for cfg in configs:
         cn = normalize_model_name(cfg["dir_name"])
         match = None
-        for rn2, rnk in rk_sorted:
+        for rn2, rnk in registry_key_sorted:
             if cn == rn2:
                 match = rnk
                 break
         if not match:
-            for rn2, rnk in rk_sorted:
+            for rn2, rnk in registry_key_sorted:
                 if cn.startswith(rn2 + '-'):
                     match = rnk
                     break
         if not match:
-            for rn2, rnk in rk_sorted:
+            for rn2, rnk in registry_key_sorted:
                 if rn2.endswith('-' + cn):
                     match = rnk
                     break
@@ -768,7 +773,7 @@ def cmd_migrate_keys() -> None:
 
 # ── fill-arch command ──────────────────────────────────────────────
 
-def _read_gguf_arch(model_path: str) -> tuple:
+def _read_gguf_arch(model_path: str) -> tuple[Optional[int], Optional[int]]:
     """Read n_layers (block_count) and hidden_dim (embedding_length) from a GGUF file header.
 
     Lightweight header-only parser (~140ms/file) vs GGUFReader which memory-maps the
@@ -776,7 +781,7 @@ def _read_gguf_arch(model_path: str) -> tuple:
     """
     _GGUF_SIZES = {0: 1, 1: 1, 2: 2, 3: 2, 4: 4, 5: 4, 6: 4, 7: 1, 10: 8, 11: 8, 12: 8}
 
-    def _skip_value(f, vt):
+    def _skip_value(f: Any, vt: int) -> None:
         """Properly skip a GGUF metadata value of the given type."""
         if vt in _GGUF_SIZES:
             f.read(_GGUF_SIZES[vt])
@@ -818,10 +823,8 @@ def _read_gguf_arch(model_path: str) -> tuple:
                     s_raw = f.read(8)
                     s_len = int.from_bytes(s_raw, "little")
                     val = f.read(s_len).decode("utf-8", errors="replace")
-                    _skip = False
                 elif val_type == 4:  # UINT32 - common for block_count/embedding_length
                     val = int.from_bytes(f.read(4), "little")
-                    _skip = False
                 elif val_type == 9:  # ARRAY (skip)
                     _skip_value(f, val_type)
                     val = None
@@ -904,14 +907,14 @@ def cmd_fill_arch() -> None:
         if entry.get("n_layers") and entry.get("hidden_dim"):
             skipped_has += 1
             continue
-        nk = normalize_model_name(key)
-        found = gguf_arch.get(nk)
+        normalized_key = normalize_model_name(key)
+        found = gguf_arch.get(normalized_key)
         if not found:
-            base = nk.split("@")[0]
+            base = normalized_key.split("@")[0]
             found = gguf_arch.get(base)
         if not found:
             for gk, gv in gguf_arch.items():
-                if nk in gk or gk in nk:
+                if normalized_key in gk or gk in normalized_key:
                     found = gv
                     break
         if found:
@@ -938,7 +941,7 @@ def cmd_sync() -> None:
     """Full sync: add → fill-arch → configs → sync-ctx → sync-from-configs → fill-ctx → fmt"""
     lms = _run_lms_ls()
     reg = load_registry()
-    rk = {normalize_model_name(k): k for k, v in reg.items() if isinstance(v, dict)}
+    registry_key_map = {normalize_model_name(k): k for k, v in reg.items() if isinstance(v, dict)}
 
     # Find new models
     new_models = []
@@ -947,7 +950,7 @@ def cmd_sync() -> None:
         if not mk:
             continue
         sk = normalize_model_name(mk)
-        if not any(sk == r for r in rk):
+        if not any(sk == r for r in registry_key_map):
             new_models.append(m)
 
     if new_models:

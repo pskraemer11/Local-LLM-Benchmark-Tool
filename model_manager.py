@@ -9,14 +9,14 @@ Imported by run_benchmarks_v13.py AND custom_benchmark_v13.py.
   (lms load / unload / ps). It is used from two sides:
 
   1. run_benchmarks_v13.py (Launcher)
-     - CALLS load_model_via_lms() and unload_all_models()
+     - CALLS load_model_via_lms() and has_unloaded_all_models()
      - Model load/unload happens HERE ONLY
      - Uses get_current_loaded_model() for status checking
 
   2. custom_benchmark_v13.py (Custom pipeline subprocess)
      - IMPORTS the constants (API_BASE, TIMEOUT_*)
      - NEVER calls load/unload (initiated by the launcher)
-     - Uses check_api_available() as health-check (legacy)
+     - Uses is_api_available() as health-check (legacy)
 
 ── API- vs. CLI-Zugriff ────────────────────────────────────────────
   - lms CLI:     load, unload, ps, ls (Subprozesse)
@@ -26,12 +26,14 @@ Imported by run_benchmarks_v13.py AND custom_benchmark_v13.py.
   erfolgen koennen.
 
 ── Wichtige Hinweise ───────────────────────────────────────────────
-  - wait_for_model_ready() wird vom Launcher nach load_model_via_lms()
+  - is_model_ready() wird vom Launcher nach load_model_via_lms()
     aufgerufen, um die API-Bereitschaft aktiv zu prüfen (anstatt time.sleep(10)).
   - load_model_via_lms() returns the EXACT model ID from lms ps --json
     (e.g. "microsoft/phi-4@q6_k"), used by ALL pipelines as the
     model parameter in API calls.
 """
+
+from __future__ import annotations
 
 import json
 import os
@@ -40,9 +42,10 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from benchmark_config import PIPELINE_TIMEOUTS
+from type_defs import AvailableModelInfo, LoadedModelInfo
 
 API_BASE = "http://127.0.0.1:1234/v1"
 TIMEOUT_CLI = 30
@@ -91,7 +94,7 @@ def safe_json_loads(text: str) -> Any:
     return json.loads(text, object_pairs_hook=OrderedDict)
 
 
-def check_api_available() -> bool:
+def is_api_available() -> bool:
     try:
         from urllib.request import Request, urlopen
         req = Request(f"{API_BASE}/models", method="GET")
@@ -101,7 +104,7 @@ def check_api_available() -> bool:
         return False
 
 
-def get_current_loaded_model() -> Optional[dict[str, str]]:
+def get_current_loaded_model() -> Optional[LoadedModelInfo]:
     try:
         r = subprocess.run(["lms", "ps", "--json"], capture_output=True, text=True,
                            timeout=15, encoding="utf-8", errors="replace")
@@ -113,7 +116,7 @@ def get_current_loaded_model() -> Optional[dict[str, str]]:
         entry = entries[0]
         return {
             "identifier": entry.get("identifier", ""),
-            "model_key": entry.get("modelKey", entry.get("path", "")),
+            "model_identifier": entry.get("modelKey", entry.get("path", "")),
             "display_name": entry.get("displayName", ""),
             "status": entry.get("status", ""),
             "context_length": entry.get("contextLength"),
@@ -122,7 +125,7 @@ def get_current_loaded_model() -> Optional[dict[str, str]]:
         return None
 
 
-def unload_all_models() -> bool:
+def has_unloaded_all_models() -> bool:
     """Unload all models and wait until the LMS process reports no loaded models.
 
     Polls `lms ps --json` (the canonical LMS state source) instead of pinging
@@ -196,11 +199,11 @@ def _registry_display_overrides() -> dict[str, str]:
     return overrides
 
 
-def get_available_models(exclude_keywords: Optional[list[str]] = None) -> list[dict]:
+def get_available_models(exclude_keywords: Optional[list[str]] = None) -> list[AvailableModelInfo]:
     """Query LM Studio for installed models via `lms ls --json`.
 
     Returns a list of dicts with keys:
-        key, model_key, display, variant, quant, variants,
+        key, model_identifier, display, variant, quant, variants,
         identifier, params, publisher
     """
     try:
@@ -228,7 +231,7 @@ def get_available_models(exclude_keywords: Optional[list[str]] = None) -> list[d
                         display = f"{display}@{quant_name}"
                     models.append({
                         "key": unique_key,
-                        "model_key": base_key,
+                        "model_identifier": base_key,
                         "display": display,
                         "variant": sv or base_key,
                         "quant": quant_name,
@@ -243,9 +246,9 @@ def get_available_models(exclude_keywords: Optional[list[str]] = None) -> list[d
                 if overrides:
                     from assemble_blueprint import normalize_model_name
                     for m in models:
-                        nk = normalize_model_name(m["model_key"])
-                        if nk in overrides:
-                            m["display"] = overrides[nk]
+                        normalized_key = normalize_model_name(m["model_identifier"])
+                        if normalized_key in overrides:
+                            m["display"] = overrides[normalized_key]
                             if m["quant"]:
                                 m["display"] = f"{m['display']}@{m['quant']}"
                 if exclude_keywords:
@@ -297,7 +300,7 @@ def parse_selection(choice: str, max_val: int) -> Optional[list[int]]:
     return sorted(selected) if selected else None
 
 
-def _ensure_lmstudio_running() -> bool:
+def _is_lmstudio_running() -> bool:
     """Ensure LM Studio server is reachable, starting it if necessary.
 
     Order of operations (each step is a no-op if the previous succeeded):
@@ -386,40 +389,40 @@ def _ensure_lmstudio_running() -> bool:
     return False
 
 
-# Code-Review 2026-07-18 §6.1: defensive model_key validation.
+# Code-Review 2026-07-18 §6.1: defensive model_identifier validation.
 # All subprocess calls in this module already use list-form (not
-# shell=True), so a malicious model_key cannot inject shell syntax.
+# shell=True), so a malicious model_identifier cannot inject shell syntax.
 # But we still validate the character set to fail early on bad data
 # (typos, copy-paste errors, etc.) and to provide a clearer error
 # message than the underlying subprocess errors.
 _VALID_MODEL_KEY_RE = re.compile(r"^[A-Za-z0-9._/\-@:+=#]{1,256}$")
 
 
-def _validate_model_key(model_key: str) -> str:
-    """Return model_key if it contains only safe characters; raise ValueError otherwise.
+def _validate_model_identifier(model_identifier: str) -> str:
+    """Return model_identifier if it contains only safe characters; raise ValueError otherwise.
 
     Valid characters: ASCII letters/digits, `.`, `_`, `/`, `-`, `@`, `:`, `+`, `=`, `#`.
     Max length 256 (longer-than-realistic for any model name on HF).
     """
-    if not isinstance(model_key, str) or not _VALID_MODEL_KEY_RE.match(model_key):
+    if not isinstance(model_identifier, str) or not _VALID_MODEL_KEY_RE.match(model_identifier):
         raise ValueError(
-            f"Invalid model_key: {model_key!r}. "
+            f"Invalid model_identifier: {model_identifier!r}. "
             f"Allowed: alphanumeric, '.', '_', '/', '-', '@', ':', '+', '=', '#'; max 256 chars."
         )
-    return model_key
+    return model_identifier
 
 
-def load_model_via_lms(model_key: str, gpu_offload: Optional[float] = None) -> tuple[bool, Optional[str]]:
+def load_model_via_lms(model_identifier: str, gpu_offload: Optional[float] = None) -> tuple[bool, Optional[str]]:
     # Code-Review 2026-07-18 §6.1: validate input early. subprocess.run
     # already uses list-form (no shell injection possible), but bad
     # input should fail with a clear message, not a cryptic CLI error.
     try:
-        _validate_model_key(model_key)
+        _validate_model_identifier(model_identifier)
     except ValueError as e:
         print(f"  [ERROR] {e}")
         return False, None
-    print(f"\n  [INFO] Loading '{model_key}'...")
-    cmd = ["lms", "load", model_key, "--yes"]
+    print(f"\n  [INFO] Loading '{model_identifier}'...")
+    cmd = ["lms", "load", model_identifier, "--yes"]
     if gpu_offload is not None:
         cmd.extend(["--gpu", str(gpu_offload)])
     for attempt in range(2):
@@ -443,17 +446,17 @@ def load_model_via_lms(model_key: str, gpu_offload: Optional[float] = None) -> t
                 if loaded:
                     print(f"  [INFO] Exact model ID: {loaded['identifier']}")
                     return True, loaded["identifier"]
-            return True, model_key
+            return True, model_identifier
         stderr = result.stderr.strip()
         if "already loaded" in stderr.lower():
             print("  [OK] Already loaded")
             loaded = get_current_loaded_model()
             if loaded:
                 return True, loaded["identifier"]
-            return True, model_key
+            return True, model_identifier
         if attempt == 0 and ("No LM Runtime" in stderr or "Runtime not found" in stderr):
             print(f"  [WARN] Daemon error – restarting LM Studio...")
-            if _ensure_lmstudio_running():
+            if _is_lmstudio_running():
                 time.sleep(3)
                 continue
         print(f"  [WARN] Load failed: {stderr[:200]}")
@@ -461,7 +464,7 @@ def load_model_via_lms(model_key: str, gpu_offload: Optional[float] = None) -> t
     return False, None
 
 
-def wait_for_model_ready(timeout: int = TIMEOUT_MODEL_READY) -> bool:
+def is_model_ready(timeout: int = TIMEOUT_MODEL_READY) -> bool:
     """Wait for the LM Studio API to return a successful response (model loaded and serving).
     
     Unlike the previous implementation, this only considers HTTP 200 as "ready".
