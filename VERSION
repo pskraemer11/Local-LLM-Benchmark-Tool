@@ -16,7 +16,7 @@ PATCH=0
 SUFFIX="-p7"   # for "Prio 7: fill-arch, sync-from-configs, VRAM-Formel" 17.07.2026
 
 # Resolved version (use this in any "X.Y.Z" reference)
-__version__ = f"{MAJOR}.{MINOR}.{PATCH}{SUFFIX}"
+__version__ = "13.0.0-p7"
 # Example: 13.0.0-p7
 
 # Release metadata

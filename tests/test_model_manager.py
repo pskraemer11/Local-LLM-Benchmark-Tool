@@ -900,7 +900,7 @@ class TestValidateModelKey:
         mocker.patch(
             "urllib.request.urlopen",
             side_effect=HTTPError(
-                url="http://127.0.0.1:1234/v1/chat/completions",
+                url=f"{API_BASE}/chat/completions",
                 code=500, msg="Internal Server Error", hdrs={}, fp=None,
             ),
         )

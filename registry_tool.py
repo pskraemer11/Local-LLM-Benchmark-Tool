@@ -13,6 +13,9 @@ Commands:
                 into registry (skips context_length to preserve native model limit)
   fill-arch     Read n_layers and hidden_dim from local GGUF headers for
                 registry entries missing arch data
+  fill-reasoning
+                Read reasoning (thinking/instruct) from GGUF chat_template
+                for registry entries without reasoning field
   fill-ctx      Add default context_length to entries missing it
                 (size-based rule or 16384 fallback)
   fix-ctx       Recompute context_length for ALL entries (size-based formula)
@@ -21,7 +24,7 @@ Commands:
   fmt           Normalize blank lines in registry YAML (no blanks within entries,
                 one blank between entries)
   migrate-keys  Re-key entries without publisher prefix to publisher/model-name
-  sync          Full sync: add → fill-arch → configs → sync-ctx →
+  sync          Full sync: add → fill-arch → fill-reasoning → configs → sync-ctx →
                 sync-from-configs → fill-ctx → fmt
 """
 
@@ -390,10 +393,12 @@ def cmd_add(models: list[dict[str, Any]]) -> dict[str, Any]:
         if model_path:
             full_path = str(MODELS_CACHE / model_path)
             if os.path.isfile(full_path):
-                nl, hd = _read_gguf_arch(full_path)
+                nl, hd, is_reasoning = _read_gguf_arch(full_path)
                 if nl and hd:
                     entry["n_layers"] = int(nl)
                     entry["hidden_dim"] = int(hd)
+                if is_reasoning is not None:
+                    entry["reasoning"] = "thinking" if is_reasoning else "instruct"
 
         reg[canonical] = entry
         added.append(canonical)
@@ -466,7 +471,7 @@ def cmd_configs() -> dict[str, Any]:
             if "num_parallel" in entry:
                 set_field("llm.load.numParallelSessions", entry["num_parallel"])
 
-            # useUnifiedKvCache decision
+            # useUnifiedKvCache decision (uses ctx, but does NOT overwrite contextLength)
             fs = entry.get("file_size_bytes", 0)
             np_val = entry.get("num_parallel", 1)
             nl = entry.get("n_layers")
@@ -477,17 +482,8 @@ def cmd_configs() -> dict[str, Any]:
             kv_bytes = _KV_BYTES.get(kc, 1.0) + _KV_BYTES.get(vc, 0.5)
             model_gb = fs / 1_000_000_000 if fs else 0
 
-            # Benchmark context limit from VRAM formula
-            if np_val >= 1 and nl and hd and model_gb > 0:
-                bcl = _max_ctx_from_vram(model_gb, np_val, nl, hd, kv_bytes)
-            else:
-                bcl = ctx
-            bcl = entry.get("benchmark_context_limit") or bcl
-            ctx_effective = min(ctx, bcl)
-            set_field("llm.load.contextLength", ctx_effective)
-
             if nl and hd and model_gb > 0:
-                kv_gb = nl * hd * 2 * kv_bytes * ctx_effective / 1_000_000_000
+                kv_gb = nl * hd * 2 * kv_bytes * ctx / 1_000_000_000
                 total_gb = model_gb + kv_gb * np_val
                 is_ukv_enabled = bool(total_gb >= _USE_UNIFIED_KV_CACHE_THRESHOLD_GB)
             elif model_gb > 0:
@@ -608,7 +604,8 @@ _CTX_FROM_SIZE: list[tuple[float, int]] = [
     (9, 131072),
 ]
 
-# Bytes per KV-cache element per quantization type
+# Bytes per KV-cache element per quantization type.
+# Read-only after init — treat as immutable (thread-safe by design).
 _KV_BYTES: dict[str, float] = {
     "q8_0": 1.0, "q8_1": 2.0,
     "q5_1": 0.625, "q5_l": 0.625,
@@ -774,11 +771,12 @@ def cmd_migrate_keys() -> None:
 
 # ── fill-arch command ──────────────────────────────────────────────
 
-def _read_gguf_arch(model_path: str) -> tuple[Optional[int], Optional[int]]:
-    """Read n_layers (block_count) and hidden_dim (embedding_length) from a GGUF file header.
+def _read_gguf_arch(model_path: str) -> tuple[Optional[int], Optional[int], Optional[bool]]:
+    """Read n_layers (block_count), hidden_dim (embedding_length) and reasoning-support from a GGUF file header.
 
-    Lightweight header-only parser (~140ms/file) vs GGUFReader which memory-maps the
-    entire file (~12GB, taking 5-7s).
+    Returns (block_count, embedding_length, is_reasoning) where is_reasoning
+    is True/False if the chat_template was readable, or None if the GGUF
+    header could not be parsed.
     """
     _GGUF_SIZES = {0: 1, 1: 1, 2: 2, 3: 2, 4: 4, 5: 4, 6: 4, 7: 1, 10: 8, 11: 8, 12: 8}
 
@@ -790,7 +788,10 @@ def _read_gguf_arch(model_path: str) -> tuple[Optional[int], Optional[int]]:
             s_raw = f.read(8)
             if len(s_raw) < 8:
                 return
-            f.read(int.from_bytes(s_raw, "little"))
+            s_len = int.from_bytes(s_raw, "little")
+            if s_len > 100_000 or s_len < 0:
+                return
+            f.read(s_len)
         elif vt == 9:  # ARRAY
             raw = f.read(4)
             if len(raw) < 4:
@@ -806,14 +807,17 @@ def _read_gguf_arch(model_path: str) -> tuple[Optional[int], Optional[int]]:
     try:
         with open(model_path, "rb") as f:
             if f.read(4) != b"GGUF":
-                return None, None
+                return None, None, None
             f.read(4 + 8 + 8)  # version, tensor_count, metadata_count
             block_count = embedding_length = None
+            chat_template = None
             for _ in range(10_000):
                 raw = f.read(8)
                 if len(raw) < 8:
                     break
                 key_len = int.from_bytes(raw, "little")
+                if key_len > 500 or key_len < 1:
+                    break
                 key = f.read(key_len).decode("utf-8", errors="replace")
                 raw = f.read(4)
                 if len(raw) < 4:
@@ -844,12 +848,25 @@ def _read_gguf_arch(model_path: str) -> tuple[Optional[int], Optional[int]]:
                     block_count = int(val)
                 elif key.endswith(".embedding_length"):
                     embedding_length = int(val)
+                elif key == "tokenizer.chat_template":
+                    chat_template = str(val)
                 if block_count and embedding_length:
                     break
-        return block_count, embedding_length
+        is_reasoning = _detect_reasoning_from_template(chat_template) if chat_template else False
+        return block_count, embedding_length, is_reasoning
     except (OSError, ValueError, struct.error):
         # GGUF header parse failures (corrupt file, unsupported version, etc.)
-        return None, None
+        return None, None, None
+
+
+def _detect_reasoning_from_template(template: str) -> bool:
+    """Check if a GGUF chat_template supports reasoning/thinking mode."""
+    patterns = [
+        "enable_thinking", "reasoning_effort",
+        "<|channel>thought", "<|channel>think",
+        "<think>", "</think>",
+    ]
+    return any(p in template for p in patterns)
 
 
 MODELS_CACHE = Path.home() / ".lmstudio" / "models"
@@ -887,20 +904,21 @@ def cmd_fill_arch() -> None:
     print(f"  -> {len(unique)} einzigartige Modelle (von {len(lms_models)} GGUF-Dateien)")
 
     print("[3] GGUF-Header parallel parsen ...")
-    gguf_arch: dict[str, tuple[int, int]] = {}
+    gguf_arch: dict[str, tuple[int, int, bool | None]] = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
         fut_to_base = {pool.submit(_read_gguf_arch, p): b for b, p in unique.items()}
         for i, fut in enumerate(concurrent.futures.as_completed(fut_to_base), 1):
             base = fut_to_base[fut]
-            nl, hd = fut.result()
+            nl, hd, is_reasoning = fut.result()
             if nl and hd:
-                gguf_arch[base] = (nl, hd)
+                gguf_arch[base] = (nl, hd, is_reasoning)
             if i % 10 == 0:
                 print(f"     ({i}/{len(unique)})")
     print(f"  -> {len(gguf_arch)} mit n_layers/hidden_dim")
 
     total = len([k for k, v in reg.items() if isinstance(v, dict)])
     updated = skipped_has = skipped_no = 0
+    reasoning_updated = 0
     print(f"[4] {total} Registry-Einträge durchgehen ...")
 
     for key, entry in reg.items():
@@ -908,27 +926,130 @@ def cmd_fill_arch() -> None:
             continue
         if entry.get("n_layers") and entry.get("hidden_dim"):
             skipped_has += 1
-            continue
-        normalized_key = normalize_model_name(key)
-        found = gguf_arch.get(normalized_key)
-        if not found:
-            base = normalized_key.split("@")[0]
-            found = gguf_arch.get(base)
-        if not found:
-            for gk, gv in gguf_arch.items():
-                if normalized_key in gk or gk in normalized_key:
-                    found = gv
-                    break
-        if found:
-            entry["n_layers"] = int(found[0])
-            entry["hidden_dim"] = int(found[1])
-            updated += 1
         else:
-            skipped_no += 1
+            normalized_key = normalize_model_name(key)
+            found = gguf_arch.get(normalized_key)
+            if not found:
+                base = normalized_key.split("@")[0]
+                found = gguf_arch.get(base)
+            if not found:
+                for gk, gv in gguf_arch.items():
+                    if normalized_key in gk or gk in normalized_key:
+                        found = gv
+                        break
+            if found:
+                entry["n_layers"] = int(found[0])
+                entry["hidden_dim"] = int(found[1])
+                updated += 1
+            else:
+                skipped_no += 1
+                continue
+
+        # Update reasoning field from GGUF header (skips if already explicitly set)
+        if entry.get("reasoning") is None:
+            normalized_key = normalize_model_name(key)
+            found = gguf_arch.get(normalized_key)
+            if not found:
+                base = normalized_key.split("@")[0]
+                found = gguf_arch.get(base)
+            if not found:
+                for gk, gv in gguf_arch.items():
+                    if normalized_key in gk or gk in normalized_key:
+                        found = gv
+                        break
+            if found and found[2] is not None:
+                entry["reasoning"] = "thinking" if found[2] else "instruct"
+                reasoning_updated += 1
 
     print(f"  -> {updated} aktualisiert")
     print(f"  -> {skipped_has} bereits vorhanden")
     print(f"  -> {skipped_no} kein GGUF-Match (nur per add+path möglich)")
+    if reasoning_updated:
+        print(f"  -> reasoning-Feld: {reasoning_updated} gesetzt")
+
+    if updated or reasoning_updated:
+        print("[5] Registry speichern ...")
+        save_registry(reg)
+        print("  [OK] Gespeichert")
+    print("Fertig.")
+
+
+# ── fill-reasoning command ──────────────────────────────────────────
+
+def cmd_fill_reasoning() -> None:
+    """Fill reasoning field from GGUF headers for all registry entries without it.
+
+    Scans LM Studio models, parses GGUF chat_template, and sets
+    reasoning: thinking|instruct where previously missing.
+    """
+    if not REGISTRY_PATH.exists():
+        print(f"[ERROR] Registry not found: {REGISTRY_PATH}")
+        sys.exit(1)
+
+    print("[1] Registry laden ...")
+    reg = load_registry()
+    if not reg:
+        print("[ERROR] Leere Registry")
+        sys.exit(1)
+
+    print("[2] LM Studio-Modelle scannen ...")
+    lms = _run_lms_ls()
+    unique: dict[str, str] = {}
+    for m in lms:
+        rp = m.get("path", "")
+        if not rp:
+            continue
+        full_path = str(MODELS_CACHE / rp)
+        if not os.path.isfile(full_path):
+            continue
+        key = normalize_model_name(m.get("modelKey", "")).lower()
+        base = key.split("@")[0]
+        if base not in unique:
+            unique[base] = full_path
+    print(f"  -> {len(unique)} einzigartige Modelle")
+
+    print("[3] GGUF-Header parallel parsen (reasoning-Scan) ...")
+    gguf_reasoning: dict[str, bool] = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+        fut_to_base = {pool.submit(_read_gguf_arch, p): b for b, p in unique.items()}
+        for i, fut in enumerate(concurrent.futures.as_completed(fut_to_base), 1):
+            base = fut_to_base[fut]
+            _, _, is_reasoning = fut.result()
+            if is_reasoning is not None:
+                gguf_reasoning[base] = is_reasoning
+            if i % 10 == 0:
+                print(f"     ({i}/{len(unique)})")
+    print(f"  -> {len(gguf_reasoning)} mit tokenizer.chat_template (reasoning-auswertbar)")
+
+    total = len([k for k, v in reg.items() if isinstance(v, dict)])
+    updated = skipped_has = skipped_no_match = 0
+    print(f"[4] {total} Registry-Einträge durchgehen ...")
+
+    for key, entry in reg.items():
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("reasoning") is not None:
+            skipped_has += 1
+            continue
+        normalized_key = normalize_model_name(key)
+        found_base = unique.get(normalized_key)
+        if not found_base:
+            base = normalized_key.split("@")[0]
+            found_base = unique.get(base)
+        if not found_base:
+            for ubase in unique:
+                if normalized_key in ubase or ubase in normalized_key:
+                    found_base = ubase
+                    break
+        if found_base and found_base in gguf_reasoning:
+            entry["reasoning"] = "thinking" if gguf_reasoning[found_base] else "instruct"
+            updated += 1
+        else:
+            skipped_no_match += 1
+
+    print(f"  -> {updated} reasoning gesetzt")
+    print(f"  -> {skipped_has} bereits vorhanden")
+    print(f"  -> {skipped_no_match} kein GGUF-Match")
 
     if updated:
         print("[5] Registry speichern ...")
@@ -961,8 +1082,11 @@ def cmd_sync() -> None:
     else:
         print("[add] Keine neuen Modelle")
 
-    print("[fill-arch] n_layers/hidden_dim aus GGUF-Headern in Registry ...")
+    print("[fill-arch] n_layers/hidden_dim + reasoning aus GGUF-Headern in Registry ...")
     cmd_fill_arch()
+
+    print("[fill-reasoning] Fehlende reasoning-Felder aus GGUF-Headern ergänzen ...")
+    cmd_fill_reasoning()
 
     print("[configs] load.fields in JSON-Configs schreiben (inkl. useUnifiedKvCache über VRAM-Formel) ...")
     cmd_configs()
@@ -1019,6 +1143,8 @@ def main() -> None:
         cmd_fill_size()
     elif cmd == "fill-arch":
         cmd_fill_arch()
+    elif cmd == "fill-reasoning":
+        cmd_fill_reasoning()
     elif cmd == "fmt":
         cmd_fmt()
     elif cmd == "migrate-keys":

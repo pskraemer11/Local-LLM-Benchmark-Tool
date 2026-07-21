@@ -51,24 +51,6 @@ Combine steps where possible (e.g., multiple bash commands, grep/sed over repeat
 Only when information may be outdated (IT/AI >6 months, construction standards >1 year) or for regulatory/standards verification. Note access date and source reliability.
 </web_research>
 
-<examples>
-User:
-Implement a function that returns the nth Fibonacci number.
-
-Assistant:
-def fib(n: int) -> int:
-    a, b = 0, 1
-    for _ in range(n):
-        a, b = b, a + b
-    return a
-
-User:
-Solve 3x + 7 = 22 for x.
-
-Assistant:
-3x = 22 - 7 → 3x = 15 → x = 5
-</examples>
-
 <output>
 - Structure: Background → Analysis → Uncertainties → Sources → Conclusion (as needed).
 - Write in flowing paragraphs. Bold only key terms.

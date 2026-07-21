@@ -4,10 +4,11 @@ Documents the control of Thinking mode in `custom_benchmark_v13.py:MODEL_CONFIG`
 
 ## Mechanism
 
-The system controls Thinking on two levels:
+The system controls Thinking on three levels:
 
-1. **MODEL_CONFIG** (`custom_benchmark_v13.py:140-230`): Per-model defaults
-2. **`--thinking` CLI flag**: Overrides via `REASONING_PATTERNS` to `True`
+1. **Registry** (`model_registry.yaml:reasoning` field): Determines if a model is classified as reasoning (thinking=True, instruct=False). Populated automatically from GGUF `tokenizer.chat_template` via `registry_tool.py fill-reasoning` (part of `sync` pipeline).
+2. **MODEL_CONFIG** (`custom_benchmark_v13.py:140-230`): Per-model defaults
+3. **`--thinking` CLI flag**: Overrides via `REASONING_PATTERNS` to `True`
 
 ### API Control
 
@@ -58,7 +59,7 @@ The `--thinking` CLI flag has a limited effect since v13:
 
 | Model group | --thinking effect | Reason |
 |-------------|-------------------|------------|
-| **Reasoning models** (name contains "reasoning"/"think"/"r1"/"rnj") | ✅ Enables enable_thinking + Timeout ×2 | Native reasoning supported |
+| **Reasoning models** (registry `reasoning: thinking`) | ✅ Enables enable_thinking + Timeout ×2 | Native reasoning supported. Detection via `model_registry.yaml:reasoning` field (not keyword matching) |
 | **Gemma 4** | ✅ Enables enable_thinking for MATH-500 | Gemma-4 template sets `<|channel>thought` |
 | **Qwen3.6 (alle)** | ❌ Ignored (enable_thinking=False forced) | qwen3.6-27b aus REASONING_PATTERNS entfernt. `--thinking` hat keinen Effekt auf Qwen3.6 |
 | **GPT-OSS** | ❌ Ignored (no thinking support) | GPT-OSS architecture has no thinking |
@@ -67,6 +68,18 @@ The `--thinking` CLI flag has a limited effect since v13:
 
 **Practical consequence:** `--thinking` should only be used with Gemma 4 and explicit reasoning models. 
 For all other models it is a no-op.
+
+## Model Classification (registry-based since 21.07.)
+
+Since 21.07., `_is_reasoning_model()` no longer uses keyword matching but reads the `reasoning` field
+from `model_registry.yaml`. Detection flow:
+
+1. **GGUF header** (`_read_gguf_arch()`): Reads `tokenizer.chat_template`, returns `is_reasoning=True/False/None`
+2. **fill-reasoning** (`registry_tool.py`): Writes `reasoning: thinking|instruct` into registry for entries without it
+3. **Runtime** (`run_benchmarks_v13.py:_is_reasoning_model()`): Looks up `model_identifier` in registry,
+   strips `@quant` suffix, returns `True` for `reasoning: thinking`, `False` otherwise
+
+Fallback: If registry data is missing, prints a warning and returns `False`.
 
 ## MODEL_CONFIG in _get_lmeval_params (v13)
 
@@ -85,6 +98,11 @@ _is_qwen3_5_model) controls:
 MODEL_CONFIG in custom_benchmark_v13.py now only contains the custom pipeline parameters.
 
 ## History
+
+### 2026-07-21
+- **Reasoning detection via Registry:** `_is_reasoning_model()` now reads `model_registry.yaml:reasoning` field. No longer keyword-based. Registry populated automatically from GGUF `tokenizer.chat_template` via `registry_tool.py fill-reasoning`.
+- **BUGFIX `_read_gguf_arch()`:** Returns `is_reasoning = False` (not `None`) when no chat template found, preventing models without templates from incorrectly triggering the reasoning path.
+- **BUGFIX @quant suffix:** Both `run_benchmarks_v13.py` and `custom_benchmark_v13.py` now strip `@quant` suffix before registry lookup, so `model_identifier=model@q4_0` matches registry key `publisher/model`.
 
 ### 2026-07-20
 - **Native REST API (Option 2):** `custom_benchmark_v13.py:generate_answer()`: When `enable_thinking=False`, routes to `_generate_answer_native()` which uses LM Studio's native REST API (`/api/v1/chat`) with `reasoning: "off"` — a **dedicated, reliable** parameter that guarantees thinking is disabled. This is the fallback after `chat_template_kwargs` may be ignored by the OpenAI-compatible endpoint.

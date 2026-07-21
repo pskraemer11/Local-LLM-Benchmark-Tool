@@ -99,6 +99,45 @@ NATIVE_CHAT_URL = API_BASE.replace("/v1", "/api/v1/chat")
 import psutil
 import pynvml
 
+# ── Registry Reasoning Check ────────────────────────────────────────────
+# Used by _generate_answer_native() to avoid sending reasoning="off"
+# to models that don't support it (which would cause a 401 error).
+_REGISTRY_REASONING_CACHE: Optional[dict[str, Optional[str]]] = None
+
+def _model_supports_reasoning(model_identifier: str) -> Optional[bool]:
+    """Check registry for reasoning field.
+
+    Returns True (thinking), False (instruct), None (missing / unknown).
+    """
+    global _REGISTRY_REASONING_CACHE
+    if _REGISTRY_REASONING_CACHE is None:
+        _REGISTRY_REASONING_CACHE = {}
+        try:
+            from registry_tool import load_registry
+            from assemble_blueprint import normalize_model_name
+            data = load_registry()
+            for key, entry in data.items():
+                if isinstance(entry, dict) and "reasoning" in entry:
+                    _REGISTRY_REASONING_CACHE[normalize_model_name(key)] = entry["reasoning"]
+        except Exception:
+            pass
+    try:
+        from assemble_blueprint import normalize_model_name
+        normalized_key = normalize_model_name(model_identifier)
+    except Exception:
+        normalized_key = model_identifier.lower().replace("-", "_").replace(" ", "_")
+    cached = _REGISTRY_REASONING_CACHE.get(normalized_key) if normalized_key else None
+    # Fallback: ohne @quant-Suffix (Registry-Keys haben kein Quant)
+    if cached is None and normalized_key and "@" in normalized_key:
+        base_key = normalized_key.split("@")[0]
+        cached = _REGISTRY_REASONING_CACHE.get(base_key)
+    if cached == "thinking":
+        return True
+    if cached == "instruct":
+        return False
+    return None
+
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "simple_evals")
 RESULTS_DIR = os.path.join(BASE_DIR, "ergebnisse")
@@ -133,12 +172,10 @@ def _can_use_structured_output(model_identifier: str | None) -> bool:
         return False
     if IS_THINKING_MODE:
         return False
-    if model_identifier:
-        kl = model_identifier.lower()
-        if any(kw in kl for kw in ("r1-distill", "deepseek", "reasoning", "think")):
-            return False
-        if "mamba" in kl:
-            return False
+    if model_identifier and _model_supports_reasoning(model_identifier) is True:
+        return False
+    if model_identifier and "mamba" in model_identifier.lower():
+        return False
     return True
 
 
@@ -667,7 +704,8 @@ def generate_answer(prompt: Optional[str] = None, model_identifier: Optional[str
                     temperature: float = 0.0, top_p: float = 1.0, top_k: Optional[int] = None, min_p: Optional[float] = None,
                     is_thinking_enabled: Optional[bool] = None, reasoning_effort: Optional[str] = None,
                     is_streaming: bool = True, stop: Optional[list[str]] = None,
-                    response_format: Optional[dict] = None) -> tuple[Optional[str], float, int, int, float, int, Optional[str], Optional[str]]:
+                    response_format: Optional[dict] = None,
+                    native_model_identifier: Optional[str] = None) -> tuple[Optional[str], float, int, int, float, int, Optional[str], Optional[str]]:
     if messages is None:
         messages = []
         if system_msg:
@@ -676,10 +714,9 @@ def generate_answer(prompt: Optional[str] = None, model_identifier: Optional[str
     # Native REST API path: reliable thinking off via reasoning="off" parameter
     if is_thinking_enabled is False:
         return _generate_answer_native(
-            model_identifier=model_identifier or "local-model",
-            messages=messages, prompt=prompt, system_msg=system_msg,
-            temperature=temperature, top_p=top_p, max_tokens=max_tokens,
-            top_k=top_k, min_p=min_p, timeout=timeout,
+            model_identifier=native_model_identifier or model_identifier or "local-model",
+            prompt=prompt, system_msg=system_msg, temperature=temperature,
+            top_p=top_p, max_tokens=max_tokens, top_k=top_k, min_p=min_p, timeout=timeout,
         )
     body = {
         "model": model_identifier or "local-model",
@@ -699,11 +736,6 @@ def generate_answer(prompt: Optional[str] = None, model_identifier: Optional[str
         if reasoning_effort is not None:
             kwargs["reasoning_effort"] = reasoning_effort
         body["chat_template_kwargs"] = kwargs
-    # Gemma 4: <|channel>thought tag is hardcoded in GGUF jinja template,
-    # extra_body override is ignored. Force-disable via system prompt.
-    if is_thinking_enabled is False and model_identifier and "gemma" in model_identifier.lower():
-        if not any(m.get("role") == "system" for m in messages):
-            messages.append({"role": "system", "content": "Do NOT use thinking or reasoning. Answer directly without <|channel>thought tags."})
     if stop:
         body["stop"] = stop
     if response_format is not None:
@@ -726,7 +758,6 @@ def generate_answer(prompt: Optional[str] = None, model_identifier: Optional[str
 
 def _generate_answer_native(
     model_identifier: str,
-    messages: list[dict[str, Any]],
     prompt: Optional[str],
     system_msg: Optional[str],
     temperature: float,
@@ -738,28 +769,24 @@ def _generate_answer_native(
 ) -> tuple[Optional[str], float, int, int, float, int, Optional[str], Optional[str]]:
     """Use LM Studio native REST API with reasoning='off' to disable thinking.
 
-    The native API has a dedicated reasoning parameter that reliably controls
-    thinking behavior, unlike chat_template_kwargs which may be ignored by
-    the OpenAI-compatible endpoint.
+    Body format (docs: https://lmstudio.ai/docs/developer/rest/chat):
+    - model:      string  (required) – modelKey, e.g. "ai21labs_ai21-jamba2-mini"
+    - input:      string  – user message text
+    - system_prompt: string (optional)
+    - max_output_tokens: int (optional)
+    - reasoning: "off"|"low"|"medium"|"high"|"on"
     """
-    system_prompt = None
-    input_text = prompt or ""
-    for m in messages:
-        if m.get("role") == "system" and not system_prompt:
-            system_prompt = m.get("content", "")
-        elif m.get("role") == "user":
-            input_text = m.get("content", "")
-
     body: dict[str, Any] = {
         "model": model_identifier,
-        "input": input_text,
+        "input": prompt or "",
         "temperature": temperature,
         "top_p": top_p,
         "max_output_tokens": max_tokens,
-        "reasoning": "off",
     }
-    if system_prompt:
-        body["system_prompt"] = system_prompt
+    if _model_supports_reasoning(model_identifier) is True:
+        body["reasoning"] = "off"
+    if system_msg:
+        body["system_prompt"] = system_msg
     if top_k is not None:
         body["top_k"] = top_k
     if min_p is not None:
@@ -774,29 +801,70 @@ def _generate_answer_native(
             result = json.loads(resp.read().decode("utf-8"))
         elapsed = time.time() - start
 
-        output = result.get("output", [])
-        content_parts = []
-        thinking_content = ""
-        for item in output:
-            if item.get("type") == "message":
-                content_parts.append(item.get("content", ""))
-            elif item.get("type") == "reasoning":
-                thinking_content += item.get("content", "")
+        output = result.get("output")
+        if output is None:
+            choices = result.get("choices")
+            if choices:
+                raw_content = choices[0].get("message", {}).get("content", "")
+                content, think_tags = strip_thinking_tokens(raw_content)
+                thinking_tokens = think_tags
+                usage = result.get("usage", {})
+                tokens_in = usage.get("prompt_tokens", 0)
+                tokens_out = usage.get("completion_tokens", 0)
+                tokens_per_sec = tokens_out / elapsed if elapsed > 0 else 0
+                return content, elapsed, tokens_in, tokens_out, tokens_per_sec, thinking_tokens, None, None
+            raw_content = ""
+            content = None
+            thinking_tokens = 0
+            tokens_in = tokens_out = tokens_per_sec = 0
+        else:
+            content_parts = []
+            thinking_content = ""
+            for item in output:
+                if item.get("type") == "message":
+                    content_parts.append(item.get("content", ""))
+                elif item.get("type") == "reasoning":
+                    thinking_content += item.get("content", "")
 
-        raw_content = "".join(content_parts)
-        content, think_tags = strip_thinking_tokens(raw_content)
-        thinking_tokens = len(thinking_content.split()) if thinking_content else 0
-        thinking_tokens += think_tags
+            raw_content = "".join(content_parts)
+            content, think_tags = strip_thinking_tokens(raw_content)
+            thinking_tokens = len(thinking_content.split()) if thinking_content else 0
+            thinking_tokens += think_tags
 
-        stats = result.get("stats", {})
-        tokens_in = stats.get("input_tokens", 0)
-        tokens_out = stats.get("total_output_tokens", 0)
-        tokens_per_sec = stats.get("tokens_per_second", 0)
-        if tokens_per_sec == 0 and elapsed > 0:
-            tokens_per_sec = tokens_out / elapsed
+            stats = result.get("stats", {})
+            tokens_in = stats.get("input_tokens", 0)
+            tokens_out = stats.get("total_output_tokens", 0)
+            tokens_per_sec = stats.get("tokens_per_second", 0)
+            if tokens_per_sec == 0 and elapsed > 0:
+                tokens_per_sec = tokens_out / elapsed
 
         return content, elapsed, tokens_in, tokens_out, tokens_per_sec, thinking_tokens, None, None
     except (URLError, HTTPError, json.JSONDecodeError, KeyError, TimeoutError) as e:
+        # If reasoning="off" caused the error (model doesn't support reasoning),
+        # retry without it
+        if "reasoning" in body and b"reasoning" in payload:
+            body.pop("reasoning")
+            try:
+                payload2 = json.dumps(body).encode("utf-8")
+                req2 = Request(NATIVE_CHAT_URL, data=payload2, headers=headers, method="POST")
+                start2 = time.time()
+                with urlopen(req2, timeout=timeout) as resp2:
+                    result2 = json.loads(resp2.read().decode("utf-8"))
+                elapsed2 = time.time() - start2
+                output2 = result2.get("output")
+                if output2:
+                    for item in output2:
+                        if item.get("type") == "message":
+                            raw_content2 = item.get("content", "")
+                            content2, think_tags2 = strip_thinking_tokens(raw_content2)
+                            stats2 = result2.get("stats", {})
+                            ti2 = stats2.get("input_tokens", 0)
+                            to2 = stats2.get("total_output_tokens", 0)
+                            tps2 = stats2.get("tokens_per_second", 0)
+                            return content2, elapsed2, ti2, to2, tps2, think_tags2, None, None
+                return None, 0, 0, 0, 0, 0, "api_error", "No output in retry"
+            except (URLError, HTTPError, json.JSONDecodeError, KeyError, TimeoutError):
+                pass
         err_text = str(e)
         try:
             if hasattr(e, "read"):
@@ -1460,13 +1528,15 @@ def get_benchmark_category(benchmark_name: str) -> str:
 
 
 def run_task(task: dict[str, Any], task_type: str, model_identifier: Optional[str] = None, api_model: Optional[str] = None,
-             model_config: Optional[ModelConfig] = None, benchmark_category: str = "coding") -> TaskResult:
+             model_config: Optional[ModelConfig] = None, benchmark_category: str = "coding",
+             native_model_identifier: Optional[str] = None) -> TaskResult:
     prompt = task["prompt"]
     if model_config is None:
         model_config = _get_model_config(model_identifier, benchmark_category=benchmark_category, is_thinking_enabled=IS_THINKING_MODE)
 
     generation_parameters = {
         "model_identifier": api_model or model_identifier,
+        "native_model_identifier": native_model_identifier or model_identifier,
         "temperature": model_config.get("temperature", 0.0),
         "top_p": model_config.get("top_p", 1.0),
         "top_k": model_config.get("top_k"),
@@ -1640,7 +1710,8 @@ def benchmark_model(model_info: Any, tasks: list[dict[str, Any]], task_type: str
         result = None
         for attempt in range(1, MAX_RETRIES + 1):
             try:
-                result = run_task(task, task_type, model_identifier=model_identifier, api_model=api_model, model_config=model_config)
+                result = run_task(task, task_type, model_identifier=model_identifier, api_model=api_model, model_config=model_config,
+                                  native_model_identifier=model_info.get("model_identifier", model_identifier))
                 if result is not None and result.get("error_type") is None:
                     break
                 if result is not None and result.get("error_type"):
@@ -1867,7 +1938,7 @@ def main() -> None:
     _args, _ = _parser.parse_known_args()
     sample_size = _args.sample_size
     non_interactive = _args.non_interactive
-    model_identifier_override = _args.model_identifier
+    model_identifier_override = _args.model_key
     api_model_override = _args.api_model
     benchmark_override = _args.benchmark
     qwen_prompt_mode = _args.qwen_prompt
@@ -1944,6 +2015,12 @@ def main() -> None:
     for midx, model_info in enumerate(models, 1):
         model_identifier = model_info["key"]
         model_display = model_info["display"]
+        # Reasoning-Registry-Prüfung – ohne Eintrag überspringen
+        r = _model_supports_reasoning(model_identifier)
+        if r is None:
+            print(f"\n  [ERROR] {model_display}: reasoning nicht in Registry – "
+                  "`python registry_tool.py sync` ausführen. Überspringe.")
+            continue
         # Take exact API ID from parent (if set)
         if api_model_override:
             model_info["_api_model"] = api_model_override
@@ -1969,7 +2046,7 @@ def main() -> None:
             try:
                 res, avg_s, avg_l, avg_t, cs = benchmark_model(
                     model_info, tasks, tt, bench["name"], monitor,
-                    quiet=non_interactive
+                    is_quiet_mode=non_interactive
                 )
             except Exception as e:
                 print(f"\n[ERROR] Benchmark {bench['name']} completely failed: {e}")
@@ -1979,7 +2056,7 @@ def main() -> None:
                 cs = {}
             csv_p = csv_writer.write_per_task_csv(
                 res, bench["name"], model_display,
-                model_identifier=model_info.get("key", ""),
+                model_key=model_info.get("key", ""),
                 sample_size=sample_size,
                 keep_response=KEEP_RESPONSE,
             ) if res else ""
@@ -2032,7 +2109,7 @@ def main() -> None:
             bench_names = "+".join(sorted(set(r["benchmark_name"] for r in model_results)))
             csv_writer.write_per_model_csv(
                 model_results, model_display,
-                model_identifier=model_info.get("key", ""),
+                model_key=model_info.get("key", ""),
                 sample_size=sample_size,
             )
 

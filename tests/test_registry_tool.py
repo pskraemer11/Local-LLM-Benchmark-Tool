@@ -224,8 +224,8 @@ class TestMatchCascade:
         assert fields.get("llm.load.useUnifiedKvCache") is False
 
     def test_benchmark_context_limit_override(self, fake_config):
-        # If registry has benchmark_context_limit, it overrides
-        # the formula-computed bcl
+        # contextLength is no longer overwritten by cmd_configs;
+        # the user's manually set value is preserved.
         sub = fake_config / "publisher"
         json_path = self._make_config(
             sub, sub / "m.json",
@@ -236,11 +236,11 @@ class TestMatchCascade:
                 "file_size_bytes": 8_000_000_000,
                 "n_layers": 40,
                 "hidden_dim": 5120,
-                "context_length": 16384,  # Native
+                "context_length": 16384,
                 "num_parallel": 1,
                 "k_cache": "q8_0",
                 "v_cache": "iq4_nl",
-                "benchmark_context_limit": 4096,  # Override
+                "benchmark_context_limit": 4096,
             }
         }
         with patch.object(rt, "load_registry", return_value=registry), \
@@ -259,17 +259,18 @@ class TestMatchCascade:
         with open(json_path, "r", encoding="utf-8") as f:
             data = json.load(f)
         fields = {f["key"]: f["value"] for f in data["load"]["fields"]}
-        # Override → 4096, not 16384 and not formula-computed
-        assert fields.get("llm.load.contextLength") == 4096
+        # contextLength was NOT overwritten — user's value (16384) preserved
+        assert fields.get("llm.load.contextLength") == 16384
 
     def test_context_capped_at_native(self, fake_config):
-        # If formula gives more than native context_length, native wins
+        # contextLength is no longer overwritten by cmd_configs;
+        # the user's manually set value is preserved.
         sub = fake_config / "publisher"
         json_path = self._make_config(
             sub, sub / "m.json",
             **{"llm.load.contextLength": 16384}
         )
-        # Tiny model: 4 GB → can fit huge context, but capped at native 16384
+        # Tiny model: 4 GB
         registry = {
             "publisher/m": {
                 "file_size_bytes": 4_000_000_000,
@@ -297,7 +298,7 @@ class TestMatchCascade:
         with open(json_path, "r", encoding="utf-8") as f:
             data = json.load(f)
         fields = {f["key"]: f["value"] for f in data["load"]["fields"]}
-        # 4 GB model can fit 15+ GB of KV cache → ctx capped at 16384
+        # contextLength was NOT overwritten — user's value (16384) preserved
         assert fields.get("llm.load.contextLength") == 16384
 
 

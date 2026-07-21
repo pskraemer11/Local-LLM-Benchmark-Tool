@@ -40,12 +40,23 @@ Usage:
     from csv_writer import write_per_task_csv, write_per_model_csv, ...
 """
 
+from __future__ import annotations
+
 import csv
+import locale
 import os
 import re
 import sys
 from datetime import datetime
 from typing import Optional
+
+# Set locale for user-readable number formatting in console output.
+# CSV output uses explicit f-string formatting with '.' as decimal separator
+# regardless of locale, so this does not affect file parsing.
+try:
+    locale.setlocale(locale.LC_ALL, "")
+except locale.Error:
+    pass  # Fallback: C locale (system default)
 
 # ── Directory ────────────────────────────────────────────────────
 

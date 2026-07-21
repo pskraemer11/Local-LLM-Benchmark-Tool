@@ -44,33 +44,22 @@ def _get_model_info() -> Dict[str, Any]:
         return _MODEL_INFO_CACHE
     info = {}
     try:
-        import subprocess
-        r = subprocess.run(["lms", "ls", "--json"], capture_output=True, text=True, timeout=15)
-        if r.returncode == 0:
-            data = json.loads(r.stdout)
-            for item in data if isinstance(data, list) else data.values():
-                if isinstance(item, dict):
-                    mk = item.get("modelKey", "")
-                    if not mk:
-                        continue
-                    sz_bytes = item.get("sizeBytes", 0) or 0
-                    quant = item.get("quantization", {}) or {}
-                    quant_name = quant.get("name", "?") if isinstance(quant, dict) else str(quant)
-                    sv = item.get("selectedVariant") or ""
-                    # Build unique key per variant
-                    unique_key = sv if sv and sv != mk else f"{mk}@{quant_name}"
-                    display = item.get("displayName", "")
-                    if "@" in display:
-                        display = display.split("@")[0]
-                    info[unique_key] = {
-                        "displayName": display,
-                        "vram_gb": round(sz_bytes / 1e9, 2),
-                        "params": item.get("paramsString", "?"),
-                        "quant": quant_name,
-                        "modelKey": mk,
-                    }
+        from model_manager import get_available_models
+        models = get_available_models()
+        for m in models:
+            unique_key = m["key"]
+            display = m["display"]
+            if "@" in display:
+                display = display.split("@")[0]
+            info[unique_key] = {
+                "displayName": display,
+                "vram_gb": m.get("vram_gb", ""),
+                "params": m.get("params", "?") or "?",
+                "quant": m.get("quant", "?") or "?",
+                "modelKey": m.get("modelKey", m["model_identifier"]),
+            }
     except Exception:
-        pass
+        print("[WARN] _get_model_info: could not query available models", file=sys.stderr)
     _MODEL_INFO_CACHE = info
     return info
 
@@ -81,25 +70,16 @@ def _get_installed_model_keys() -> set:
         return INSTALLED_CACHE
     installed = set()
     try:
-        import subprocess
-        r = subprocess.run(["lms", "ls", "--json"], capture_output=True, text=True, timeout=15)
-        if r.returncode == 0:
-            data = json.loads(r.stdout)
-            for item in data if isinstance(data, list) else data.values():
-                if not isinstance(item, dict):
-                    continue
-                mk = item.get("modelKey", "")
-                if not mk:
-                    continue
-                # Normalize the same way CSVs do: / → _, lowercase @variant
-                norm = mk.replace("/", "_")
-                quant = item.get("quantization", {}) or {}
-                quant_name = quant.get("name", "") if isinstance(quant, dict) else str(quant)
-                if quant_name:
-                    norm = f"{norm}@{quant_name.lower()}"
-                installed.add(norm)
+        from model_manager import get_available_models
+        models = get_available_models()
+        for m in models:
+            norm = m["model_identifier"].replace("/", "_")
+            quant = m.get("quant", "")
+            if quant:
+                norm = f"{norm}@{quant.lower()}"
+            installed.add(norm)
     except Exception:
-        pass
+        print("[WARN] _get_installed_model_keys: could not query available models", file=sys.stderr)
     INSTALLED_CACHE = installed
     return installed
 
@@ -605,7 +585,7 @@ def find_latest_csvs(min_sample_size: int = 0, since: Optional[str] = None,
                             pass
                     break
         except Exception:
-            pass
+            print(f"  [WARN] find_latest_csvs: skipping unreadable {fname}", file=sys.stderr)
         
         if min_sample_size > 0 and file_sample_size < min_sample_size:
             continue
@@ -735,6 +715,7 @@ def try_read_evalplus(model_key: str) -> Optional[Dict[str, float]]:
             with open(eval_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
         except Exception:
+            print(f"  [WARN] Skipping corrupt eval file: {os.path.basename(eval_file)}", file=sys.stderr)
             continue
         ev = data.get("eval", {})
         total = len(ev)
@@ -757,6 +738,7 @@ def _read_results_json(search_dir: str, task_name: str, metric_priority: List[st
             with open(os.path.join(search_dir, fname), "r", encoding="utf-8") as f:
                 data = json.load(f)
         except Exception:
+            print(f"  [WARN] _read_results_json: skipping corrupt {fname}", file=sys.stderr)
             continue
         td = data.get("results", {}).get(task_name, {})
         for metric in metric_priority:
@@ -795,6 +777,7 @@ def read_lmeval_per_model(model_key: str) -> Optional[Dict[str, float]]:
             with open(fpath, "r", encoding="utf-8") as f:
                 data = json.load(f)
         except Exception:
+            print(f"  [WARN] Skipping corrupt JSON: {os.path.basename(fpath)}", file=sys.stderr)
             continue
         for task_name, task_data in data.get("results", {}).items():
             alias = {"arc_challenge_chat": "ARC-Challenge",
@@ -854,6 +837,7 @@ def read_agentic(model_key: str) -> Optional[float]:
             vals = [s.get("score", 0) for s in results_list if isinstance(s, dict)]
             return sum(vals) / len(vals) if vals else None
     except Exception:
+        print(f"  [WARN] _try_read_agentic_score: could not parse {os.path.basename(latest)}", file=sys.stderr)
         return None
     return None
 

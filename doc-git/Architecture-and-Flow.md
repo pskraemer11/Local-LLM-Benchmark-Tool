@@ -258,15 +258,18 @@ Disadvantage: Both versions (old + new) must exist during the run, since resolut
 
 ### 2.6 Model Classification
 
-```python
-REASONING_KEYWORDS = ["reasoning", "think", "r1", "rnj"]
-MOE_PATTERN = re.compile(r"\d+b-a\d+b", re.IGNORECASE)
+Reasoning detection is now **registry-based** (not keyword-based in code):
 
-_is_reasoning_model()   # -> Timeout x2
-_is_moe_model()         # -> only display "(detected)"
-_is_qwen3_5_model()     # -> system-less prompt embedding (no_system_msg)
-_is_gptoss_model()      # -> stop tokens for evalplus/lmeval
 ```
+_is_reasoning_model()     → reads model_registry.yaml:reasoning field (thinking=True, instruct=False, missing→False)
+                            strips @quant suffix, falls back to False with warning
+_is_moe_model()            → only display "(detected)"
+_is_qwen3_5_model()        → system-less prompt embedding (no_system_msg)
+_is_gptoss_model()         → stop tokens for evalplus/lmeval
+_is_reasoning_model()      → Timeout x2
+```
+
+The registry `reasoning` field is populated automatically from GGUF chat_templates via `registry_tool.py fill-reasoning` (part of `sync` pipeline). `_load_registry_for_context()` loads the full registry (no longer filters by `context_length` presence).
 
 The **sampling parameters** are no longer assigned per model class, but via the category system (see §2.10). The former `_is_qwen3_6_model`, `_is_gemma_model`, `_is_magistral_model` etc. in `_get_lmeval_params()` were removed – their overrides now live in `benchmark_config.MODEL_TEMP_OVERRIDES`.
 
@@ -472,9 +475,10 @@ the model stays loaded – useful for many small benchmarks, but risky for model
 | `fill-ctx` | `fmt_registry.py` | Fill missing `context_length` in the registry (size-based formula) |
 | `fill-size` | **NEW 15.07.** | Fill `file_size_bytes` from LMS cache for registry entries without size |
 | `fill-arch` | **NEW 17.07.** | Write `n_layers`/`hidden_dim` from **local GGUF files** (header reader, ~1ms/file) into registry |
+| `fill-reasoning` | **NEW 21.07.** | Fill missing `reasoning` field in registry from GGUF chat_template (`thinking` = reasoning, `instruct` = no reasoning) |
 | `migrate-keys` | **NEW 15.07.** | Migrate entries without publisher prefix to `publisher/model-name` (119 keys migrated) |
 | `fmt` | `fmt_registry.py` | Normalize blank lines (none within, one between entries) |
-| `sync` | All of the above | Full maintenance: add → **fill-arch** → configs → sync-from-configs → sync-ctx → fill-ctx → fmt |
+| `sync` | All of the above | Full maintenance: add → **fill-arch** → **fill-reasoning** → configs → sync-from-configs → sync-ctx → fill-ctx → fmt |
 
 **Invocation:**
 ```bash
@@ -500,6 +504,7 @@ python registry_tool.py sync-ctx      # Sync context_length only
 | `useUnifiedKvCache` | bool | see below (VRAM formula) | Written to JSON config via `configs` (not permanently in Registry) |
 | `n_layers` | int | – | Number of transformer layers (from GGUF header `block_count`). **Set via `add` / `fill-arch`** |
 | `hidden_dim` | int | – | Embedding dimension (from GGUF header `embedding_length`). **Set via `add` / `fill-arch`** |
+| `reasoning` | str | – | `thinking` (model has reasoning/thinking capability) or `instruct` (no reasoning). Read from GGUF `tokenizer.chat_template` via `_read_gguf_arch()`. **Set via `add` / `fill-reasoning`** |
 
 **Architecture data (n_layers, hidden_dim):** Are automatically read from the GGUF header when adding new models (`add`). Can be retroactively filled for existing models via `fill-arch`. The lightweight header reader takes ~1ms per file (no memory-mapping of the entire ~12GB model). Models without GGUF files (uninstalled) receive no architecture data.
 
@@ -551,7 +556,8 @@ at np > 1: kv_ref = 1.5 (q8_0 + iq4_nl)
 - Magic `GGUF` (4 bytes)
 - Version (uint32), TensorCount (uint64), MetadataKVCount (uint64)
 - Metadata KV pairs: Key (String), Value (typed: UINT32/STRING/ARRAY/...)
-- Looks for `{arch}.block_count` (n_layers) and `{arch}.embedding_length` (hidden_dim)
+- Looks for `{arch}.block_count` (n_layers), `{arch}.embedding_length` (hidden_dim), and `tokenizer.chat_template` (is_reasoning)
+- Returns `(n_layers, hidden_dim, is_reasoning)` where `is_reasoning` is `True` (thinking template), `False` (instruct template), or `None` (no chat template found)
 - **Runtime:** ~1ms per file (vs. 5-7s with GGUFReader)
 
 **Blank line formatting:** No blank lines within an entry, exactly one between entries. Automatically ensured by `registry_tool.py fmt` or `save_registry()` in `registry_tool.py`.
@@ -888,7 +894,7 @@ Changes need ONLY be made in `model_manager.py` – no more searching for hardco
 | `OVERALL_WEIGHTS`        | `{"Coding": {"HumanEval+": 0.25, "MBPP+": 0.25, "DS1000": 0.25, "CoderEval": 0.25}, ...}` | Benchmark weighting per category |
 | `TOOL_EVAL_SCENARIO_IDS` | TC-01..TC-69               | Agentic scenarios                |
 | `EXCLUDE_KEYWORDS`       | whisper, vision, ocr, transcription, translat, audit, audio, embed, vl, flux, **german, rag** | Excluded modalities |
-| `REASONING_KEYWORDS`     | ["reasoning", "think", "r1"] | Reasoning detection             |
+| `REASONING_KEYWORDS`     | ["reasoning", "think", "r1"] | Reasoning detection (assemble_blueprint.py blueprint assignment; runtime detection via registry `reasoning` field, see §2.6) |
 | `QUANT_MAP`              | Dict model_key -> Quant label (static, ~45 entries) | Quant mapping for CSV and display. Source priority: QUANT_MAP > `lms ls --json` > Config files > GGUF cache. Auto-generatable via `generate_quant_map.py`. **NEW 18.07.:** `get_quant()` 4-step look-up priority: QUANT_MAP exact → suffix → base → **registry fallback** (`model_registry.yaml:quants` first entry) |
 | `PIPELINE_DISCOVERY`     | Glob pattern + version regex | Dynamic script detection        |
 | `CUSTOM_BENCHMARK_SCRIPT` | dynamic via `glob()`       | Highest `custom_benchmark_v*.py` |
@@ -1086,6 +1092,11 @@ pytest tests/ -v
 
 | Date   | File                                         | Change                                                                           |
 |--------|-----------------------------------------------|----------------------------------------------------------------------------------|
+| 21.07. | `run_benchmarks_v13.py`                       | **Bugfix lm_eval 0.4.12 CLI:** `--generation_parameters` → `--gen_kwargs` (argument renamed in new lm-eval-harness) |
+| 21.07. | `run_benchmarks_v13.py`                       | **Reasoning detection via Registry:** `_is_reasoning_model()` now reads `model_registry.yaml:reasoning` field instead of keyword matching. `_load_registry_for_context()` no longer filters by `context_length`. Model identifier strips `@quant` suffix before registry lookup |
+| 21.07. | `custom_benchmark_v13.py`                     | **Same @quant fix** in `_model_supports_reasoning()` as run_benchmarks_v13.py |
+| 21.07. | `registry_tool.py`                            | **NEW: `fill-reasoning` command** – reads GGUF `tokenizer.chat_template`, sets `reasoning: thinking|instruct` in registry. Part of `sync` pipeline. `_read_gguf_arch()` now returns `(n_layers, hidden_dim, is_reasoning)` |
+| 21.07. | `Architektur+Flow_v24.md`                     | Reasoning detection §2.6, registry_tool fill-reasoning, model_registry.yaml reasoning field, GGUF header reader updated |
 | 20.07. | `custom_benchmark_v13.py`                     | **Native REST API** (`_generate_answer_native()`): when `enable_thinking=False`, routes to `/api/v1/chat` with `reasoning="off"` — garantiert Thinking-Aus. Fallback nachdem `chat_template_kwargs` vom OpenAI-Endpoint ignoriert wird |
 | 20.07. | `run_benchmarks_v13.py`                       | **Real-time MATH-500 progress:** `run_lmeval()` switched from `subprocess.run()` to `subprocess.Popen()` — lm_eval stdout wird zeilenweise live ausgegeben (0/30, 5/30, ..., 30/30) statt erst am Ende |
 | 20.07. | `run_benchmarks_v13.py`                       | **Double coverage reasoning:** `_get_lmeval_params()` sends `reasoning="off"` alongside `chat_template_kwargs.enable_thinking`; `"reasoning"` added to both `gen_kwargs_keys` sets |
@@ -1206,7 +1217,7 @@ pytest tests/ -v
 
 ---
 
-*Created: 28.06.2026 | Updated: 15.07.2026*
+*Created: 28.06.2026 | Updated: 21.07.2026*
 *Based on: v13.0.0-p6 – Variant C+ (BENCHMARK_CATEGORY_DEFAULTS), 4 new reasoning blueprints, _get_lmeval_params() simplified*
 *Bugfix 11.07.: lm_eval `--gen_kwargs` instead of `--model_args` for generation parameters; HellaSwag/MathQA YAML fixes*
 *Bugfix 15.07.: MATH-500=0.0% due to Windows SIGALRM incompatibility – custom task in lm_eval_tasks/minerva_math500/*

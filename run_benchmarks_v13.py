@@ -59,6 +59,7 @@ import random
 import re
 import subprocess
 import sys
+import threading
 import time
 import warnings
 from datetime import datetime
@@ -101,8 +102,48 @@ def _is_qwen3_6_model(model_identifier: str) -> bool:
 MOE_PATTERN = re.compile(r"\d+b-a\d+b", re.IGNORECASE)  # e.g., "8b-a1b", "24b-a2b"
 
 def _is_reasoning_model(model_identifier: str) -> bool:
-    kl = model_identifier.lower()
-    return any(kw in kl for kw in REASONING_KEYWORDS)
+    """Check registry for reasoning field (thinking=True, instruct=False).
+
+    Falls back to False with a warning if no registry data.
+    """
+    try:
+        from assemble_blueprint import normalize_model_name
+        registry, rnorm = _load_registry_for_context()
+        normalized_key = normalize_model_name(model_identifier)
+        base_key = normalized_key.split("@")[0]
+        matched_key = rnorm.get(normalized_key) or rnorm.get(base_key)
+        if matched_key:
+            entry = registry[matched_key]
+            reasoning_val = entry.get("reasoning")
+            if reasoning_val == "thinking":
+                return True
+            if reasoning_val == "instruct":
+                return False
+        print(f"  [WARN] {model_identifier}: reasoning nicht in Registry – "
+              "`python registry_tool.py sync` ausführen.", file=sys.stderr)
+    except Exception:
+        pass
+    return False
+
+
+def _check_reasoning_registry(model_identifier: str) -> Optional[bool]:
+    """Tri-state: True (thinking), False (instruct), None (missing/unknown)."""
+    try:
+        from assemble_blueprint import normalize_model_name
+        registry, rnorm = _load_registry_for_context()
+        normalized_key = normalize_model_name(model_identifier)
+        base_key = normalized_key.split("@")[0]
+        matched_key = rnorm.get(normalized_key) or rnorm.get(base_key)
+        if matched_key:
+            entry = registry[matched_key]
+            reasoning_val = entry.get("reasoning")
+            if reasoning_val == "thinking":
+                return True
+            if reasoning_val == "instruct":
+                return False
+        return None
+    except Exception:
+        return None
 
 def _is_mamba_model(model_identifier: str) -> bool:
     return "mamba" in model_identifier.lower()
@@ -249,7 +290,7 @@ def _load_registry_for_context() -> tuple[dict[str, Any], dict[str, str]]:
 
     norm = {}
     for key, entry in data.items():
-        if isinstance(entry, dict) and "context_length" in entry:
+        if isinstance(entry, dict):
             normalized_key = normalize_model_name(key)
             norm[normalized_key] = key
     _REGISTRY_DATA = data
@@ -503,6 +544,9 @@ def _build_lmeval_cmd(model_identifier: str, api_model: str, subset_task: str, p
     """
     gptoss = _is_gptoss_model(model_identifier)
     evaluation_parameters = _get_evaluation_parameters(model_identifier, bench_name=bench_name)
+    if _is_reasoning_model(model_identifier) and evaluation_parameters.get("reasoning") == "off":
+        print(f"  [WARN] _build_lmeval_cmd: Reasoning model via OpenAI endpoint – `reasoning: \"off\"`")
+        print(f"         may be IGNORED by LM Studio. See run_lmeval() warning for details.")
     model_settings = {
         "base_url": f"{API_BASE}/chat/completions",
         "model": api_model,
@@ -529,7 +573,7 @@ def _build_lmeval_cmd(model_identifier: str, api_model: str, subset_task: str, p
         "--log_samples",
     ]
     if generation_parameters:
-        cmd.extend(["--generation_parameters", json.dumps(generation_parameters, ensure_ascii=False)])
+        cmd.extend(["--gen_kwargs", json.dumps(generation_parameters, ensure_ascii=False)])
     return cmd
 
 
@@ -820,6 +864,12 @@ def run_lmeval(model_info: AvailableModelInfo, bench: BenchmarkDef, limit: int =
     print(f"\n  >>> LM-Eval: {bench['name']} / {model_display}")
     t0 = time.time()
     evaluation_parameters = _get_evaluation_parameters(model_identifier, bench_name=bench['name'])
+    if is_reasoning_model and evaluation_parameters.get("reasoning") == "off":
+        print(f"  [WARN] Reasoning model via OpenAI endpoint – enable_thinking=False sends `reasoning: \"off\"`")
+        print(f"         to {API_BASE}/chat/completions. LM Studio IGNORES this on the OpenAI endpoint.")
+        print(f"         Native API (/api/v1/chat with reasoning='off') is NOT used by lm_eval.")
+        print(f"         → If latency is 10-20x higher, this is the cause. Skip lm_eval benchmarks")
+        print(f"           for reasoning models, or verify `reasoning: off` is respected at this endpoint.")
     #
     # Split params: constructor-level (--model_args) vs. generation-level (--generation_parameters).
     #
@@ -865,7 +915,7 @@ def run_lmeval(model_info: AvailableModelInfo, bench: BenchmarkDef, limit: int =
         "--log_samples",
     ]
     if generation_parameters:
-        cmd.extend(["--generation_parameters", json.dumps(generation_parameters, ensure_ascii=False)])
+        cmd.extend(["--gen_kwargs", json.dumps(generation_parameters, ensure_ascii=False)])
     # Prio: custom YAML überschreibt built-in (inkl. MATH-500 V2.0 statt V3.0)
     yaml_path = None
     for p in [os.path.join(LMEVAL_TASKS_DIR, f"{task_name}.yaml"),
@@ -1130,7 +1180,7 @@ def main() -> None:
     print("  CSV-Format: csv_writer (; Delimiter, utf-8)")
     print("=" * 60)
 
-    available = get_available_models(exclude_keywords=EXCLUDE_KEYWORDS)
+    available = get_available_models(exclude_keywords=EXCLUDE_KEYWORDS, registry_only=True)
     if not available:
         print("[ERROR] No models available. Aborting.")
         sys.exit(1)
@@ -1170,7 +1220,35 @@ def main() -> None:
         model_identifier = model_info["key"]
         model_load_key = model_info.get("model_identifier", model_identifier)   # base key for lms load
         model_display = model_info["display"]
-        is_reasoning_model = _is_reasoning_model(model_identifier) or _is_qwen3_6_model(model_identifier)
+
+        # ── Registry-Prüfungen VOR dem Laden ──────────────────────────
+        try:
+            from assemble_blueprint import normalize_model_name
+            registry, rnorm = _load_registry_for_context()
+            normalized_key = normalize_model_name(model_identifier)
+            # Ohne @quant-Suffix versuchen (Registry-Keys haben kein Quant)
+            base_key = normalized_key.split("@")[0]
+
+            # 1. Ist das Modell überhaupt in der Registry?
+            if normalized_key not in rnorm and base_key not in rnorm:
+                print(f"\n  [ERROR] {model_display}: nicht in Registry – "
+                      "`python registry_tool.py sync` ausführen. Überspringe.")
+                continue
+
+            # 2. Hat der Registry-Eintrag ein `reasoning`-Feld?
+            matched_key = rnorm.get(normalized_key) or rnorm.get(base_key)
+            reasoning_val = registry[matched_key].get("reasoning")
+            if reasoning_val is None:
+                print(f"\n  [ERROR] {model_display}: reasoning-Feld fehlt – "
+                      "`python registry_tool.py sync` ausführen (fill-arch liest es aus GGUF). Überspringe.")
+                continue
+
+            is_reasoning_model = (reasoning_val == "thinking") or _is_qwen3_6_model(model_identifier)
+        except Exception:
+            # Registry nicht lesbar – trotzdem fortfahren (Fallback: kein Reasoning)
+            print(f"\n  [WARN] Registry nicht lesbar – ohne Reasoning-Info fortfahren.")
+            is_reasoning_model = False
+
         print(f"\n{'=' * 60}")
         print(f"  Model {midx}/{len(models)}: {model_display}")
         if is_reasoning_model:

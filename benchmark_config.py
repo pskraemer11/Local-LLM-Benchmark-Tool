@@ -158,7 +158,7 @@ MMLU_PRO_SUBSETS = [
 
 BLACKLIST = [
     # Embedding-Modelle (separates Projekt embedding-eval/)
-    "text-embedding", "bge-m3", "granite-embedding",
+    "embed", "text-embedding", "bge-m3", "granite-embedding",
     # < 16K native context -> zu klein fuer Coding-Benchmarks
     "em_german_13b", "datagemma-rig", "granitelib-rag",
     # OCR / Vision / Audio

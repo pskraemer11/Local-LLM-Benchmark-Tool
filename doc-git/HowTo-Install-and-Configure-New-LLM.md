@@ -51,14 +51,15 @@ My-New-Model-8B:
 
 Then:
 ```
-python registry_tool.py sync           # Full maintenance: add → fill-arch → configs → sync-from-configs → sync-ctx → fill-ctx → fmt
-                                       #   add:        new models from LMS into registry (incl. GGUF architecture data)
-                                       #   fill-arch:  n_layers/hidden_dim from GGUF headers for existing entries
-                                       #   configs:    load.fields (offload, np, useUnifiedKvCache) into JSON configs
-                                        #   sync-from-configs:  JSON→Registry (offload, np, ukv only; skips ctx)
-                                       #   sync-ctx:   context_length from JSON configs (missing only)
-                                       #   fill-ctx:   remaining context_length via formula
-                                       #   fmt:        normalize blank lines
+python registry_tool.py sync           # Full maintenance: add → fill-arch → fill-reasoning → configs → sync-from-configs → sync-ctx → fill-ctx → fmt
+                                       #   add:           new models from LMS into registry (incl. GGUF architecture + reasoning data)
+                                       #   fill-arch:     n_layers/hidden_dim from GGUF headers for existing entries
+                                       #   fill-reasoning: reasoning (thinking/instruct) from GGUF chat_template, where missing
+                                       #   configs:       load.fields (offload, np, useUnifiedKvCache) into JSON configs
+                                       #   sync-from-configs:  JSON→Registry (offload, np, ukv only; skips ctx)
+                                       #   sync-ctx:      context_length from JSON configs (missing only)
+                                       #   fill-ctx:      remaining context_length via formula
+                                       #   fmt:           normalize blank lines
 python assemble_blueprint.py classify   # → reasoning, blueprint, truncation, capabilities set
 python assemble_blueprint.py assemble   # → Prompt written
 ```
@@ -67,7 +68,7 @@ python assemble_blueprint.py assemble   # → Prompt written
 
 | Field              | Source                                                      | Example                                      |
 |--------------------|-------------------------------------------------------------|----------------------------------------------|
-| `reasoning`        | Model name (keywords: r1, thinking, qwq, reasoning, cot)   | `Ministral-...-Reasoning` → `thinking`       |
+| `reasoning`        | **GGUF `tokenizer.chat_template`** via `read_gguf_arch()` (Patterns: `enable_thinking`, `<think>`, `reasoning_effort`, …) – kein Keyword-Fallback mehr. Modell wird ohne Eintrag übersprungen. | `thinking` / `instruct`                    |
 | `capabilities`     | Model name (vl/vision/ocr, coder/code)                     | `qwen2.5-coder-14b` → `[coding, text]`       |
 | `blueprint`        | From reasoning + capabilities                               | `thinking` → `reasoning_assistant`           |
 | `truncation`       | contextLength from JSON config                              | `16384` (≥8192) → `medium`                   |
@@ -131,6 +132,9 @@ python registry_tool.py sync
 # Fill in architecture data from GGUF headers (n_layers, hidden_dim)
 python registry_tool.py fill-arch
 
+# Fill in reasoning field from GGUF chat_template (where missing)
+python registry_tool.py fill-reasoning
+
 # np correction for all entries (after architecture changes)
 python registry_tool.py fix-np
 
@@ -153,7 +157,7 @@ python assemble_blueprint.py classify && assemble && validate
 .\sync_model_configs.ps1 -AutoAdd
 # or manually:
 # → edit registry.yaml (enter publisher, arch, k/v_cache, offload, num_parallel)
-python registry_tool.py sync          # incl. fill-arch + configs in pipeline
+python registry_tool.py sync          # incl. fill-arch + fill-reasoning + configs in pipeline
 python assemble_blueprint.py classify  # fills reasoning, capabilities, blueprint, truncation
 python assemble_blueprint.py assemble
 

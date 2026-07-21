@@ -70,10 +70,36 @@ class TestModelDetection:
         assert _is_moe_model("llama-8b") is False
 
     def test_reasoning_detection(self):
-        assert _is_reasoning_model("deepseek-r1-distill-7b") is True
-        assert _is_reasoning_model("o1-reasoning") is True
-        assert _is_reasoning_model("think-model") is True
-        assert _is_reasoning_model("llama-3b") is False
+        # Mock registry with reasoning field using real normalized keys
+        registry_data = {
+            "deepseek-r1-distill-7b": {
+                "reasoning": "thinking",
+                "context_length": 16384,
+            },
+            "o1-reasoning": {
+                "reasoning": "thinking",
+                "context_length": 16384,
+            },
+            "think-model": {
+                "reasoning": "thinking",
+                "context_length": 16384,
+            },
+            "llama-3b": {
+                "reasoning": "instruct",
+                "context_length": 8192,
+            },
+        }
+        norm_map = {
+            "deepseek-r1-distill-7b": "deepseek-r1-distill-7b",
+            "o1-reasoning": "o1-reasoning",
+            "think-model": "think-model",
+            "llama-3b": "llama-3b",
+        }
+        with patch.object(rb, "_load_registry_for_context", return_value=(registry_data, norm_map)):
+            assert _is_reasoning_model("deepseek-r1-distill-7b") is True
+            assert _is_reasoning_model("o1-reasoning") is True
+            assert _is_reasoning_model("think-model") is True
+            assert _is_reasoning_model("llama-3b") is False
 
 
 # ======================================================================
@@ -396,16 +422,6 @@ class TestBuildLmevalCmd:
         args_json = json.loads(idx + 1 and cmd[idx + 1])
         assert args_json["base_url"] == f"{API_BASE}/chat/completions"
         assert args_json["num_concurrent"] == 1
-
-    @pytest.mark.skip(reason="_get_evaluation_parameters rewritten in v13; "
-                        "old if-else cascade tests obsolete")
-    def test_gen_kwargs_added_when_present(self):
-        cmd = _build_lmeval_cmd("qwen3.6-30b", "qwen3.6-30b", "task1", 5, "/tmp/out")
-        # qwen3.6 returns max_tokens=8192 in gen_kwargs
-        assert "--gen_kwargs" in cmd
-        idx = cmd.index("--gen_kwargs")
-        gk = json.loads(cmd[idx + 1])
-        assert gk["max_tokens"] == 8192
 
     def test_no_gen_kwargs_when_none(self):
         # default branch returns only basic params; gen_kwargs_keys filters out

@@ -185,14 +185,20 @@ def has_unloaded_all_models() -> bool:
     return False
 
 
-def _registry_display_overrides() -> dict[str, str]:
-    """Load model_registry.yaml and return {normalized_key: display_name}."""
-    from assemble_blueprint import normalize_model_name
+# ── Registry Helpers ─────────────────────────────────────────────────
+_REGISTRY_CACHE: Optional[dict] = None
+
+def _load_registry_data() -> dict:
+    """Load and cache model_registry.yaml."""
+    global _REGISTRY_CACHE
+    if _REGISTRY_CACHE is not None:
+        return _REGISTRY_CACHE
     from ruamel.yaml import YAML
     from ruamel.yaml.error import YAMLError
     rpath = Path(__file__).resolve().parent / "doc-git" / "model_registry.yaml"
     if not rpath.exists():
-        return {}
+        _REGISTRY_CACHE = {}
+        return _REGISTRY_CACHE
     try:
         y = YAML()
         y.preserve_quotes = True
@@ -200,7 +206,15 @@ def _registry_display_overrides() -> dict[str, str]:
             data = y.load(f) or {}
     except (YAMLError, OSError, UnicodeDecodeError) as e:
         print(f"  [WARN] model_registry.yaml fehlerhaft: {e}", file=sys.stderr)
-        return {}
+        data = {}
+    _REGISTRY_CACHE = data
+    return data
+
+
+def _registry_display_overrides() -> dict[str, str]:
+    """Load model_registry.yaml and return {normalized_key: display_name}."""
+    from assemble_blueprint import normalize_model_name
+    data = _load_registry_data()
     overrides = {}
     for key, entry in data.items():
         if isinstance(entry, dict) and "display_name" in entry:
@@ -208,12 +222,12 @@ def _registry_display_overrides() -> dict[str, str]:
     return overrides
 
 
-def get_available_models(exclude_keywords: Optional[list[str]] = None) -> list[AvailableModelInfo]:
+def get_available_models(exclude_keywords: Optional[list[str]] = None, registry_only: bool = False) -> list[AvailableModelInfo]:
     """Query LM Studio for installed models via `lms ls --json`.
 
     Returns a list of dicts with keys:
         key, model_identifier, display, variant, quant, variants,
-        identifier, params, publisher
+        identifier, params, publisher, vram_gb, modelKey
     """
     try:
         result = subprocess.run(
@@ -238,6 +252,7 @@ def get_available_models(exclude_keywords: Optional[list[str]] = None) -> list[A
                         if "@" in display:
                             display = display.split("@")[0]
                         display = f"{display}@{quant_name}"
+                    sz_bytes = item.get("sizeBytes", 0) or 0
                     models.append({
                         "key": unique_key,
                         "model_identifier": base_key,
@@ -248,6 +263,8 @@ def get_available_models(exclude_keywords: Optional[list[str]] = None) -> list[A
                         "identifier": item.get("indexedModelIdentifier", base_key),
                         "params": item.get("paramsString", ""),
                         "publisher": item.get("publisher", ""),
+                        "vram_gb": round(sz_bytes / 1e9, 2) if sz_bytes else "",
+                        "modelKey": base_key,
                     })
             if models:
                 # Apply registry display_name overrides
@@ -271,6 +288,23 @@ def get_available_models(exclude_keywords: Optional[list[str]] = None) -> list[A
                               if not any(
                                   kw in (m["key"] + " " + m["display"]).lower()
                                   for kw in exclude_keywords)]
+                if registry_only:
+                    from assemble_blueprint import normalize_model_name
+                    registry_data = _load_registry_data()
+                    registry_keys = set()
+                    for key in registry_data:
+                        if isinstance(registry_data[key], dict):
+                            registry_keys.add(normalize_model_name(key))
+                    filtered = []
+                    for m in models:
+                        normalized_key = normalize_model_name(m["model_identifier"])
+                        if normalized_key in registry_keys:
+                            filtered.append(m)
+                    missing = len(models) - len(filtered)
+                    if missing:
+                        print(f"  [WARN] {missing} Modelle nicht in Registry – mit `python registry_tool.py sync` hinzufügen. Ignoriert.",
+                              file=sys.stderr)
+                    models = filtered
                 return models
         print(f"[WARN] lms ls failed: {result.stderr.strip()}")
     except FileNotFoundError:
@@ -331,7 +365,7 @@ def _is_lmstudio_running() -> bool:
         with urlopen(req, timeout=3) as resp:
             if resp.status == 200:
                 return True
-    except (URLError, Exception):
+    except Exception:
         pass
 
     # 2. Try `lms server start` (preferred – LMS handles daemon internally)
@@ -348,7 +382,7 @@ def _is_lmstudio_running() -> bool:
                 if resp.status == 200:
                     print("  [OK] LM Studio-Server gestartet via 'lms server start'")
                     return True
-        except (URLError, Exception):
+        except Exception:
             pass
         print(f"  [WARN] 'lms server start' brachte Server nicht hoch: "
               f"{r.stderr.strip()[:120]}")
