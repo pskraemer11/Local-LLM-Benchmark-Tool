@@ -268,10 +268,6 @@ MODEL_TEMP_OVERRIDES = {
     "gemma": {
         "enable_thinking": False,
     },
-    # Jamba (SSM-Transformer-Hybrid): neigt zu ausführlichen Antworten → max_tokens begrenzen
-    "jamba": {
-        "max_tokens": 2048,
-    },
     # LFM (z.B. LFM2-24B-A2B-REAP, LFM2.5-8B): kein Override nötig → Kategorie-Defaults greifen
     "lfm": {
     },
