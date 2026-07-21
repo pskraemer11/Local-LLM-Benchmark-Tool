@@ -1966,7 +1966,7 @@ bartowski/ai21labs_ai21-jamba2-mini:
   num_parallel: 1
   notes: 'Architektur: ?'
   file_size_bytes: 12481977312
-  context_length: 49152
+  context_length: 8192
   n_layers: 32
   hidden_dim: 4096
   useUnifiedKvCache: true
