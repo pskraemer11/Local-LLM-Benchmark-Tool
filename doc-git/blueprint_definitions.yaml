@@ -148,13 +148,13 @@ modules:
     minimal: ''
   output_style_default:
     description: Allgemeiner Output-Stil
-    full: "<output>\n- Structure responses clearly with concise sections where appropriate.\n- Prefer clarity over verbosity, precision over rhetoric.\n- Respond in the user's language.\n</output>"
-    medium: <output>Prefer clarity over verbosity. Respond in the user's language.</output>
+    full: "<output>\n- Be concise and direct. Avoid unnecessary verbosity.\n- Structure responses clearly with brief sections where appropriate.\n- Prefer clarity over verbosity, precision over rhetoric.\n- Respond in the user's language.\n</output>"
+    medium: <output>Be concise and direct. Prefer clarity over verbosity. Respond in the user's language.</output>
     minimal: ''
   output_style_technical:
     description: Technischer Output-Stil
-    full: "<output>\n- Provide concrete code examples where useful.\n- Explain design decisions briefly.\n- Include error handling and edge cases.\n- Prefer clarity over verbosity.\n</output>"
-    medium: <output>Provide code with error handling. Prefer clarity over verbosity.</output>
+    full: "<output>\n- Be concise and direct. Avoid unnecessary verbosity.\n- Provide concrete code examples where useful.\n- Explain design decisions briefly.\n- Include error handling and edge cases.\n- Prefer clarity over verbosity.\n</output>"
+    medium: <output>Be concise. Provide code with error handling. Prefer clarity over verbosity.</output>
     minimal: ''
   thinking_instruction:
     description: Chain-of-Thought Anweisung für Reasoning-Modelle

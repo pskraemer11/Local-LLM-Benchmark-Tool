@@ -4,7 +4,7 @@ import datasets
 
 def doc_to_text(doc: dict) -> str:
     return (
-        "Solve the following math problem. Put the final answer in \\boxed{}.\n\n"
+        "Solve the following math problem concisely. Put the final answer in \\boxed{}.\n\n"
         f"Problem: {doc['problem']}\nAnswer:"
     )
 
