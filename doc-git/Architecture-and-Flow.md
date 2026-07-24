@@ -1,4 +1,4 @@
-# Architecture & Flow – Status 18.07.2026 (v13.0.0-p8)
+# Architecture & Flow – Status 24.07.2026 (v13.0.5)
 
 > **Version Convention:** see [`../VERSION`](../VERSION) – Single Source of Truth for project version. The filename `_v24.md` is legacy (last updated 17.07.2026) – planned migration to `_v13.md` in a future major version.
 > **Review Reference:** See `Doku-intern/Code-Review-2026-07-18.md` for the full review that informed the 18.07. changes.
@@ -175,6 +175,16 @@ main()
 ├── resolve_benchmarks()
 │
 ├── for MODEL in models:
+│   │
+│   ├── [Registry-Prüfungen VOR dem Laden]        # NEW 24.07., siehe §2.6a
+│   │   ├── 1. Ist Modell in Registry?           → sonst skip
+│   │   ├── 2. reasoning-Feld vorhanden?          → sonst skip
+│   │   ├── 3. capabilities-Feld vorhanden?       → sonst skip
+│   │   ├── 4. blueprint-Feld vorhanden?          → sonst skip
+│   │   ├── 5. truncation-Feld gültig?            → WARN + default
+│   │   ├── 6. systemPrompt in Config JSON?       → WARN wenn leer
+│   │   └── 7. Template-Datei existiert?          → WARN wenn fehlt
+│   │
 │   ├── Reasoning-/MoE detection (Timeout x2 / display)
 │   ├── get_current_loaded_model()                # lms ps --json
 │   ├── if same model loaded:
@@ -204,6 +214,20 @@ main()
 ├── unload_all_models()                            # Free memory
 └── csv_writer.write_konsolidiert_aktuell()        # Overall overview (for >1 model)
 ```
+
+### 2.1a Pre-Run Registry-Prüfungen (NEW 24.07.)
+
+Vor dem Laden eines Modells prüft `run_benchmarks_v13.py` 7 Bedingungen. Jede nicht bestandene Prüfung führt zu **skip mit Fehlermeldung** (ERROR) oder **WARN**:
+
+| # | Prüfung | Fehlermodus | Empfohlener Fix |
+|---|---------|-------------|-----------------|
+| 1 | Registry-Eintrag vorhanden | ERROR + skip | `python registry_tool.py sync` |
+| 2 | `reasoning`-Feld gesetzt | ERROR + skip | `python registry_tool.py sync` |
+| 3 | `capabilities`-Feld gesetzt | ERROR + skip | `python assemble_blueprint.py classify` (oder `sync`) |
+| 4 | `blueprint`-Feld gesetzt (`!= none`) | ERROR + skip | `python assemble_blueprint.py classify` (oder `sync`) |
+| 5 | `truncation` gültig (`full/medium/minimal`) | WARN + default | `python assemble_blueprint.py classify` (oder `sync`) |
+| 6 | `systemPrompt` in Config-JSON nicht leer | WARN | `python assemble_blueprint.py assemble` (oder `sync`) |
+| 7 | Template-Jinja-Datei existiert (wenn `template:` gesetzt) | WARN | Template-Datei in `doc-git/Jinja-Chat-Templates/` anlegen |
 
 ### 2.2 Model Management Architecture
 
@@ -258,22 +282,59 @@ Disadvantage: Both versions (old + new) must exist during the run, since resolut
 
 ### 2.6 Model Classification
 
-Reasoning detection is now **registry-based** (not keyword-based in code):
+Reasoning detection uses a **hybrid approach** with 4-tier priority chain:
 
 ```
-_is_reasoning_model()     → reads model_registry.yaml:reasoning field (thinking=True, instruct=False, missing→False)
-                            strips @quant suffix, falls back to False with warning
+classify_reasoning(model_name, notes, arch, existing_reasoning)
+  ├── 1. existing_reasoning      GGUF-Header / user override (höchste Priorität)
+  ├── 2. _ARCH_REASONING_MAP     Known architecture (qwen3→thinking, gpt-oss→instruct, …)
+  ├── 3. NON_REASONING_MODELS    Keyword blacklist (whisper, flux, …)
+  ├── 4. REASONING_KEYWORDS      Keyword whitelist (r1, qwq, thinking, …)
+  └── 5. Default: "instruct"     Fallback
+```
+
+**Sources of classification (in order of reliability):**
+
+| Source | Methode | Setzt durch |
+|--------|---------|-------------|
+| **GGUF chat_template** | `_detect_reasoning_from_template()` via Regex: `<\s*(think|thinking|thought)>`, `enable_thinking`, `reasoning_effort` | `cmd_fill_reasoning()` → Registry `reasoning`-Feld |
+| **Architektur-Map** | `_ARCH_REASONING_MAP` in `assemble_blueprint.py`: qwen3/qwen35/deepseek2/kimi-linear → `thinking`, gpt-oss/nomic-bert/flux → `instruct/none` | `classify_reasoning()` Priority 2 |
+| **Keyword-Heuristik** | `REASONING_KEYWORDS` (`r1`, `qwq`, `thinking`, …) + `NON_REASONING_MODELS` | Fallback ohne GGUF-Daten |
+
+**Verwendet von:**
+
+| Funktion | Ort | Zweck |
+|----------|-----|-------|
+| `_is_reasoning_model()` | `run_benchmarks_v13.py` | Timeout ×2 für Reasoning-Modelle |
+| `_check_reasoning_registry()` | `run_benchmarks_v13.py` | Tri-State: True/False/None |
+| `is_reasoning_model` | `run_benchmarks_v13.py:1301` | Pre-Run-Check vor Modell-Ladung |
+| `get_model_config()` | `benchmark_config.py` | `--thinking`-Flag-Steuerung |
+| `classify_registry()` | `assemble_blueprint.py` | Massen-Klassifikation beim `sync` |
+
+**`_ARCH_REASONING_MAP` (statische Architektur→Reasoning-Zuordnung):**
+
+```python
+_ARCH_REASONING_MAP = {
+    "qwen3": "thinking",    "qwen35": "thinking",
+    "qwen35moe": "thinking", "qwen3moe": "thinking",
+    "deepseek2": "thinking", "kimi-linear": "thinking",
+    "gpt-oss": "instruct",   # override für Keyword-Fehlklassifikation
+    "nomic-bert": "none",    "flux": "none",
+}
+```
+
+**Weitere Detektionen:**
+
+```
 _is_moe_model()            → only display "(detected)"
 _is_qwen3_5_model()        → system-less prompt embedding (no_system_msg)
 _is_gptoss_model()         → stop tokens for evalplus/lmeval
-_is_reasoning_model()      → Timeout x2
+_is_reasoning_model()      → reads registry reasoning field (Timeouts x2)
 ```
 
-The registry `reasoning` field is populated automatically from GGUF chat_templates via `registry_tool.py fill-reasoning` (part of `sync` pipeline). `_load_registry_for_context()` loads the full registry (no longer filters by `context_length` presence).
+Das Registry-`reasoning`-Feld wird automatisch aus GGUF chat_templates via `registry_tool.py fill-reasoning` befüllt (Teil der `sync`-Pipeline). `_load_registry_for_context()` lädt das gesamte Registry (kein Filter nach `context_length` mehr).
 
-The **sampling parameters** are no longer assigned per model class, but via the category system (see §2.10). The former `_is_qwen3_6_model`, `_is_gemma_model`, `_is_magistral_model` etc. in `_get_lmeval_params()` were removed – their overrides now live in `benchmark_config.MODEL_TEMP_OVERRIDES`.
-
-**Reasoning detection for `--thinking` flag:** `REASONING_PATTERNS` in `benchmark_config.py` (Central, 15 entries). When `--thinking` is active, `get_model_config()` forces `enable_thinking=True` – unless a model override (e.g. `qwen3.6: {enable_thinking: False}`) takes precedence.
+**Sampling-Parameter** werden seit Variant C+ nicht mehr pro Modellklasse, sondern via Kategoriesystem vergeben (siehe §2.10).
 
 ### 2.7 Task-Retry Mechanism (NEW in v10, after review)
 
@@ -459,14 +520,14 @@ The `--no-unload-between` flag prevents unloading/reloading between benchmarks o
 By default, the model is unloaded after each benchmark (to save VRAM). With `--no-unload-between`
 the model stays loaded – useful for many small benchmarks, but risky for models just above 16 GB VRAM.
 
-### registry_tool.py (NEW 14.07.)
+### registry_tool.py (NEW 14.07., extended 24.07.)
 
 **`registry_tool.py`** consolidates three previously separate code locations for registry and JSON config maintenance:
 
 | Command | Origin | Function |
 |---------|--------|----------|
 | `compare` | Previously embedded Python in `sync_model_configs.ps1` | Compare Registry vs LMS vs JSON configs |
-| `add` | Previously embedded Python in `sync_model_configs.ps1` | Add new LMS models to registry (canonical Key = `publisher/model-name`), np via `_infer_num_parallel()`, **reads n_layers/hidden_dim automatically from GGUF header** |
+| `add` | Previously embedded Python in `sync_model_configs.ps1` | Add new LMS models to registry (canonical Key = `publisher/model-name`), np via `_infer_num_parallel()`, **reads n_layers/hidden_dim automatically from GGUF header**. **24.07.:** Interaktive Prompt-Frage bei fehlendem GGUF (`[i]nstruct/[t]hinking/[n]one`) |
 | `configs` | Previously embedded Python in `sync_model_configs.ps1` | Write `load.fields` (offloadRatio, numParallelSessions, useUnifiedKvCache) to JSON configs. **useUnifiedKvCache decision via VRAM formula** (see below) |
 | `fix-np` | **NEW 17.07.** | Re-set `num_parallel` for ALL entries based on architecture + model key (`_infer_num_parallel()`) |
 | `fix-ctx` | **NEW 17.07.** | Re-calculate `context_length` for ALL entries based on current np/KV-quant values |
@@ -475,36 +536,58 @@ the model stays loaded – useful for many small benchmarks, but risky for model
 | `fill-ctx` | `fmt_registry.py` | Fill missing `context_length` in the registry (size-based formula) |
 | `fill-size` | **NEW 15.07.** | Fill `file_size_bytes` from LMS cache for registry entries without size |
 | `fill-arch` | **NEW 17.07.** | Write `n_layers`/`hidden_dim` from **local GGUF files** (header reader, ~1ms/file) into registry |
-| `fill-reasoning` | **NEW 21.07.** | Fill missing `reasoning` field in registry from GGUF chat_template (`thinking` = reasoning, `instruct` = no reasoning) |
+| `fill-reasoning` | **NEW 21.07., extended 24.07.** | Fill missing `reasoning` field in registry from GGUF chat_template (`_detect_reasoning_from_template()` mit Regex statt Substring) |
 | `migrate-keys` | **NEW 15.07.** | Migrate entries without publisher prefix to `publisher/model-name` (119 keys migrated) |
 | `fmt` | `fmt_registry.py` | Normalize blank lines (none within, one between entries) |
-| `sync` | All of the above | Full maintenance: add → **fill-arch** → **fill-reasoning** → configs → sync-from-configs → sync-ctx → fill-ctx → fmt |
+| **`validate`** | **NEW 24.07.** | **7 Checks:** template file existiert, Config JSON promptTemplate gesetzt, override_overlap, missing_reasoning/capabilities/blueprint, registry_no_config, orphan_override, reasoning_arch_mismatch |
+| `sync` | All of the above | **24.07.:** add → fill-arch → fill-reasoning → configs → sync-from-configs → sync-ctx → fill-ctx → fmt → **classify** → **assemble** → **validate** |
 
-**Invocation:**
+**Der eine Befehl für alles** (nach neuem Modell oder Änderungen):
 ```bash
-python registry_tool.py sync          # Full maintenance
+python registry_tool.py sync
+```
+Dieser Befehl ruft automatisch auf:
+1. `add` – Neue Modelle aus LMS
+2. `fill-arch` – n_layers/hidden_dim/reasoning aus GGUF
+3. `fill-reasoning` – reasoning aus GGUF chat_template
+4. `configs` – load.fields in JSON-Configs
+5. `sync-from-configs` – JSON→Registry
+6. `sync-ctx` – context_length aus JSON
+7. `fill-ctx` – Default context_length
+8. `fmt` – Blank lines
+9. **`classify_registry()`** – reasoning, capabilities, blueprint, truncation setzen
+10. **`assemble_prompts()`** – Prompt in JSON-Configs schreiben
+11. **`validate_prompts()`** – Syntax-Prüfung
+
+**Weitere Invocations:**
+```bash
+python registry_tool.py validate      # 7 Checks (siehe oben)
 python registry_tool.py compare       # Report only
 python registry_tool.py add <file>    # New models from JSON file
 python registry_tool.py configs       # Write load.fields only
 python registry_tool.py sync-ctx      # Sync context_length only
 ```
 
-**`sync_model_configs.ps1`** was converted to `registry_tool.py` (no more embedded Python). The old scripts `sync_context_length.py` and `fmt_registry.py` are thin wrappers that delegate to `registry_tool.py`.
+**`sync_model_configs.ps1`** was converted to `registry_tool.py` (no more embedded Python). The old scripts `sync_context_length.py` and `fmt_registry.py` are thin wrappers that delegate to `registry_tool.py`. **`fmt_registry.py` wurde entfernt** (Funktion in `registry_tool._format_blank_lines()` dupliziert).
 
 ### model_registry.yaml – Fields
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `offload` | int (0-1) | 1 | GPU offload ratio (1 = full GPU offload) |
-| `num_parallel` | int | MoE=4, Dense=1, ERNIE=1, GPT-OSS=4 | Max concurrent prediction sessions (via `_infer_num_parallel()`) |
-| `k_cache` | str | `q8_0` | KV cache quantization (K) – Gemma-4/GPT-OSS: `f16` |
-| `v_cache` | str | `iq4_nl` | KV cache quantization (V) – Gemma-4/GPT-OSS: `f16` |
-| `file_size_bytes` | int | – | GGUF file size (for context_length formula + useUnifiedKvCache formula) |
-| `context_length` | int | Formula-based | Calculated from `file_size_bytes`, np, KV quant (default 16384 when size missing) |
-| `useUnifiedKvCache` | bool | see below (VRAM formula) | Written to JSON config via `configs` (not permanently in Registry) |
-| `n_layers` | int | – | Number of transformer layers (from GGUF header `block_count`). **Set via `add` / `fill-arch`** |
-| `hidden_dim` | int | – | Embedding dimension (from GGUF header `embedding_length`). **Set via `add` / `fill-arch`** |
-| `reasoning` | str | – | `thinking` (model has reasoning/thinking capability) or `instruct` (no reasoning). Read from GGUF `tokenizer.chat_template` via `_read_gguf_arch()`. **Set via `add` / `fill-reasoning`** |
+| Field | Type | Default | Set By | Description |
+|-------|------|---------|--------|-------------|
+| `offload` | int (0-1) | 1 | `add` / registry manual | GPU offload ratio (1 = full GPU offload) |
+| `num_parallel` | int | MoE=4, Dense=1, ERNIE=1, GPT-OSS=4 | `add` / `fix-np` | Max concurrent prediction sessions (via `_infer_num_parallel()`) |
+| `k_cache` | str | `q8_0` | registry manual | KV cache quantization (K) – Gemma-4/GPT-OSS: `f16` |
+| `v_cache` | str | `iq4_nl` | registry manual | KV cache quantization (V) – Gemma-4/GPT-OSS: `f16` |
+| `file_size_bytes` | int | – | `add` / `fill-size` | GGUF file size (for context_length formula + useUnifiedKvCache formula) |
+| `context_length` | int | Formula-based | `fill-ctx` / `sync-ctx` | Calculated from `file_size_bytes`, np, KV quant (default 16384 when size missing) |
+| `useUnifiedKvCache` | bool | VRAM formula | `configs` | Written to JSON config via `configs` (not permanently in Registry) |
+| `n_layers` | int | – | `add` / `fill-arch` | Number of transformer layers (from GGUF header `block_count`) |
+| `hidden_dim` | int | – | `add` / `fill-arch` | Embedding dimension (from GGUF header `embedding_length`) |
+| `reasoning` | str | – | `add` / `fill-reasoning` | `thinking` (model has reasoning/thinking capability) or `instruct` (no reasoning). Read from GGUF `tokenizer.chat_template` via `_detect_reasoning_from_template()` (Regex) |
+| `capabilities` | str | – | `classify_registry()` | Comma-separated: `text`, `coding`, `vision`, `audio`, `agentic`. Auto-detected via name + arch + notes |
+| `blueprint` | str | – | `classify_registry()` | Prompt-Blueprint-Name (z.B. `default_chat`, `coding_agent`, `reasoning_assistant`). Aus `reasoning` + `capabilities` |
+| `truncation` | str | – | `classify_registry()` | `full` / `medium` / `minimal` (abhängig von context_length) |
+| `custom_template` | bool | – | `classify_registry()` | `True` wenn YAML `template:` gesetzt (Jinja-Override aktiv) |
 
 **Architecture data (n_layers, hidden_dim):** Are automatically read from the GGUF header when adding new models (`add`). Can be retroactively filled for existing models via `fill-arch`. The lightweight header reader takes ~1ms per file (no memory-mapping of the entire ~12GB model). Models without GGUF files (uninstalled) receive no architecture data.
 
@@ -832,8 +915,8 @@ Benchmarks/
 ├── run_benchmarks_v13.py            # Current launcher (v13), dynamic script resolution, --seed
 ├── consolidate_results_v13.py       # Current consolidation (--compare, --models, always-CI)
 ├── registry_tool.py                 # Registry + JSON config maintenance (consolidated)
-├── sync_context_length.py           # Thin wrapper → registry_tool.py sync-ctx
-├── fmt_registry.py                  # Thin wrapper → registry_tool.py fill-ctx / fmt
+├── assemble_blueprint.py            # Prompt-Blueprint-System (classify + assemble + validate)
+├── type_defs.py                     # Shared TypedDict definitions
 ├── generate_quant_map.py            # QUANT_MAP generator (auto-generated)
 ├── check_agentic.py                 # Agentic diagnostics
 ├── download_real_benchmarks.py      # Dataset download
@@ -894,7 +977,8 @@ Changes need ONLY be made in `model_manager.py` – no more searching for hardco
 | `OVERALL_WEIGHTS`        | `{"Coding": {"HumanEval+": 0.25, "MBPP+": 0.25, "DS1000": 0.25, "CoderEval": 0.25}, ...}` | Benchmark weighting per category |
 | `TOOL_EVAL_SCENARIO_IDS` | TC-01..TC-69               | Agentic scenarios                |
 | `EXCLUDE_KEYWORDS`       | whisper, vision, ocr, transcription, translat, audit, audio, embed, vl, flux, **german, rag** | Excluded modalities |
-| `REASONING_KEYWORDS`     | ["reasoning", "think", "r1"] | Reasoning detection (assemble_blueprint.py blueprint assignment; runtime detection via registry `reasoning` field, see §2.6) |
+| `REASONING_KEYWORDS`     | ["r1", "thinking", "qwq", "cot", "reasoning", "phi-4-reasoning", …] | Keyword-Whitelist für Reasoning-Detektion (letzte Priorität in der Hybrid-Klassifikation, siehe §2.6) |
+| `_ARCH_REASONING_MAP`   | `{"qwen3":"thinking", "deepseek2":"thinking", "gpt-oss":"instruct", …}` | **NEU 24.07.:** Architektur→Reasoning-Zuordnung in `assemble_blueprint.py`. Überschreibt Keyword-Heuristik. Siehe §2.6 |
 | `QUANT_MAP`              | Dict model_key -> Quant label (static, ~45 entries) | Quant mapping for CSV and display. Source priority: QUANT_MAP > `lms ls --json` > Config files > GGUF cache. Auto-generatable via `generate_quant_map.py`. **NEW 18.07.:** `get_quant()` 4-step look-up priority: QUANT_MAP exact → suffix → base → **registry fallback** (`model_registry.yaml:quants` first entry) |
 | `PIPELINE_DISCOVERY`     | Glob pattern + version regex | Dynamic script detection        |
 | `CUSTOM_BENCHMARK_SCRIPT` | dynamic via `glob()`       | Highest `custom_benchmark_v*.py` |
@@ -958,7 +1042,7 @@ class ModelData:
 
 ## 17. Tests (NEW in v10, after review)
 
-**Status 18.07.2026 (p8):** **548 passing, 9 skipped, 0 failing** (412 → 548, +136 new tests in p8). 9 skipped tests are obsolete `_get_lmeval_params` if-else-cascade tests (replaced by Variante C+ in v13).
+**Status 24.07.2026 (v13.0.5):** **572 passing, 9 skipped, 0 failing** (548 → 572, +24 in Teil 1+2). 9 skipped tests are obsolete `_get_lmeval_params` if-else-cascade tests (replaced by Variante C+ in v13).
 
 Test files in `tests/`:
 
@@ -1014,6 +1098,9 @@ pytest tests/ -v
 18. **`--no-unload-between`:** Off by default. Useful for many small benchmarks, saves loading time.
 19. **`--exclude-benchmarks`:** Allows exclusion of individual benchmarks (e.g. `--exclude-benchmarks agentic,custom`).
 20. **Consolidate bugfixes (15.07.):** `find_latest_csvs` now pairs DS1000/CoderEval by `model_key` instead of raw timestamp; directory scan in `read_data` is skipped when `--since` is set; `--merge` without `--runs` sets `all_runs=True` instead of `merge_runs=2`; IFEval metrics (`prompt_level_strict_acc,none` etc.) added to METRICS list.
+21. **`fmt_registry.py` removed (24.07.):** Die Funktion `format_blank_lines()` existiert nur noch in `registry_tool._format_blank_lines()`. Der Import in `assemble_blueprint.py` wurde entsprechend korrigiert.
+22. **top_k:0 API-Error (24.07.):** LM Studio API akzeptiert `top_k: 0` nicht (HTTP 400). `_generate_answer_native()` filtert `top_k` wenn ≤ 0. Der Override `gpt-oss: {top_k: 0}` wurde beibehalten, aber der API-Call sendet `top_k` nicht mehr.
+23. **Native API stop tokens (24.07.):** `_generate_answer_native()` sendet jetzt `stop`-Parameter (bisher nur `_generate_answer_with_reasoning()`). Retry-Kette bei API-Fehlern: zuerst ohne `stop` (falls LM Studio es nicht unterstützt), dann mit `reasoning="off"`.
 
 ---
 
@@ -1092,6 +1179,21 @@ pytest tests/ -v
 
 | Date   | File                                         | Change                                                                           |
 |--------|-----------------------------------------------|----------------------------------------------------------------------------------|
+| 24.07. | `run_benchmarks_v13.py`                       | **Pre-Run Registry-Prüfungen (7 Checks):** capabilities, blueprint, truncation, systemPrompt, reasoning, registry-exists, template-file – schlagen vor dem Modell-Laden fehl. Siehe §2.1a |
+| 24.07. | `run_benchmarks_v13.py`                       | **Startup-Validierung:** Fehlende capabilities/blueprint → ERROR+skip, fehlendes truncation → WARN+default, leerer systemPrompt → WARN |
+| 24.07. | `benchmark_config.py`                         | **`_word_boundary_match()`:** `"de"` matcht nicht mehr `"deepseek"`. Boundary-aware Substring-Matching verhindert Fehlmatches. Override-Sortierung nach Länge (spezifischste Keys zuerst) |
+| 24.07. | `registry_tool.py`                            | **NEW `validate`-Befehl:** 7 Checks (template_missing_file, template_missing_config, override_overlap, missing_reasoning/capabilities/blueprint, registry_no_config, orphan_override, reasoning_arch_mismatch) |
+| 24.07. | `registry_tool.py`                            | **`cmd_sync()` erweitert:** Ruft jetzt `classify_registry()` → `assemble_prompts()` → `validate_prompts()` am Ende auf. Ein Befehl für alles |
+| 24.07. | `registry_tool.py`                            | **`_detect_reasoning_from_template()` mit Regex:** `<\s*/?\s*(think|thinking|thought)\s*>` statt Substring. Vermeidet False Positives |
+| 24.07. | `registry_tool.py`                            | **Interaktive Prompt-Abfrage in `cmd_add`:** Bei fehlender GGUF-Datei wird `[i]nstruct/[t]hinking/[n]one` abgefragt |
+| 24.07. | `registry_tool.py`                            | **Bugfix `_format_blank_lines()`:** `pathlib.Path.write_text()` → `open()` (OSError [Errno 22] unter Python 3.14/Windows) |
+| 24.07. | `assemble_blueprint.py`                       | **`_ARCH_REASONING_MAP`:** Statische Arch→Reasoning-Zuordnung (qwen3→thinking, gpt-oss→instruct, …). Priority 2 in `classify_reasoning()` |
+| 24.07. | `assemble_blueprint.py`                       | **`classify_reasoning()` Priority-Chain:** existing_reasoning > arch map > blacklist > whitelist > instruct. Neue Parameter: `arch`, `existing_reasoning` |
+| 24.07. | `assemble_blueprint.py`                       | **`REASONING_KEYWORDS` bereinigt:** `gpt-oss` entfernt, `phi-4`→`phi-4-reasoning`, `ministral` entfernt |
+| 24.07. | `assemble_blueprint.py`                       | **Bugfix Import:** `from fmt_registry import format_blank_lines` → `from registry_tool import _format_blank_lines` (fmt_registry existiert nicht mehr im Root) |
+| 24.07. | `custom_benchmark_v13.py`                     | **Native API `_retry_native()`:** Retry-Kette bei API-Fehlern: `stop` → `reasoning="off"`. `top_k > 0`-Guard gegen LM-Studio-API-400 |
+| 24.07. | `doc-git/HowTo-Install-and-Configure-New-LLM.md` | **Workflow vereinfacht:** `python registry_tool.py sync` als einziger Befehl. Alle 3 assemble_blueprint-Schritte entfallen (automatisch in sync) |
+| 24.07. | `doc-git/Architektur+Flow_v24.md`             | **Komplett aktualisiert:** Hybrid-Klassifikation §2.6, Pre-Run-Checks §2.1a, Registry-Tool §Registry, Fields-Tabelle, Changelog |
 | 21.07. | `run_benchmarks_v13.py`                       | **Bugfix lm_eval 0.4.12 CLI:** `--generation_parameters` → `--gen_kwargs` (argument renamed in new lm-eval-harness) |
 | 21.07. | `run_benchmarks_v13.py`                       | **Reasoning detection via Registry:** `_is_reasoning_model()` now reads `model_registry.yaml:reasoning` field instead of keyword matching. `_load_registry_for_context()` no longer filters by `context_length`. Model identifier strips `@quant` suffix before registry lookup |
 | 21.07. | `custom_benchmark_v13.py`                     | **Same @quant fix** in `_model_supports_reasoning()` as run_benchmarks_v13.py |
@@ -1217,7 +1319,8 @@ pytest tests/ -v
 
 ---
 
-*Created: 28.06.2026 | Updated: 21.07.2026*
-*Based on: v13.0.0-p6 – Variant C+ (BENCHMARK_CATEGORY_DEFAULTS), 4 new reasoning blueprints, _get_lmeval_params() simplified*
-*Bugfix 11.07.: lm_eval `--gen_kwargs` instead of `--model_args` for generation parameters; HellaSwag/MathQA YAML fixes*
-*Bugfix 15.07.: MATH-500=0.0% due to Windows SIGALRM incompatibility – custom task in lm_eval_tasks/minerva_math500/*
+*Created: 28.06.2026 | Updated: 24.07.2026*
+*Based on: v13.0.5 – Pipeline-Validierung, Hybrid-Klassifikation (GGUF+Architektur-Map), vereinfachter Workflow*
+*24.07.: registry_tool.py validate (7 Checks), _word_boundary_match(), Pre-Run-Checks in run_benchmarks_v13.py*
+*24.07.: _ARCH_REASONING_MAP, classify_reasoning() Priority-Chain, _detect_reasoning_from_template() Regex*
+*24.07.: cmd_sync() inkludiert classify→assemble→validate, ein Befehl für alles*
