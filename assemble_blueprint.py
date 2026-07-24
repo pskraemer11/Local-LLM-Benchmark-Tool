@@ -71,6 +71,110 @@ def normalize_model_name(name: str) -> str:
     return s
 
 
+_VARIANT_SUFFIXES = (
+    "-ud",          # Unsloth distilled
+    "-quat",        # Quantization-aware training variant
+    "-imatrix",     # Importance-matrix quant
+)
+
+
+def normalize_for_config(name: str) -> str:
+    """Broader normalization for config matching.
+
+    Like normalize_model_name but also strips:
+    - Quantization suffixes (@q4_0, @iq4_nl, etc.)
+    - Variant suffixes (-ud, -quat, -imatrix)
+    """
+    s = normalize_model_name(name)
+    # Strip @quant suffix (e.g. @iq4_nl, @q4_k_s, @q5_0)
+    idx = s.find('@')
+    if idx > 0:
+        s = s[:idx]
+    # Strip variant suffixes
+    for suffix in _VARIANT_SUFFIXES:
+        if s.endswith(suffix):
+            s = s[:-len(suffix)]
+            break
+    return s
+
+
+def find_config_for_registry_key(
+    registry_key: str,
+    configs: list[dict],
+) -> dict | None:
+    """Find the best matching LM Studio config for a registry key.
+
+    Multi-level matching:
+    1. Exact normalized match (via normalize_model_name)
+    2. Broader match (via normalize_for_config, strips @quant + -ud/-quat)
+    3. Registry key is prefix of config name (e.g. 'gemma-4-12b-it-qat' → 'gemma-4-12b-it-qat-q4-0')
+    4. Config name is prefix of registry key (e.g. 'gemma-4-26b-a4b-it' → 'gemma-4-26b-a4b-it-quat')
+    """
+    rn = normalize_model_name(registry_key)
+    rn_broad = normalize_for_config(registry_key)
+
+    # Build config lookup
+    cfg_exact: dict[str, list[dict]] = {}
+    cfg_broad: dict[str, list[dict]] = {}
+    cfg_raw: list[dict] = []
+    for cfg in configs:
+        raw = f"{cfg['publisher']}/{cfg['dir_name']}"
+        cn = normalize_model_name(raw)
+        cb = normalize_for_config(raw)
+        cfg_exact.setdefault(cn, []).append(cfg)
+        cfg_broad.setdefault(cb, []).append(cfg)
+        cfg_raw.append((cn, raw, cfg))
+
+    # Level 1: exact match
+    if rn in cfg_exact:
+        return cfg_exact[rn][0]
+
+    # Level 2: broad match (stripped quant/variant)
+    if rn_broad in cfg_broad:
+        return cfg_broad[rn_broad][0]
+
+    # Level 3: registry key is prefix of config name
+    for cn, raw, cfg in cfg_raw:
+        if cn.startswith(rn + '-'):
+            return cfg
+
+    # Level 4: config name is prefix of registry key
+    for cn, raw, cfg in sorted(cfg_raw, key=lambda x: -len(x[0])):
+        if rn.startswith(cn + '-') or rn_broad.startswith(cn + '-'):
+            return cfg
+
+    return None
+
+
+def find_registry_key_for_config(
+    config_norm: str,
+    registry_sorted: list[tuple[str, str]],
+) -> str | None:
+    """Find the best matching registry key for a config name.
+
+    Multi-level matching (mirrors the existing logic in cmd_configs + _strip_quant):
+    1. Exact match
+    2. Config starts with registry key + hyphen
+    3. Registry key ends with hyphen + config
+    4. Broad match (config vs broad registry key)
+    """
+    for rn2, rnk in registry_sorted:
+        if config_norm == rn2:
+            return rnk
+    for rn2, rnk in registry_sorted:
+        if config_norm.startswith(rn2 + '-'):
+            return rnk
+    for rn2, rnk in registry_sorted:
+        if rn2.endswith('-' + config_norm):
+            return rnk
+    # Broad match: strip quant from registry keys and retry
+    for rn2, rnk in registry_sorted:
+        rn2_clean = normalize_for_config(rnk)
+        if config_norm == rn2_clean:
+            return rnk
+    return None
+
+
 def classify_reasoning(
     model_name: str,
     notes: str = "",

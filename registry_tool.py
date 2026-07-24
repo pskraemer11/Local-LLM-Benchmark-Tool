@@ -56,7 +56,8 @@ y.indent(mapping=2, sequence=4, offset=2)
 # import-error reporting when assemble_blueprint.py is broken.
 sys.path.insert(0, str(BASE_DIR))
 from assemble_blueprint import (
-    normalize_model_name, read_lms_configs, _ARCH_REASONING_MAP,
+    normalize_model_name, normalize_for_config, find_config_for_registry_key, find_registry_key_for_config,
+    read_lms_configs, _ARCH_REASONING_MAP,
     classify_registry, create_blueprint_definitions,
     assemble_prompts, validate_prompts,
 )
@@ -555,21 +556,7 @@ def cmd_sync_from_configs() -> None:
     blacklisted = 0
     for cfg in configs:
         cn = normalize_model_name(cfg["dir_name"])
-        match = None
-        for rn2, rnk in registry_key_sorted:
-            if cn == rn2:
-                match = rnk
-                break
-        if not match:
-            for rn2, rnk in registry_key_sorted:
-                if cn.startswith(rn2 + '-'):
-                    match = rnk
-                    break
-        if not match:
-            for rn2, rnk in registry_key_sorted:
-                if rn2.endswith('-' + cn):
-                    match = rnk
-                    break
+        match = find_registry_key_for_config(cn, registry_key_sorted)
         if not match:
             skipped_no_match += 1
             continue
@@ -702,12 +689,17 @@ def cmd_sync_ctx() -> None:
     print(f"  -> {len(configs)} Config-Dateien gefunden")
 
     dir_to_ctx: dict[str, list[int]] = {}
+    dir_broad_to_ctx: dict[str, list[int]] = {}
     for c in configs:
-        norm_dir = normalize_model_name(c["dir_name"])
+        raw = f"{c['publisher']}/{c['dir_name']}"
+        norm_dir = normalize_model_name(raw)
+        broad_dir = normalize_for_config(raw)
         ctx = c.get("context_length")
         if ctx is not None:
             dir_to_ctx.setdefault(norm_dir, []).append(int(ctx))
+            dir_broad_to_ctx.setdefault(broad_dir, []).append(int(ctx))
     dir_best_ctx = {d: min(ctxs) for d, ctxs in dir_to_ctx.items()}
+    dir_broad_best_ctx = {d: min(ctxs) for d, ctxs in dir_broad_to_ctx.items()}
     print(f"  -> {len(dir_best_ctx)} eindeutige Modelle mit context_length")
 
     norm_reg: dict[str, str] = {}
@@ -725,7 +717,10 @@ def cmd_sync_ctx() -> None:
             skipped_has_value += 1
             continue
         base_key = _strip_quant(norm_key)
-        ctx = dir_best_ctx.get(base_key) or dir_best_ctx.get(norm_key)
+        broad_key = normalize_for_config(orig_key)
+        ctx = (dir_best_ctx.get(base_key)
+               or dir_best_ctx.get(norm_key)
+               or dir_broad_best_ctx.get(broad_key))
         if ctx is not None:
             entry["context_length"] = ctx
             updated += 1
@@ -1127,21 +1122,17 @@ def cmd_validate() -> dict[str, Any]:
                 )
 
     # ── Check 2: YAML template: -> Config JSON promptTemplate ──────
-    # Build map: normalized config dir_name -> json_path
-    cfg_map: dict[str, Path] = {}
-    for cfg in cfgs:
-        cfg_map[normalize_model_name(cfg.get("dir_name", ""))] = Path(cfg["json_path"])
     for model_key, entry in reg.items():
         if not isinstance(entry, dict) or not entry.get("template"):
             continue
-        rk = normalize_model_name(model_key)
-        json_path = cfg_map.get(rk)
-        if json_path is None or not json_path.exists():
+        match = find_config_for_registry_key(model_key, cfgs)
+        if match is None:
             errors["template_missing_config"].append(
                 f"{model_key}: template='{entry['template']}' in YAML, "
-                f"aber Config-JSON nicht gefunden ({json_path})"
+                f"aber Config-JSON nicht gefunden (auch nach fallback matching)"
             )
             continue
+        json_path = Path(match["json_path"])
         try:
             data = json.loads(json_path.read_text(encoding="utf-8"))
         except Exception:
@@ -1183,16 +1174,16 @@ def cmd_validate() -> dict[str, Any]:
         if not entry.get("blueprint"):
             errors["missing_blueprint"].append(model_key)
 
-    # ── Check 5: Registry name finds matching Config JSON ──────────
-    cfg_names = {normalize_model_name(c.get("dir_name", "")) for c in cfgs}
+    # ── Check 5: Registry name findet Config JSON (mit fallback matching) ──
     for model_key, entry in reg.items():
         if not isinstance(entry, dict):
             continue
-        rk = normalize_model_name(model_key)
         # Skip models without GGUF installed (no config expected)
         if not entry.get("file_size_bytes"):
             continue
-        if rk not in cfg_names:
+        match = find_config_for_registry_key(model_key, cfgs)
+        if match is None:
+            rk = normalize_model_name(model_key)
             errors["registry_no_config"].append(
                 f"{model_key}: keine passende Config-JSON gefunden (normalized: {rk})"
             )

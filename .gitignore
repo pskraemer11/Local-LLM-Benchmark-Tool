@@ -41,6 +41,27 @@ benchmark-dirs.txt
 # OpenCode
 .opencode/
 
+# Embedding Evaluation (gross, inkl .venv mit torch)
+embedding-eval/
+
+# Temporäre Markdown-Dokumente / Notizen (nicht Teil des Frameworks)
+*.md
+!doc-git/**/*.md
+!README.md
+
+# Tools (separates Verzeichnis, nicht fester Repo-Bestandteil)
+tools/
+
+# Coverage
+.coverage
+.coverage.*
+
+# LM Studio model dumps
+lms_models*.txt
+
+# Prompt Inventar
+prompt_inventory.csv
+
 # Temporaere Dateien
 *.tmp
 *.bak
