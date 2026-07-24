@@ -24,6 +24,9 @@ Commands:
   fmt           Normalize blank lines in registry YAML (no blanks within entries,
                 one blank between entries)
   migrate-keys  Re-key entries without publisher prefix to publisher/model-name
+  validate      Check model_registry.yaml consistency: template files exist,
+                Config JSON promptTemplate matches YAML, override overlap,
+                required fields present, etc.
   sync          Full sync: add → fill-arch → fill-reasoning → configs → sync-ctx →
                 sync-from-configs → fill-ctx → fmt
 """
@@ -52,7 +55,11 @@ y.indent(mapping=2, sequence=4, offset=2)
 # §2.1): enables IDE resolution, `__pycache__` re-use, and normal
 # import-error reporting when assemble_blueprint.py is broken.
 sys.path.insert(0, str(BASE_DIR))
-from assemble_blueprint import normalize_model_name, read_lms_configs
+from assemble_blueprint import (
+    normalize_model_name, read_lms_configs, _ARCH_REASONING_MAP,
+    classify_registry, create_blueprint_definitions,
+    assemble_prompts, validate_prompts,
+)
 from benchmark_config import (
     BLACKLIST,
     USABLE_VRAM_GB as _USABLE_VRAM_GB,
@@ -104,8 +111,9 @@ def _run_lms_ls() -> list[dict[str, Any]]:
 
 def _format_blank_lines(path: Path) -> None:
     """Normalize blank lines in YAML: none within entries, one between entries."""
-    content = path.read_text(encoding="utf-8")
-    lines = content.split("\n")
+    with open(path, "r", encoding="utf-8", newline="") as f:
+        content = f.read()
+    lines = content.splitlines()
 
     def is_top_key(s: str) -> bool:
         s = s.rstrip()
@@ -139,7 +147,8 @@ def _format_blank_lines(path: Path) -> None:
             i += 1
     while out and out[-1] == "":
         out.pop()
-    path.write_text("\n".join(out) + "\n", encoding="utf-8")
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        f.write("\n".join(out) + "\n")
 
 
 # ── fmt command ────────────────────────────────────────────────────
@@ -339,7 +348,7 @@ def _infer_num_parallel(arch: str, model_identifier: str = "") -> int:
 
 # ── add command ────────────────────────────────────────────────────
 
-def cmd_add(models: list[dict[str, Any]]) -> dict[str, Any]:
+def cmd_add(models: list[dict[str, Any]], interactive: bool = False) -> dict[str, Any]:
     reg = load_registry()
     added: list[str] = []
     skipped: list[tuple[str, str]] = []
@@ -399,6 +408,19 @@ def cmd_add(models: list[dict[str, Any]]) -> dict[str, Any]:
                     entry["hidden_dim"] = int(hd)
                 if is_reasoning is not None:
                     entry["reasoning"] = "thinking" if is_reasoning else "instruct"
+
+        # Interactive reasoning prompt (fallback: no GGUF data available)
+        if "reasoning" not in entry and interactive:
+            print(f"\n  Modell: {mk}")
+            print(f"  Architektur: {ar}")
+            print(f"  Keine GGUF-Datei gefunden – Reasoning-Typ kann nicht automatisch erkannt werden.")
+            ans = input("  Reasoning-Typ? [i]nstruct / [t]hinking / [n]one / (d=instruct): ").strip().lower()
+            if ans in ("t", "thinking"):
+                entry["reasoning"] = "thinking"
+            elif ans in ("n", "none"):
+                entry["reasoning"] = "none"
+            else:
+                entry["reasoning"] = "instruct"
 
         reg[canonical] = entry
         added.append(canonical)
@@ -859,14 +881,22 @@ def _read_gguf_arch(model_path: str) -> tuple[Optional[int], Optional[int], Opti
         return None, None, None
 
 
+_REASONING_TOKEN_RE = re.compile(
+    r'<\s*/?\s*(?:think|thinking|thought)\s*>|'
+    r'<\|channel>\s*(?:thought|think)',
+    re.IGNORECASE,
+)
+
 def _detect_reasoning_from_template(template: str) -> bool:
-    """Check if a GGUF chat_template supports reasoning/thinking mode."""
-    patterns = [
-        "enable_thinking", "reasoning_effort",
-        "<|channel>thought", "<|channel>think",
-        "<think>", "</think>",
-    ]
-    return any(p in template for p in patterns)
+    """Check if a GGUF chat_template supports reasoning/thinking mode.
+
+    Uses regex for token patterns (avoids false positives from
+    accidental substring matches) and substring for the well-known
+    Jinja llama.cpp variables.
+    """
+    if "enable_thinking" in template or "reasoning_effort" in template:
+        return True
+    return bool(_REASONING_TOKEN_RE.search(template))
 
 
 MODELS_CACHE = Path.home() / ".lmstudio" / "models"
@@ -1058,6 +1088,164 @@ def cmd_fill_reasoning() -> None:
     print("Fertig.")
 
 
+# ── validate command ───────────────────────────────────────────────
+
+TEMPLATE_DIR = BASE_DIR / "doc-git" / "Jinja-Chat-Templates"
+
+
+def cmd_validate() -> dict[str, Any]:
+    """Validate model_registry.yaml consistency: templates, configs, overrides.
+
+    Returns dict with error counts per check category.
+    """
+    reg = load_registry()
+    cfgs = read_lms_configs(CONFIG_ROOT)
+    errors: dict[str, list[str]] = {
+        "template_missing_file": [],
+        "template_missing_config": [],
+        "override_overlap": [],
+        "missing_reasoning": [],
+        "missing_capabilities": [],
+        "missing_blueprint": [],
+        "registry_no_config": [],
+        "orphan_override": [],
+        "reasoning_arch_mismatch": [],
+    }
+
+    from benchmark_config import MODEL_TEMP_OVERRIDES
+
+    # ── Check 1: template: references existent .jinja file ─────────
+    for model_key, entry in reg.items():
+        if not isinstance(entry, dict):
+            continue
+        tpl = entry.get("template")
+        if tpl:
+            tpl_path = TEMPLATE_DIR / tpl
+            if not tpl_path.exists():
+                errors["template_missing_file"].append(
+                    f"{model_key}: template='{tpl}' -> Datei nicht gefunden ({tpl_path})"
+                )
+
+    # ── Check 2: YAML template: -> Config JSON promptTemplate ──────
+    # Build map: normalized config dir_name -> json_path
+    cfg_map: dict[str, Path] = {}
+    for cfg in cfgs:
+        cfg_map[normalize_model_name(cfg.get("dir_name", ""))] = Path(cfg["json_path"])
+    for model_key, entry in reg.items():
+        if not isinstance(entry, dict) or not entry.get("template"):
+            continue
+        rk = normalize_model_name(model_key)
+        json_path = cfg_map.get(rk)
+        if json_path is None or not json_path.exists():
+            errors["template_missing_config"].append(
+                f"{model_key}: template='{entry['template']}' in YAML, "
+                f"aber Config-JSON nicht gefunden ({json_path})"
+            )
+            continue
+        try:
+            data = json.loads(json_path.read_text(encoding="utf-8"))
+        except Exception:
+            errors["template_missing_config"].append(
+                f"{model_key}: Config-JSON nicht lesbar ({json_path})"
+            )
+            continue
+        has_pt = False
+        for field in data.get("operation", {}).get("fields", []):
+            if field.get("key") == "llm.prediction.promptTemplate":
+                val = field.get("value", "")
+                if val and val.strip():
+                    has_pt = True
+                break
+        if not has_pt:
+            errors["template_missing_config"].append(
+                f"{model_key}: template='{entry['template']}' in YAML, "
+                f"aber promptTemplate in Config fehlt/leer ({json_path})"
+            )
+
+    # ── Check 3: Overlapping MODEL_TEMP_OVERRIDES substrings ──────
+    override_keys = list(MODEL_TEMP_OVERRIDES.keys())
+    for i, a in enumerate(override_keys):
+        for b in override_keys[i + 1:]:
+            if a in b or b in a:
+                errors["override_overlap"].append(
+                    f"'{a}' <-> '{b}': '{a}' ist substring von '{b}' "
+                    f"(oder umgekehrt) – Reihenfolge im Dict entscheidet!"
+                )
+
+    # ── Check 4: reasoning/capabilities/blueprint fields ───────────
+    for model_key, entry in reg.items():
+        if not isinstance(entry, dict):
+            continue
+        if not entry.get("reasoning"):
+            errors["missing_reasoning"].append(model_key)
+        if not entry.get("capabilities"):
+            errors["missing_capabilities"].append(model_key)
+        if not entry.get("blueprint"):
+            errors["missing_blueprint"].append(model_key)
+
+    # ── Check 5: Registry name finds matching Config JSON ──────────
+    cfg_names = {normalize_model_name(c.get("dir_name", "")) for c in cfgs}
+    for model_key, entry in reg.items():
+        if not isinstance(entry, dict):
+            continue
+        rk = normalize_model_name(model_key)
+        # Skip models without GGUF installed (no config expected)
+        if not entry.get("file_size_bytes"):
+            continue
+        if rk not in cfg_names:
+            errors["registry_no_config"].append(
+                f"{model_key}: keine passende Config-JSON gefunden (normalized: {rk})"
+            )
+
+    # ── Check 6: MODEL_TEMP_OVERRIDES keys matchen Registry-Modell ─
+    # Use RAW registry keys (not normalized) to avoid '.' -> '-' conversion
+    from benchmark_config import _word_boundary_match
+    reg_raw_names = {k.lower() for k in reg if isinstance(reg.get(k), dict)}
+    for pattern in MODEL_TEMP_OVERRIDES:
+        matches_any = any(_word_boundary_match(pattern, rn) for rn in reg_raw_names)
+        if not matches_any:
+            errors["orphan_override"].append(
+                f"'{pattern}': kein Registry-Modell mit diesem Substring"
+            )
+
+    # ── Check 7: reasoning stimmt mit Architektur-Map überein ──────
+    for model_key, entry in reg.items():
+        if not isinstance(entry, dict):
+            continue
+        reasoning = entry.get("reasoning")
+        arch_raw = entry.get("arch", "")
+        if not reasoning or not arch_raw:
+            continue
+        detected = None
+        arch_lower = arch_raw.lower()
+        for arch_key, rtype in _ARCH_REASONING_MAP.items():
+            if arch_key in arch_lower:
+                detected = rtype
+                break
+        if detected is not None and reasoning != detected:
+            errors["reasoning_arch_mismatch"].append(
+                f"{model_key}: reasoning={reasoning}, aber Architektur "
+                f"'{arch_raw}' erwartet '{detected}'"
+            )
+
+    # ── Report ─────────────────────────────────────────────────────
+    total = sum(len(v) for v in errors.values())
+    print(f"\n{'=' * 60}")
+    print(f"  Validierung: {total} Probleme gefunden")
+    print(f"{'=' * 60}")
+    for check, items in errors.items():
+        if items:
+            print(f"\n  ❌ {check} ({len(items)}):")
+            for item in items[:10]:
+                print(f"     - {item}")
+            if len(items) > 10:
+                print(f"     ... und {len(items) - 10} weitere")
+        else:
+            print(f"\n  ✅ {check}: 0")
+
+    return errors
+
+
 # ── sync command (full) ────────────────────────────────────────────
 
 def cmd_sync() -> None:
@@ -1103,6 +1291,16 @@ def cmd_sync() -> None:
     print("[fmt] Blank lines normalisieren ...")
     cmd_fmt()
 
+    print("[classify] reasoning/capabilities/blueprint/truncation aus Registry ...")
+    classify_registry()
+    create_blueprint_definitions()
+
+    print("[assemble] Prompt in JSON-Configs schreiben ...")
+    assemble_prompts(preview_only=False)
+
+    print("[validate] Prompt-Syntax-Prüfung ...")
+    validate_prompts()
+
     print("[OK] Sync abgeschlossen")
 
 
@@ -1126,7 +1324,7 @@ def main() -> None:
             models = json.load(sys.stdin)
         if not isinstance(models, list):
             models = [models]
-        cmd_add(models)
+        cmd_add(models, interactive=True)
     elif cmd == "configs":
         cmd_configs()
     elif cmd == "sync-ctx":
@@ -1149,6 +1347,8 @@ def main() -> None:
         cmd_fmt()
     elif cmd == "migrate-keys":
         cmd_migrate_keys()
+    elif cmd == "validate":
+        cmd_validate()
     elif cmd == "sync":
         cmd_sync()
     else:

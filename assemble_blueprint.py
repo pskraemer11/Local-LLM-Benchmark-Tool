@@ -36,11 +36,24 @@ INVENTORY_PATH = REPO_ROOT / "prompt_inventory.csv"
 REASONING_KEYWORDS = [
     "r1", "thinker", "thinking", "qwq", "cascade",
     "cot", "reasoning", "reasoning-plus", "reasoningplus", "rnj",
-    "math", "gpt-oss", "magistral", "phi-4", "ministral"
+    "math", "magistral", "phi-4-reasoning",
 ]
 NON_REASONING_MODELS = [
     "whisper", "flux", "ocr", "translategemma"
 ]
+
+# Architecture → default reasoning type (priority after GGUF/existing)
+_ARCH_REASONING_MAP = {
+    "qwen3": "thinking",
+    "qwen35": "thinking",
+    "qwen35moe": "thinking",
+    "qwen3moe": "thinking",
+    "deepseek2": "thinking",
+    "kimi-linear": "thinking",
+    "gpt-oss": "instruct",
+    "nomic-bert": "none",
+    "flux": "none",
+}
 
 
 def normalize_model_name(name: str) -> str:
@@ -58,23 +71,40 @@ def normalize_model_name(name: str) -> str:
     return s
 
 
-def classify_reasoning(model_name: str, notes: str = "") -> str:
-    """Classify model reasoning type: thinking | instruct | none."""
+def classify_reasoning(
+    model_name: str,
+    notes: str = "",
+    arch: str = "",
+    existing_reasoning: str | None = None,
+) -> str:
+    """Classify model reasoning type: thinking | instruct | none.
+
+    Priority chain:
+      1. existing_reasoning (GGUF header / user override)
+      2. arch → _ARCH_REASONING_MAP
+      3. NON_REASONING_MODELS keyword blacklist
+      4. REASONING_KEYWORDS keyword whitelist
+      5. Default: "instruct"
+    """
     name_lower = model_name.lower()
     notes_lower = notes.lower() if notes else ""
 
-    # Check for non-reasoning models first
+    if existing_reasoning is not None:
+        return existing_reasoning
+
+    if arch:
+        arch_lower = arch.lower()
+        for arch_key, reasoning_type in _ARCH_REASONING_MAP.items():
+            if arch_key in arch_lower:
+                return reasoning_type
+
     for kw in NON_REASONING_MODELS:
         if kw in name_lower:
             return "none"
 
-    # Check for thinking/reasoning models
     for kw in REASONING_KEYWORDS:
         if kw in name_lower:
             return "thinking"
-
-    # Notes-based detection removed: too many false positives
-    # (descriptive words like "reasoning" in notes are not CoT indicators)
 
     return "instruct"
 
@@ -430,8 +460,9 @@ def classify_registry():
         notes = str(entry.get("notes", ""))
         custom_tpl = has_custom_template(entry)
 
-        # Classification
-        reasoning = classify_reasoning(model_name, notes)
+        # Classification (priority: GGUF/override > arch map > keywords > instruct)
+        existing_reasoning = entry.get("reasoning")
+        reasoning = classify_reasoning(model_name, notes, arch, existing_reasoning)
         capabilities = classify_capabilities(model_name, arch, notes)
         blueprint = select_blueprint(reasoning, capabilities, arch, model_name)
 
@@ -466,8 +497,8 @@ def classify_registry():
         yaml_ruamel.dump(registry, f)
 
     # Normalize blank lines (no blanks within entries, one between entries)
-    from fmt_registry import format_blank_lines
-    format_blank_lines(REGISTRY_PATH)
+    from registry_tool import _format_blank_lines
+    _format_blank_lines(REGISTRY_PATH)
 
     print(f"[OK] Updated {updated_count} models in {REGISTRY_PATH}")
 

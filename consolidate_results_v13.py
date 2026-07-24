@@ -656,60 +656,73 @@ def find_latest_csvs(min_sample_size: int = 0, since: Optional[str] = None,
         return {k: v[1] for k, v in ds1000.items()}, {k: v[1] for k, v in codereval.items()}
 
 
-def _find_dir_ci(prefix: str, model_key: str) -> Optional[str]:
-    """Find a result subdirectory by case-insensitive matching.
+def _find_newest_by_mtime(prefix: str, model_key: str) -> Optional[str]:
+    """Find the newest {prefix}_{model_key} result directory by mtime.
     
-    Tries in order:
-    1. Exact match: {prefix}_{model_key_safe}
-    2. Case-insensitive exact match
-    3. Prefix scan: find any {prefix}_* dir whose name (after prefix_) starts with safe
-       (handles double-@ variant naming like lmeval_base@var@QUANT)
-    4. Base key fallback (without @variant)
+    Falls back through:
+    1. Case-insensitive prefix + model_key match (handles double-@ variants)
+    2. Base key without @variant
+    Returns the directory with the newest modification time, or None.
     """
-    safe = model_key.replace("/", "_")
+    safe = model_key.replace("/", "_").lower()
     target_prefix = f"{prefix}_"
-    
-    # Step 1: exact match
-    exact = f"{target_prefix}{safe}"
-    if os.path.isdir(os.path.join(RESULTS_DIR, exact)):
-        return os.path.join(RESULTS_DIR, exact)
-    
-    # Step 2: case-insensitive exact match
-    exact_lower = exact.lower()
+    candidates: list[tuple[float, str]] = []
+    seen: set[str] = set()
+
     for dname in os.listdir(RESULTS_DIR):
-        if dname.lower() == exact_lower and os.path.isdir(os.path.join(RESULTS_DIR, dname)):
-            return os.path.join(RESULTS_DIR, dname)
-    
-    # Step 3: prefix scan – find dir whose content after prefix_ starts with safe
-    # This catches variant-specific dirs with extra @ (e.g. base@var@QUANT)
-    for dname in os.listdir(RESULTS_DIR):
-        if not dname.startswith(target_prefix):
+        dpath = os.path.join(RESULTS_DIR, dname)
+        if not os.path.isdir(dpath):
+            continue
+        if not dname.lower().startswith(target_prefix):
             continue
         rest = dname[len(target_prefix):]
-        if rest.lower().startswith(safe.lower()) and os.path.isdir(os.path.join(RESULTS_DIR, dname)):
-            return os.path.join(RESULTS_DIR, dname)
-    
-    # Step 4: base key fallback (without @variant)
-    base = model_key.split("@")[0].replace("/", "_")
+        if rest.lower().startswith(safe):
+            candidates.append((os.path.getmtime(dpath), dpath))
+            seen.add(dname.lower())
+
+    # Fallback: ohne @variant
+    base = model_key.split("@")[0].replace("/", "_").lower()
     if base != safe:
-        base_dir = f"{target_prefix}{base}"
-        if os.path.isdir(os.path.join(RESULTS_DIR, base_dir)):
-            return os.path.join(RESULTS_DIR, base_dir)
-    
-    return None
+        for dname in os.listdir(RESULTS_DIR):
+            dpath = os.path.join(RESULTS_DIR, dname)
+            if not os.path.isdir(dpath) or dname.lower() in seen:
+                continue
+            if not dname.lower().startswith(target_prefix):
+                continue
+            rest = dname[len(target_prefix):]
+            if rest.lower().startswith(base):
+                candidates.append((os.path.getmtime(dpath), dpath))
+
+    if not candidates:
+        return None
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    return candidates[0][1]
+
+
+def _pick_newest_eval_file(dpath: str) -> Optional[str]:
+    """Pick the newest .eval_results.json in dpath by mtime."""
+    candidates = []
+    for fname in os.listdir(dpath):
+        if fname.endswith(".eval_results.json"):
+            fpath = os.path.join(dpath, fname)
+            candidates.append((os.path.getmtime(fpath), fpath))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    return candidates[0][1]
 
 
 def try_read_evalplus(model_key: str) -> Optional[Dict[str, float]]:
-    root = _find_dir_ci("evalplus", model_key)
+    root = _find_newest_by_mtime("evalplus", model_key)
     if not root:
         return None
     results = {}
     for dataset in ["humaneval", "mbpp"]:
         dpath = os.path.join(root, dataset)
-        eval_file = os.path.join(dpath, "local-model_openai_temp_0.0.eval_results.json")
-        if not os.path.exists(eval_file):
-            eval_file = os.path.join(dpath, "local-model_openai_temp_1.0.eval_results.json")
-        if not os.path.exists(eval_file):
+        if not os.path.isdir(dpath):
+            continue
+        eval_file = _pick_newest_eval_file(dpath)
+        if eval_file is None:
             continue
         try:
             with open(eval_file, "r", encoding="utf-8") as f:
@@ -747,7 +760,7 @@ def _read_results_json(search_dir: str, task_name: str, metric_priority: List[st
     return None
 
 def read_lmeval_per_model(model_key: str) -> Optional[Dict[str, float]]:
-    root = _find_dir_ci("lmeval", model_key)
+    root = _find_newest_by_mtime("lmeval", model_key)
     if not root:
         return None
     results = {}
@@ -805,7 +818,7 @@ def read_lmeval_per_model(model_key: str) -> Optional[Dict[str, float]]:
 
 
 def read_agentic(model_key: str) -> Optional[float]:
-    root = _find_dir_ci("agentic", model_key)
+    root = _find_newest_by_mtime("agentic", model_key)
     if not root:
         return None
     # Recursively find all .json files

@@ -281,6 +281,27 @@ REASONING_PATTERNS = {
 }
 
 
+def _word_boundary_match(pattern: str, text: str) -> bool:
+    """Substring match with word-boundary check to avoid false overlaps.
+    
+    Returns True if `pattern` is bounded by non-alphanumeric chars
+    or string boundaries (start/end, '-', '_', '/', '.', '@').
+    A digit counts as a boundary when adjacent to the pattern.
+    """
+    if pattern not in text:
+        return False
+    idx = text.find(pattern)
+    while idx != -1:
+        before = text[idx - 1] if idx > 0 else ""
+        after = text[idx + len(pattern)] if idx + len(pattern) < len(text) else ""
+        before_ok = not before or not before.isalnum() or before.isdigit()
+        after_ok = not after or not after.isalnum() or after.isdigit()
+        if before_ok and after_ok:
+            return True
+        idx = text.find(pattern, idx + 1)
+    return False
+
+
 def get_model_config(model_identifier: str, category: str = "coding", is_thinking_enabled: bool = False) -> ModelConfig:
     """Merge category defaults + model override + thinking flag.
     
@@ -292,13 +313,15 @@ def get_model_config(model_identifier: str, category: str = "coding", is_thinkin
     key_lower = model_identifier.lower() if model_identifier else ""
     cat = category if category in BENCHMARK_CATEGORY_DEFAULTS else "coding"
     config = dict(BENCHMARK_CATEGORY_DEFAULTS[cat])
-    # Apply model override (flacher Merge)
-    for pattern, override in MODEL_TEMP_OVERRIDES.items():
-        if pattern in key_lower:
+    # Apply model override (boundary-aware substring matching).
+    # Sort by key length descending so specific (longer) patterns match first,
+    # preventing shadowing (e.g. "deepseek-r1-distill" before "deepseek").
+    for pattern, override in sorted(MODEL_TEMP_OVERRIDES.items(), key=lambda kv: len(kv[0]), reverse=True):
+        if _word_boundary_match(pattern, key_lower):
             config.update(override)
             break
     # Thinking-Flag: force enable_thinking=True fuer Reasoning-Modelle
-    if is_thinking_enabled and any(p in key_lower for p in REASONING_PATTERNS):
+    if is_thinking_enabled and any(_word_boundary_match(p, key_lower) for p in REASONING_PATTERNS):
         config["enable_thinking"] = True
     return config
 

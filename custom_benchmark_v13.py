@@ -717,6 +717,7 @@ def generate_answer(prompt: Optional[str] = None, model_identifier: Optional[str
             model_identifier=native_model_identifier or model_identifier or "local-model",
             prompt=prompt, system_msg=system_msg, temperature=temperature,
             top_p=top_p, max_tokens=max_tokens, top_k=top_k, min_p=min_p, timeout=timeout,
+            stop=stop,
         )
     body = {
         "model": model_identifier or "local-model",
@@ -756,6 +757,35 @@ def generate_answer(prompt: Optional[str] = None, model_identifier: Optional[str
     return None, elapsed, t_in, t_out, 0, think_tok, "api_error", "Fallback also failed"
 
 
+def _retry_native(body: dict[str, Any], headers: dict[str, str], timeout: int, param: str) -> Optional[tuple]:
+    """Retry native API call with a stripped param. Returns result tuple or None."""
+    try:
+        payload = json.dumps(body).encode("utf-8")
+        req = Request(NATIVE_CHAT_URL, data=payload, headers=headers, method="POST")
+        start = time.time()
+        with urlopen(req, timeout=timeout) as resp:
+            result = json.loads(resp.read().decode("utf-8"))
+        elapsed = time.time() - start
+        output = result.get("output")
+        if output:
+            for item in output:
+                if item.get("type") == "message":
+                    content, think_tags = strip_thinking_tokens(item.get("content", ""))
+                    stats = result.get("stats", {})
+                    return content, elapsed, stats.get("input_tokens", 0), \
+                           stats.get("total_output_tokens", 0), \
+                           stats.get("tokens_per_second", 0), think_tags, None, None
+    except (URLError, HTTPError, json.JSONDecodeError, KeyError, TimeoutError) as e2:
+        err = str(e2)
+        try:
+            if hasattr(e2, "read"):
+                err += f" | body={e2.read().decode('utf-8', errors='replace')[:500]}"
+        except (AttributeError, ValueError, UnicodeDecodeError):
+            pass
+        print(f"[DEBUG] Native API retry ohne {param} fehlgeschlagen: {err}")
+    return None
+
+
 def _generate_answer_native(
     model_identifier: str,
     prompt: Optional[str],
@@ -766,6 +796,7 @@ def _generate_answer_native(
     top_k: Optional[int],
     min_p: Optional[float],
     timeout: int,
+    stop: Optional[list[str]] = None,
 ) -> tuple[Optional[str], float, int, int, float, int, Optional[str], Optional[str]]:
     """Use LM Studio native REST API with reasoning='off' to disable thinking.
 
@@ -774,6 +805,7 @@ def _generate_answer_native(
     - input:      string  – user message text
     - system_prompt: string (optional)
     - max_output_tokens: int (optional)
+    - stop:       list[str] (optional) – stop tokens
     - reasoning: "off"|"low"|"medium"|"high"|"on"
     """
     body: dict[str, Any] = {
@@ -782,17 +814,20 @@ def _generate_answer_native(
         "temperature": temperature,
         "top_p": top_p,
         "max_output_tokens": max_tokens,
+        "reasoning": "off",
     }
-    if _model_supports_reasoning(model_identifier) is True:
-        body["reasoning"] = "off"
     if system_msg:
         body["system_prompt"] = system_msg
-    if top_k is not None:
+    if top_k is not None and top_k > 0:
         body["top_k"] = top_k
     if min_p is not None:
         body["min_p"] = min_p
+    if stop:
+        body["stop"] = stop
 
     headers = {"Content-Type": "application/json"}
+    if os.environ.get("OPENCODE_DEBUG_NATIVE_API"):
+        print(f"\n[DEBUG] _generate_answer_native body={json.dumps(body, ensure_ascii=False)[:500]}")
     try:
         payload = json.dumps(body).encode("utf-8")
         req = Request(NATIVE_CHAT_URL, data=payload, headers=headers, method="POST")
@@ -840,31 +875,21 @@ def _generate_answer_native(
 
         return content, elapsed, tokens_in, tokens_out, tokens_per_sec, thinking_tokens, None, None
     except (URLError, HTTPError, json.JSONDecodeError, KeyError, TimeoutError) as e:
-        # If reasoning="off" caused the error (model doesn't support reasoning),
-        # retry without it
-        if "reasoning" in body and b"reasoning" in payload:
-            body.pop("reasoning")
-            try:
-                payload2 = json.dumps(body).encode("utf-8")
-                req2 = Request(NATIVE_CHAT_URL, data=payload2, headers=headers, method="POST")
-                start2 = time.time()
-                with urlopen(req2, timeout=timeout) as resp2:
-                    result2 = json.loads(resp2.read().decode("utf-8"))
-                elapsed2 = time.time() - start2
-                output2 = result2.get("output")
-                if output2:
-                    for item in output2:
-                        if item.get("type") == "message":
-                            raw_content2 = item.get("content", "")
-                            content2, think_tags2 = strip_thinking_tokens(raw_content2)
-                            stats2 = result2.get("stats", {})
-                            ti2 = stats2.get("input_tokens", 0)
-                            to2 = stats2.get("total_output_tokens", 0)
-                            tps2 = stats2.get("tokens_per_second", 0)
-                            return content2, elapsed2, ti2, to2, tps2, think_tags2, None, None
-                return None, 0, 0, 0, 0, 0, "api_error", "No output in retry"
-            except (URLError, HTTPError, json.JSONDecodeError, KeyError, TimeoutError):
-                pass
+        # Retry: strip unsupported params (stop, then reasoning)
+        retry_body = {}
+        if "stop" in body:
+            retry_body = dict(body)
+            retry_body.pop("stop")
+            result_retry = _retry_native(retry_body, headers, timeout, "stop")
+            if result_retry is not None:
+                return result_retry
+        if "reasoning" in body:
+            if not retry_body:
+                retry_body = dict(body)
+            retry_body.pop("reasoning")
+            result_retry = _retry_native(retry_body, headers, timeout, "reasoning")
+            if result_retry is not None:
+                return result_retry
         err_text = str(e)
         try:
             if hasattr(e, "read"):
@@ -1711,7 +1736,7 @@ def benchmark_model(model_info: Any, tasks: list[dict[str, Any]], task_type: str
         for attempt in range(1, MAX_RETRIES + 1):
             try:
                 result = run_task(task, task_type, model_identifier=model_identifier, api_model=api_model, model_config=model_config,
-                                  native_model_identifier=model_info.get("model_identifier", model_identifier))
+                                  native_model_identifier=api_model or model_info.get("model_identifier", model_identifier))
                 if result is not None and result.get("error_type") is None:
                     break
                 if result is not None and result.get("error_type"):

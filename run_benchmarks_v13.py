@@ -752,7 +752,7 @@ def run_evalplus(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_siz
         backend="openai",
         dataset=dataset,
         base_url=API_BASE,
-        temperature=0.0,
+        temperature=0.0 if not gptoss else 0.7,
         instruction_prefix="Please provide a self-contained Python script that solves the following problem in a markdown code block:",
         response_prefix="Below is a Python script with a self-contained function that solves the problem and passes corresponding tests:",
     )
@@ -1242,6 +1242,61 @@ def main() -> None:
                 print(f"\n  [ERROR] {model_display}: reasoning-Feld fehlt – "
                       "`python registry_tool.py sync` ausführen (fill-arch liest es aus GGUF). Überspringe.")
                 continue
+
+            # 3. YAML template: -> Config JSON promptTemplate vorhanden?
+            tpl = registry[matched_key].get("template")
+            if tpl:
+                from registry_tool import TEMPLATE_DIR
+                tpl_path = TEMPLATE_DIR / tpl
+                if not tpl_path.exists():
+                    print(f"\n  [WARN] {model_display}: template='{tpl}' -> Datei nicht gefunden ({tpl_path})")
+
+            # 4. `capabilities`-Feld vorhanden?
+            caps = registry[matched_key].get("capabilities")
+            if not caps:
+                print(f"\n  [ERROR] {model_display}: capabilities-Feld fehlt – "
+                      "`assemble_blueprint.py classify` ausführen. Überspringe.")
+                continue
+
+            # 5. `blueprint`-Feld vorhanden?
+            bp = registry[matched_key].get("blueprint")
+            if not bp or bp == "none":
+                print(f"\n  [ERROR] {model_display}: blueprint-Feld fehlt oder 'none' – "
+                      "`assemble_blueprint.py classify` ausführen. Überspringe.")
+                continue
+
+            # 6. `truncation`-Feld vorhanden?
+            trunc = registry[matched_key].get("truncation")
+            if trunc not in ("full", "medium", "minimal"):
+                print(f"\n  [WARN] {model_display}: truncation-Feld fehlt oder ungültig ('{trunc}') – "
+                      "`assemble_blueprint.py classify` ausführen. Setze default='full'.")
+                registry[matched_key]["truncation"] = "full"
+
+            # 7. Wurde `assemble` bereits ausgeführt? (systemPrompt in Config JSON)
+            try:
+                from assemble_blueprint import read_lms_configs
+                from pathlib import Path as _Path
+                cfgs = read_lms_configs(_Path.home() / ".lmstudio" / ".internal" / "user-concrete-model-default-config")
+                cfg_key = normalize_model_name(model_identifier)
+                found_cfg = None
+                for c in cfgs:
+                    if normalize_model_name(c.get("dir_name", "")) == cfg_key:
+                        found_cfg = c
+                        break
+                if found_cfg:
+                    jp = _Path(found_cfg["json_path"])
+                    if jp.exists():
+                        _data = json.loads(jp.read_text(encoding="utf-8-sig"))
+                        sys_prompt = ""
+                        for _f in _data.get("operation", {}).get("fields", []):
+                            if _f.get("key") == "llm.prediction.systemPrompt":
+                                sys_prompt = _f.get("value", "")
+                                break
+                        if not sys_prompt:
+                            print(f"\n  [WARN] {model_display}: systemPrompt in Config JSON ist leer – "
+                                  "`assemble_blueprint.py assemble` ausführen.")
+            except Exception:
+                pass
 
             is_reasoning_model = (reasoning_val == "thinking") or _is_qwen3_6_model(model_identifier)
         except Exception:

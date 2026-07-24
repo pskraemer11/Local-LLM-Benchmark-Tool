@@ -14,7 +14,7 @@ import consolidate_results_v13 as cr
 from benchmark_config import CAT_WEIGHTS, OVERALL_WEIGHTS, QUANT_MAP
 from consolidate_results_v13 import (
     _auto_delimiter,
-    _find_dir_ci,
+    _find_newest_by_mtime,
     _normalize_model_keys,
     _percentile,
     _read_col,
@@ -191,44 +191,53 @@ class TestNormalizeModelKeys:
 
 
 # ======================================================================
-# _find_dir_ci
+# _find_newest_by_mtime
 # ======================================================================
 
-class TestFindDirCi:
+class TestFindNewestByMtime:
     def test_finds_exact_directory(self, monkeypatch, tmp_path):
         monkeypatch.setattr(cr, "RESULTS_DIR", str(tmp_path))
         d = tmp_path / "lmeval_my-model"
         d.mkdir()
-        result = _find_dir_ci("lmeval", "my-model")
+        result = _find_newest_by_mtime("lmeval", "my-model")
         assert result == str(d)
 
     def test_finds_case_insensitive(self, monkeypatch, tmp_path):
         monkeypatch.setattr(cr, "RESULTS_DIR", str(tmp_path))
         d = tmp_path / "lmeval_MY-MODEL"
         d.mkdir()
-        result = _find_dir_ci("lmeval", "my-model")
-        # Compare via case-insensitive basename match (Windows preserves case)
+        result = _find_newest_by_mtime("lmeval", "my-model")
         assert os.path.normpath(result).lower() == os.path.normpath(str(d)).lower()
 
     def test_returns_none_when_not_found(self, monkeypatch, tmp_path):
         monkeypatch.setattr(cr, "RESULTS_DIR", str(tmp_path))
-        assert _find_dir_ci("lmeval", "nope") is None
+        assert _find_newest_by_mtime("lmeval", "nope") is None
 
     def test_slash_in_model_key_replaces_with_underscore(self, monkeypatch, tmp_path):
         monkeypatch.setattr(cr, "RESULTS_DIR", str(tmp_path))
         d = tmp_path / "lmeval_author_my-model"
         d.mkdir()
-        result = _find_dir_ci("lmeval", "author/my-model")
+        result = _find_newest_by_mtime("lmeval", "author/my-model")
         assert result == str(d)
 
     def test_falls_back_to_base_when_no_variant(self, monkeypatch, tmp_path):
         monkeypatch.setattr(cr, "RESULTS_DIR", str(tmp_path))
-        # Create only variant-less version
         d = tmp_path / "lmeval_model"
         d.mkdir()
-        # Search with @variant → second candidate is base
-        result = _find_dir_ci("lmeval", "model@q4_k_m")
+        result = _find_newest_by_mtime("lmeval", "model@q4_k_m")
         assert result == str(d)
+
+    def test_picks_newest_when_multiple_dirs(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(cr, "RESULTS_DIR", str(tmp_path))
+        d_old = tmp_path / "lmeval_model-old"
+        d_old.mkdir()
+        d_new = tmp_path / "lmeval_model-new"
+        d_new.mkdir()
+        # Set old dir mtime far in the past
+        old_mtime = 1000000
+        os.utime(str(d_old), (old_mtime, old_mtime))
+        result = _find_newest_by_mtime("lmeval", "model")
+        assert result == str(d_new)
 
 
 # ======================================================================

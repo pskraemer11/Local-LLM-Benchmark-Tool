@@ -17,17 +17,15 @@ grep -l "model-name" doc-git/model_registry.yaml
 ```
 
 **Case 1: Model is already in the registry**
-→ `sync_model_configs.ps1 -FullSync` or manually:
+Simply run:
 
 > **ℹ BLACKLIST check:** If the model name contains keywords like `embed`, `ocr`, `vision`,
 > `whisper`, `german`, `rag`, `translat`, `audio`, `vl`, `flux`, `bge-m3`, `datagemma-rig`,
 > `granitelib-rag`, or `em_german_13b`, it is in `BLACKLIST` and **will be skipped** by
-> `registry_tool.py` and `assemble_blueprint.py`. These models are not suitable for
+> `registry_tool.py`. These models are not suitable for
 > coding/benchmark use (embeddings, <16K context, OCR/vision/audio, etc.).
 ```
-python assemble_blueprint.py classify   # Update classification
-python assemble_blueprint.py assemble   # Write prompt to JSON
-python assemble_blueprint.py validate   # Syntax check
+python registry_tool.py sync
 ```
 
 **Case 2: New model – create entry in registry**
@@ -51,17 +49,18 @@ My-New-Model-8B:
 
 Then:
 ```
-python registry_tool.py sync           # Full maintenance: add → fill-arch → fill-reasoning → configs → sync-from-configs → sync-ctx → fill-ctx → fmt
-                                       #   add:           new models from LMS into registry (incl. GGUF architecture + reasoning data)
-                                       #   fill-arch:     n_layers/hidden_dim from GGUF headers for existing entries
-                                       #   fill-reasoning: reasoning (thinking/instruct) from GGUF chat_template, where missing
-                                       #   configs:       load.fields (offload, np, useUnifiedKvCache) into JSON configs
-                                       #   sync-from-configs:  JSON→Registry (offload, np, ukv only; skips ctx)
-                                       #   sync-ctx:      context_length from JSON configs (missing only)
-                                       #   fill-ctx:      remaining context_length via formula
-                                       #   fmt:           normalize blank lines
-python assemble_blueprint.py classify   # → reasoning, blueprint, truncation, capabilities set
-python assemble_blueprint.py assemble   # → Prompt written
+python registry_tool.py sync           # Full maintenance – erledigt ALLES automatisch:
+                                        #   add:           new models from LMS into registry (incl. GGUF architecture + reasoning data)
+                                        #   fill-arch:     n_layers/hidden_dim from GGUF headers for existing entries
+                                        #   fill-reasoning: reasoning (thinking/instruct) from GGUF chat_template
+                                        #   configs:       load.fields (offload, np, useUnifiedKvCache) into JSON configs
+                                        #   sync-from-configs:  JSON→Registry (offload, np, ukv only; skips ctx)
+                                        #   sync-ctx:      context_length from JSON configs (missing only)
+                                        #   fill-ctx:      remaining context_length via formula
+                                        #   fmt:           normalize blank lines
+                                        #   classify:      reasoning, capabilities, blueprint, truncation setzen
+                                        #   assemble:      Prompt in JSON-Configs schreiben
+                                        #   validate:      Syntax-Prüfung
 ```
 
 **All info that classify + registry_tool.py determine automatically:**
@@ -117,16 +116,14 @@ mkdir -p ~/.lmstudio/hub/models/{publisher}/{model-name}/
 ```
 1. Delete GGUF            # Config is preserved
 2. Re-import GGUF          # Old config is recognized again
-3. python registry_tool.py sync           # Sync configs + registry
-4. python assemble_blueprint.py classify  # Update classification
-5. python assemble_blueprint.py assemble  # Rewrite prompt
+3. python registry_tool.py sync           # Registry + classify + assemble + validate in einem Schritt
 ```
 → Done. The old `model.yaml` (if present) is updated on `lms clone`/`lms get`, not on manual import.
 
 ### Cheat Sheet
 
 ```bash
-# Full maintenance (registry + configs)
+# DER EINE Befehl für alles (nach neuem Modell oder Änderungen)
 python registry_tool.py sync
 
 # Fill in architecture data from GGUF headers (n_layers, hidden_dim)
@@ -150,23 +147,6 @@ python registry_tool.py sync-from-configs
 # Compare registry vs LMS vs configs
 python registry_tool.py compare
 
-# Standard case (model known)
-python assemble_blueprint.py classify && assemble && validate
-
-# New model – automatically via sync_model_configs.ps1
-.\sync_model_configs.ps1 -AutoAdd
-# or manually:
-# → edit registry.yaml (enter publisher, arch, k/v_cache, offload, num_parallel)
-python registry_tool.py sync          # incl. fill-arch + fill-reasoning + configs in pipeline
-python assemble_blueprint.py classify  # fills reasoning, capabilities, blueprint, truncation
-python assemble_blueprint.py assemble
-
-# Full sync incl. prompt assembly
-.\sync_model_configs.ps1 -FullSync
-
-# Preview only (without writing)
+# Prompt-Preview (ohne zu schreiben)
 python assemble_blueprint.py preview
-
-# Validation after changes
-python assemble_blueprint.py validate
 ```
