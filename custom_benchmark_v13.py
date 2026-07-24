@@ -255,6 +255,31 @@ def subsample_tasks(tasks: list[dict[str, Any]], task_type: str, sample_size: in
     return selected
 
 
+_DS1000_BROKEN_API_PATTERNS: list[str] = [
+    "interp2d",  # removed in scipy 1.13+, breaks DS1000 task #339
+]
+
+
+def _filter_broken_code_tasks(tasks: list[dict]) -> list[dict]:
+    """Filter out DS1000 tasks whose code_context uses removed/broken APIs.
+
+    The official DS1000 environment pins scipy==1.12.0, but the current
+    benchmark environment has scipy>=1.17 where interp2d was removed.
+    These tasks would always score 0 due to harness error, not model quality.
+    """
+    filtered: list[dict] = []
+    removed = 0
+    for task in tasks:
+        code_ctx = task.get("code_context", "")
+        if any(p in code_ctx for p in _DS1000_BROKEN_API_PATTERNS):
+            removed += 1
+            continue
+        filtered.append(task)
+    if removed:
+        print(f"  [FILTER] {removed} Task(s) mit broken APIs entfernt (interp2d in code_context)")
+    return filtered
+
+
 class Monitor:
     def __init__(self) -> None:
         self.cpu_percent = []
@@ -2066,6 +2091,9 @@ def main() -> None:
                 tasks = tasks[:MAX_TASKS_PER_BENCHMARK]
             else:
                 print(f"\n  Loading {bench['file']} ({len(tasks)} tasks)")
+            # DS1000: Filter tasks whose code_context uses APIs removed from
+            # the current environment (e.g. scipy.interpolate.interp2d).
+            tasks = _filter_broken_code_tasks(tasks)
             tt = get_task_type(bench["file"])
             tasks = subsample_tasks(tasks, tt, sample_size=sample_size)
             try:
