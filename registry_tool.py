@@ -56,7 +56,8 @@ y.indent(mapping=2, sequence=4, offset=2)
 # import-error reporting when assemble_blueprint.py is broken.
 sys.path.insert(0, str(BASE_DIR))
 from assemble_blueprint import (
-    normalize_model_name, normalize_for_config, find_config_for_registry_key, find_registry_key_for_config,
+    normalize_model_name, normalize_for_config, find_config_for_registry_key,
+    find_all_configs_for_registry_key, find_registry_key_for_config,
     read_lms_configs, _ARCH_REASONING_MAP,
     classify_registry, create_blueprint_definitions,
     assemble_prompts, validate_prompts,

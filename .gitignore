@@ -44,11 +44,6 @@ benchmark-dirs.txt
 # Embedding Evaluation (gross, inkl .venv mit torch)
 embedding-eval/
 
-# Temporäre Markdown-Dokumente / Notizen (nicht Teil des Frameworks)
-*.md
-!doc-git/**/*.md
-!README.md
-
 # Tools (separates Verzeichnis, nicht fester Repo-Bestandteil)
 tools/
 

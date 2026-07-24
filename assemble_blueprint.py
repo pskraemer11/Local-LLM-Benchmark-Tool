@@ -110,10 +110,26 @@ def find_config_for_registry_key(
     3. Registry key is prefix of config name (e.g. 'gemma-4-12b-it-qat' → 'gemma-4-12b-it-qat-q4-0')
     4. Config name is prefix of registry key (e.g. 'gemma-4-26b-a4b-it' → 'gemma-4-26b-a4b-it-quat')
     """
+    all_cfgs = _find_all_configs_for_registry_key(registry_key, configs)
+    return all_cfgs[0] if all_cfgs else None
+
+
+def find_all_configs_for_registry_key(
+    registry_key: str,
+    configs: list[dict],
+) -> list[dict]:
+    """Like find_config_for_registry_key but returns ALL matching configs."""
+    return _find_all_configs_for_registry_key(registry_key, configs)
+
+
+def _find_all_configs_for_registry_key(
+    registry_key: str,
+    configs: list[dict],
+) -> list[dict]:
+    """Internal: find all matching configs for a registry key (used by both single and multi)."""
     rn = normalize_model_name(registry_key)
     rn_broad = normalize_for_config(registry_key)
 
-    # Build config lookup
     cfg_exact: dict[str, list[dict]] = {}
     cfg_broad: dict[str, list[dict]] = {}
     cfg_raw: list[dict] = []
@@ -127,23 +143,25 @@ def find_config_for_registry_key(
 
     # Level 1: exact match
     if rn in cfg_exact:
-        return cfg_exact[rn][0]
+        return cfg_exact[rn]
 
     # Level 2: broad match (stripped quant/variant)
     if rn_broad in cfg_broad:
-        return cfg_broad[rn_broad][0]
+        return cfg_broad[rn_broad]
 
     # Level 3: registry key is prefix of config name
+    matched: list[dict] = []
     for cn, raw, cfg in cfg_raw:
         if cn.startswith(rn + '-'):
-            return cfg
+            matched.append(cfg)
+    if matched:
+        return matched
 
     # Level 4: config name is prefix of registry key
     for cn, raw, cfg in sorted(cfg_raw, key=lambda x: -len(x[0])):
         if rn.startswith(cn + '-') or rn_broad.startswith(cn + '-'):
-            return cfg
-
-    return None
+            matched.append(cfg)
+    return matched
 
 
 def find_registry_key_for_config(
