@@ -44,8 +44,9 @@ benchmark-dirs.txt
 # Embedding Evaluation (gross, inkl .venv mit torch)
 embedding-eval/
 
-# Tools (separates Verzeichnis, nicht fester Repo-Bestandteil)
-tools/
+# Nur bestimmte Tools-Dateien ausschliessen (lokal, nicht fuer Repo):
+#   tools/ rumpelt nicht im git status, aber neue Pipeline-Komponenten
+#   (wie lmeval_proxy.py) werden getrackt.
 
 # Coverage
 .coverage

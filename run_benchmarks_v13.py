@@ -173,6 +173,63 @@ RESULTS_DIR = os.path.join(BASE_DIR, "ergebnisse")
 DATA_DIR = os.path.join(BASE_DIR, "simple_evals")
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
+# ── LM-Eval Proxy ──────────────────────────────────────────────
+# Routes lm_eval's OpenAI Chat Completions requests through the native API
+# (/api/v1/chat) with reasoning='off' to suppress thinking tokens.
+# Only needed for reasoning models on lm_eval benchmarks.
+LMEVAL_PROXY_PORT = 1235
+LMEVAL_PROXY_SCRIPT = os.path.join(BASE_DIR, "tools", "lmeval_proxy.py")
+_lmeval_proxy_proc: Optional[subprocess.Popen] = None
+
+
+def _proxy_is_running() -> bool:
+    return _lmeval_proxy_proc is not None and _lmeval_proxy_proc.poll() is None
+
+
+def _start_lmeval_proxy() -> None:
+    global _lmeval_proxy_proc
+    if _proxy_is_running():
+        return
+    if not os.path.isfile(LMEVAL_PROXY_SCRIPT):
+        print(f"  [WARN] lmeval_proxy.py not found at {LMEVAL_PROXY_SCRIPT} – proxy disabled")
+        return
+    try:
+        _lmeval_proxy_proc = subprocess.Popen(
+            [sys.executable, LMEVAL_PROXY_SCRIPT, "--port", str(LMEVAL_PROXY_PORT)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        # Wait briefly for startup
+        import socket
+        for _ in range(10):
+            if _proxy_is_running():
+                try:
+                    s = socket.socket()
+                    s.settimeout(0.5)
+                    s.connect(("127.0.0.1", LMEVAL_PROXY_PORT))
+                    s.close()
+                    print(f"  [OK] LM-Eval Proxy on port {LMEVAL_PROXY_PORT} (reasoning=off for lm_eval)")
+                    return
+                except (ConnectionRefusedError, OSError):
+                    pass
+            time.sleep(0.3)
+        print(f"  [WARN] lmeval_proxy started but not responding on port {LMEVAL_PROXY_PORT}")
+    except Exception as e:
+        print(f"  [WARN] lmeval_proxy failed to start: {e}")
+
+
+def _stop_lmeval_proxy() -> None:
+    global _lmeval_proxy_proc
+    if _lmeval_proxy_proc is None:
+        return
+    try:
+        _lmeval_proxy_proc.terminate()
+        _lmeval_proxy_proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        _lmeval_proxy_proc.kill()
+    except Exception:
+        pass
+    _lmeval_proxy_proc = None
+
 # Magic-string constants (Code-Review 2026-07-18 §5.3): sentinel model
 # name required by evalplus.provider.make_model(). The actual model
 # routing happens via the OpenAI-compatible request to LMS.
@@ -865,11 +922,13 @@ def run_lmeval(model_info: AvailableModelInfo, bench: BenchmarkDef, limit: int =
     t0 = time.time()
     evaluation_parameters = _get_evaluation_parameters(model_identifier, bench_name=bench['name'])
     if is_reasoning_model and evaluation_parameters.get("reasoning") == "off":
-        print(f"  [WARN] Reasoning model via OpenAI endpoint – enable_thinking=False sends `reasoning: \"off\"`")
-        print(f"         to {API_BASE}/chat/completions. LM Studio IGNORES this on the OpenAI endpoint.")
-        print(f"         Native API (/api/v1/chat with reasoning='off') is NOT used by lm_eval.")
-        print(f"         → If latency is 10-20x higher, this is the cause. Skip lm_eval benchmarks")
-        print(f"           for reasoning models, or verify `reasoning: off` is respected at this endpoint.")
+        if _proxy_is_running():
+            print(f"  [INFO] Reasoning model via proxy – requests routed to Native API with reasoning='off'")
+        else:
+            print(f"  [WARN] Reasoning model via OpenAI endpoint – `reasoning: \"off\"` ignored by LM Studio.")
+            print(f"         Native API (/api/v1/chat with reasoning='off') is NOT used by lm_eval.")
+            print(f"         → If latency is 10-20x higher, this is the cause. Skip lm_eval benchmarks")
+            print(f"           for reasoning models, or use --lmeval-proxy.")
     #
     # Split params: constructor-level (--model_args) vs. generation-level (--generation_parameters).
     #
@@ -887,8 +946,10 @@ def run_lmeval(model_info: AvailableModelInfo, bench: BenchmarkDef, limit: int =
     #           otherwise LM Studio responds with HTTP 400 "model not found".
     #           A test with "model=check" (invalid name) causes the request to HANG
     #           (no timeout, no error response) – therefore ALWAYS use api_model.
+    use_proxy = _proxy_is_running() and evaluation_parameters.get("reasoning") == "off"
+    lm_base_url = f"http://127.0.0.1:{LMEVAL_PROXY_PORT}/v1/chat/completions" if use_proxy else f"{API_BASE}/chat/completions"
     model_settings = {
-        "base_url": f"{API_BASE}/chat/completions",
+        "base_url": lm_base_url,
         "model": api_model,
         "num_concurrent": 1,
         "max_gen_toks": 512,
@@ -1215,6 +1276,16 @@ def main() -> None:
 
     print(f"  Benchmarks: {', '.join(b['name'] for b in benchmarks)}")
 
+    # Start LM-Eval proxy if needed: reasoning model + lm_eval benchmarks
+    lmeval_names = {b["name"] for b in LMEVAL_BENCHMARKS}
+    has_lmeval = any(b["name"] in lmeval_names for b in benchmarks)
+    has_reasoning_model = any(
+        _is_reasoning_model(m["key"])
+        for m in models
+    )
+    if has_lmeval and has_reasoning_model:
+        _start_lmeval_proxy()
+
     all_summary = []
     for midx, model_info in enumerate(models, 1):
         model_identifier = model_info["key"]
@@ -1412,6 +1483,9 @@ def main() -> None:
                                                   no_structured_output=str(args.no_structured_output or ""),
                                                   no_unload_between='True' if not args.unload_between else '',
                                                   base_dir=BASE_DIR)
+
+    # Stop LM-Eval proxy
+    _stop_lmeval_proxy()
 
     print("\n" + "=" * 60)
     print("  FINISHED")
