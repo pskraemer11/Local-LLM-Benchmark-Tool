@@ -37,13 +37,16 @@ def _upstream_url(upstream: str, path: str) -> str:
     return f"{u}/{p}"
 
 
+# Longer timeout for native API calls (MATH-500 needs up to 120s per request)
+NATIVE_API_TIMEOUT = 300
+
 def _proxy_upstream(upstream: str, path: str, headers: dict, body: bytes = None) -> tuple[int, dict, bytes]:
     """Forward a request to LM Studio and return (status, response_headers, body)."""
     url = _upstream_url(upstream, path)
     method = "POST" if body else "GET"
     req = Request(url, data=body, headers=headers, method=method)
     try:
-        with urlopen(req, timeout=30) as resp:
+        with urlopen(req, timeout=NATIVE_API_TIMEOUT) as resp:
             resp_headers = dict(resp.headers)
             return resp.status, resp_headers, resp.read()
     except Exception as e:
@@ -337,7 +340,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
         try:
-            with urlopen(req, timeout=120) as native_resp:
+            with urlopen(req, timeout=NATIVE_API_TIMEOUT) as native_resp:
                 buffer = b""
                 while True:
                     chunk = native_resp.read(4096)
