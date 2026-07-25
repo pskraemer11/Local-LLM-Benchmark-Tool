@@ -38,7 +38,7 @@ def _upstream_url(upstream: str, path: str) -> str:
 
 
 # Longer timeout for native API calls (MATH-500 needs up to 120s per request)
-NATIVE_API_TIMEOUT = 300
+NATIVE_API_TIMEOUT = 900
 
 def _proxy_upstream(upstream: str, path: str, headers: dict, body: bytes = None) -> tuple[int, dict, bytes]:
     """Forward a request to LM Studio and return (status, response_headers, body)."""
