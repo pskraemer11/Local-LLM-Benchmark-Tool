@@ -1,4 +1,4 @@
-# Parallel Slots, useUnifiedKvCache & Context Length Optimization (np) – LM Studio
+# Parallel Slots Optimization (np) – LM Studio
 
 ## Problem
 
@@ -10,7 +10,7 @@ For **sequential batch jobs** (e.g. benchmarks, one request after another), the 
 | Architecture                     | Optimal np | Reason                                                         |
 |----------------------------------|------------|----------------------------------------------------------------|
 | **Dense** (all parameters active)| **np=1**   | LCP cache reuse saves prompt tokens; GPU is already saturated  |
-| **MoE** (only subset active)     | **np=4**   | LCP cache reuse not supported; batching fills GPU better       |
+| **MoE** (only subset active)     | **np=4**   | LCP cache reuse not supported; batching fills GPU better        |
 
 ### Measurement Dense: Qwen2.5 Coder 14B, two quantization variants (08./09.07.2026)
 
@@ -105,12 +105,12 @@ Each question has **different few-shot examples** (randomly drawn from the train
 
 **np=4 vs np=1 under benchmark load:**
 
-| Aspect                | np=4                                            | np=1                     |
-|-----------------------|-------------------------------------------------|--------------------------|
-| LCP hits              | **0** (never)                                   | **0** (never)            |
-| Effective usage       | 1 slot active, 3 slots unused                   | 1 slot active            |
-| KV-Cache VRAM         | **4× base** (3× waste)                          | 1× base                  |
-| Progressive slowdown  | **Yes** – VRAM pressure grows over time         | No (minimal cache)       |
+| Aspect                | np=4                                   | np=1                     |
+|-----------------------|----------------------------------------|--------------------------|
+| LCP hits              | **0** (never)                          | **0** (never)            |
+| Effective usage       | 1 slot active, 3 slots unused          | 1 slot active            |
+| KV-Cache VRAM         | **4× base** (3× waste)                 | 1× base                  |
+| Progressive slowdown  | **Yes** – VRAM pressure grows over time | No (minimal cache)       |
 | Result                | Same speed as np=1, but higher VRAM consumption | Same speed, minimal VRAM |
 
 ### Progressive Slowdown
@@ -161,8 +161,7 @@ Example for a 16 GB VRAM GPU (approximate values, depends on model size and KV q
 | 2   | ~50 % of np=1 values                 |
 | 4   | ~25 % of np=1 values                 |
 
-
-##### useUnifiedKvCache & context length – VRAM Formula ###
+## useUnifiedKvCache – VRAM Formula
 
 As of 17.07.2026, `useUnifiedKvCache` (JSON field `llm.load.useUnifiedKvCache`) is no longer set via a blanket `<9 GB` heuristic, but through an **architecture-aware VRAM estimate**:
 
@@ -173,12 +172,12 @@ kv_gb        = n_layers × hidden_dim × 2 × kv_bytes × context_length / 1e9
 total_gb     = model_gb + kv_gb × num_parallel
 ```
 
-| Condition                                   | useUnifiedKvCache | Reason                                 |
-|---------------------------------------------|:------------------:|---------------------------------------|
-| `total_gb < 14.0`                           | `false` (OFF)      | Enough VRAM for separate caches       |
-| `total_gb ≥ 14.0`                           | `true` (ON)        | VRAM shortage, shared cache           |
-| No architecture data + `model_gb ≥ 9.0`     | `true` (ON)        | Old heuristic (fallback)              |
-| No architecture data + `model_gb < 9.0`     | `false` (OFF)      | Old heuristic (fallback)              |
+| Condition                                   | useUnifiedKvCache | Reason                             |
+|---------------------------------------------|:------------------:|------------------------------------|
+| `total_gb < 14.0`                           | `false` (OFF)      | Enough VRAM for separate caches    |
+| `total_gb ≥ 14.0`                           | `true` (ON)        | VRAM shortage, shared cache        |
+| No architecture data + `model_gb ≥ 9.0`     | `true` (ON)        | Old heuristic (fallback)           |
+| No architecture data + `model_gb < 9.0`     | `false` (OFF)      | Old heuristic (fallback)           |
 | np = 1                                      | `false` (OFF)      | Only one slot, no shared cache needed |
 
 **Source of architecture data:** `n_layers` and `hidden_dim` are automatically read from the GGUF header when adding new models (`registry_tool.py add`) using `block_count` and `embedding_length` respectively. The header reader takes ~1ms per file (unlike `GGUFReader` from the gguf package, which memory-maps the entire ~12GB file).
