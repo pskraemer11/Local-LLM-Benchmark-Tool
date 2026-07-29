@@ -813,7 +813,7 @@ ibm-granite/granite-4.0-h-tiny:
     \ | max. 1 Mio Kontext | Code-, Math- & Multilingual-Faehigkeiten"
   reasoning: instruct
   capabilities: coding, text
-  blueprint: default_chat
+  blueprint: coding_agent
   truncation: full
   custom_template: true
   context_length: 241979
@@ -839,7 +839,7 @@ unsloth/granite-4.0-h-tiny-ud:
     \ 128K Kontext | Unsloth UD-Feintuning | max. 1 Mio Kontext | Code-, Math- & Multilingual-Faehigkeiten"
   reasoning: instruct
   capabilities: coding, text
-  blueprint: default_chat
+  blueprint: coding_agent
   truncation: full
   custom_template: true
   offload: 1
@@ -864,7 +864,7 @@ unsloth/granite-4.0-h-tiny-ud:
     \ SwiGLU, RMSNorm, shared input/output embeddings | Code-, Math- & Multilingual-Faehigkeiten"
   reasoning: instruct
   capabilities: coding, text
-  blueprint: default_chat
+  blueprint: coding_agent
   truncation: full
   custom_template: true
   context_length: 120989
@@ -889,7 +889,7 @@ unsloth/granite-4.1-8b-ud:
     \ Math- & Multilingual-Faehigkeiten"
   reasoning: instruct
   capabilities: coding, text
-  blueprint: default_chat
+  blueprint: coding_agent
   truncation: full
   custom_template: true
   offload: 1
@@ -913,7 +913,7 @@ unsloth/granite-4.1-8b-ud:
   notes: "Architektur: Granite-4.1 | Dense 30B | 131K Kontext | Code-, Math- & Multilingual-Faehigkeiten"
   reasoning: instruct
   capabilities: coding, text
-  blueprint: default_chat
+  blueprint: coding_agent
   truncation: full
   custom_template: true
   context_length: 65536
@@ -938,7 +938,7 @@ mradermacher/granite-4.1-30b-i1:
     \ (i1) | Code-, Math- & Multilingual-Faehigkeiten"
   reasoning: instruct
   capabilities: coding, text
-  blueprint: default_chat
+  blueprint: coding_agent
   truncation: full
   custom_template: true
   context_length: 65536

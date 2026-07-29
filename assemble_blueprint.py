@@ -684,6 +684,42 @@ def create_blueprint_definitions() -> None:
             "modules": ["gemma_capabilities", "gemma_think_token", "safety_block", "output_style_default"],
             "custom_template": True,
         },
+        "gptoss_reasoning": {
+            "description": "GPT-OSS Harmony-Format (Reasoning + Coding)",
+            "role": "You are GPT-OSS, a helpful AI assistant with coding and reasoning skills.",
+            "role_template": "You are {name}, a {arch} model{params_label} by {publisher}, optimized for {capabilities}{type_label}.",
+            "modules": ["thinking_instruction", "coding_principles", "safety_block", "output_style_technical"],
+        },
+        "magistral_reasoning": {
+            "description": "Magistral [THINK]-Format (Reasoning + Coding)",
+            "role": "You are Magistral, an AI assistant that thinks before answering.",
+            "role_template": "You are {name}, a {arch} model{params_label} by {publisher}, optimized for {capabilities}{type_label}.",
+            "modules": ["thinking_instruction", "coding_principles", "safety_block", "output_style_technical"],
+        },
+        "phi4_reasoning": {
+            "description": "Phi-4-Reasoning-Plus <think>-Format",
+            "role": "You are Phi-4, an AI assistant that reasons step by step before answering.",
+            "role_template": "You are {name}, a {arch} model{params_label} by {publisher}, optimized for {capabilities}{type_label}.",
+            "modules": ["thinking_instruction", "coding_principles", "safety_block", "output_style_technical"],
+        },
+        "ministral_reasoning": {
+            "description": "Ministral Reasoning [THINK]-Format",
+            "role": "You are Ministral, an AI assistant that reasons before answering.",
+            "role_template": "You are {name}, a {arch} model{params_label} by {publisher}, optimized for {capabilities}{type_label}.",
+            "modules": ["thinking_instruction", "coding_principles", "safety_block", "output_style_technical"],
+        },
+        "nemotron_reasoning": {
+            "description": "Nemotron Cascade Thinking-Format",
+            "role": "You are Nemotron, an AI assistant that thinks through problems carefully.",
+            "role_template": "You are {name}, a {arch} model{params_label} by {publisher}, optimized for {capabilities}{type_label}.",
+            "modules": ["thinking_instruction", "coding_principles", "safety_block", "output_style_technical"],
+        },
+        "apriel_reasoning": {
+            "description": "Apriel Thinker [BEGIN FINAL RESPONSE]-Format",
+            "role": "You are Apriel, an AI assistant that analyzes problems thoroughly.",
+            "role_template": "You are {name}, a {arch} model{params_label} by {publisher}, optimized for {capabilities}{type_label}.",
+            "modules": ["thinking_instruction", "coding_principles", "safety_block", "output_style_technical"],
+        },
         "none": {
             "description": "No blueprint (audio/vision/etc.)",
             "role": "",
