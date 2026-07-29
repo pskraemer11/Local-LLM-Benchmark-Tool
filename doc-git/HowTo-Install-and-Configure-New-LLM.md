@@ -2,36 +2,39 @@
 
 ### Phase A – LM Studio handles automatically
 
-| Step                                                   | What happens                                                  | Where                                                                               |
-|--------------------------------------------------------|---------------------------------------------------------------|-------------------------------------------------------------------------------------|
-| ① Import GGUF / `lms get`                              | File lands in `~/.lmstudio/models/{publisher}/{name}/`        |
-| ② First load of the model                              | LMS generates JSON config                                     | `~/.lmstudio/.internal/user-concrete-model-default-config/{publisher}/{dir}/*.json` |
-| ③ If `hub/models/{pub}/{model}/model.yaml` exists       | Its `config.operation.fields` are merged into the JSON        |
-| ④ If `hub/models/{pub}/{model}/*.jinja` exists          | Its chat template overrides the embedded GGUF template        |
+| Step                                              | What happens                                           | Where                                                                               |
+|---------------------------------------------------|--------------------------------------------------------|-------------------------------------------------------------------------------------|
+| ① Import GGUF / `lms get`                         | File lands in `~/.lmstudio/models/{publisher}/{name}/` |
+| ② First load of the model                         | LMS generates JSON config                              | `~/.lmstudio/.internal/user-concrete-model-default-config/{publisher}/{dir}/*.json` |
+| ③ If `hub/models/{pub}/{model}/model.yaml` exists | Its `config.operation.fields` are merged into the JSON |
+| ④ If `hub/models/{pub}/{model}/*.jinja` exists    | Its chat template overrides the embedded GGUF template |
 
 ### Phase B – Manual check & our pipeline
 
+**Check: Is the model in the registry?**
 ```bash
-# 1. Check: Is the model in the registry?
 grep -l "model-name" doc-git/model_registry.yaml
 ```
 
 **Case 1: Model is already in the registry**
-Simply run:
 
-> **ℹ BLACKLIST check:** If the model name contains keywords like `embed`, `ocr`, `vision`,
-> `whisper`, `german`, `rag`, `translat`, `audio`, `vl`, `flux`, `bge-m3`, `datagemma-rig`,
-> `granitelib-rag`, or `em_german_13b`, it is in `BLACKLIST` and **will be skipped** by
-> `registry_tool.py`. These models are not suitable for
-> coding/benchmark use (embeddings, <16K context, OCR/vision/audio, etc.).
+1. *ℹ BLACKLIST check:* 
+      If the model name contains keywords like `embed`, `ocr`, `vision`, `whisper`, `german`, `rag`, `translat`, `audio`, `vl`, `flux`, `bge-m3`, `datagemma-rig`, `granitelib-rag`, or `em_german_13b`, 
+      it is in `BLACKLIST` and **will be skipped** by `registry_tool.py`. 
+      These models are not suitable for coding/math-benchmark use (embeddings, OCR/vision/audio, <16K context length, etc.).
+
+2. Simply run:
 ```
 python registry_tool.py sync
 ```
 
 **Case 2: New model – create entry in registry**
 
-Easiest way: `sync_model_configs.ps1 -AutoAdd` detects the model via `lms ls` and registers it automatically. Manual:
+Easiest way: 
+Run in MS-PowerShell:
+`sync_model_configs.ps1 -AutoAdd` detects the model via `lms ls` and registers it automatically. 
 
+or Manual:
 `doc-git/model_registry.yaml` – insert entry (alphabetical position):
 ```yaml
 My-New-Model-8B:
@@ -47,7 +50,7 @@ My-New-Model-8B:
   # are set automatically by classify + registry_tool.py
 ```
 
-Then:
+Then call:
 ```
 python registry_tool.py sync           # Full maintenance – erledigt ALLES automatisch:
                                         #   add:           new models from LMS into registry (incl. GGUF architecture + reasoning data)
@@ -93,7 +96,8 @@ With np=1 or missing architecture data: `useUnifiedKvCache = model_gb ≥ 9.0` (
 
 **When do I need a Jinja template override?**
 
-Only if the model has special chat template tokens not embedded in the GGUF. The only case so far: **Gemma-4** with `<|think|>` token.
+Only if the model has special chat template tokens not embedded in the GGUF. 
+For example: **Gemma-4** with `<|think|>` token.
 
 ```bash
 # Create Jinja override (if necessary)
@@ -109,7 +113,8 @@ mkdir -p ~/.lmstudio/hub/models/{publisher}/{model-name}/
 | `config.operation.fields` (default temperature, parsing)| `essentialai/rnj-1/model.yaml` → `reasoning.parsing` with `THOUGHT:/RESPONSE:`    |
 | `base` keys (multiple quants → one base model)          | `mistralai/codestral-22b-v0.1/model.yaml` → lmstudio-community-GGUF               |
 
-⚠️ **Caution (from the chronicle, line 2159):** `model.yaml` creates a **virtual model instance** in LMS. If the same GGUF is already loaded as a physical instance → **HTTP-500 conflict** (two instances on the same file). Solution: use `model.yaml` only for models without a physical GGUF, or use alternative base keys.
+⚠️ **Caution (from the chronicle, line 2159):** `model.yaml` creates a **virtual model instance** in LMS. If the same GGUF is already loaded as a physical instance 
+    → **HTTP-500 conflict** (two instances on the same file). Solution: use `model.yaml` only for models without a physical GGUF, or use alternative base keys.
 
 ### Phase D – After GGUF reinstallation (deleted + reloaded)
 

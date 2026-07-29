@@ -12,7 +12,7 @@ The benchmark system consists of **four independent evaluation pipelines**, cont
 
 | Pipeline                  | Script(s)                             | Benchmarks                                     | Evaluation                                 |
 |---------------------------|----------------------------------------|------------------------------------------------|--------------------------------------------|
-| **Custom Script v10**     | `custom_benchmark_v13.py`              | DS1000, CoderEval                              | `exec_sandboxed()` + Namespace comparison   |
+| **Custom Script v10**     | `custom_benchmark.py`              | DS1000, CoderEval                              | `exec_sandboxed()` + Namespace comparison   |
 | **lm-evaluation-harness** | `lm_eval` CLI                          | MATH-500, ARC-Challenge, HellaSwag, TruthfulQA | `generate_until` + Regex extraction        |
 | **evalplus**              | `evalplus.codegen`+`evalplus.evaluate` | HumanEval+, MBPP+                              | Differential testing with plus_input       |
 | **Agentic**               | `tool_eval_bench` CLI                  | Agentic (69 scenarios)                         | tool-eval-bench Envelope (final_score)     |
@@ -62,7 +62,7 @@ benchmark_config.py (CENTRAL CONFIGURATION)
 ├── BLACKLIST (embedding models, <16K context, OCR/vision/audio/translation, rag/german)
 └── EXCLUDE_KEYWORDS = BLACKLIST (alias, backward-compat)
 
-run_benchmarks_v13.py (LAUNCHER - main(), v10)
+run_benchmarks.py (LAUNCHER - main(), v10)
 ├── ONLY HERE is load/unload called
 ├── Controls all 4 pipelines
 ├── Custom subprocess via dynamic glob (always the highest _vXX file)
@@ -90,7 +90,7 @@ run_benchmarks_v13.py (LAUNCHER - main(), v10)
 │   → evalplus_codegen now generates exactly sample_size tasks, no legacy artifacts
 └── Version internal: "Unified Benchmark Launcher v10"
 
-custom_benchmark_v13.py (CUSTOM BENCHMARKS, v10)
+custom_benchmark.py (CUSTOM BENCHMARKS, v10)
 ├── NEVER calls load/unload
 ├── Assumes model is ready
 ├── DS1000 + CoderEval (PandasEval removed)
@@ -103,9 +103,9 @@ custom_benchmark_v13.py (CUSTOM BENCHMARKS, v10)
 ├── Saves tasks_*.csv + model_*.csv
 ├── No legacy paths (old format, interactive mode removed)
 ├── Complete type hints (55 functions)
-└── Standalone mode warns -> Use run_benchmarks_v13.py
+└── Standalone mode warns -> Use run_benchmarks.py
 
-consolidate_results_v13.py (CONSOLIDATION, v10)
+consolidate_results.py (CONSOLIDATION, v10)
 ├── ModelData dataclass (instead of raw dicts)
 ├── median/p90 columns in CSV and MD
 ├── compute_category_scores() normalizes by available benchmarks
@@ -142,7 +142,7 @@ After the review on 28.06., the following architecture changes were implemented:
 - **Central configuration**: `benchmark_config.py` for weights, tool-eval scenarios.
 - **Task-Retry**: `MAX_RETRIES=3` with exponential backoff on API errors.
 - **MMLU-Pro helper extracted**: `_get_lmeval_params()`, `_build_lmeval_cmd()`, `_parse_subset_score()` as testable individual functions.
-- **ModelData dataclass**: In `consolidate_results_v13.py` – typed CSV rows instead of raw dicts.
+- **ModelData dataclass**: In `consolidate_results.py` – typed CSV rows instead of raw dicts.
 - **System metrics**: Median + P90 instead of Mean + Max (more robust against outliers).
 - **CSV schema**: `fn_csv` extended with CPU_med/CPU_p90/GPU_med/GPU_p90/RAM_med/RAM_p90/GPU_Temp_p90.
 - **API_BASE**: No longer hardcoded, but sourced from `model_manager.API_BASE`.
@@ -151,15 +151,15 @@ After the review on 28.06., the following architecture changes were implemented:
 - **Granite 4.0 H Tiny**: Experts=64 causes `ggml_new_object: not enough space` at 1M Context; only viable with Experts=16.
 - **Thinking mode via CLI**: `--thinking` flag forces `enable_thinking=True` for MATH-500 on all reasoning models (controlled via `REASONING_PATTERNS` in `benchmark_config.py`).
 - **Structured output (v30)**: Custom pipeline uses `response_format` with JSON schema (`{"code": "..."}`) via LM Studio API. Guarantees valid JSON, eliminates ~12% parsing errors (empty responses, markdown extraction). Fallback via `--no-structured-output`.
-- **Paired bootstrap comparison (v30)**: `consolidate_results_v13.py --compare "key1,key2,key3"` compares all pairs with paired bootstrap CI. `--seed` ensures identical task subsets.
-- **--seed for reproducibility (v30)**: `run_benchmarks_v13.py --seed 42` and `custom_benchmark_v13.py --seed 42` enable reproducible task selection.
+- **Paired bootstrap comparison (v30)**: `consolidate_results.py --compare "key1,key2,key3"` compares all pairs with paired bootstrap CI. `--seed` ensures identical task subsets.
+- **--seed for reproducibility (v30)**: `run_benchmarks.py --seed 42` and `custom_benchmark.py --seed 42` enable reproducible task selection.
 - **--bootstrap removed (v30)**: CIs are always computed when per-item data exists. No flag needed.
 - **Context length (v32)**: Taken from the `user-concrete-model-default-config` JSONs (no longer a CLI parameter). Typically 8192-16384 – sufficient for all benchmarks (DS1000~1.2K, MATH-500~1K, Agentic~9K), massively reduces VRAM pressure on 128K models.
 - **Variant C+ (p6)**: Sampling parameters are no longer model-specific but benchmark-category-dependent. Four category defaults (`coding`, `math`, `knowledge`, `agentic`) in `BENCHMARK_CATEGORY_DEFAULTS` + optional model overrides in `MODEL_TEMP_OVERRIDES`. Unified `get_model_config()` function replaces the separate `_get_model_config()` and `_get_lmeval_params()` (see §2.10).
 
 ---
 
-## 2. Main Flow (run_benchmarks_v13.py)
+## 2. Main Flow (run_benchmarks.py)
 
 ### 2.1 main() Function – Central Model Management
 
@@ -205,7 +205,7 @@ main()
 │   │   ├── if lmeval (MATH-500, ARC, HellaSwag, TruthfulQA):
 │   │   │   └── lm_eval --model local-chat-completions
 │   │   └── if custom (DS1000/CoderEval):
-│   │       └── custom_benchmark_v13.py --subprocess
+│   │       └── custom_benchmark.py --subprocess
 │   │           (Script resolved via dynamic glob: CUSTOM_BENCHMARK_SCRIPT)
 │   │
 │   └── all_summary.append(result)                # all 4 pipelines (Bugfix 28.06.)
@@ -217,7 +217,7 @@ main()
 
 ### 2.1a Pre-Run Registry-Prüfungen (NEW 24.07.)
 
-Vor dem Laden eines Modells prüft `run_benchmarks_v13.py` 7 Bedingungen. Jede nicht bestandene Prüfung führt zu **skip mit Fehlermeldung** (ERROR) oder **WARN**:
+Vor dem Laden eines Modells prüft `run_benchmarks.py` 7 Bedingungen. Jede nicht bestandene Prüfung führt zu **skip mit Fehlermeldung** (ERROR) oder **WARN**:
 
 | # | Prüfung | Fehlermodus | Empfohlener Fix |
 |---|---------|-------------|-----------------|
@@ -235,8 +235,8 @@ Vor dem Laden eines Modells prüft `run_benchmarks_v13.py` 7 Bedingungen. Jede n
 
 **NEW (v20+):**
 - `model_manager.py` contains ALL model functions
-- `run_benchmarks_v13.py` imports from `model_manager` - only caller of load/unload
-- `custom_benchmark_v13.py` imports from `model_manager`, **never** calls `load/unload`
+- `run_benchmarks.py` imports from `model_manager` - only caller of load/unload
+- `custom_benchmark.py` imports from `model_manager`, **never** calls `load/unload`
 - `_api_model` (exact ID from `lms ps`) is used consistently in **all** pipelines
 - `API_BASE` is sourced from `model_manager.API_BASE` (not hardcoded in the Launcher)
 - **Context length:** Taken from the `user-concrete-model-default-config` JSONs (no longer a parameter to `load_model_via_lms()`). Typically 8192–16384 – sufficient for all pipelines (DS1000~1.2K, MATH-500~1K, Agentic~9K) and massively reduces VRAM pressure on models with native 128K+ context.
@@ -250,7 +250,7 @@ Vor dem Laden eines Modells prüft `run_benchmarks_v13.py` 7 Bedingungen. Jede n
 **NEW (v9 fix):** After `load_model_via_lms()`, the model is confirmed via `lms ps --json`. Then simple `time.sleep(10)` - no more polling loop:
 
 ```python
-# run_benchmarks_v13.py:
+# run_benchmarks.py:
 ok, api_model = load_model_via_lms(model_key)  # lms load + lms ps polling
 print("  [INFO] Waiting 10s for API initialization...")
 time.sleep(10)
@@ -305,9 +305,9 @@ classify_reasoning(model_name, notes, arch, existing_reasoning)
 
 | Funktion | Ort | Zweck |
 |----------|-----|-------|
-| `_is_reasoning_model()` | `run_benchmarks_v13.py` | Timeout ×2 für Reasoning-Modelle |
-| `_check_reasoning_registry()` | `run_benchmarks_v13.py` | Tri-State: True/False/None |
-| `is_reasoning_model` | `run_benchmarks_v13.py:1301` | Pre-Run-Check vor Modell-Ladung |
+| `_is_reasoning_model()` | `run_benchmarks.py` | Timeout ×2 für Reasoning-Modelle |
+| `_check_reasoning_registry()` | `run_benchmarks.py` | Tri-State: True/False/None |
+| `is_reasoning_model` | `run_benchmarks.py:1301` | Pre-Run-Check vor Modell-Ladung |
 | `get_model_config()` | `benchmark_config.py` | `--thinking`-Flag-Steuerung |
 | `classify_registry()` | `assemble_blueprint.py` | Massen-Klassifikation beim `sync` |
 
@@ -368,7 +368,7 @@ for attempt in range(1, MAX_RETRIES + 1):
 
 **Effect:** `extra_body.chat_template_kwargs.enable_thinking` now flows into the LM Studio request for the first time. `max_tokens` overrides YAML's `max_gen_toks`. `temperature`/`top_p`/`min_p` are set correctly.
 
-**Reference:** `run_benchmarks_v13.py:709-754`, `openai_completions.py:189-206` (LocalChatCompletion._create_payload)
+**Reference:** `run_benchmarks.py:709-754`, `openai_completions.py:189-206` (LocalChatCompletion._create_payload)
 
 ### 2.9 Sampling Parameters: Variant C+ (p6, 15.07.2026)
 
@@ -423,8 +423,8 @@ BENCHMARK_CATEGORY_DEFAULTS  (global, 4 entries)
 
 **Implementation:**
 - `benchmark_config.py`: `get_model_config(model_key, category, thinking)` – single merge function
-- `custom_benchmark_v13.py`: `_get_model_config()` delegates to `get_model_config()`; benchmark_category is determined in `benchmark_model()` via `get_benchmark_category(benchmark_name)`
-- `run_benchmarks_v13.py`: `_get_lmeval_params()` derives category from `bench_name` and calls `get_model_config()` – the old if-else cascade is eliminated
+- `custom_benchmark.py`: `_get_model_config()` delegates to `get_model_config()`; benchmark_category is determined in `benchmark_model()` via `get_benchmark_category(benchmark_name)`
+- `run_benchmarks.py`: `_get_lmeval_params()` derives category from `bench_name` and calls `get_model_config()` – the old if-else cascade is eliminated
 
 ### 2.10 Error Handling
 
@@ -480,7 +480,7 @@ with signal timeout.
 
 ## 5. Agentic Pipeline
 
-`run_agentic()` in `run_benchmarks_v13.py`:
+`run_agentic()` in `run_benchmarks.py`:
 
 ```
 tool_eval_bench CLI
@@ -698,7 +698,7 @@ Median and P90 replace Mean/Max as more robust metrics against outliers.
 
 ## 7. DS1000 Evaluation
 
-`evaluate_code()` in `custom_benchmark_v13.py` goes through 4 evaluation modes:
+`evaluate_code()` in `custom_benchmark.py` goes through 4 evaluation modes:
 
 1. **DS1000 Harness** – if `test_execution` in `code_context` present
 2. **Namespace comparison** – if `reference_code` + `setup_code` present
@@ -810,10 +810,10 @@ agentic;Agentic;Phi-4;0.55;0;33;31;38;39;37;43;30;28;32;11.9;63;61
 
 ---
 
-## 12. Consolidation (consolidate_results_v13.py)
+## 12. Consolidation (consolidate_results.py)
 
 ```
-consolidate_results_v13.py
+consolidate_results.py
 ├── find_latest_csv(pattern)
 ├── read_evalplus(model_key)
 ├── read_lmeval_per_model(model_key)
@@ -911,9 +911,9 @@ Benchmarks/
 ├── benchmark_config.py              # Central configuration (weights, subsets, scenarios)
 ├── model_manager.py                 # Model management (unversioned)
 ├── csv_writer.py                    # CSV schema (unversioned) + write_quant_comparison()
-├── custom_benchmark_v13.py          # Current custom pipeline (DS1000 + CoderEval, structured output)
-├── run_benchmarks_v13.py            # Current launcher (v13), dynamic script resolution, --seed
-├── consolidate_results_v13.py       # Current consolidation (--compare, --models, always-CI)
+├── custom_benchmark.py          # Current custom pipeline (DS1000 + CoderEval, structured output)
+├── run_benchmarks.py            # Current launcher (v13), dynamic script resolution, --seed
+├── consolidate_results.py       # Current consolidation (--compare, --models, always-CI)
 ├── registry_tool.py                 # Registry + JSON config maintenance (consolidated)
 ├── assemble_blueprint.py            # Prompt-Blueprint-System (classify + assemble + validate)
 ├── type_defs.py                     # Shared TypedDict definitions
@@ -941,7 +941,7 @@ Benchmarks/
 ```
 
 **Migration path when copying a new version:**
-It suffices to `Copy-Item custom_benchmark_v13.py custom_benchmark_v14.py`. The launcher dynamically detects the highest version. No manual launcher update required.
+It suffices to `Copy-Item custom_benchmark.py custom_benchmark_v14.py`. The launcher dynamically detects the highest version. No manual launcher update required.
 
 ---
 
@@ -988,12 +988,12 @@ Changes need ONLY be made in `model_manager.py` – no more searching for hardco
 | `KV_QUANT_REFERENCE_BYTES` | **1.5**                    | **NEW 18.07.:** Reference (q8_0 + iq4_nl) for ctx scaling in `_default_ctx_from_size` |
 
 **Removed in v29:** `DISPLAY_NAMES` + `WHITELIST` – replaced by dynamic auto-discovery:
-- **Model selection** (`consolidate_results_v13.py`): Automatically iterates over all model keys from the result CSVs. Optional filter via `--models key1,key2`.
+- **Model selection** (`consolidate_results.py`): Automatically iterates over all model keys from the result CSVs. Optional filter via `--models key1,key2`.
 - **Display names**: Are queried live from `lms ls --json` (field `displayName`), fallback = readable key transformation.
 - **QUANT_MAP generator** (`generate_quant_map.py`): Fetches all keys dynamically from `lms ls --json` + result CSVs, no more static import from `benchmark_config.py`.
 - Background: Whitelist was redundant (selection also possible interactively/CLI), DISPLAY_NAMES replaceable by dynamic sources.
 
-**Removed in p8 (18.07.):** `MMLU_PRO_ENABLED = False` – was imported by `run_benchmarks_v13.py` and `consolidate_results_v13.py` but never read.
+**Removed in p8 (18.07.):** `MMLU_PRO_ENABLED = False` – was imported by `run_benchmarks.py` and `consolidate_results.py` but never read.
 
 ---
 
@@ -1003,14 +1003,14 @@ All 3 main scripts have complete type hints:
 
 | Script | Functions | Imports |
 |--------|-----------|---------|
-| `custom_benchmark_v13.py` | 55 functions | `from collections.abc import Generator` |
-| `run_benchmarks_v13.py` | 20 functions | `from collections.abc import Iterator` |
-| `consolidate_results_v13.py` | 27 functions | `from dataclasses import dataclass`, `from collections.abc import Callable` |
+| `custom_benchmark.py` | 55 functions | `from collections.abc import Generator` |
+| `run_benchmarks.py` | 20 functions | `from collections.abc import Iterator` |
+| `consolidate_results.py` | 27 functions | `from dataclasses import dataclass`, `from collections.abc import Callable` |
 
 **Examples:**
 
 ```python
-# custom_benchmark_v13.py
+# custom_benchmark.py
 def evaluate_generated_code(
     generated_code: str,
     entry_point: str,
@@ -1020,7 +1020,7 @@ def evaluate_generated_code(
 ) -> tuple[float, str]:
     ...
 
-# run_benchmarks_v13.py
+# run_benchmarks.py
 def run_benchmarks(
     models: list[str],
     benchmarks: list[str],
@@ -1028,7 +1028,7 @@ def run_benchmarks(
 ) -> list[dict[str, Any]]:
     ...
 
-# consolidate_results_v13.py
+# consolidate_results.py
 @dataclass
 class ModelData:
     model_name: str
@@ -1051,9 +1051,9 @@ Test files in `tests/`:
 | `test_scores.py` | 10 | `compute_category_scores()`, `_percentile()`, `_threshold_filtered()`, `_b5_named()` |
 | `test_csv.py` | 5 | `read_custom_csv()`, `auto_delimiter_detection()`, CSV parsing with fixtures |
 | `test_csv_writer.py` | – | `csv_writer.py` unified schema |
-| `test_consolidate.py` | – | `consolidate_results_v13.py` |
-| `test_consolidate_results.py` | – | `consolidate_results_v13.py` extended (incl. `TestGetQuant`) |
-| `test_custom_benchmark.py` | – | `custom_benchmark_v13.py` |
+| `test_consolidate.py` | – | `consolidate_results.py` |
+| `test_consolidate_results.py` | – | `consolidate_results.py` extended (incl. `TestGetQuant`) |
+| `test_custom_benchmark.py` | – | `custom_benchmark.py` |
 | `test_custom_benchmark_io.py` | – | `exec_sandboxed` I/O |
 | `test_dependencies.py` | – | Required Python packages |
 | `test_model_manager.py` | 76 | `parse_selection`, `check_api_available`, `get_current_loaded_model`, `get_available_models`, `load_model_via_lms`, **`unload_all_models` (Bug 1 fix, 18.07.)**, **`_ensure_lmstudio_running` (Bug 2 fix, 18.07.)**, `wait_for_model_ready`, **`_validate_model_key` (18.07.)** |
@@ -1179,8 +1179,20 @@ pytest tests/ -v
 
 | Date   | File                                         | Change                                                                           |
 |--------|-----------------------------------------------|----------------------------------------------------------------------------------|
-| 24.07. | `run_benchmarks_v13.py`                       | **Pre-Run Registry-Prüfungen (7 Checks):** capabilities, blueprint, truncation, systemPrompt, reasoning, registry-exists, template-file – schlagen vor dem Modell-Laden fehl. Siehe §2.1a |
-| 24.07. | `run_benchmarks_v13.py`                       | **Startup-Validierung:** Fehlende capabilities/blueprint → ERROR+skip, fehlendes truncation → WARN+default, leerer systemPrompt → WARN |
+| 29.07. | `utils/terminal.py`                           | **NEW:** ANSI-Farben + Progress-Bar Utility (`ok`, `warn`, `error`, `info`, `progress_bar`) – löst §2.3 "Keine visuellen Indikatoren" |
+| 29.07. | `type_defs.py`                                | **NEW `GenerationConfig`-Dataclass:** `generate_answer()` von 16 Einzelparametern auf `cfg: GenerationConfig` umgestellt (P3-Befund aus Review 28.07.) |
+| 29.07. | `custom_benchmark.py`                         | **Refactored `run_task()`:** 4 Helfer extrahiert (`_call_and_evaluate`, `_make_codereval_prompt`, `_make_datascience_prompt`, `_extract_setup_code`) – löst P3 "run_task()-Duplikation" |
+| 29.07. | `run_benchmarks.py`                           | **`run_agentic()` umgestellt:** `subprocess.run` → `Popen` + Thread mit Live-Output-Fortschritt. Dynamischer Timeout: `limit * agentic_scenario + 600` statt fixer 3600s (P2 "PIPELINE_TIMEOUTS") |
+| 29.07. | `consolidate_results.py`                      | **`main()` gesplittet:** 407→292 Zeilen. 3 Inline-Helfer auf Modulebene + `_run_comparison_mode()` extrahiert (P3 "main() >200 Zeilen") |
+| 29.07. | `assemble_blueprint.py`                       | **Typ-Hints auf 100%:** 6 Funktionen ergänzt (`format_publishers`, `format_capabilities`, `classify_registry`, `create_blueprint_definitions`, `assemble_prompts`, `validate_prompts`) – löst P3 "Typ-Hint-Lücken" |
+| 29.07. | alle 9 Skripte                                | **Terminal-Farben integriert:** ANSI `ok`/`warn`/`error`/`info` ersetzen `[OK]`/`[WARN]`/`[ERROR]`/`[INFO]`-Prefixe |
+| 29.07. | `doc-git/thinking-config.md`                  | **Überarbeitet:** `chat_template_kwargs` nur für Qwen3/Qwen3.5 (Quelle: lmstudio-bug-tracker#1573). `reasoning_effort: low` für gpt-oss. MATH max_tokens 8192→4096 |
+| 29.07. | `doc-git/Jinja-Chat-Templates/`               | **4 neue Templates + 2 Configs:** `google_gemma-4-12B-it-qat-q4_0` (Jinja + Config), `google_gemma-4-26B-A4B-it` (Jinja + Config), `phi-4_template_unsloth.jinja`, `gpt-oss-20b-template_unsloth.jinja` |
+| 29.07. | Benchmark-Lauf                                | **3 Modelle × 4 Pipelines × SampleSize 5** erfolgreich durchgelaufen (~34 Min). Server-Log-Analyse: 2 Channel Errors (structured output + lazy grammar, recovered). |
+| 29.07. | `doc-git/Reviews/Code-Review_2026-07-28.md`   | **ISO/IEC 9126 Review** – siehe separates Dokument für ausführliche Bewertung |
+| 29.07. | LM Studio Server Log                          | **Analysiert:** `~/.lmstudio/server-logs/2026-07/2026-07-29.1.log` – 2 Channel Errors, 3 Minor (GET /v1/version), alle recovered |
+| 24.07. | `run_benchmarks.py`                       | **Pre-Run Registry-Prüfungen (7 Checks):** capabilities, blueprint, truncation, systemPrompt, reasoning, registry-exists, template-file – schlagen vor dem Modell-Laden fehl. Siehe §2.1a |
+| 24.07. | `run_benchmarks.py`                       | **Startup-Validierung:** Fehlende capabilities/blueprint → ERROR+skip, fehlendes truncation → WARN+default, leerer systemPrompt → WARN |
 | 24.07. | `benchmark_config.py`                         | **`_word_boundary_match()`:** `"de"` matcht nicht mehr `"deepseek"`. Boundary-aware Substring-Matching verhindert Fehlmatches. Override-Sortierung nach Länge (spezifischste Keys zuerst) |
 | 24.07. | `registry_tool.py`                            | **NEW `validate`-Befehl:** 7 Checks (template_missing_file, template_missing_config, override_overlap, missing_reasoning/capabilities/blueprint, registry_no_config, orphan_override, reasoning_arch_mismatch) |
 | 24.07. | `registry_tool.py`                            | **`cmd_sync()` erweitert:** Ruft jetzt `classify_registry()` → `assemble_prompts()` → `validate_prompts()` am Ende auf. Ein Befehl für alles |
@@ -1191,34 +1203,34 @@ pytest tests/ -v
 | 24.07. | `assemble_blueprint.py`                       | **`classify_reasoning()` Priority-Chain:** existing_reasoning > arch map > blacklist > whitelist > instruct. Neue Parameter: `arch`, `existing_reasoning` |
 | 24.07. | `assemble_blueprint.py`                       | **`REASONING_KEYWORDS` bereinigt:** `gpt-oss` entfernt, `phi-4`→`phi-4-reasoning`, `ministral` entfernt |
 | 24.07. | `assemble_blueprint.py`                       | **Bugfix Import:** `from fmt_registry import format_blank_lines` → `from registry_tool import _format_blank_lines` (fmt_registry existiert nicht mehr im Root) |
-| 24.07. | `custom_benchmark_v13.py`                     | **Native API `_retry_native()`:** Retry-Kette bei API-Fehlern: `stop` → `reasoning="off"`. `top_k > 0`-Guard gegen LM-Studio-API-400 |
+| 24.07. | `custom_benchmark.py`                     | **Native API `_retry_native()`:** Retry-Kette bei API-Fehlern: `stop` → `reasoning="off"`. `top_k > 0`-Guard gegen LM-Studio-API-400 |
 | 24.07. | `doc-git/HowTo-Install-and-Configure-New-LLM.md` | **Workflow vereinfacht:** `python registry_tool.py sync` als einziger Befehl. Alle 3 assemble_blueprint-Schritte entfallen (automatisch in sync) |
 | 24.07. | `doc-git/Architektur+Flow_v24.md`             | **Komplett aktualisiert:** Hybrid-Klassifikation §2.6, Pre-Run-Checks §2.1a, Registry-Tool §Registry, Fields-Tabelle, Changelog |
-| 21.07. | `run_benchmarks_v13.py`                       | **Bugfix lm_eval 0.4.12 CLI:** `--generation_parameters` → `--gen_kwargs` (argument renamed in new lm-eval-harness) |
-| 21.07. | `run_benchmarks_v13.py`                       | **Reasoning detection via Registry:** `_is_reasoning_model()` now reads `model_registry.yaml:reasoning` field instead of keyword matching. `_load_registry_for_context()` no longer filters by `context_length`. Model identifier strips `@quant` suffix before registry lookup |
-| 21.07. | `custom_benchmark_v13.py`                     | **Same @quant fix** in `_model_supports_reasoning()` as run_benchmarks_v13.py |
+| 21.07. | `run_benchmarks.py`                       | **Bugfix lm_eval 0.4.12 CLI:** `--generation_parameters` → `--gen_kwargs` (argument renamed in new lm-eval-harness) |
+| 21.07. | `run_benchmarks.py`                       | **Reasoning detection via Registry:** `_is_reasoning_model()` now reads `model_registry.yaml:reasoning` field instead of keyword matching. `_load_registry_for_context()` no longer filters by `context_length`. Model identifier strips `@quant` suffix before registry lookup |
+| 21.07. | `custom_benchmark.py`                     | **Same @quant fix** in `_model_supports_reasoning()` as run_benchmarks.py |
 | 21.07. | `registry_tool.py`                            | **NEW: `fill-reasoning` command** – reads GGUF `tokenizer.chat_template`, sets `reasoning: thinking|instruct` in registry. Part of `sync` pipeline. `_read_gguf_arch()` now returns `(n_layers, hidden_dim, is_reasoning)` |
 | 21.07. | `Architektur+Flow_v24.md`                     | Reasoning detection §2.6, registry_tool fill-reasoning, model_registry.yaml reasoning field, GGUF header reader updated |
-| 20.07. | `custom_benchmark_v13.py`                     | **Native REST API** (`_generate_answer_native()`): when `enable_thinking=False`, routes to `/api/v1/chat` with `reasoning="off"` — garantiert Thinking-Aus. Fallback nachdem `chat_template_kwargs` vom OpenAI-Endpoint ignoriert wird |
-| 20.07. | `run_benchmarks_v13.py`                       | **Real-time MATH-500 progress:** `run_lmeval()` switched from `subprocess.run()` to `subprocess.Popen()` — lm_eval stdout wird zeilenweise live ausgegeben (0/30, 5/30, ..., 30/30) statt erst am Ende |
-| 20.07. | `run_benchmarks_v13.py`                       | **Double coverage reasoning:** `_get_lmeval_params()` sends `reasoning="off"` alongside `chat_template_kwargs.enable_thinking`; `"reasoning"` added to both `gen_kwargs_keys` sets |
+| 20.07. | `custom_benchmark.py`                     | **Native REST API** (`_generate_answer_native()`): when `enable_thinking=False`, routes to `/api/v1/chat` with `reasoning="off"` — garantiert Thinking-Aus. Fallback nachdem `chat_template_kwargs` vom OpenAI-Endpoint ignoriert wird |
+| 20.07. | `run_benchmarks.py`                       | **Real-time MATH-500 progress:** `run_lmeval()` switched from `subprocess.run()` to `subprocess.Popen()` — lm_eval stdout wird zeilenweise live ausgegeben (0/30, 5/30, ..., 30/30) statt erst am Ende |
+| 20.07. | `run_benchmarks.py`                       | **Double coverage reasoning:** `_get_lmeval_params()` sends `reasoning="off"` alongside `chat_template_kwargs.enable_thinking`; `"reasoning"` added to both `gen_kwargs_keys` sets |
 | 19.07. | `benchmark_config.py`                         | **BLACKLIST** (19 items) replaces `EXCLUDE_KEYWORDS`; `EXCLUDE_KEYWORDS = BLACKLIST` alias. Embedding models, <16K context, OCR/vision/audio, rag/german |
 | 19.07. | `model_registry.yaml`                         | 26 blacklisted entries (404 lines) deleted: embedding, OCR, vision, audio, translation, <16K context |
 | 19.07. | `registry_tool.py`                            | Blacklist skips in `cmd_add`, `cmd_configs`, `cmd_sync_from_configs` |
 | 19.07. | `assemble_blueprint.py`                       | Blacklist skip in `assemble_prompts()`; imports `BLACKLIST` from `benchmark_config` |
 | 19.07. | `model_manager.py`                            | `--context-length` flag **removed** from `load_model_via_lms()`. Root cause: `lms load --context-length N` permanently overwrote JSON configs. Context now exclusively from pre-config JSONs |
-| 19.07. | `run_benchmarks_v13.py`                     | All `context_length=` call sites removed; context-mismatch reload logic simplified away (no longer controllable via CLI) |
-| 19.07. | `run_benchmarks_v13.py`                     | **Bugfix Thinking lm_eval:** `extra_body` → `chat_template_kwargs` top-level in gen_kwargs. lm_eval nutzt `requests.post()` direkt (nicht OpenAI SDK) – `extra_body` wird als unbekannter HTTP-Key ignoriert. Betrifft MATH-500, ARC, HellaSwag, TruthfulQA |
-| 19.07. | `custom_benchmark_v13.py`                     | `_use_structured_output(model_key)` helper disables `response_format: json_schema` for reasoning (r1-distill, deepseek, think) and Mamba models; CoderEval regex fallback added; registry blueprint fixes (deepseek-r1-distill → reasoning_coding) |
-| 19.07. | `custom_benchmark_v13.py`                     | **Bugfix Thinking:** `extra_body` nesting entfernt in `generate_answer()`. `chat_template_kwargs` now at TOP level of HTTP body. Root cause: `extra_body` ist ein OpenAI-SDK-Konzept (wird entpackt), kein gültiger HTTP-JSON-Key — LM Studio ignorierte ihn still. Qwen3.6-27B (thinking=ON per GGUF) lief daher immer im Thinking-Modus (6000+ Tokens/Task) |
+| 19.07. | `run_benchmarks.py`                     | All `context_length=` call sites removed; context-mismatch reload logic simplified away (no longer controllable via CLI) |
+| 19.07. | `run_benchmarks.py`                     | **Bugfix Thinking lm_eval:** `extra_body` → `chat_template_kwargs` top-level in gen_kwargs. lm_eval nutzt `requests.post()` direkt (nicht OpenAI SDK) – `extra_body` wird als unbekannter HTTP-Key ignoriert. Betrifft MATH-500, ARC, HellaSwag, TruthfulQA |
+| 19.07. | `custom_benchmark.py`                     | `_use_structured_output(model_key)` helper disables `response_format: json_schema` for reasoning (r1-distill, deepseek, think) and Mamba models; CoderEval regex fallback added; registry blueprint fixes (deepseek-r1-distill → reasoning_coding) |
+| 19.07. | `custom_benchmark.py`                     | **Bugfix Thinking:** `extra_body` nesting entfernt in `generate_answer()`. `chat_template_kwargs` now at TOP level of HTTP body. Root cause: `extra_body` ist ein OpenAI-SDK-Konzept (wird entpackt), kein gültiger HTTP-JSON-Key — LM Studio ignorierte ihn still. Qwen3.6-27B (thinking=ON per GGUF) lief daher immer im Thinking-Modus (6000+ Tokens/Task) |
 | 19.07. | `benchmark_config.py`                         | Qwen3.6-Catch-All: `qwen3.6` → `enable_thinking=False` (ersetzt spezifische `qwen3.6-27b`/`qwen3.6-28b-reap`). GGUF-Default ist thinking=ON für alle Qwen3.6-Modelle |
 | 19.07. | `registry_tool.py`                            | Registry `context_length` fixed for 13 overestimated models (from GGUF headers); missing arch/reasoning/capabilities filled for 11 entries; JSON configs synced (165 updated) |
 | 17.07. | `Architektur+Flow_v24.md`                     | p7: fill-arch + sync-from-configs, VRAM formula for useUnifiedKvCache, GGUF header reader (1ms), sync pipeline extended |
 | 17.07. | `registry_tool.py`                            | NEW: fill-arch (GGUF header reader), sync-from-configs (overwrite from JSON). add reads n_layers/hidden_dim from GGUF. fill-arch in sync pipeline. HF fallback removed. |
 | 12.07. | `Architektur+Flow_v25.md`                     | v33: v12→v13, MATH-500 replaces MathQA, MMLU-Pro removed, --no-unload-between, --exclude-benchmarks, documentation updated |
-| 12.07. | `run_benchmarks_v13.py`                       | v13 from v12: MATH-500 instead of MathQA, MMLU-Pro removed, `--no-unload-between`, `--exclude-benchmarks` |
-| 12.07. | `custom_benchmark_v13.py`                     | v13 from v12: MODEL_CONFIG updated (--thinking only for Gemma MATH-500/Reasoning) |
-| 12.07. | `consolidate_results_v13.py`                  | v13 from v12: MATH-500 instead of MathQA, MMLU-Pro removed from weighting |
+| 12.07. | `run_benchmarks.py`                       | v13 from v12: MATH-500 instead of MathQA, MMLU-Pro removed, `--no-unload-between`, `--exclude-benchmarks` |
+| 12.07. | `custom_benchmark.py`                     | v13 from v12: MODEL_CONFIG updated (--thinking only for Gemma MATH-500/Reasoning) |
+| 12.07. | `consolidate_results.py`                  | v13 from v12: MATH-500 instead of MathQA, MMLU-Pro removed from weighting |
 | 08.07. | `Architektur+Flow_v24.md`                     | v32: --gpu max/-c removed, Pre-Config JSONs, numExperts clarification |
 | 07.07. | `Architektur+Flow_v24.md`                     | v31: Variant-unique keys, resume=False, load_key/lms load fix, warning for variant mismatch |
 | 07.07. | `run_benchmarks_v12.py`                       | model_info["key"] variant-unique, load_key separated, warning for variant mismatch |
@@ -1253,13 +1265,13 @@ pytest tests/ -v
 | 18.07. | `registry_tool.py`                            | **REFACTORED:** `_normalize_ctx()` removed (was duplicate of `assemble_blueprint.normalize_model_name`). All call sites now use the canonical function |
 | 18.07. | `registry_tool.py`                            | **ENHANCED:** `cmd_configs` now also writes `llm.load.contextLength` (VRAM-aware via `_max_ctx_from_vram()`) and `llm.load.useUnifiedKvCache` (via central thresholds) |
 | 18.07. | `registry_tool.py`                            | **REFACTORED:** `_infer_num_parallel()` now handles MTP models (`mtp` in key → `np=2` to match Max Draft Tokens) |
-| 18.07. | `run_benchmarks_v13.py`                       | **REFACTORED:** Redundant `EXCLUDE_KEYWORDS` filtering removed from `resolve_models()` and `select_models_interactive()` – already applied by `get_available_models()`. `EVALPLUS_SENTINEL_MODEL = "local-model"` constant added |
-| 18.07. | `run_benchmarks_v13.py`                       | **DOCUMENTED:** `THINKING_ENABLED` global is single-threaded-safe in current launcher (sequential model iteration), but needs `threading.Lock` if parallel benchmarking is added |
+| 18.07. | `run_benchmarks.py`                       | **REFACTORED:** Redundant `EXCLUDE_KEYWORDS` filtering removed from `resolve_models()` and `select_models_interactive()` – already applied by `get_available_models()`. `EVALPLUS_SENTINEL_MODEL = "local-model"` constant added |
+| 18.07. | `run_benchmarks.py`                       | **DOCUMENTED:** `THINKING_ENABLED` global is single-threaded-safe in current launcher (sequential model iteration), but needs `threading.Lock` if parallel benchmarking is added |
 | 18.07. | `assemble_blueprint.py`                       | **NEW:** `read_lms_configs()` 5s TTL cache (was re-walking 158+ JSON files on every call; `cmd_sync()` invokes 4+ times) |
-| 18.07. | `custom_benchmark_v13.py`                     | **ENHANCED:** `Monitor._sample_loop` sampling interval 200ms → 500ms (60% fewer NVML syscalls) |
-| 18.07. | `custom_benchmark_v13.py`                     | **REFACTORED:** 4x repeated `try: x.append(float(...)) except (ValueError, TypeError, AttributeError): pass` blocks → single `_safe_float()` helper |
-| 18.07. | `custom_benchmark_v13.py`                     | **Bug 6.4 Fix:** `_unwrap_solution_for_insert` now correctly synthesizes `def expected_func(*args, **kwargs): <body>` when Granite emits bare statements without `def` (was only documented in docstring, never implemented) |
-| 18.07. | `consolidate_results_v13.py`                  | **CLEANUP:** `MMLU_PRO_ENABLED` import removed |
+| 18.07. | `custom_benchmark.py`                     | **ENHANCED:** `Monitor._sample_loop` sampling interval 200ms → 500ms (60% fewer NVML syscalls) |
+| 18.07. | `custom_benchmark.py`                     | **REFACTORED:** 4x repeated `try: x.append(float(...)) except (ValueError, TypeError, AttributeError): pass` blocks → single `_safe_float()` helper |
+| 18.07. | `custom_benchmark.py`                     | **Bug 6.4 Fix:** `_unwrap_solution_for_insert` now correctly synthesizes `def expected_func(*args, **kwargs): <body>` when Granite emits bare statements without `def` (was only documented in docstring, never implemented) |
+| 18.07. | `consolidate_results.py`                  | **CLEANUP:** `MMLU_PRO_ENABLED` import removed |
 | 18.07. | `tests/test_model_manager.py`                 | **+13 NEW tests** for `_validate_model_key()` (shell-meta, path-traversal, control-chars, length cap, integration with `load_model_via_lms`) |
 | 18.07. | `tests/test_model_manager.py`                 | **+10 NEW tests** for Bug-1 Fix (`unload_all_models` with `lms ps --json` polling) |
 | 18.07. | `tests/test_model_manager.py`                 | **+5 NEW tests** for `TestEnsureLmStudioRunning` (3-stage boot: lms server start / llmster fallback) |
@@ -1269,9 +1281,9 @@ pytest tests/ -v
 | 18.07. | `tests/test_prio2_terminal.py`               | **FIXED:** `test_no_def_in_solution_creates_synthetic` – corrected test expectation (verifies body in synthetic def, not literal `pass`) |
 | 18.07. | `tests/` (all files)                          | **+136 NEW tests** total: 412 → 548 passing, 0 failing (1 pre-existing failure in `test_prio2_terminal` resolved by Bug 6.4 fix) |
 | 15.07. | `Architektur+Flow_v24.md`                     | p5: MATH-500 SIGALRM fix, registry_tool.py fill-size/migrate-keys, consolidate bugfixes |
-| 15.07. | `benchmark_config.py`                         | **Variant C+**: NEW `BENCHMARK_CATEGORY_DEFAULTS`, `MODEL_TEMP_OVERRIDES`, `get_model_config()`. `THINKING_CONFIG` as backward-compat alias. `REASONING_PATTERNS` moved from custom_benchmark_v13 to here. |
-| 15.07. | `custom_benchmark_v13.py`                     | `_get_model_config()` delegates to `benchmark_config.get_model_config()` with benchmark_category. `BENCHMARK_CATEGORY_MAP` and `get_benchmark_category()` new. `REASONING_PATTERNS` removed (to benchmark_config.py). |
-| 15.07. | `run_benchmarks_v13.py`                       | `_get_lmeval_params()` completely replaced: category-based lookup instead of if-else cascade. 5 obsolete helpers removed (`_is_magistral_model`, `_is_phi4_model`, `_is_ministral_model`, `_is_nemotron_model`, `_is_apriel_model`). |
+| 15.07. | `benchmark_config.py`                         | **Variant C+**: NEW `BENCHMARK_CATEGORY_DEFAULTS`, `MODEL_TEMP_OVERRIDES`, `get_model_config()`. `THINKING_CONFIG` as backward-compat alias. `REASONING_PATTERNS` moved from custom_benchmark to here. |
+| 15.07. | `custom_benchmark.py`                     | `_get_model_config()` delegates to `benchmark_config.get_model_config()` with benchmark_category. `BENCHMARK_CATEGORY_MAP` and `get_benchmark_category()` new. `REASONING_PATTERNS` removed (to benchmark_config.py). |
+| 15.07. | `run_benchmarks.py`                       | `_get_lmeval_params()` completely replaced: category-based lookup instead of if-else cascade. 5 obsolete helpers removed (`_is_magistral_model`, `_is_phi4_model`, `_is_ministral_model`, `_is_nemotron_model`, `_is_apriel_model`). |
 | 15.07. | `assemble_blueprint.py`                       | `select_blueprint()` detects 4 new model families: phi-4-reasoning, ministral, nemotron, apriel. `REASONING_KEYWORDS` extended by `rnj`. |
 | 15.07. | `doc-git/blueprint_definitions.yaml`          | 4 new reasoning blueprints: `phi4_reasoning`, `ministral_reasoning`, `nemotron_reasoning`, `apriel_reasoning`. |
 | 15.07. | `doc-git/model_registry.yaml`                 | 4 new blueprint assignments for Phi-4-Reasoning-Plus, Ministral, Nemotron, Apriel. |
@@ -1282,7 +1294,7 @@ pytest tests/ -v
 | 14.07. | `sync_context_length.py`                      | Rewrite: thin wrapper → registry_tool.py sync-ctx |
 | 14.07. | `assemble_blueprint.py`                       | Calls `format_blank_lines()` after `classify_registry()` (automatic blank line normalization) |
 | 14.07. | `model_registry.yaml`                         | 46 entries filled with `context_length: 16384`; offload+num_parallel in all entries; blank lines formatted; duplicate key `deepseek-coder-33b-instruct-i1` cleaned |
-| 14.07. | `consolidate_results_v13.py`                  | New CLI: --merge, --since, --until, --all-runs, --no-installed; Default: installed-only + latest-run |
+| 14.07. | `consolidate_results.py`                  | New CLI: --merge, --since, --until, --all-runs, --no-installed; Default: installed-only + latest-run |
 | 04.07. | `custom_benchmark_v12.py`                     | REASONING_PATTERNS set, `--thinking` activates thinking for AceMath+DeepSeek+Gemma |
 | 04.07. | `run_benchmarks_v12.py`                       | `_get_lmeval_params()` thinking for Reasoning+Gemma on MathQA/MMLU-Pro |
 | 30.06. | `Architektur+Flow_v24.md`                     | Update: QUANT_MAP, qwen3.6 class, konsolidiert_aktuell.csv, Qwen3/Qwen3.6 results |
@@ -1319,8 +1331,11 @@ pytest tests/ -v
 
 ---
 
-*Created: 28.06.2026 | Updated: 24.07.2026*
+*Created: 28.06.2026 | Updated: 29.07.2026*
 *Based on: v13.0.5 – Pipeline-Validierung, Hybrid-Klassifikation (GGUF+Architektur-Map), vereinfachter Workflow*
-*24.07.: registry_tool.py validate (7 Checks), _word_boundary_match(), Pre-Run-Checks in run_benchmarks_v13.py*
+*24.07.: registry_tool.py validate (7 Checks), _word_boundary_match(), Pre-Run-Checks in run_benchmarks.py*
 *24.07.: _ARCH_REASONING_MAP, classify_reasoning() Priority-Chain, _detect_reasoning_from_template() Regex*
 *24.07.: cmd_sync() inkludiert classify→assemble→validate, ein Befehl für alles*
+*29.07.: Refactoring-Sprint (Terminal-Farben, GenerationConfig, run_task-Helfer, main()-Split, Typ-Hints 100%)*
+*29.07.: 4 neue Chat-Templates (Gemma-4 QAT, Phi-4 Unsloth, GPT-OSS Unsloth)*
+*29.07.: Benchmark-Lauf 3 Modelle × 4 Pipelines × SampleSize 5 + Server-Log-Analyse*
