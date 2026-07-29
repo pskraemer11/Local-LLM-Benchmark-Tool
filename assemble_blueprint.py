@@ -15,6 +15,8 @@ Usage:
   python assemble_blueprint.py all         -> Alle Phasen ausführen
 """
 
+from typing import Any
+
 from ruamel.yaml import YAML
 import json
 import re
@@ -26,6 +28,7 @@ from datetime import datetime
 # === Pfade ===
 REPO_ROOT = Path(__file__).parent
 sys.path.insert(0, str(REPO_ROOT))
+from utils.terminal import ok, warn, error
 from benchmark_config import BLACKLIST
 REGISTRY_PATH = REPO_ROOT / "doc-git" / "model_registry.yaml"
 BLUEPRINT_PATH = REPO_ROOT / "doc-git" / "blueprint_definitions.yaml"
@@ -60,7 +63,7 @@ def normalize_model_name(name: str) -> str:
     """Normalize a model name for matching between registry and directory names."""
     s = name.lower()
     s = re.sub(r'\.gguf$', '', s)
-    s = re.sub(r'-(gguf|mxpr4)$', '', s)
+    s = re.sub(r'-(gguf|mxfp4)$', '', s)
     # Strip publisher prefix (e.g., "mradermacher/", "unsloth/")
     s = re.sub(r'^[^/]+/', '', s)
     # Normalize separators: dots and underscores become hyphens
@@ -346,8 +349,10 @@ def select_blueprint(reasoning: str, capabilities: str, arch: str = "", model_na
             return "reasoning_coding"
         return "reasoning_assistant"
 
-    # Granite general-purpose models: keep on default_chat (not code-specialized)
+    # Granite models: use coding_agent blueprint when coding capability present
     if "granite" in name_lower and "code" not in name_lower:
+        if "coding" in capabilities.split(", "):
+            return "coding_agent"
         return "default_chat"
 
     # Coding models
@@ -374,7 +379,7 @@ def extract_params(model_name: str) -> str | None:
     return None
 
 
-def format_publishers(pub_val) -> str:
+def format_publishers(pub_val: Any) -> str:
     """Format publisher(s) into a readable string."""
     if isinstance(pub_val, list):
         names = [str(p) for p in pub_val if p]
@@ -382,7 +387,7 @@ def format_publishers(pub_val) -> str:
     return str(pub_val) if pub_val else "unknown"
 
 
-def format_capabilities(caps) -> str:
+def format_capabilities(caps: Any) -> str:
     """Format capabilities (comma-separated string or list) into readable string."""
     if not caps:
         return "test generation"
@@ -553,7 +558,7 @@ def read_lms_configs(config_root: Path) -> list:
     return models
 
 
-def classify_registry():
+def classify_registry() -> None:
     """Phase 1: Read registry, classify models, write updated YAML."""
     if not REGISTRY_PATH.exists():
         print(f"[ERROR] Registry not found: {REGISTRY_PATH}")
@@ -638,7 +643,7 @@ def classify_registry():
     print(f"Blueprint: {dict(blueprint_counts)}")
 
 
-def create_blueprint_definitions():
+def create_blueprint_definitions() -> None:
     """Phase 2: Create blueprint_definitions.yaml with blueprints and modules."""
     blueprints = {
         "default_chat": {
@@ -747,7 +752,7 @@ def create_blueprint_definitions():
     print(f"[OK] Created {BLUEPRINT_PATH} with {len(blueprints)} blueprints and {len(modules)} modules")
 
 
-def assemble_prompts(preview_only: bool = False):
+def assemble_prompts(preview_only: bool = False) -> None:
     """Phase 3: Generate system prompts from blueprints and write to JSON configs."""
     # Read registry
     yaml_ruamel = YAML()
@@ -840,15 +845,25 @@ def assemble_prompts(preview_only: bool = False):
                     p = str(info.get("json_path", ""))
                     if p in seen_paths:
                         continue
-                    # When config key is a substring of search_key (search_key is more specific),
-                    # verify that the file name also contains the distinguishing suffix
                     if ck in search_key:
+                        # Config key is shorter: verify file name has distinguishing suffix
                         file_stem = info.get("file_name", "")
                         if file_stem.endswith(".json"):
                             file_stem = file_stem[:-5]
                         file_key = normalize_model_name(file_stem)
                         if search_key not in file_key:
                             continue
+                    else:
+                        # search_key in ck: exclude variant-suffixed configs not matching
+                        suffix = ck[len(search_key):].lstrip('-')
+                        for vs in _VARIANT_SUFFIXES:
+                            vs_clean = vs.lstrip('-')
+                            if suffix.startswith(vs_clean) and not search_key.endswith(vs_clean):
+                                break
+                        else:
+                            candidates.append((pub, info))
+                            seen_paths.add(p)
+                        continue
                     candidates.append((pub, info))
                     seen_paths.add(p)
 
@@ -898,7 +913,7 @@ def assemble_prompts(preview_only: bool = False):
           f"{stats['not_found']} not found, {stats['errors']} errors")
 
 
-def validate_prompts():
+def validate_prompts() -> None:
     """Phase 4a: Validate all written prompts for XML well-formedness and content."""
     lms_configs = read_lms_configs(CONFIG_ROOT)
     issues = []

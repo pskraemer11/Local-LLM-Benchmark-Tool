@@ -806,7 +806,7 @@ ibm-granite/granite-4.0-h-tiny:
   quants: [Q8_0]
   arch: "Granite-4.0, MoE"
   template: "granite-4.0-h-tiny_template.jinja"
-  experts: 24
+  experts: 64
   k_cache: "q8_0"
   v_cache: "q5_1"
   notes: "Architektur: MoE Hybrid (4 Attn + 36 Mamba2) | Experts: 64 total, 6 aktiv\
@@ -832,7 +832,7 @@ unsloth/granite-4.0-h-tiny-ud:
   quants: [Q8_K_XL]
   arch: "Granite-4.0, MoE"
   template: "granite-4.0-h-tiny_template.jinja"
-  experts: 24
+  experts: 64
   k_cache: "q8_0"
   v_cache: "iq4_nl"
   notes: "Architektur: MoE Hybrid (4 Attn + 36 Mamba2) | Experts: 64, 6 aktiv | max\
