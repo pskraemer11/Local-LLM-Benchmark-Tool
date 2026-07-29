@@ -483,11 +483,11 @@ with signal timeout.
 `run_agentic()` in `run_benchmarks.py`:
 
 ```
-tool_eval_bench CLI
+tool_eval_bench CLI (v2.0.7+)
 ├── --base-url http://127.0.0.1:1234/v1
 ├── --scenarios TC-XX ... (random from TOOL_EVAL_SCENARIO_IDS = TC-01..TC-69)
 ├── --json-file <agentic_<model>_<ts>.json>
-├── --timeout 120 (per scenario)
+├── --timeout 600 (per scenario, from PIPELINE_TIMEOUTS["agentic_scenario"])
 ├── --no-live (no interactive UI)
 └── Result: final_score (0-100) from JSON envelope, normalized to 0-1
 ```
@@ -497,22 +497,21 @@ Total runtime per model: `PIPELINE_TIMEOUTS["agentic_subprocess"]` = 3600s (60 m
 
 The 600s per scenario prevent the previous problem where `tool_eval_bench` aborted the HTTP request after 120s while the model was still generating a tool call. For very large multi-turn contexts (>5000 tokens), the timeout can be increased further if needed.
 
-### max_tokens reduction in tool_eval_bench (2026-07-07)
+### tool-eval-bench v2.0.7 — CLI-Änderungen (2026-07-29)
 
-**Problem (trigger):** Granite-4.1-30B (Q3_K_S) generates 300-500 tokens per tool call response (essay-like explanations before the actual tool call), at ~5.2 tok/s. With 69 scenarios and multiple rounds per scenario, the 3600s total limit is insufficient.
+Seit dem Upgrade von tool-eval-bench auf v2.0.7 hat sich die CLI geändert:
 
-**Fix:** `max_tokens` in `tool_eval_bench` reduced from 4096 to 512.
+| Alt (vor v2.0.7) | Neu (v2.0.7+) | Bemerkung |
+|------------------|----------------|-----------|
+| `--model` (Auto-Detection via `lms ps`) | `--model` explizit | Auto-Detection entfällt, muss bei Bedarf ergänzt werden |
+| `reasoning=off` im Payload | `--no-think` | Dediziertes Flag, kein `backend-kwargs` mehr nötig |
+| `max_tokens` Patch in `orchestrator.py:379` (4096→512) | **Entfällt** | v2.0.7 hat keinen hardcodierten `max_tokens`-Override mehr. Steuerung über `--backend-kwargs '{"max_tokens": 512}'` falls nötig |
+| `--timeout 120` | `--timeout 600` | Wird von `PIPELINE_TIMEOUTS["agentic_scenario"]` gesteuert |
+| `reasoning` API-Parameter | `--no-think` | Direkter Ersatz |
 
-| Aspect | Detail |
-|--------|--------|
-| File | `...\Python314\Lib\site-packages\tool_eval_bench\runner\orchestrator.py:379` |
-| Value | `max_tokens=4096` → `max_tokens=512` |
-| Validity | **Global** – affects all models running through `tool_eval_bench` |
-| Effect | Model is truncated after ~512 tokens, prevents lengthy explanations |
-| Risk | For tool calls with complex JSON/code arguments (>512 tokens), calls could be incomplete. However, the 69 TC scenarios only use simple calls (Name + 2-3 arguments, far below 512 tokens) |
-| Maintenance | Lost on `pip install --upgrade tool_eval_bench`, must be re-applied |
+Der frühere Source-Patch in `tool_eval_bench\runner\orchestrator.py:379` (`max_tokens=4096→512`) wird **nicht mehr benötigt**, da v2.0.7 das Verhalten des Backends respektiert (LM Studio steuert `max_tokens` via Config).
 
-**Previous agentic timeout cases:** Only occurred with Granite-4.1-30B. Reasoning models (Qwen3 Coder Reap 25B, Gemma-4) ran through other pipelines (DS1000, CoderEval, lm-eval, evalplus) and were not affected by this timeout. If another model times out in Agentic, besides `max_tokens`, the timeout values in `benchmark_config.py` (`agentic_subprocess`: 3600s, `agentic_scenario`: 600s) should also be checked.
+**Fallback bei zu langen Antworten:** `--backend-kwargs '{"max_tokens": 512}'` an den Befehl anhängen.
 
 ### --no-unload-between (NEW in v13)
 
@@ -1187,6 +1186,7 @@ pytest tests/ -v
 | 29.07. | `assemble_blueprint.py`                       | **Typ-Hints auf 100%:** 6 Funktionen ergänzt (`format_publishers`, `format_capabilities`, `classify_registry`, `create_blueprint_definitions`, `assemble_prompts`, `validate_prompts`) – löst P3 "Typ-Hint-Lücken" |
 | 29.07. | alle 9 Skripte                                | **Terminal-Farben integriert:** ANSI `ok`/`warn`/`error`/`info` ersetzen `[OK]`/`[WARN]`/`[ERROR]`/`[INFO]`-Prefixe |
 | 29.07. | `doc-git/thinking-config.md`                  | **Überarbeitet:** `chat_template_kwargs` nur für Qwen3/Qwen3.5 (Quelle: lmstudio-bug-tracker#1573). `reasoning_effort: low` für gpt-oss. MATH max_tokens 8192→4096 |
+| 29.07. | `doc-git/Architecture-and-Flow.md`             | **§5 Agentic aktualisiert:** CLI-Diagramm auf v2.0.7, `max_tokens`-Patch-Doku durch v2.0.7-Änderungen ersetzt (`--no-think`, `--backend-kwargs`) |
 | 29.07. | `doc-git/Jinja-Chat-Templates/`               | **4 neue Templates + 2 Configs:** `google_gemma-4-12B-it-qat-q4_0` (Jinja + Config), `google_gemma-4-26B-A4B-it` (Jinja + Config), `phi-4_template_unsloth.jinja`, `gpt-oss-20b-template_unsloth.jinja` |
 | 29.07. | Benchmark-Lauf                                | **3 Modelle × 4 Pipelines × SampleSize 5** erfolgreich durchgelaufen (~34 Min). Server-Log-Analyse: 2 Channel Errors (structured output + lazy grammar, recovered). |
 | 29.07. | `doc-git/Reviews/Code-Review_2026-07-28.md`   | **ISO/IEC 9126 Review** – siehe separates Dokument für ausführliche Bewertung |
