@@ -1,13 +1,13 @@
 # LLM Benchmark Suite
 
-> **Version:** see [`VERSION`](./VERSION) (currently 13.0.0-p3).  
-> **Release date:** 2026-07-12  
-> **Last doc update:** 2026-07-17  
-> - New `registry_tool.py` commands: `fill-arch` (GGUF-Header-Reader for n_layers/hidden_dim), `sync-from-configs` (overwrite registry from JSON configs)  
-> - `add` command now auto-reads architecture data from GGUF header  
-> - VRAM-aware `useUnifiedKvCache` decision via architecture-based formula (see doc-git/)  
-> - HF fallback removed from `fill-arch` (models without GGUF stay without arch data)  
-> **Status:** see [`Doku-intern/Reviews/Code-Review_2026-07-12.md`](./Doku-intern/Reviews/Code-Review_2026-07-12.md) for the most recent code-review and fix history.
+> **Version:** v13.0.5 – Pipeline-Validierung, Hybrid-Klassifikation  
+> **Release date:** 2026-07-29  
+> **Last doc update:** 2026-07-29  
+> - ISO/IEC 9126 Review (28.07.): alle 9 Skripte auf 100% Typ-Hints, Terminal-Farben, `GenerationConfig`-Dataclass  
+> - `run_task()` in 4 Helfer refactored, `run_agentic()` mit Live-Fortschritt, `main()` gesplittet  
+> - Chat-Templates: 4 neue Jinja-Overrides (Gemma-4 QAT, Phi-4 Unsloth, GPT-OSS Unsloth)  
+> - 8 Code-Reviews in `doc-git/Reviews/`, 14 Modell-Dokumente in `doc-git/Modell Specific Hints/`  
+> **Status:** see [`doc-git/Reviews/Code-Review_2026-07-28.md`](./doc-git/Reviews/Code-Review_2026-07-28.md) for the latest ISO/IEC 9126 quality review.
 
 Local benchmark framework for LLMs via LM Studio REST API (OpenAI-compatible). Tests coding, reasoning, knowledge, and agentic capabilities across **4 pipelines** with **9 benchmarks** (MMLU-Pro is archived).
 
@@ -31,13 +31,15 @@ Over 50 LLM models were tested on an HP Omen gaming PC with an NVIDIA RTX 5070 T
 - **Task retry**: 3 attempts with exponential backoff on API errors
 - **Consolidation**: Weighted leaderboard (Coding 35%, Math 25%, Agentic 25%, Knowledge 15%)
 - **Bootstrap confidence intervals**: 95% CI from per-item data (DS1000/CoderEval) via `--bootstrap`
+- **Terminal colors**: ANSI-coded output with progress bars (`utils/terminal.py`)
+- **GenerationConfig**: 16 parameters → single dataclass (`type_defs.py`)
 - **Registry tool**: `registry_tool.py` for model registry management, JSON config sync, architecture data extraction from GGUF headers
 
 ## Prerequisites
 
 - **Hardware**: NVIDIA GPU with >=16 GB VRAM (tested: RTX 5070 Ti)
                 (less works, but not with all models tested here)
-- **Software**: LM Studio (>=1.4.1) with REST API on `localhost:1234`
+- **Software**: LM Studio (>=1.4.1), based on llama.cpp Backends with REST / OpenAI compatible API on `localhost:1234`
 - **Python**: 3.13+
 - **Installed models**: GGUF quantizations in LM Studio
 
@@ -75,19 +77,19 @@ git clone https://github.com/xlangai/DS-1000.git ds1000_official
 python registry_tool.py sync
 
 # Interactive mode (select model + benchmarks)
-python run_benchmarks_v13.py
+python run_benchmarks.py
 
 # Direct run (model + all benchmarks)
-python run_benchmarks_v13.py --model "qwen2.5-coder-14b-instruct" --sample-size 20
+python run_benchmarks.py --model "qwen2.5-coder-14b-instruct" --sample-size 20
 
 # With thinking mode for reasoning models (MATH-500)
-python run_benchmarks_v13.py --model "gemma-4-26b-a4b-it" --sample-size 20 --thinking
+python run_benchmarks.py --model "gemma-4-26b-a4b-it" --sample-size 20 --thinking
 
 # Specific benchmarks
-python run_benchmarks_v13.py --model "qwen2.5-coder-14b-instruct" --benchmarks DS1000,CoderEval --sample-size 10
+python run_benchmarks.py --model "qwen2.5-coder-14b-instruct" --benchmarks DS1000,CoderEval --sample-size 10
 
 # Consolidate results (with bootstrap CI)
-python consolidate_results_v13.py --bootstrap
+python consolidate_results.py --bootstrap
 ```
 
 ## CLI Options (run_benchmarks)
@@ -125,15 +127,17 @@ registry_tool.py            (Model registry + JSON config management)
 ├── configs / sync-from-configs  (Bidirectional JSON ↔ Registry sync)
 └── sync                    (Full maintenance pipeline)
 |
-run_benchmarks_v13.py       (Launcher – load/unload HERE ONLY)
-├── custom_benchmark_v13.py   (DS1000, CoderEval)
+run_benchmarks.py       (Launcher – load/unload HERE ONLY)
+├── custom_benchmark.py   (DS1000, CoderEval)
 ├── lm_eval                   (ARC, HellaSwag, TruthfulQA, MATH-500)
 ├── evalplus                  (HumanEval+, MBPP+)
 └── tool_eval_bench           (Agentic)
 |
-consolidate_results_v13.py   (Weighted leaderboard + bootstrap CI)
+consolidate_results.py   (Weighted leaderboard + bootstrap CI)
     → ergebnisse/konsolidiert_*.csv + *.md
 ```
+
+see also: https://deepwiki.com/pskraemer11/Local-LLM-Benchmark-Tool
 
 ### Benchmarks
 
@@ -158,34 +162,44 @@ consolidate_results_v13.py   (Weighted leaderboard + bootstrap CI)
 Activates `--thinking` for reasoning models on supported benchmarks:
 
 ```bash
-python run_benchmarks_v13.py --model "gemma-4-26b-a4b-it" --thinking
+python run_benchmarks.py --model "gemma-4-26b-a4b-it" --thinking
 ```
 
-Implementation is in `run_benchmarks_v13.py` and `custom_benchmark_v13.py`.
+Implementation is in `run_benchmarks.py` and `custom_benchmark.py`.
 Reasoning model detection uses model-name keywords (r1, thinking, qwq, reasoning, cot).
 
 ## Project Structure
 
 ```
 Benchmarks/
-├── run_benchmarks_v13.py           # Launcher
-├── custom_benchmark_v13.py         # Custom pipeline (DS1000, CoderEval)
-├── consolidate_results_v13.py      # Consolidation + bootstrap CI
+├── run_benchmarks.py           # Launcher
+├── custom_benchmark.py         # Custom pipeline (DS1000, CoderEval)
+├── consolidate_results.py      # Consolidation + bootstrap CI
 ├── registry_tool.py                # Model registry + JSON config management
 ├── assemble_blueprint.py           # Blueprint/classify/validate assembly
 ├── benchmark_config.py             # Weights, Tool-Eval-Scenarios
 ├── model_manager.py                # LM Studio load/unload
 ├── csv_writer.py                   # CSV output
-├── simple_evals/                   # JSONL datasets
-├── lm_eval_tasks/                  # Custom YAML tasks (minerva_math500, etc.)
-├── ergebnisse/                     # Results + consolidation
-├── doc-git/                        # Documentation (German)
+├── tools/lmeval_proxy.py            # Native API proxy for lm_eval
+├── tools/correlation_export.py      # Results correlation export
+├── utils/terminal.py                # ANSI terminal colors + progress bars
+├── type_defs.py                     # Shared TypedDict + GenerationConfig
+├── simple_evals/                    # JSONL datasets
+├── lm_eval_tasks/                   # Custom YAML tasks (minerva_math500, etc.)
+├── ergebnisse/                      # Results + consolidation
+├── doc-git/                         # Documentation (German)
 │   ├── Architecture-and-Flow.md    # Full architecture + flow description
 │   ├── HowTo-Install-and-Configure-New-LLM.md # Model installation guide
 │   ├── Parallel-Slots-Optimization.md # numParallel & KV-Cache optimization
 │   ├── thinking-config.md          # Thinking mode configuration
-│   └── model_registry.yaml         # YAML model registry (source of truth)
-└── tests/                          # Pytest tests
+│   ├── model_registry.yaml         # YAML model registry (source of truth)
+│   ├── blueprint_definitions.yaml  # Blueprint definitions for prompt assembly
+│   ├── Datasets-17-07-2026.md      # Dataset descriptions
+│   ├── Jinja-Chat-Templates/       # Chat template overrides (Gemma-4, Phi-4, GPT-OSS)
+│   ├── Reviews/                    # ISO/IEC 9126 Code Reviews (8 Reports)
+│   ├── Modell Specific Hints/      # Model-specific documentation (14 files)
+│   └── PandasEval vs CoderEval - Evaluation Guidebook.md
+└── tests/                          # Pytest tests (520+, 14 files)
 ```
 
 ## Sample Results
