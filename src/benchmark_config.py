@@ -304,7 +304,7 @@ MODEL_TEMP_OVERRIDES = {
         "top_p": 1.0,
         "min_p": None,
     },
-    "deepseek": {
+    "deepseek-coder": {
         "temperature": 0.6,
         "top_p": 0.95,
         "min_p": 0.02,
@@ -378,7 +378,7 @@ def get_model_config(model_identifier: str, category: str = "coding", is_thinkin
     config = dict(BENCHMARK_CATEGORY_DEFAULTS[cat])
     # Apply model override (boundary-aware substring matching).
     # Sort by key length descending so specific (longer) patterns match first,
-    # preventing shadowing (e.g. "deepseek-r1-distill" before "deepseek").
+    # preventing shadowing (e.g. "deepseek-r1-distill" before "deepseek-coder").
     for pattern, override in sorted(MODEL_TEMP_OVERRIDES.items(), key=lambda kv: len(kv[0]), reverse=True):
         if _word_boundary_match(pattern, key_lower):
             config.update(override)

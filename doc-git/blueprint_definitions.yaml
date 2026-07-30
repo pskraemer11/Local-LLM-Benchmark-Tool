@@ -1,5 +1,5 @@
 version: '1.0'
-created: '2026-07-29 17:26:55'
+created: '2026-07-30 16:14:41'
 blueprints:
   default_chat:
     description: Standard Chat-Assistent
@@ -134,11 +134,21 @@ modules:
     minimal: ''
   coding_principles:
     description: Code-Qualitätsregeln
-    full: "<coding>\n- Understand the existing codebase before making changes.\n-\
-      \ Write clean, maintainable, efficient code.\n- Make minimal necessary changes.\n\
-      - Add comments only where they provide real explanatory value.\n- Prefer reproducible\
-      \ debugging and testing approaches.\n</coding>"
-    medium: <coding>Write clean, minimal, correct code. Understand existing code first.</coding>
+    full: "<coding>\n\n<code_quality>\n- Write clean, efficient code with minimal\
+      \ comments\n- Comment only where logic is not self-explanatory; avoid redundancy\n\
+      - Make minimal changes — no unprompted refactoring\n- Understand the codebase\
+      \ thoroughly before implementing\n- Break extensive new code into smaller units\n\
+      </code_quality>\n\n<file_system>\n- Verify file paths; do not assume relative\
+      \ to cwd\n- Edit files in place; never create renamed copies\n- Use sed for\
+      \ global search/replace\n</file_system>\n\n<testing>\n- For bug fixes: write\
+      \ a test that reproduces the issue first\n- For new features: test-driven development\
+      \ where appropriate\n- Consult user if testing infra is missing or costly to\
+      \ set up\n</testing>\n\n<troubleshooting>\n- On repeated failures: list 5-7\
+      \ possible causes, assess likelihood, address systematically\n- On major obstacles:\
+      \ propose a new plan and seek confirmation\n</troubleshooting>\n\n</coding>"
+    medium: <coding>Write clean, minimal code. Understand codebase first. Edit in
+      place; verify paths. Reproduce bugs with tests before fixing. On failure, consider
+      root causes systematically.</coding>
     minimal: ''
   output_style_default:
     description: Allgemeiner Output-Stil

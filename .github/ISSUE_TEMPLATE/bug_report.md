@@ -11,7 +11,7 @@ A clear and concise description of what the bug is.
 
 **To Reproduce**
 Steps to reproduce the behavior:
-1. Run command `python run_benchmarks_v13.py ...` with these args
+1. Run command `python run_benchmarks.py ...` with these args
 2. Wait for benchmark `XYZ` to start
 3. See error
 

@@ -109,12 +109,30 @@ def load_lms_json(path: str | Path) -> list[Any]:
 
 
 def _run_lms_ls() -> list[dict[str, Any]]:
-    r = subprocess.run(["lms", "ls", "--json"], capture_output=True, text=True, timeout=15)
-    if r.returncode != 0:
-        print(f"[WARN] lms ls fehlgeschlagen: {r.stderr.strip()}")
-        return []
-    data = json.loads(r.stdout)
-    return data if isinstance(data, list) else list(data.values())
+    try:
+        r = subprocess.run(["lms", "ls", "--json"], capture_output=True, text=True, timeout=15)
+        if r.returncode == 0:
+            data = json.loads(r.stdout)
+            return data if isinstance(data, list) else list(data.values())
+        stderr = r.stderr.strip()
+    except FileNotFoundError:
+        stderr = "lms.exe not found"
+    except subprocess.TimeoutExpired:
+        stderr = "lms ls timed out"
+
+    print(f"[INFO] lms ls fehlgeschlagen ({stderr}) – versuche Server-Start...")
+    try:
+        from model_manager import _is_lmstudio_running
+        if _is_lmstudio_running():
+            r = subprocess.run(["lms", "ls", "--json"], capture_output=True, text=True, timeout=15)
+            if r.returncode == 0:
+                data = json.loads(r.stdout)
+                return data if isinstance(data, list) else list(data.values())
+    except Exception as e:
+        print(f"[WARN] Server-Start fehlgeschlagen: {e}")
+
+    print(f"[WARN] lms ls auch nach Server-Start fehlgeschlagen")
+    return []
 
 
 # ── Blank-line formatting ──────────────────────────────────────────
@@ -1286,7 +1304,7 @@ def _print_menu(cmds: list[tuple[str, str]]) -> None:
     print("=" * 60)
     for i, (cmd, desc) in enumerate(cmds, 1):
         print(f"  {i:2d}. {cmd:20s} {desc}")
-    print(f"  {len(cmds)+1:2d}. {'quit':20s} Exit")
+    print(f"   q. {'quit':20s} Exit")
     print("=" * 60)
 
 
@@ -1316,10 +1334,17 @@ def _run_menu_cmd(cmd: str) -> None:
                 models = [models]
             cmd_add(models, interactive=True)
         else:
-            print("  Kein JSON via Pipe. Bitte Modell-JSON pipen oder Datei angeben.")
+            print("  [add] Ermittle installierte Modelle via LMS ...")
+            models = _run_lms_ls()
+            if models:
+                cmd_add(models, interactive=True)
+            else:
+                print("  [WARN] Keine Modelle von LMS erhalten.")
     else:
         dispatch[cmd]()
-    input("\nDrücke Enter für das Menü ...")
+    if input("\nDrücke Enter für das Menü ... oder q für Quit: ").strip().lower() == "q":
+        print("[OK] Bye")
+        sys.exit(0)
 
 
 def _interactive_menu() -> None:
@@ -1345,8 +1370,8 @@ def _interactive_menu() -> None:
     _print_menu(cmds)
     while True:
         try:
-            choice = input("Select command [1-16]: ").strip()
-            if not choice or choice == str(len(cmds) + 1):
+            choice = input("Select command [1-15] or q: ").strip().lower()
+            if not choice or choice == "q":
                 print("[OK] Bye")
                 sys.exit(0)
             idx = int(choice) - 1
@@ -1375,17 +1400,20 @@ def main() -> None:
     if cmd == "compare":
         cmd_compare()
     elif cmd == "add":
-        # Read new models JSON from file arg or stdin
+        # Read new models JSON from file arg, stdin, or auto-detect via LMS
         if len(sys.argv) > 2:
             with open(sys.argv[2], "r", encoding="utf-8-sig") as f:
                 models = json.load(f)
         elif not sys.stdin.isatty():
             models = json.load(sys.stdin)
         else:
-            print("[ERROR] Kein JSON via Pipe und keine Datei angegeben.")
-            print("  Nutzung:   Get-LMSModels | python registry_tool.py add")
-            print("  Alternativ: python registry_tool.py add models.json")
-            sys.exit(1)
+            print("  [add] Ermittle installierte Modelle via LMS ...")
+            models = _run_lms_ls()
+            if not models:
+                print("[ERROR] Kein JSON via Pipe/Datei und LMS nicht erreichbar.")
+                print("  Nutzung:   Get-LMSModels | python registry_tool.py add")
+                print("  Alternativ: python registry_tool.py add models.json")
+                sys.exit(1)
         if not isinstance(models, list):
             models = [models]
         cmd_add(models, interactive=True)

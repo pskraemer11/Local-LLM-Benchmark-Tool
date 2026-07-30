@@ -34,6 +34,7 @@ from benchmark_config import BLACKLIST
 REGISTRY_PATH = PROJECT_ROOT / "doc-git" / "model_registry.yaml"
 BLUEPRINT_PATH = PROJECT_ROOT / "doc-git" / "blueprint_definitions.yaml"
 CONFIG_ROOT = Path.home() / ".lmstudio" / ".internal" / "user-concrete-model-default-config"
+TEMPLATE_DIR = PROJECT_ROOT / "doc-git" / "Jinja-Chat-Templates"
 INVENTORY_PATH = PROJECT_ROOT / "prompt_inventory.csv"
 
 # === Reasoning Keywords ===
@@ -65,6 +66,8 @@ def normalize_model_name(name: str) -> str:
     s = name.lower()
     s = re.sub(r'\.gguf$', '', s)
     s = re.sub(r'-(gguf|mxfp4)$', '', s)
+    # Strip -gguf-/-mxfp4- also from middle (Intel/JetBrains naming convention)
+    s = re.sub(r'[-_](gguf|mxfp4)[-_]', r'-', s)
     # Strip publisher prefix (e.g., "mradermacher/", "unsloth/")
     s = re.sub(r'^[^/]+/', '', s)
     # Normalize separators: dots and underscores become hyphens
@@ -737,8 +740,8 @@ def create_blueprint_definitions() -> None:
         },
         "coding_principles": {
             "description": "Code-Qualitätsregeln",
-            "full": "<coding>\n- Understand the existing codebase before making changes.\n- Write clean, maintainable, efficient code.\n- Make minimal necessary changes.\n- Add comments only where they provide real explanatory value.\n- Prefer reproducible debugging and testing approaches.\n</coding>",
-            "medium": "<coding>Write clean, minimal, correct code. Understand existing code first.</coding>",
+            "full": "<coding>\n\n<code_quality>\n- Write clean, efficient code with minimal comments\n- Comment only where logic is not self-explanatory; avoid redundancy\n- Make minimal changes — no unprompted refactoring\n- Understand the codebase thoroughly before implementing\n- Break extensive new code into smaller units\n</code_quality>\n\n<file_system>\n- Verify file paths; do not assume relative to cwd\n- Edit files in place; never create renamed copies\n- Use sed for global search/replace\n</file_system>\n\n<testing>\n- For bug fixes: write a test that reproduces the issue first\n- For new features: test-driven development where appropriate\n- Consult user if testing infra is missing or costly to set up\n</testing>\n\n<troubleshooting>\n- On repeated failures: list 5-7 possible causes, assess likelihood, address systematically\n- On major obstacles: propose a new plan and seek confirmation\n</troubleshooting>\n\n</coding>",
+            "medium": "<coding>Write clean, minimal code. Understand codebase first. Edit in place; verify paths. Reproduce bugs with tests before fixing. On failure, consider root causes systematically.</coding>",
             "minimal": "",
         },
         "output_style_default": {
@@ -927,11 +930,24 @@ def assemble_prompts(preview_only: bool = False) -> None:
                     with open(json_path, "r", encoding="utf-8-sig") as f:
                         data = json.load(f)
 
-                    for field in data.get("operation", {}).get("fields", []):
+                    tpl_name = entry.get("template")
+                    tpl_content = None
+                    if tpl_name:
+                        tpl_path = TEMPLATE_DIR / tpl_name
+                        if tpl_path.exists():
+                            tpl_content = tpl_path.read_text(encoding="utf-8")
+
+                    fields = data.setdefault("operation", {}).setdefault("fields", [])
+                    found_pt = False
+                    for field in fields:
                         if field.get("key") == "llm.prediction.systemPrompt":
                             field["value"] = assembled_prompt
                         if field.get("key") == "llm.prediction.promptTemplate":
-                            field["value"] = ""
+                            if tpl_content is not None:
+                                field["value"] = tpl_content
+                            found_pt = True
+                    if tpl_content is not None and not found_pt:
+                        fields.append({"key": "llm.prediction.promptTemplate", "value": tpl_content})
 
                     with open(json_path, "w", encoding="utf-8") as f:
                         json.dump(data, f, indent=2, ensure_ascii=False)

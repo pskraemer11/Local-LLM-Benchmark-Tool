@@ -121,7 +121,7 @@ openai/gpt-oss-20b:
   notes: '32×2.4B MoE | 131K Kontext | Tool-Use | Configurable Reasoning Effort (low/medium/high)
     | Harmony Response Format'
   template: "gpt-oss-20b_harmony.jinja"
-  reasoning: thinking
+  reasoning: instruct
   capabilities: coding, text
   blueprint: gptoss_reasoning
   truncation: full
@@ -146,7 +146,7 @@ lmstudio-community/gpt-oss-20b:
   notes: "Architektur: GPT-OSS MoE | 32×2.4B | 131K Kontext | Configurable Reasoning\
     \ Effort (low/medium/high) | Harmony Response Format"
   template: "gpt-oss-20b_harmony.jinja"
-  reasoning: thinking
+  reasoning: instruct
   capabilities: coding, text
   blueprint: gptoss_reasoning
   truncation: full
@@ -173,7 +173,7 @@ unsloth/gpt-oss-20b:
   notes: '32×2.4B MoE | 131K Kontext | Tool-Use | Configurable Reasoning Effort (low/medium/high)
     | Harmony Response Format'
   template: "gpt-oss-20b_harmony.jinja"
-  reasoning: thinking
+  reasoning: instruct
   capabilities: coding, text
   blueprint: gptoss_reasoning
   truncation: full
@@ -201,7 +201,7 @@ bartowski/openai_gpt-oss-20b:
   context_length: 131072
   n_layers: 24
   hidden_dim: 2880
-  reasoning: thinking
+  reasoning: instruct
   capabilities: coding, text
   blueprint: gptoss_reasoning
   truncation: full
@@ -224,10 +224,10 @@ Intel/gpt-oss-20b-q4ks-autoround:
   notes: 'Architektur: GPT-OSS MoE (AutoRound) | 32×2.4B Parameter | Intel AutoRound
     Quantization'
   template: "gpt-oss-20b_harmony.jinja"
-  reasoning: thinking
+  reasoning: instruct
   capabilities: coding, text
   blueprint: gptoss_reasoning
-  truncation: medium
+  truncation: full
   file_size_bytes: 11618123200
   context_length: 128000
   n_layers: 24
@@ -2513,19 +2513,20 @@ intel/qwen3-8b-q4km-autoround-inc-v1:
   arch: Qwen3 Dense
   k_cache: q8_0
   v_cache: iq4_nl
-  offload: 1
+  offload: 1.0
   num_parallel: 1
   notes: 'Architektur: Qwen3 Dense'
   file_size_bytes: 5027783424
   context_length: 262144
   n_layers: 36
   hidden_dim: 4096
-  reasoning: instruct
+  reasoning: thinking
   max_context_length: 40960
   quants: [Q4_K_M]
   capabilities: coding, vision, text
-  blueprint: coding_agent
+  blueprint: reasoning_coding
   truncation: full
+  useUnifiedKvCache: true
 
 intel/qwen3-30b-a3b-instruct-2507-q2ks-mixed-autoround:
   publisher: Intel
@@ -2533,27 +2534,7 @@ intel/qwen3-30b-a3b-instruct-2507-q2ks-mixed-autoround:
   arch: Qwen3 MoE
   k_cache: q8_0
   v_cache: iq4_nl
-  offload: 1
-  num_parallel: 4
-  notes: 'Architektur: Qwen3 MoE'
-  file_size_bytes: 10740659584
-  context_length: 24576
-  n_layers: 48
-  hidden_dim: 2048
-  reasoning: instruct
-  max_context_length: 262144
-  quants: [Q2_K_S]
-  capabilities: coding, vision, text
-  blueprint: coding_agent
-  truncation: full
-
-intel/qwen3-30b-a3b-thinking-2507-q2ks-mixed-autoround:
-  publisher: Intel
-  hf_url: https://huggingface.co/intel/qwen3-30b-a3b-thinking-2507-q2ks-mixed-autoround
-  arch: Qwen3 MoE
-  k_cache: q8_0
-  v_cache: iq4_nl
-  offload: 1
+  offload: 1.0
   num_parallel: 4
   notes: 'Architektur: Qwen3 MoE'
   file_size_bytes: 10740659584
@@ -2566,6 +2547,28 @@ intel/qwen3-30b-a3b-thinking-2507-q2ks-mixed-autoround:
   capabilities: coding, vision, text
   blueprint: reasoning_coding
   truncation: full
+  useUnifiedKvCache: true
+
+intel/qwen3-30b-a3b-thinking-2507-q2ks-mixed-autoround:
+  publisher: Intel
+  hf_url: https://huggingface.co/intel/qwen3-30b-a3b-thinking-2507-q2ks-mixed-autoround
+  arch: Qwen3 MoE
+  k_cache: q8_0
+  v_cache: iq4_nl
+  offload: 1.0
+  num_parallel: 4
+  notes: 'Architektur: Qwen3 MoE'
+  file_size_bytes: 10740659584
+  context_length: 24576
+  n_layers: 48
+  hidden_dim: 2048
+  reasoning: thinking
+  max_context_length: 262144
+  quants: [Q2_K_S]
+  capabilities: coding, vision, text
+  blueprint: reasoning_coding
+  truncation: full
+  useUnifiedKvCache: true
 
 intel/qwen3-coder-30b-a3b-instruct-q2ks-mixed-autoround:
   publisher: Intel
@@ -2573,19 +2576,20 @@ intel/qwen3-coder-30b-a3b-instruct-q2ks-mixed-autoround:
   arch: Qwen3 MoE
   k_cache: q8_0
   v_cache: iq4_nl
-  offload: 1
+  offload: 1.0
   num_parallel: 4
   notes: 'Architektur: Qwen3 MoE'
   file_size_bytes: 10740661760
   context_length: 24576
   n_layers: 48
   hidden_dim: 2048
-  reasoning: instruct
+  reasoning: thinking
   max_context_length: 262144
   quants: [Q2_K_S]
   capabilities: coding, vision, text
-  blueprint: coding_agent
-  truncation: minimal
+  blueprint: reasoning_coding
+  truncation: full
+  useUnifiedKvCache: true
 
 intel/mirothinker-v1.5-30b-q2ks-mixed-autoround:
   publisher: Intel
@@ -2593,7 +2597,7 @@ intel/mirothinker-v1.5-30b-q2ks-mixed-autoround:
   arch: Qwen3 MoE
   k_cache: q8_0
   v_cache: iq4_nl
-  offload: 1
+  offload: 1.0
   num_parallel: 4
   notes: 'Architektur: Qwen3 MoE'
   file_size_bytes: 10740660704
@@ -2606,6 +2610,7 @@ intel/mirothinker-v1.5-30b-q2ks-mixed-autoround:
   capabilities: text
   blueprint: reasoning_assistant
   truncation: full
+  useUnifiedKvCache: true
 
 noctrex/ernie-4.5-21b-a3b-pt_moe:
   publisher: noctrex
@@ -2613,7 +2618,7 @@ noctrex/ernie-4.5-21b-a3b-pt_moe:
   arch: '?'
   k_cache: q8_0
   v_cache: iq4_nl
-  offload: 1
+  offload: 1.0
   num_parallel: 4
   notes: 'Architektur: ?'
   file_size_bytes: 12376186112
@@ -2624,6 +2629,7 @@ noctrex/ernie-4.5-21b-a3b-pt_moe:
   capabilities: coding, text
   blueprint: coding_agent
   truncation: minimal
+  useUnifiedKvCache: true
 
 jetbrains/mellum2-12b-a2.5b-thinking_moe:
   publisher: JetBrains
@@ -2631,7 +2637,7 @@ jetbrains/mellum2-12b-a2.5b-thinking_moe:
   arch: '?'
   k_cache: q8_0
   v_cache: iq4_nl
-  offload: 1
+  offload: 1.0
   num_parallel: 1
   notes: 'Architektur: ?'
   file_size_bytes: 7029536832
@@ -2642,6 +2648,7 @@ jetbrains/mellum2-12b-a2.5b-thinking_moe:
   capabilities: coding, text
   blueprint: coding_agent
   truncation: full
+  useUnifiedKvCache: true
 
 noctrex/lfm2-24b-a2b_moe:
   publisher: noctrex
@@ -2649,7 +2656,7 @@ noctrex/lfm2-24b-a2b_moe:
   arch: '?'
   k_cache: q8_0
   v_cache: iq4_nl
-  offload: 1
+  offload: 1.0
   num_parallel: 4
   notes: 'Architektur: ?'
   file_size_bytes: 13284953376
@@ -2660,3 +2667,4 @@ noctrex/lfm2-24b-a2b_moe:
   capabilities: text
   blueprint: default_chat
   truncation: medium
+  useUnifiedKvCache: true
