@@ -1,3 +1,4 @@
+from dataclasses import dataclass, field
 from typing import TypedDict, Optional, NotRequired
 from typing import Any
 
@@ -144,3 +145,23 @@ class PerModelBenchmarkResult(TypedDict):
     ram_max: Optional[float]
     gpu_temp_max: Optional[float]
     vram_gb: Optional[float]
+
+
+@dataclass
+class GenerationConfig:
+    prompt: Optional[str] = None
+    model_identifier: Optional[str] = None
+    native_model_identifier: Optional[str] = None
+    timeout: int = 120_000
+    max_tokens: int = 4096
+    system_msg: Optional[str] = None
+    messages: Optional[list[dict[str, Any]]] = None
+    temperature: float = 0.0
+    top_p: float = 1.0
+    top_k: Optional[int] = None
+    min_p: Optional[float] = None
+    is_thinking_enabled: Optional[bool] = None
+    reasoning_effort: Optional[str] = None
+    is_streaming: bool = True
+    stop: Optional[list[str]] = None
+    response_format: Optional[dict] = None

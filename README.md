@@ -33,7 +33,7 @@ Over 50 LLM models were tested on an HP Omen gaming PC with an NVIDIA RTX 5070 T
 - **Bootstrap confidence intervals**: 95% CI from per-item data (DS1000/CoderEval) via `--bootstrap`
 - **Terminal colors**: ANSI-coded output with progress bars (`utils/terminal.py`)
 - **GenerationConfig**: 16 parameters → single dataclass (`type_defs.py`)
-- **Registry tool**: `registry_tool.py` for model registry management, JSON config sync, architecture data extraction from GGUF headers
+- **Registry tool**: `src/registry_tool.py` for model registry management, JSON config sync, architecture data extraction from GGUF headers
 
 ## Prerequisites
 
@@ -47,7 +47,7 @@ Over 50 LLM models were tested on an HP Omen gaming PC with an NVIDIA RTX 5070 T
 
 ```bash
 # Clone repository
-git clone https://github.com/pskraer11/llm-benchmark-suite.git
+git clone https://github.com/pskraemer11/Local-LLM-Benchmark-Tool/llm-benchmark-suite.git
 cd llm-benchmark-suite
 
 # Python dependencies
@@ -74,22 +74,22 @@ git clone https://github.com/xlangai/DS-1000.git ds1000_official
 
 ```bash
 # Registry maintenance (add new models, sync configs, extract GGUF arch data)
-python registry_tool.py sync
+python src/registry_tool.py sync
 
 # Interactive mode (select model + benchmarks)
-python run_benchmarks.py
+python src/run_benchmarks.py
 
 # Direct run (model + all benchmarks)
-python run_benchmarks.py --model "qwen2.5-coder-14b-instruct" --sample-size 20
+python src/run_benchmarks.py --model "qwen2.5-coder-14b-instruct" --sample-size 20
 
 # With thinking mode for reasoning models (MATH-500)
-python run_benchmarks.py --model "gemma-4-26b-a4b-it" --sample-size 20 --thinking
+python src/run_benchmarks.py --model "gemma-4-26b-a4b-it" --sample-size 20 --thinking
 
 # Specific benchmarks
-python run_benchmarks.py --model "qwen2.5-coder-14b-instruct" --benchmarks DS1000,CoderEval --sample-size 10
+python src/run_benchmarks.py --model "qwen2.5-coder-14b-instruct" --benchmarks DS1000,CoderEval --sample-size 10
 
 # Consolidate results (with bootstrap CI)
-python consolidate_results.py --bootstrap
+python src/consolidate_results.py --bootstrap
 ```
 
 ## CLI Options (run_benchmarks)
@@ -105,7 +105,7 @@ python consolidate_results.py --bootstrap
 | `--output-dir`      | Results directory (default: `ergebnisse/`)                                                                   |
 | `--unload-between`  | Unload model between benchmarks (default: on)                                                                |
 
-## Registry Tool (registry_tool.py)
+## Registry Tool (src/registry_tool.py)
 
 | Command            | Description                                                                 |
 |--------------------|-----------------------------------------------------------------------------|
@@ -122,18 +122,18 @@ python consolidate_results.py --bootstrap
 ```
 LM Studio REST API (localhost:1234)
 |
-registry_tool.py            (Model registry + JSON config management)
+src/registry_tool.py            (Model registry + JSON config management)
 ├── add / fill-arch         (GGUF header reader for n_layers/hidden_dim)
 ├── configs / sync-from-configs  (Bidirectional JSON ↔ Registry sync)
 └── sync                    (Full maintenance pipeline)
 |
-run_benchmarks.py       (Launcher – load/unload HERE ONLY)
-├── custom_benchmark.py   (DS1000, CoderEval)
+src/run_benchmarks.py       (Launcher – load/unload HERE ONLY)
+├── src/custom_benchmark.py   (DS1000, CoderEval)
 ├── lm_eval                   (ARC, HellaSwag, TruthfulQA, MATH-500)
 ├── evalplus                  (HumanEval+, MBPP+)
 └── tool_eval_bench           (Agentic)
 |
-consolidate_results.py   (Weighted leaderboard + bootstrap CI)
+src/consolidate_results.py   (Weighted leaderboard + bootstrap CI)
     → ergebnisse/konsolidiert_*.csv + *.md
 ```
 
@@ -162,24 +162,24 @@ see also: https://deepwiki.com/pskraemer11/Local-LLM-Benchmark-Tool
 Activates `--thinking` for reasoning models on supported benchmarks:
 
 ```bash
-python run_benchmarks.py --model "gemma-4-26b-a4b-it" --thinking
+python src/run_benchmarks.py --model "gemma-4-26b-a4b-it" --thinking
 ```
 
-Implementation is in `run_benchmarks.py` and `custom_benchmark.py`.
+Implementation is in `src/run_benchmarks.py` and `src/custom_benchmark.py`.
 Reasoning model detection uses model-name keywords (r1, thinking, qwq, reasoning, cot).
 
 ## Project Structure
 
 ```
 Benchmarks/
-├── run_benchmarks.py           # Launcher
-├── custom_benchmark.py         # Custom pipeline (DS1000, CoderEval)
-├── consolidate_results.py      # Consolidation + bootstrap CI
-├── registry_tool.py                # Model registry + JSON config management
-├── assemble_blueprint.py           # Blueprint/classify/validate assembly
-├── benchmark_config.py             # Weights, Tool-Eval-Scenarios
-├── model_manager.py                # LM Studio load/unload
-├── csv_writer.py                   # CSV output
+├── src/run_benchmarks.py           # Launcher
+├── src/custom_benchmark.py         # Custom pipeline (DS1000, CoderEval)
+├── src/consolidate_results.py      # Consolidation + bootstrap CI
+├── src/registry_tool.py                # Model registry + JSON config management
+├── src/assemble_blueprint.py           # Blueprint/classify/validate assembly
+├── src/benchmark_config.py             # Weights, Tool-Eval-Scenarios
+├── src/model_manager.py                # LM Studio load/unload
+├── src/csv_writer.py                   # CSV output
 ├── tools/lmeval_proxy.py            # Native API proxy for lm_eval
 ├── tools/correlation_export.py      # Results correlation export
 ├── utils/terminal.py                # ANSI terminal colors + progress bars

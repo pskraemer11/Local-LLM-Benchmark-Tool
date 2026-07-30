@@ -26,14 +26,15 @@ from pathlib import Path
 from datetime import datetime
 
 # === Pfade ===
-REPO_ROOT = Path(__file__).parent
-sys.path.insert(0, str(REPO_ROOT))
+_SRC_DIR = Path(__file__).parent
+PROJECT_ROOT = _SRC_DIR.parent
+sys.path.insert(0, str(_SRC_DIR))
 from utils.terminal import ok, warn, error
 from benchmark_config import BLACKLIST
-REGISTRY_PATH = REPO_ROOT / "doc-git" / "model_registry.yaml"
-BLUEPRINT_PATH = REPO_ROOT / "doc-git" / "blueprint_definitions.yaml"
+REGISTRY_PATH = PROJECT_ROOT / "doc-git" / "model_registry.yaml"
+BLUEPRINT_PATH = PROJECT_ROOT / "doc-git" / "blueprint_definitions.yaml"
 CONFIG_ROOT = Path.home() / ".lmstudio" / ".internal" / "user-concrete-model-default-config"
-INVENTORY_PATH = REPO_ROOT / "prompt_inventory.csv"
+INVENTORY_PATH = PROJECT_ROOT / "prompt_inventory.csv"
 
 # === Reasoning Keywords ===
 REASONING_KEYWORDS = [
@@ -1014,10 +1015,46 @@ def validate_prompts() -> None:
             print(f"  WARN: {len(long)} prompts > 2000 chars (may still have old defaults)")
 
 
+def _interactive_menu() -> None:
+    """Show interactive command selection menu when no args given."""
+    cmds = [
+        ("all",      "classify → assemble → validate (full pipeline)"),
+        ("classify", "Read model registry & GGUF headers, classify blueprint + reasoning"),
+        ("assemble", "Build and write system prompts from blueprints"),
+        ("preview",  "Dry-run: compute prompts and print summary without writing"),
+        ("validate", "Check all system prompts for XML balance, length, Jinja remnants"),
+    ]
+    print("\n" + "=" * 60)
+    print("  assemble_blueprint.py – Interactive Menu")
+    print("=" * 60)
+    for i, (cmd, desc) in enumerate(cmds, 1):
+        print(f"  {i:2d}. {cmd:12s} {desc}")
+    print(f"  {len(cmds)+1:2d}. {'quit':12s} Exit")
+    print("=" * 60)
+
+    while True:
+        try:
+            choice = input("\nSelect command [1-6]: ").strip()
+            if not choice or choice == str(len(cmds) + 1):
+                print("[OK] Bye")
+                sys.exit(0)
+            idx = int(choice) - 1
+            if 0 <= idx < len(cmds):
+                cmd = cmds[idx][0]
+                print(f"\n[RUN] assemble_blueprint.py {cmd}\n")
+                sys.argv = [sys.argv[0], cmd]
+                break
+            print(f"[ERROR] Invalid choice: {choice}")
+        except (EOFError, KeyboardInterrupt):
+            print("\n[OK] Bye")
+            sys.exit(0)
+        except ValueError:
+            print(f"[ERROR] Invalid choice: {choice}")
+
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print(__doc__)
-        sys.exit(1)
+        _interactive_menu()
 
     command = sys.argv[1]
 

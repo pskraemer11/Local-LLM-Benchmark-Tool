@@ -10,12 +10,13 @@ import shutil
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parents[1]))
+_SRC_DIR = Path(__file__).resolve().parents[1]
+_PROJECT_ROOT = _SRC_DIR.parent
+sys.path.insert(0, str(_SRC_DIR))
 from assemble_blueprint import read_lms_configs, find_all_configs_for_registry_key
 from registry_tool import load_registry
 
-BASE_DIR = Path(__file__).resolve().parents[1]
-TEMPLATE_DIR = BASE_DIR / "doc-git" / "Jinja-Chat-Templates"
+TEMPLATE_DIR = _PROJECT_ROOT / "doc-git" / "Jinja-Chat-Templates"
 CONFIG_ROOT = Path.home() / ".lmstudio" / ".internal" / "user-concrete-model-default-config"
 TEMPLATE_KEY = "llm.prediction.promptTemplate"
 

@@ -5,10 +5,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 
-import run_benchmarks_v13 as rb
-from run_benchmarks_v13 import (
+import run_benchmarks as rb
+from run_benchmarks import (
     ALL_BENCHMARKS,
     ALL_BENCH_NAMES,
     API_BASE,
@@ -285,7 +285,7 @@ class TestLmevalParams:
 
     def test_math_default_has_higher_max_tokens(self):
         params = _get_evaluation_parameters("plain-7b-model", "math")
-        assert params["max_tokens"] == 8192        # math erlaubt mehr Tokens
+        assert params["max_tokens"] == 4096        # math erlaubt mehr Tokens
 
     def test_knowledge_default(self):
         params = _get_evaluation_parameters("plain-7b-model", "knowledge")
@@ -305,13 +305,14 @@ class TestLmevalParams:
             # gpt-oss-Override hat `stop` -> lm_eval versteht beides
             assert any(k in params for k in ("until", "stop"))
 
-    def test_enable_thinking_false_emits_reasoning_off_native(self):
-        # Wenn enable_thinking=False, wird zusaetzlich reasoning="off" gesetzt fuer
-        # den nativen API-Pfad (siehe Code-Review 2026-07-20 §Interoperability).
+    def test_enable_thinking_false_emits_chat_template_kwargs(self):
+        # Wenn enable_thinking=False, wird chat_template_kwargs mit enable_thinking=False gesetzt
+        # (OpenAI-kompatibles API statt Native REST API).
         params = _get_evaluation_parameters("plain-7b-model", "coding")
         chat_template_kwargs = params.get("chat_template_kwargs", {})
         if "enable_thinking" in chat_template_kwargs and chat_template_kwargs["enable_thinking"] is False:
-            assert params.get("reasoning") == "off"
+            # Kein reasoning="off" mehr (Native API entfernt)
+            assert "reasoning" not in params or params.get("reasoning") != "off"
 
     # Region: Model-Overrides (MODEL_TEMP_OVERRIDES) ---------------------
     def test_phi4_reasoning_override(self):
@@ -330,13 +331,14 @@ class TestLmevalParams:
         assert params["top_p"] == 0.9
         assert params["top_k"] == 20
 
-    def test_qwen3_6_emits_reasoning_off(self):
+    def test_qwen3_6_emits_chat_template_kwargs(self):
         # Qwen3.6 denkt im GGUF-Default mit. Override erzwingt enable_thinking=False.
-        # Folge: reasoning="off" wird fuer native API gesetzt.
+        # Folge: chat_template_kwargs wird fuer OpenAI-kompatibles API gesetzt.
         params = _get_evaluation_parameters("qwen3.6-30b-a3b-instruct", "coding")
         chat_template_kwargs = params.get("chat_template_kwargs", {})
         assert chat_template_kwargs.get("enable_thinking") is False
-        assert params.get("reasoning") == "off"
+        # Kein reasoning="off" mehr (Native API entfernt)
+        assert "reasoning" not in params or params.get("reasoning") != "off"
 
     def test_gemma_override_wins_against_math_thinking_default(self):
         # math category default hat enable_thinking=True, gemma override setzt es auf False.
@@ -360,8 +362,8 @@ class TestLmevalParams:
         params = _get_evaluation_parameters("r1-distill-7b", "coding")
         chat_template_kwargs = params.get("chat_template_kwargs", {})
         assert chat_template_kwargs.get("enable_thinking") is True
-        # Und reasoning="off" darf NICHT gesetzt sein, wenn thinking an ist
-        assert "reasoning" not in params or params["reasoning"] != "off"
+        # Und reasoning="off" darf NICHT gesetzt sein (Native API entfernt)
+        assert "reasoning" not in params or params.get("reasoning") != "off"
 
     def test_thinking_flag_unchanged_for_non_reasoning_model(self, monkeypatch):
         monkeypatch.setattr(rb, "IS_THINKING_ENABLED", True)

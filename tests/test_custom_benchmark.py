@@ -5,10 +5,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 
-import custom_benchmark_v13 as cb
-from custom_benchmark_v13 import (
+import custom_benchmark as cb
+from custom_benchmark import (
     _is_bare_statement,
     _patch_matplotlib_compat,
     _repair_indentation,
@@ -107,7 +107,7 @@ class TestUnwrapSolutionForInsert:
 class TestPatchMatplotlibCompat:
     def test_patches_set_xticklabels(self):
         # Find the actual pattern
-        import custom_benchmark_v13 as cb
+        import custom_benchmark as cb
         import inspect as _i
         src = _i.getsource(cb._patch_matplotlib_compat)
         # Just verify it exists and doesn't crash on simple code

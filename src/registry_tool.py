@@ -36,12 +36,14 @@ from __future__ import annotations
 import csv, json, os, re, struct, sys, subprocess, tempfile, concurrent.futures
 from pathlib import Path
 from collections import OrderedDict
-from typing import Any
+from typing import Any, Callable
 
+from utils.terminal import ok, warn, error
 from type_defs import RegistryEntry
 
-BASE_DIR = Path(__file__).resolve().parent
-REGISTRY_PATH = BASE_DIR / "doc-git" / "model_registry.yaml"
+_SRC_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = _SRC_DIR.parent
+REGISTRY_PATH = PROJECT_ROOT / "doc-git" / "model_registry.yaml"
 CONFIG_ROOT = Path.home() / ".lmstudio" / ".internal" / "user-concrete-model-default-config"
 
 # ── ruamel.yaml setup ──────────────────────────────────────────────
@@ -51,10 +53,7 @@ y.preserve_quotes = True
 y.indent(mapping=2, sequence=4, offset=2)
 
 # ── assemble_blueprint helpers ─────────────────────────────────────
-# Direct import instead of dynamic SourceFileLoader (Code-Review 2026-07-18
-# §2.1): enables IDE resolution, `__pycache__` re-use, and normal
-# import-error reporting when assemble_blueprint.py is broken.
-sys.path.insert(0, str(BASE_DIR))
+sys.path.insert(0, str(_SRC_DIR))
 from assemble_blueprint import (
     normalize_model_name, normalize_for_config, find_config_for_registry_key,
     find_all_configs_for_registry_key, find_registry_key_for_config,
@@ -89,10 +88,19 @@ def load_registry(path: Path = REGISTRY_PATH) -> dict[str, RegistryEntry]:
         return y.load(f) or {}
 
 
+def _normalize_quants_flow_style(path: Path) -> None:
+    """Convert block-style quants (multiline list) to flow-style [item] inline."""
+    content = path.read_text("utf-8")
+    new, n = re.subn(r'  quants:\n    - (\S+)', r'  quants: [\1]', content)
+    if n:
+        path.write_text(new, "utf-8")
+
+
 def save_registry(reg: dict[str, Any], path: Path = REGISTRY_PATH) -> None:
     with open(path, "w", encoding="utf-8") as f:
         y.dump(reg, f)
     _format_blank_lines(path)
+    _normalize_quants_flow_style(path)
 
 
 def load_lms_json(path: str | Path) -> list[Any]:
@@ -590,12 +598,8 @@ def cmd_sync_from_configs() -> None:
     print(f"  -> blacklisted:      {blacklisted} uebersprungen")
 
     if updated_offload or updated_np or updated_ukv:
-        print("[4] Registry speichern ...")
         save_registry(reg)
-        print("  [OK] Gespeichert")
-    else:
-        print("  Keine Änderungen")
-    print("Fertig.")
+    print(f"[OK] sync-from-configs: offload {updated_offload}, np {updated_np}, ukv {updated_ukv} aktualisiert ({skipped_no_match} kein Match, {blacklisted} blacklisted)")
 
 
 # ── sync-ctx command ───────────────────────────────────────────────
@@ -733,12 +737,8 @@ def cmd_sync_ctx() -> None:
     print(f"  -> {skipped_no_config} keine Config gefunden")
 
     if updated:
-        print("[4] Registry speichern ...")
         save_registry(reg)
-        print("  [OK] Gespeichert")
-    else:
-        print("  Keine Änderungen")
-    print("Fertig.")
+    print(f"[OK] sync-ctx: {updated} aktualisiert, {skipped_has_value} bereits vorhanden, {skipped_no_config} keine Config gefunden")
 
 
 # ── migrate-keys command ───────────────────────────────────────────
@@ -987,17 +987,7 @@ def cmd_fill_arch() -> None:
                 entry["reasoning"] = "thinking" if found[2] else "instruct"
                 reasoning_updated += 1
 
-    print(f"  -> {updated} aktualisiert")
-    print(f"  -> {skipped_has} bereits vorhanden")
-    print(f"  -> {skipped_no} kein GGUF-Match (nur per add+path möglich)")
-    if reasoning_updated:
-        print(f"  -> reasoning-Feld: {reasoning_updated} gesetzt")
-
-    if updated or reasoning_updated:
-        print("[5] Registry speichern ...")
-        save_registry(reg)
-        print("  [OK] Gespeichert")
-    print("Fertig.")
+    print(f"[OK] fill-arch: {updated} n_layers/hidden_dim gesetzt, {reasoning_updated} reasoning gesetzt, {skipped_has} bereits vorhanden, {skipped_no} kein GGUF-Match ({len(gguf_arch)} GGUF-Dateien ausgewertet)")
 
 
 # ── fill-reasoning command ──────────────────────────────────────────
@@ -1073,20 +1063,12 @@ def cmd_fill_reasoning() -> None:
         else:
             skipped_no_match += 1
 
-    print(f"  -> {updated} reasoning gesetzt")
-    print(f"  -> {skipped_has} bereits vorhanden")
-    print(f"  -> {skipped_no_match} kein GGUF-Match")
-
-    if updated:
-        print("[5] Registry speichern ...")
-        save_registry(reg)
-        print("  [OK] Gespeichert")
-    print("Fertig.")
+    print(f"[OK] fill-reasoning: {updated} reasoning gesetzt, {skipped_has} bereits vorhanden, {skipped_no_match} kein GGUF-Match ({len(gguf_reasoning)} GGUF-Dateien ausgewertet)")
 
 
 # ── validate command ───────────────────────────────────────────────
 
-TEMPLATE_DIR = BASE_DIR / "doc-git" / "Jinja-Chat-Templates"
+TEMPLATE_DIR = PROJECT_ROOT / "doc-git" / "Jinja-Chat-Templates"
 
 
 def cmd_validate() -> dict[str, Any]:
@@ -1298,9 +1280,94 @@ def cmd_sync() -> None:
 
 # ── CLI dispatch ──────────────────────────────────────────────────
 
+def _print_menu(cmds: list[tuple[str, str]]) -> None:
+    print("=" * 60)
+    print("  registry_tool.py – Interactive Menu")
+    print("=" * 60)
+    for i, (cmd, desc) in enumerate(cmds, 1):
+        print(f"  {i:2d}. {cmd:20s} {desc}")
+    print(f"  {len(cmds)+1:2d}. {'quit':20s} Exit")
+    print("=" * 60)
+
+
+def _run_menu_cmd(cmd: str) -> None:
+    """Execute a single menu command and wait for user to acknowledge."""
+    print(f"\n[RUN] registry_tool.py {cmd}\n")
+    dispatch: dict[str, Callable[[], Any]] = {
+        "sync": cmd_sync,
+        "validate": cmd_validate,
+        "configs": cmd_configs,
+        "compare": cmd_compare,
+        "fmt": cmd_fmt,
+        "fix-np": cmd_fix_np,
+        "fix-ctx": cmd_fix_ctx,
+        "fill-arch": cmd_fill_arch,
+        "fill-reasoning": cmd_fill_reasoning,
+        "fill-ctx": cmd_fill_ctx,
+        "fill-size": cmd_fill_size,
+        "sync-ctx": cmd_sync_ctx,
+        "sync-from-configs": cmd_sync_from_configs,
+        "migrate-keys": cmd_migrate_keys,
+    }
+    if cmd == "add":
+        if not sys.stdin.isatty():
+            models = json.load(sys.stdin)
+            if not isinstance(models, list):
+                models = [models]
+            cmd_add(models, interactive=True)
+        else:
+            print("  Kein JSON via Pipe. Bitte Modell-JSON pipen oder Datei angeben.")
+    else:
+        dispatch[cmd]()
+    input("\nDrücke Enter für das Menü ...")
+
+
+def _interactive_menu() -> None:
+    """Show interactive command selection menu when no args given."""
+    cmds = [
+        ("sync",      "Full sync: add → fill-arch → fill-reasoning → configs → sync → fmt → classify → assemble → validate"),
+        ("validate",  "Check model_registry.yaml consistency"),
+        ("configs",   "Write offloadRatio, numParallelSessions, useUnifiedKvCache into JSON configs (VRAM-aware)"),
+        ("compare",   "Compare registry vs LMS vs JSON configs"),
+        ("add",       "Add LMS models to registry (pipe JSON or provide file)"),
+        ("fmt",       "Normalize blank lines in registry YAML"),
+        ("fix-np",    "Recompute num_parallel for ALL entries"),
+        ("fix-ctx",   "Recompute context_length for ALL entries"),
+        ("fill-arch", "Read n_layers/hidden_dim from GGUF headers"),
+        ("fill-reasoning", "Read reasoning from GGUF chat_template"),
+        ("fill-ctx",  "Add default context_length to missing entries"),
+        ("fill-size", "Look up file_size_bytes from LMS"),
+        ("sync-ctx",  "Sync context_length from JSON configs into registry"),
+        ("sync-from-configs", "Sync offload/np/UKV from configs into registry"),
+        ("migrate-keys", "Re-key entries without publisher prefix"),
+    ]
+
+    _print_menu(cmds)
+    while True:
+        try:
+            choice = input("Select command [1-16]: ").strip()
+            if not choice or choice == str(len(cmds) + 1):
+                print("[OK] Bye")
+                sys.exit(0)
+            idx = int(choice) - 1
+            if 0 <= idx < len(cmds):
+                _run_menu_cmd(cmds[idx][0])
+                _print_menu(cmds)
+            else:
+                print(f"[ERROR] Invalid choice: {choice}")
+        except (EOFError, KeyboardInterrupt):
+            print("\n[OK] Bye")
+            sys.exit(0)
+        except ValueError:
+            print(f"[ERROR] Invalid choice: {choice}")
+
+
 def main() -> None:
     if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
-        print(__doc__)
+        if len(sys.argv) < 2:
+            _interactive_menu()
+        else:
+            print(__doc__)
         return
 
     cmd = sys.argv[1]
@@ -1308,12 +1375,17 @@ def main() -> None:
     if cmd == "compare":
         cmd_compare()
     elif cmd == "add":
-        # Read new models JSON from stdin or file arg
+        # Read new models JSON from file arg or stdin
         if len(sys.argv) > 2:
             with open(sys.argv[2], "r", encoding="utf-8-sig") as f:
                 models = json.load(f)
-        else:
+        elif not sys.stdin.isatty():
             models = json.load(sys.stdin)
+        else:
+            print("[ERROR] Kein JSON via Pipe und keine Datei angegeben.")
+            print("  Nutzung:   Get-LMSModels | python registry_tool.py add")
+            print("  Alternativ: python registry_tool.py add models.json")
+            sys.exit(1)
         if not isinstance(models, list):
             models = [models]
         cmd_add(models, interactive=True)

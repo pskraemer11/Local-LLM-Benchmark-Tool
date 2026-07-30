@@ -13,10 +13,9 @@ Also use the model cards from HuggingFace to help clarify open points.
 
 | Registry Name                 | Publisher                 | Arch        | Template                            | Blueprint      | Capabilities (Actual) | Capabilities (HF Target) |
 |-------------------------------|---------------------------|-------------|-------------------------------------|----------------|----------------------|--------------------------|
-| `granite-20b-code-instruct`   | bartowski                 | *(missing)* | *(none)*                            | `coding_agent` | coding, text         | coding, text ✅          |
 | `granite-4.0-h-tiny`          | ibm-granite               | Granite-4.0 | `granite-4.0-h-tiny_template.jinja` | `default_chat` | text                 | **coding** missing       |
 | `granite-4.0-h-tiny-UD`       | unsloth                   | Granite-4.0 | `granite-4.0-h-tiny_template.jinja` | `default_chat` | text                 | **coding** missing       |
-| `granite-4.1-8b`             |ibm-granite,lms-comm,unsloth| Granite-4.1| `granite-4.1-30b_template.jinja`   | `default_chat` | text                 | **coding** missing       |
+| `granite-4.1-8b`              |ibm-granite,lms-co.,unsloth| Granite-4.1 | `granite-4.1-30b_template.jinja`    | `default_chat` | text                 | **coding** missing       |
 | `granite-4.1-8b-UD`           | unsloth                   | Granite-4.1 | `granite-4.1-30b_template.jinja`    | `default_chat` | text                 | **coding** missing       |
 | `granite-4.1-30b`             | ibm-granite, mradermacher | Granite-4.1 | `granite-4.1-30b_template.jinja`    | `default_chat` | text                 | **coding** missing       |
 | `granite-4.1-30b-i1`          | ibm-granite, mradermacher | Granite-4.1 | `granite-4.1-30b_template.jinja`    | `default_chat` | text                 | **coding** missing       |
@@ -33,10 +32,6 @@ Also use the model cards from HuggingFace to help clarify open points.
 - **Per HF**: MoE Hybrid Mamba-2/Transformer (9:1). **64 total experts, 6 active, 1 shared**. 7B total / 1B active. 128K Context. NoPE. **Tool Calling, Coding, Instruction Following, RAG, FIM, JSON, multilingual**. Chat Template identical.
 - **In Registry**: `arch: Granite-4.0` ✅; `experts: 24` ❌ **should be 64**; `capabilities: [text]` ⚠️ **coding missing**; `notes:` says "24 Experts" ❌
 
-### Granite-20b-code-instruct
-- **Per HF**: Dense Transformer (MQA, GELU, absolute PE). **DEPRECATED** – not recommended for new projects. 8K Context. 116 programming languages. Function Calling, Code Generation.
-- **In Registry**: `blueprint: coding_agent` ✅; `capabilities: [coding, text]` ✅; **`arch` field missing** → System prompt says "a Unknown model" ⚠️
-
 ---
 
 ## 3. System Prompt Quality (3 bugs found)
@@ -44,8 +39,8 @@ Also use the model cards from HuggingFace to help clarify open points.
 ### Bug A: Wrong model name in JSON configs
 Several configs have the **wrong model name** in the system prompt – a matching issue in the assemble script (Publisher-overwrite / normalize_match):
 
-| Config file under                                    | System prompt says (wrong)                                                    | Should be                                |
-|------------------------------------------------------|-------------------------------------------------------------------------------|------------------------------------------|
+| Config file under                                     | System prompt says (wrong)                                                    | Should be                                |
+|-------------------------------------------------------|-------------------------------------------------------------------------------|------------------------------------------|
 | `ibm-granite/...granite-4.0-h-tiny-Q8_0.gguf.json`    | `You are **granite-4.0-h-tiny-UD** ... by **unsloth**`                        | `granite-4.0-h-tiny` by `ibm-granite`    |
 | `ibm-granite/...granite-4.1-30b-Q3_K_S.gguf.json`     | `You are **granite-4.1-30b-i1** ... by **ibm-granite/mradermacher**`          | `granite-4.1-30b` by `ibm-granite`       |
 | `ibm-granite/...granite-4.1-8b-Q8_0.gguf.json`        | `You are **granite-4.1-8b-UD** ... by **unsloth**`                            | `granite-4.1-8b` by `ibm-granite`        |
@@ -53,10 +48,7 @@ Several configs have the **wrong model name** in the system prompt – a matchin
 
 **Root cause**: The `normalize_model_name()` match is too broad – "granite-4.0-h-tiny" also matches "granite-4.0-h-tiny-UD", and the first match wins.
 
-### Bug B: `granite-20b-code-instruct` without `arch`
-System prompt: *"a **Unknown** model"* ⚠️. `arch` field missing from the registry entry.
-
-### Bug C: No system prompt in `lmstudio-community/granite-4.1-8b-Q6_K.gguf.json`
+### Bug B: No system prompt in `lmstudio-community/granite-4.1-8b-Q6_K.gguf.json`
 This config has an empty `operation.fields` array – no system prompt was written at all.
 
 ---
@@ -74,10 +66,9 @@ This config has an empty `operation.fields` array – no system prompt was writt
 | ibm-granite  | 4.1-30b Q3_K_S           | ✅ embedded (2925 chars, correct)      | **Not yet removed**     |
 | ibm-granite  | 4.1-8b Q8_0              | ✅ embedded (2925 chars, correct)      | **Not yet removed**     |
 | mradermacher | 4.1-30b-i1 Q3_K_S        | ✅ embedded (2925 chars, correct)      | **Not yet removed**     |
-| bartowski    | 20b-code-instruct Q5_K_S | ❌ none                                | ✅                      |
-| unsloth      | 4.0-h-tiny-UD Q8_K_XL    | ❌ none                                | ✅                      |
-| unsloth      | 4.1-8b(-UD) Q8/Q6        | ❌ none                                | ✅                      |
-| lmstudio-community | 4.1-8b Q6/Q8       | ❌ none                                | ✅                      |
+| unsloth      | 4.0-h-tiny-UD Q8_K_XL    | ❌ none                                | ✅                     |
+| unsloth      | 4.1-8b(-UD) Q8/Q6        | ❌ none                                | ✅                     |
+| lmstudio-community | 4.1-8b Q6/Q8       | ❌ none                                | ✅                     |
 
 ### Hub Jinja overrides (`hub/models/`):
 **No Granite Jinja files found** in `hub/models/`. Unlike Gemma-4, no hub overrides exist. When `promptTemplate` is missing, LMS falls back directly to the GGUF-embedded template.
@@ -118,14 +109,14 @@ Per HF: "⚠️ **DEPRECATED** – not recommended for new projects." Should be 
 |---|---|---|
 | 1 | Add `arch: Granite-20b-Code` to `granite-20b-code-instruct` in registry                              | 🔴 High   |
 | 2 | Add `coding` to `capabilities` of all Granite-4.x models (via `classify_capabilities()` or manually) | 🔴 High   |
-| 3 | Bugfix: Correct `normalize_model_name()` so that "granite-4.0-h-tiny" does not match                | 🔴 High   |
+| 3 | Bugfix: Correct `normalize_model_name()` so that "granite-4.0-h-tiny" does not match                 | 🔴 High   |
 |             "granite-4.0-h-tiny-UD" (exact match or suffix comparison)                                   |           |
 | 4 | Correct `experts: 64` for `granite-4.0-h-tiny` (HF: 64 total / 6 active)                             | 🟡 Medium |
-| 5 | Remove `promptTemplate` from the 4 remaining ibm-granite/mradermacher configs                       | 🟡 Medium |
+| 5 | Remove `promptTemplate` from the 4 remaining ibm-granite/mradermacher configs                        | 🟡 Medium |
 |             (or replace with hub override)
 | 6 | Create dedicated `granite_chat` blueprint + `granite_capabilities` module                            | 🟡 Medium |
 | 7 | Mark `granite-20b-code-instruct` with `deprecated: true`                                             | 🟢 Low    |
 | 8 | Set context lengths in configs to HF values (128K / 131K)                                            | 🟢 Low    |
-| 9 | Re-assemble `lmstudio-community/granite-4.1-8b-Q6_K.gguf.json` without system prompt                | 🟢 Low    |
+| 9 | Re-assemble `lmstudio-community/granite-4.1-8b-Q6_K.gguf.json` without system prompt                 | 🟢 Low    |
 
 Shall I execute the actions?

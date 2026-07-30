@@ -15,7 +15,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import model_manager as mm
 from model_manager import (
@@ -355,131 +355,89 @@ class TestGetAvailableModels:
 # ─────────────────────────────────────────────────────────────────────
 
 class TestLoadModelViaLMS:
-    """Load a model via the `lms load` CLI."""
+    """Load a model via LM Studio REST API."""
 
     def test_successful_load(self, mocker):
-        # Mock lms load (returns 0) and lms ps (returns a model)
-        load_result = MagicMock()
-        load_result.returncode = 0
-        load_result.stderr = ""
-        ps_result = MagicMock()
-        ps_result.returncode = 0
-        ps_result.stdout = json.dumps([{
-            "identifier": "test_model@q4_k_m",
-            "modelKey": "test_model",
-            "displayName": "Test Model",
-        }])
-        # side_effect: first call returns load_result, subsequent calls ps_result
-        mocker.patch("subprocess.run", side_effect=[load_result, ps_result])
+        # Mock REST API responses: load returns success, then list returns instance
+        load_response = {
+            "status": "loaded",
+            "instance_id": "test_model@q4_k_m",
+            "load_time_seconds": 5.0,
+        }
+        list_response = {
+            "models": [{
+                "key": "test_model",
+                "loaded_instances": [{"id": "test_model@q4_k_m"}],
+            }]
+        }
+        mocker.patch("model_manager._rest_request", side_effect=[load_response, list_response])
         ok, identifier = load_model_via_lms("test_model")
         assert ok is True
         assert identifier == "test_model@q4_k_m"
 
-    def test_falls_back_to_model_identifier_if_ps_returns_nothing(self, mocker):
-        # lms load succeeds, but lms ps returns no loaded model
-        # (this is a fallback case: the load succeeded but verification
-        # did not return an identifier within 10 seconds)
-        load_result = MagicMock()
-        load_result.returncode = 0
-        load_result.stderr = ""
-        ps_result = MagicMock()
-        ps_result.returncode = 0
-        ps_result.stdout = "[]"  # no model loaded
-        mocker.patch("subprocess.run", side_effect=[load_result] + [ps_result] * 10)
-        # CRITICAL: mock time.sleep to prevent the 10-iteration 1-second
-        # sleep loop from blocking the test
-        mocker.patch("time.sleep")
+    def test_falls_back_to_model_identifier_if_list_returns_nothing(self, mocker):
+        # Load succeeds but list returns no instances
+        load_response = {
+            "status": "loaded",
+            "instance_id": "test_model",
+            "load_time_seconds": 5.0,
+        }
+        list_response = {"models": []}
+        mocker.patch("model_manager._rest_request", side_effect=[load_response, list_response])
         ok, identifier = load_model_via_lms("test_model")
         # Falls back to using the model key directly
         assert ok is True
         assert identifier == "test_model"
 
     def test_timeout_returns_false(self, mocker):
-        mocker.patch(
-            "subprocess.run",
-            side_effect=subprocess.TimeoutExpired(cmd="lms", timeout=180),
-        )
-        ok, identifier = load_model_via_lms("test_model")
-        assert ok is False
-        assert identifier is None
-
-    def test_lms_not_found_returns_false(self, mocker):
-        mocker.patch("subprocess.run", side_effect=FileNotFoundError())
+        mocker.patch("model_manager._rest_request", return_value=None)
         ok, identifier = load_model_via_lms("test_model")
         assert ok is False
         assert identifier is None
 
     def test_already_loaded(self, mocker):
-        # lms load returns "already loaded" error
-        load_result = MagicMock()
-        load_result.returncode = 1
-        load_result.stderr = "Model already loaded"
-        ps_result = MagicMock()
-        ps_result.returncode = 0
-        ps_result.stdout = json.dumps([{
-            "identifier": "test_model@q4_k_m",
-            "modelKey": "test_model",
-            "displayName": "Test",
-        }])
-        mocker.patch("subprocess.run", side_effect=[load_result, ps_result])
+        # REST API returns a response (not None) - treat as already loaded
+        list_response = {
+            "models": [{
+                "key": "test_model",
+                "loaded_instances": [{"id": "test_model@q4_k_m"}],
+            }]
+        }
+        mocker.patch("model_manager._rest_request", return_value=list_response)
         ok, identifier = load_model_via_lms("test_model")
         # Already loaded is treated as success
         assert ok is True
         assert identifier == "test_model@q4_k_m"
 
     def test_with_gpu_offload(self, mocker):
-        # When gpu_offload is provided, --gpu is appended
-        load_result = MagicMock()
-        load_result.returncode = 0
-        load_result.stderr = ""
-        ps_result = MagicMock()
-        ps_result.returncode = 0
-        ps_result.stdout = json.dumps([{
-            "identifier": "test@q4",
-            "modelKey": "test",
-            "displayName": "Test",
-        }])
-        mock_run = mocker.patch(
-            "subprocess.run",
-            side_effect=[load_result, ps_result],
-        )
+        # When gpu_offload is provided, it's included in the payload
+        load_response = {
+            "status": "loaded",
+            "instance_id": "test@q4",
+            "load_time_seconds": 5.0,
+        }
+        mock_rest = mocker.patch("model_manager._rest_request", return_value=load_response)
         load_model_via_lms("test", gpu_offload=0.8)
-        call_args = mock_run.call_args_list[0]
-        cmd = call_args.args[0] if call_args.args else call_args[0][0]
-        assert "--gpu" in cmd
-        assert "0.8" in cmd
+        call_args = mock_rest.call_args
+        # Check that gpu_offload was included in the data
+        assert call_args[1]["data"]["gpu_offload"] == 0.8
 
     def test_daemon_error_retried(self, mocker):
-        # First attempt: "Runtime not found" error → restart and retry
-        load_result_1 = MagicMock()
-        load_result_1.returncode = 1
-        load_result_1.stderr = "Runtime not found"
-        load_result_2 = MagicMock()
-        load_result_2.returncode = 0
-        load_result_2.stderr = ""
-        ps_result = MagicMock()
-        ps_result.returncode = 0
-        ps_result.stdout = json.dumps([{
-            "identifier": "test@q4",
-            "modelKey": "test",
-            "displayName": "Test",
-        }])
-        # First call: daemon error, then load_result_2, then ps_result
-        mock_run = mocker.patch(
-            "subprocess.run",
-            side_effect=[load_result_1, load_result_2, ps_result],
-        )
+        # First attempt fails (None), then succeeds
+        load_response = {
+            "status": "loaded",
+            "instance_id": "test@q4",
+            "load_time_seconds": 5.0,
+        }
+        mocker.patch("model_manager._rest_request", side_effect=[None, load_response])
         # _is_lmstudio_running is mocked to return True (restart succeeded)
         mocker.patch("model_manager._is_lmstudio_running", return_value=True)
         ok, identifier = load_model_via_lms("test")
         assert ok is True
 
     def test_load_failure_returns_false(self, mocker):
-        # Generic error (not "already loaded", not daemon)
-        load_result = MagicMock()
-        load_result.returncode = 1
-        load_result.stderr = "Some other error"
-        mocker.patch("subprocess.run", return_value=load_result)
+        # Generic failure (returns None)
+        mocker.patch("model_manager._rest_request", return_value=None)
         ok, identifier = load_model_via_lms("test")
         assert ok is False
         assert identifier is None
@@ -490,129 +448,81 @@ class TestLoadModelViaLMS:
 # ─────────────────────────────────────────────────────────────────────
 
 class TestUnloadAllModels:
-    """Unload all models via the `lms unload --all` CLI.
-
-    Post-fix (Code-Review 2026-07-18 Bug 1): the confirmation poll now
-    uses `lms ps --json` (canonical LMS state) instead of HTTP pinging
-    /v1/chat/completions with `model:"check"` (which was racy because
-    LM Studio could respond with HTTP 400 and be misinterpreted as
-    "model gone" while the actual model was still resident).
-    """
-
-    def _make_lms_result(self, returncode, stdout="", stderr=""):
-        r = MagicMock()
-        r.returncode = returncode
-        r.stdout = stdout
-        r.stderr = stderr
-        return r
+    """Unload all models via LM Studio REST API."""
 
     def test_successful_unload_immediately(self, mocker):
-        # lms unload returns 0, then the very first lms ps --json
-        # returns an empty list → success on the first poll
-        unload_result = self._make_lms_result(0)
-        ps_empty = self._make_lms_result(0, stdout="[]")
-        mocker.patch(
-            "subprocess.run",
-            side_effect=[unload_result, ps_empty],
-        )
+        # List returns one loaded model, unload succeeds, then list returns empty
+        list_with_model = {
+            "models": [{
+                "key": "old_model",
+                "loaded_instances": [{"id": "old_model@q4"}],
+            }]
+        }
+        unload_response = {"instance_id": "old_model@q4"}
+        list_empty = {"models": []}
+        mocker.patch("model_manager._rest_request", 
+                    side_effect=[list_with_model, unload_response, list_empty])
         assert has_unloaded_all_models() is True
 
     def test_successful_unload_after_two_polls(self, mocker):
-        # First lms ps still shows the model, second one is empty
-        unload_result = self._make_lms_result(0)
-        ps_with_model = self._make_lms_result(0, stdout=json.dumps([
-            {"identifier": "old_model@q4", "modelKey": "old_model"}
-        ]))
-        ps_empty = self._make_lms_result(0, stdout="[]")
-        mocker.patch(
-            "subprocess.run",
-            side_effect=[unload_result, ps_with_model, ps_empty],
-        )
+        # First list shows model, unload, then two polls before empty
+        list_with_model = {
+            "models": [{
+                "key": "old_model",
+                "loaded_instances": [{"id": "old_model@q4"}],
+            }]
+        }
+        unload_response = {"instance_id": "old_model@q4"}
+        list_still_loaded = {
+            "models": [{
+                "key": "old_model",
+                "loaded_instances": [{"id": "old_model@q4"}],
+            }]
+        }
+        list_empty = {"models": []}
+        mocker.patch("model_manager._rest_request", 
+                    side_effect=[list_with_model, unload_response, 
+                               list_still_loaded, list_empty])
         assert has_unloaded_all_models() is True
 
-    def test_lms_unload_command_not_found(self, mocker):
-        # lms.exe not installed at all
-        mocker.patch("subprocess.run", side_effect=FileNotFoundError())
-        assert has_unloaded_all_models() is False
+    def test_no_models_loaded(self, mocker):
+        # List returns no loaded models
+        list_empty = {"models": []}
+        mocker.patch("model_manager._rest_request", return_value=list_empty)
+        assert has_unloaded_all_models() is True
 
-    def test_lms_unload_timeout(self, mocker):
-        # lms unload itself times out
-        mocker.patch(
-            "subprocess.run",
-            side_effect=subprocess.TimeoutExpired(cmd="lms", timeout=30),
-        )
-        assert has_unloaded_all_models() is False
-
-    def test_lms_unload_non_zero_exit_still_polls(self, mocker):
-        # Non-zero exit on `lms unload --all` is logged but we still poll
-        unload_result = self._make_lms_result(1, stderr="warning: not loaded")
-        ps_empty = self._make_lms_result(0, stdout="[]")
-        mocker.patch(
-            "subprocess.run",
-            side_effect=[unload_result, ps_empty],
-        )
+    def test_unload_failure_continues_polling(self, mocker):
+        # Unload returns None (failure), but we still poll until empty
+        list_with_model = {
+            "models": [{
+                "key": "old_model",
+                "loaded_instances": [{"id": "old_model@q4"}],
+            }]
+        }
+        list_empty = {"models": []}
+        mocker.patch("model_manager._rest_request", 
+                    side_effect=[list_with_model, None, list_empty])
+        # Should succeed despite unload failure
         assert has_unloaded_all_models() is True
 
     def test_returns_false_when_model_stays_loaded(self, mocker):
         # 15 polls all show the model is still loaded
-        unload_result = self._make_lms_result(0)
-        ps_with_model = self._make_lms_result(0, stdout=json.dumps([
-            {"identifier": "stuck_model@q4", "modelKey": "stuck_model"}
-        ]))
-        mocker.patch(
-            "subprocess.run",
-            side_effect=[unload_result] + [ps_with_model] * 15,
-        )
+        list_with_model = {
+            "models": [{
+                "key": "stuck_model",
+                "loaded_instances": [{"id": "stuck_model@q4"}],
+            }]
+        }
+        unload_response = {"instance_id": "stuck_model@q4"}
+        # First call: list, second: unload, then 15 polls showing still loaded
+        side_effects = [list_with_model, unload_response] + [list_with_model] * 15
+        mocker.patch("model_manager._rest_request", side_effect=side_effects)
         assert has_unloaded_all_models() is False
 
-    def test_lms_ps_failure_is_treated_as_inconclusive(self, mocker):
-        # lms unload succeeded, but lms ps returns non-zero (LMS broken)
-        # → all polls fail → return False (caller will deal with it)
-        unload_result = self._make_lms_result(0)
-        ps_failure = self._make_lms_result(1, stderr="crash")
-        mocker.patch(
-            "subprocess.run",
-            side_effect=[unload_result] + [ps_failure] * 15,
-        )
+    def test_list_api_failure_returns_false(self, mocker):
+        # List API returns None (failure)
+        mocker.patch("model_manager._rest_request", return_value=None)
         assert has_unloaded_all_models() is False
-
-    def test_lms_ps_invalid_json_is_treated_as_inconclusive(self, mocker):
-        unload_result = self._make_lms_result(0)
-        ps_bad = self._make_lms_result(0, stdout="not json")
-        mocker.patch(
-            "subprocess.run",
-            side_effect=[unload_result] + [ps_bad] * 15,
-        )
-        assert has_unloaded_all_models() is False
-
-    def test_lms_ps_timeout_is_retried(self, mocker):
-        unload_result = self._make_lms_result(0)
-        ps_empty = self._make_lms_result(0, stdout="[]")
-        mocker.patch(
-            "subprocess.run",
-            side_effect=[unload_result,
-                         subprocess.TimeoutExpired(cmd="lms", timeout=10),
-                         ps_empty],
-        )
-        assert has_unloaded_all_models() is True
-
-    def test_no_longer_uses_chat_completions_http_ping(self, mocker):
-        # Regression test: ensure urlopen is NOT called any more for the
-        # unload confirmation. The old racy HTTP ping was the bug.
-        unload_result = self._make_lms_result(0)
-        ps_empty = self._make_lms_result(0, stdout="[]")
-        mock_run = mocker.patch(
-            "subprocess.run",
-            side_effect=[unload_result, ps_empty],
-        )
-        # If urlopen is called, the test fails
-        mock_urlopen = mocker.patch("urllib.request.urlopen")
-        has_unloaded_all_models()
-        mock_urlopen.assert_not_called()
-        # Confirm we used `lms ps --json`
-        ps_call_args = mock_run.call_args_list[1]
-        cmd = ps_call_args.args[0] if ps_call_args.args else ps_call_args[0][0]
-        assert cmd[:3] == ["lms", "ps", "--json"]
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -804,6 +714,40 @@ class TestWaitForModelReady:
 
 
 # ─────────────────────────────────────────────────────────────────────
+# is_api_available (Code-Review 2026-07-28 §2.2 — test coverage)
+# ─────────────────────────────────────────────────────────────────────
+
+class TestIsApiAvailable:
+    """is_api_available() returns bool — broad except Exception is intentional."""
+
+    def test_returns_true_on_200(self, mocker):
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_urlopen = MagicMock()
+        mock_urlopen.__enter__ = MagicMock(return_value=mock_resp)
+        mock_urlopen.__exit__ = MagicMock(return_value=False)
+        mocker.patch("urllib.request.urlopen", return_value=mock_urlopen)
+        assert is_api_available() is True
+
+    def test_returns_false_on_http_error(self, mocker):
+        from urllib.error import HTTPError
+        mocker.patch("urllib.request.urlopen", side_effect=HTTPError(
+            "http://localhost/models", 503, "Service Unavailable", {}, None
+        ))
+        assert is_api_available() is False
+
+    def test_returns_false_on_connection_error(self, mocker):
+        from urllib.error import URLError
+        mocker.patch("urllib.request.urlopen", side_effect=URLError("Connection refused"))
+        assert is_api_available() is False
+
+    def test_returns_false_on_timeout(self, mocker):
+        from socket import timeout
+        mocker.patch("urllib.request.urlopen", side_effect=timeout("timed out"))
+        assert is_api_available() is False
+
+
+# ─────────────────────────────────────────────────────────────────────
 # _validate_model_identifier (Code-Review 2026-07-18 §6.1)
 # ─────────────────────────────────────────────────────────────────────
 
@@ -875,24 +819,22 @@ class TestValidateModelKey:
 
     def test_load_model_via_lms_rejects_bad_key(self, mocker):
         # load_model_via_lms should refuse a key with shell metachars
-        mocker.patch("subprocess.run")
+        mocker.patch("model_manager._rest_request")
         ok, identifier = load_model_via_lms("evil;rm -rf /")
         assert ok is False
         assert identifier is None
 
     def test_load_model_via_lms_accepts_valid_key(self, mocker):
-        # Valid key passes validation and proceeds to subprocess
-        load_result = mocker.MagicMock()
-        load_result.returncode = 0
-        load_result.stderr = ""
-        ps_result = mocker.MagicMock()
-        ps_result.returncode = 0
-        ps_result.stdout = '[{"identifier": "valid-model@q4", "modelKey": "valid-model", "displayName": "Valid"}]'
-        mocker.patch("subprocess.run", side_effect=[load_result, ps_result])
+        # Valid key passes validation and proceeds to REST API.
+        load_response = {
+            "status": "loaded",
+            "instance_id": "valid-model@q4",
+            "load_time_seconds": 5.0,
+        }
+        mocker.patch("model_manager._rest_request", return_value=load_response)
         ok, identifier = load_model_via_lms("unsloth/valid-model")
         assert ok is True
         assert identifier == "valid-model@q4"
-        assert is_model_ready(timeout=5) is False
 
     def test_returns_false_on_500_error(self, mocker):
         # 500 errors are also retried (server not ready yet)

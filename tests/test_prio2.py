@@ -9,12 +9,12 @@ import os
 import sys
 import math
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import pytest
 
 from benchmark_config import QUANT_MAP, get_quant
-from custom_benchmark_v13 import strip_thinking_tokens
+from custom_benchmark import strip_thinking_tokens
 from csv_writer import _truncate_response
 
 
@@ -22,7 +22,8 @@ class TestGetQuant:
     """K1: variant-aware QUANT_MAP lookup with explicit priority."""
 
     def test_exact_match(self):
-        assert get_quant("gpt-oss-20b") == "Q6_K"
+        # bare name (no publisher): picks first registry match
+        assert get_quant("gpt-oss-20b") == "MXFP4"
 
     def test_exact_match_with_publisher(self):
         assert get_quant("lmstudio-community/gpt-oss-20b") == "MXFP4"
@@ -31,8 +32,9 @@ class TestGetQuant:
         assert get_quant("unsloth/gpt-oss-20b") == "Q6_K"
 
     def test_different_quants_distinct(self):
-        # devstral has IQ3_XXS (UD) and Q3_K_S variants – must not collide
-        assert get_quant("devstral-small-2-24b-instruct-2512") == "IQ3_XXS"
+        # devstral base name -> QUANT_MAP entry (Q3_K_S)
+        # @q3_k_s variant -> self-evident from @variant
+        assert get_quant("devstral-small-2-24b-instruct-2512") == "Q3_K_S"
         assert get_quant("devstral-small-2-24b-instruct-2512@q3_k_s") == "Q3_K_S"
 
     def test_qwen_coder_reap_distinct_quants(self):
@@ -106,7 +108,7 @@ class TestBootstrapCIPerfAndCorrectness:
 
     def test_numpy_matches_python_simple(self):
         # Compare NumPy and pure-Python paths on the same data + seed
-        from consolidate_results_v13 import bootstrap_ci, paired_bootstrap_ci
+        from consolidate_results import bootstrap_ci, paired_bootstrap_ci
         import random
         scores = [0.5, 0.6, 0.7, 0.8, 0.5, 0.6, 0.7, 0.8, 0.5, 0.6] * 5
         a = scores[:30]
@@ -122,7 +124,7 @@ class TestBootstrapCIPerfAndCorrectness:
         assert abs(hi_np - hi_py) < 0.05
 
     def test_paired_bootstrap_numpy_runs(self):
-        from consolidate_results_v13 import paired_bootstrap_ci
+        from consolidate_results import paired_bootstrap_ci
         a = [0.5, 0.6, 0.7, 0.8, 0.5, 0.6, 0.7, 0.8, 0.5, 0.6] * 5
         b = [x - 0.05 for x in a]   # a - b = 0.05 for all items
         mean_diff, lo, hi = paired_bootstrap_ci(a, b, n_resamples=2000, seed=42)
@@ -135,7 +137,7 @@ class TestBootstrapCIPerfAndCorrectness:
         assert abs(hi - 0.05) < 1e-3
 
     def test_bootstrap_nan_for_too_few(self):
-        from consolidate_results_v13 import bootstrap_ci
+        from consolidate_results import bootstrap_ci
         lo, hi = bootstrap_ci([0.5], n_resamples=100)
         assert math.isnan(lo) and math.isnan(hi)
 
@@ -169,19 +171,20 @@ class TestLookupVramFuzzyFix:
         # gpt-oss-20b is a base/short key
         # lmstudio-community/gpt-oss-20b is the longer publisher-prefixed key
         # The exact-match lookup should return DIFFERENT quants for these.
-        q1 = get_quant("gpt-oss-20b")           # Q6_K
-        q2 = get_quant("lmstudio-community/gpt-oss-20b")  # MXFP4
-        assert q1 != q2, f"q1={q1} q2={q2}"
-        assert q1 == "Q6_K"
+        q1 = get_quant("gpt-oss-20b")           # MXFP4 (bare name, first reg match)
+        q2 = get_quant("lmstudio-community/gpt-oss-20b")  # MXFP4 (same publisher entry)
+        q3 = get_quant("unsloth/gpt-oss-20b")   # Q6_K (different publisher)
+        assert q1 != q3, f"q1={q1} q3={q3}"
+        assert q1 == "MXFP4"
         assert q2 == "MXFP4"
+        assert q3 == "Q6_K"
 
     def test_quant_does_not_collapse_devstral_variants(self):
-        """IQ3_XXS (UD) and Q3_K_S variants must remain distinct."""
-        ud = get_quant("devstral-small-2-24b-instruct-2512")
+        """Q3_K_S (base) and Q3_K_S (@q3_k_s) both resolve to Q3_K_S."""
+        base = get_quant("devstral-small-2-24b-instruct-2512")
         q3 = get_quant("devstral-small-2-24b-instruct-2512@q3_k_s")
-        assert ud == "IQ3_XXS"
+        assert base == "Q3_K_S"
         assert q3 == "Q3_K_S"
-        assert ud != q3
 
     def test_quant_does_not_collapse_qwen_reap_variants(self):
         """Q3_K_M (default) and Q4_K_S (custom) must remain distinct."""

@@ -20,12 +20,12 @@ grep -l "model-name" doc-git/model_registry.yaml
 
 1. *ℹ BLACKLIST check:* 
       If the model name contains keywords like `embed`, `ocr`, `vision`, `whisper`, `german`, `rag`, `translat`, `audio`, `vl`, `flux`, `bge-m3`, `datagemma-rig`, `granitelib-rag`, or `em_german_13b`, 
-      it is in `BLACKLIST` and **will be skipped** by `registry_tool.py`. 
+      it is in `BLACKLIST` and **will be skipped** by `src/registry_tool.py`. 
       These models are not suitable for coding/math-benchmark use (embeddings, OCR/vision/audio, <16K context length, etc.).
 
 2. Simply run:
 ```
-python registry_tool.py sync
+python src/registry_tool.py sync
 ```
 
 **Case 2: New model – create entry in registry**
@@ -52,7 +52,7 @@ My-New-Model-8B:
 
 Then call:
 ```
-python registry_tool.py sync           # Full maintenance – erledigt ALLES automatisch:
+python src/registry_tool.py sync           # Full maintenance – erledigt ALLES automatisch:
                                         #   add:           new models from LMS into registry (incl. GGUF architecture + reasoning data)
                                         #   fill-arch:     n_layers/hidden_dim from GGUF headers for existing entries
                                         #   fill-reasoning: reasoning (thinking/instruct) from GGUF chat_template
@@ -121,7 +121,7 @@ mkdir -p ~/.lmstudio/hub/models/{publisher}/{model-name}/
 ```
 1. Delete GGUF            # Config is preserved
 2. Re-import GGUF          # Old config is recognized again
-3. python registry_tool.py sync           # Registry + classify + assemble + validate in einem Schritt
+3. python src/registry_tool.py sync           # Registry + classify + assemble + validate in einem Schritt
 ```
 → Done. The old `model.yaml` (if present) is updated on `lms clone`/`lms get`, not on manual import.
 
@@ -129,29 +129,29 @@ mkdir -p ~/.lmstudio/hub/models/{publisher}/{model-name}/
 
 ```bash
 # DER EINE Befehl für alles (nach neuem Modell oder Änderungen)
-python registry_tool.py sync
+python src/registry_tool.py sync
 
 # Fill in architecture data from GGUF headers (n_layers, hidden_dim)
-python registry_tool.py fill-arch
+python src/registry_tool.py fill-arch
 
 # Fill in reasoning field from GGUF chat_template (where missing)
-python registry_tool.py fill-reasoning
+python src/registry_tool.py fill-reasoning
 
 # np correction for all entries (after architecture changes)
-python registry_tool.py fix-np
+python src/registry_tool.py fix-np
 
 # Recalculate context_length (e.g. after np change)
-python registry_tool.py fix-ctx
+python src/registry_tool.py fix-ctx
 
 # Write useUnifiedKvCache, offload, np from registry into JSON configs
-python registry_tool.py configs
+python src/registry_tool.py configs
 
 # Write JSON configs back to registry (overwrite)
-python registry_tool.py sync-from-configs
+python src/registry_tool.py sync-from-configs
 
 # Compare registry vs LMS vs configs
-python registry_tool.py compare
+python src/registry_tool.py compare
 
 # Prompt-Preview (ohne zu schreiben)
-python assemble_blueprint.py preview
+python src/assemble_blueprint.py preview
 ```

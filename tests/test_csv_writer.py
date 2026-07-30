@@ -17,7 +17,7 @@ from datetime import datetime
 
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import csv_writer
 from csv_writer import (

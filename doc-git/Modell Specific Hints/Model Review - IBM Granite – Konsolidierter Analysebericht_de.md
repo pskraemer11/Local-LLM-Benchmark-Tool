@@ -13,10 +13,9 @@ Nehme auch hier die Modelkarten von HuggingFace zur Unterstützung bei Klärung 
 
 | Registry-Name               | Publisher                 | Arch        | Template                            | Blueprint      |Capabilities(Ist)|Capabilities (HF-Soll)|
 |-----------------------------|---------------------------|-------------|-------------------------------------|----------------|-----------------|----------------------|
-| `granite-20b-code-instruct` | bartowski                 | *(fehlt)*   | *(keins)*                           | `coding_agent` | coding, text    | coding, text ✅      |
 | `granite-4.0-h-tiny`        | ibm-granite               | Granite-4.0 | `granite-4.0-h-tiny_template.jinja` | `default_chat` | text            | **coding** fehlt     |
 | `granite-4.0-h-tiny-UD`     | unsloth                   | Granite-4.0 | `granite-4.0-h-tiny_template.jinja` | `default_chat` | text            | **coding** fehlt     |
-| `granite-4.1-8b`           |ibm-granite,lms-comm,unsloth| Granite-4.1| `granite-4.1-30b_template.jinja`   | `default_chat` | text            | **coding** fehlt     |
+| `granite-4.1-8b`            |ibm-granite,lms-co.,unsloth| Granite-4.1 | `granite-4.1-30b_template.jinja`    | `default_chat` | text            | **coding** fehlt     |
 | `granite-4.1-8b-UD`         | unsloth                   | Granite-4.1 | `granite-4.1-30b_template.jinja`    | `default_chat` | text            | **coding** fehlt     |
 | `granite-4.1-30b`           | ibm-granite, mradermacher | Granite-4.1 | `granite-4.1-30b_template.jinja`    | `default_chat` | text            | **coding** fehlt     |
 | `granite-4.1-30b-i1`        | ibm-granite, mradermacher | Granite-4.1 | `granite-4.1-30b_template.jinja`    | `default_chat` | text            | **coding** fehlt     |
@@ -26,16 +25,16 @@ Nehme auch hier die Modelkarten von HuggingFace zur Unterstützung bei Klärung 
 ## 2. Abgleich mit HuggingFace Model Cards
 
 ### Granite-4.1-30b / Granite-4.1-8b
-- **Laut HF**: Decoder-only dense Transformer, GQA/RoPE/SwiGLU. 30B (64 Layer) / 8B (40 Layer). 131K Context. **Tool Calling, Coding, Instruction Following, RAG, FIM, JSON Output, multilingual (12 Sprachen)**. Chat-Template: `<\|start_of_role\|>` / `<\|end_of_role\|>` / `<\|end_of_text\|>`.
+- **Laut HF**: Decoder-only dense Transformer, GQA/RoPE/SwiGLU. 30B (64 Layer) / 8B (40 Layer). 131K Context. 
+- **Tool Calling, Coding, Instruction Following, RAG, FIM, JSON Output, multilingual (12 Sprachen)**. 
+- **Chat-Template**: `<\|start_of_role\|>` / `<\|end_of_role\|>` / `<\|end_of_text\|>`.
 - **In Registry**: `arch: Granite-4.1` ✅; `capabilities: [text]` ⚠️ **coding fehlt**; `blueprint: default_chat` ⚠️ sollte eher coding_agent oder ein granite-spezifischer Blueprint sein.
 
 ### Granite-4.0-h-tiny
-- **Laut HF**: MoE Hybrid Mamba-2/Transformer (9:1). **64 total experts, 6 active, 1 shared**. 7B total / 1B active. 128K Context. NoPE. **Tool Calling, Coding, Instruction Following, RAG, FIM, JSON, multilingual**. Chat-Template identisch.
+- Laut HF: **MoE** Hybrid **Mamba-2**/Transformer (9:1). **64 total experts, 6 active, 1 shared**. 7B total / 1B active. 128K Context. NoPE. 
+- **Tool Calling, Coding, Instruction Following, RAG, FIM, JSON, multilingual**. Chat-Template identisch.
 - **In Registry**: `arch: Granite-4.0` ✅; `experts: 24` ❌ **sollte 64 sein**; `capabilities: [text]` ⚠️ **coding fehlt**; `notes:` sagt "24 Experts" ❌
 
-### Granite-20b-code-instruct
-- **Laut HF**: Dense Transformer (MQA, GELU, absolute PE). **DEPRECATED** – nicht für neue Projekte empfohlen. 8K Context. 116 Programmiersprachen. Function Calling, Code Generation.
-- **In Registry**: `blueprint: coding_agent` ✅; `capabilities: [coding, text]` ✅; **`arch`-Feld fehlt** → System-Prompt sagt "a Unknown model" ⚠️
 
 ---
 
@@ -74,10 +73,10 @@ Diese Config hat ein leeres `operation.fields`-Array – gar kein System-Prompt 
 | ibm-granite  | 4.1-30b Q3_K_S           | ✅ eingebettet (2925 chars, korrekt)   | **Noch nicht entfernt** |
 | ibm-granite  | 4.1-8b Q8_0              | ✅ eingebettet (2925 chars, korrekt)   | **Noch nicht entfernt** |
 | mradermacher | 4.1-30b-i1 Q3_K_S        | ✅ eingebettet (2925 chars, korrekt)   | **Noch nicht entfernt** |
-| bartowski    | 20b-code-instruct Q5_K_S | ❌ keins                               |       ✅                |
-| unsloth      | 4.0-h-tiny-UD Q8_K_XL    | ❌ keins                               |       ✅                |
-| unsloth      | 4.1-8b(-UD) Q8/Q6        | ❌ keins                               |       ✅                |
-| lmstudio-community | 4.1-8b Q6/Q8       | ❌ keins                               |       ✅                |
+| bartowski    | 20b-code-instruct Q5_K_S | ❌ keins                               |       ✅               |
+| unsloth      | 4.0-h-tiny-UD Q8_K_XL    | ❌ keins                               |       ✅               |
+| unsloth      | 4.1-8b(-UD) Q8/Q6        | ❌ keins                               |       ✅               |
+| lmstudio-community | 4.1-8b Q6/Q8       | ❌ keins                               |       ✅               |
 
 ### Hub-Jinja-Overrides (`hub/models/`):
 **Keine einzige Granite-Jinja-Datei** in `hub/models/` gefunden. Anders als bei Gemma-4 existieren keine Hub-Overrides. LMS fällt bei fehlendem `promptTemplate` direkt auf das GGUF-eingebettete Template zurück.

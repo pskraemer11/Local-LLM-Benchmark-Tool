@@ -2,18 +2,18 @@
 # -*- coding: utf-8 -*-
 """
 Shared module for LM Studio model management.
-Imported by run_benchmarks_v13.py AND custom_benchmark_v13.py.
+Imported by run_benchmarks.py AND custom_benchmark.py.
 
 ── Role in the system ─────────────────────────────────────────────
   This module encapsulates ALL interactions with the LM Studio CLI
   (lms load / unload / ps). It is used from two sides:
 
-  1. run_benchmarks_v13.py (Launcher)
+  1. run_benchmarks.py (Launcher)
      - CALLS load_model_via_lms() and has_unloaded_all_models()
      - Model load/unload happens HERE ONLY
      - Uses get_current_loaded_model() for status checking
 
-  2. custom_benchmark_v13.py (Custom pipeline subprocess)
+  2. custom_benchmark.py (Custom pipeline subprocess)
      - IMPORTS the constants (API_BASE, TIMEOUT_*)
      - NEVER calls load/unload (initiated by the launcher)
      - Uses is_api_available() as health-check (legacy)
@@ -46,8 +46,11 @@ from typing import Any, Optional
 
 from benchmark_config import PIPELINE_TIMEOUTS
 from type_defs import AvailableModelInfo, LoadedModelInfo
+from utils.terminal import ok, warn, error, info
 
-API_BASE = "http://127.0.0.1:1234/v1"
+API_BASE = os.environ.get("LLM_API_BASE", "http://127.0.0.1:1234/v1")
+# REST API base (without /v1 suffix) for model management endpoints
+_REST_API_BASE = API_BASE.rsplit("/v1", 1)[0] if API_BASE.endswith("/v1") else API_BASE
 TIMEOUT_CLI = 30
 TIMEOUT_HTTP = 120
 TIMEOUT_MODEL_READY = 120
@@ -62,7 +65,7 @@ TIMEOUT_UNLOAD_WAIT = 2
 HEALTH_CHECK_SENTINEL_MODEL = "check"
 
 # ── Pipeline-specific timeouts ──────────────────────────────────
-# These values are imported by run_benchmarks_v13.py and used as
+# These values are imported by run_benchmarks.py and used as
 # subprocess/scenario timeouts in each pipeline function.
 # Some values (lmeval_base, evalplus_base) serve as base timeouts
 # and are automatically doubled for reasoning models.
@@ -94,17 +97,53 @@ def safe_json_loads(text: str) -> Any:
     return json.loads(text, object_pairs_hook=OrderedDict)
 
 
-def is_api_available() -> bool:
+def _rest_request(endpoint: str, method: str = "GET", data: Optional[dict] = None,
+                  timeout: int = TIMEOUT_HTTP) -> Optional[dict]:
+    """Make a request to LM Studio REST API.
+    
+    Args:
+        endpoint: REST API endpoint (e.g., "/api/v1/models/load")
+        method: HTTP method (GET, POST)
+        data: Request body (will be JSON-encoded)
+        timeout: Request timeout in seconds
+        
+    Returns:
+        Parsed JSON response or None on error
+    """
+    from urllib.request import Request, urlopen
+    from urllib.error import HTTPError, URLError
+    
+    url = f"{_REST_API_BASE}{endpoint}"
+    headers = {"Content-Type": "application/json"}
+    body = json.dumps(data).encode("utf-8") if data else None
+    
     try:
-        from urllib.request import Request, urlopen
+        req = Request(url, method=method, data=body, headers=headers)
+        with urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except HTTPError as e:
+        # Return error details for HTTP errors (4xx, 5xx)
+        try:
+            error_body = json.loads(e.read().decode("utf-8"))
+            warn(f"REST API error {e.code}: {error_body}")
+        except Exception:
+            warn(f"REST API error {e.code}: {e.reason}")
+        return None
+    except (URLError, OSError, TimeoutError) as e:
+        warn(f"REST API request failed: {type(e).__name__}: {e}")
+        return None
+
+
+def is_api_available() -> bool:
+    from urllib.request import Request, urlopen
+    try:
         req = Request(f"{API_BASE}/models", method="GET")
         with urlopen(req, timeout=TIMEOUT_HEALTH_CHECK) as resp:
             return resp.status == 200
     except Exception as e:
         # Vertrag: -> bool, True wenn erreichbar, sonst False.
-        # Bisheriger breiter Catch wird beibehalten, aber jetzt mit Logging
-        # damit unerwartete Fehler (z.B. Programmierfehler) sichtbar werden.
-        print(f"  [WARN] is_api_available: {type(e).__name__}: {e}", file=sys.stderr)
+        # Breiter Catch ist beabsichtigt: Jeder Fehler bedeutet "nicht erreichbar".
+        warn(f"is_api_available: {type(e).__name__}: {e}")
         return False
 
 
@@ -128,60 +167,61 @@ def get_current_loaded_model() -> Optional[LoadedModelInfo]:
     except (json.JSONDecodeError, subprocess.TimeoutExpired, OSError, KeyError) as e:
         # KeyError deckt den Fall ab, dass `lms ps --json` ein dict (statt Liste)
         # liefert – siehe test_handles_dict_format. Vertrag: Optional[LoadedModelInfo].
-        print(f"  [WARN] lms ps --json fehlgeschlagen: {type(e).__name__}: {e}", file=sys.stderr)
+        warn(f"lms ps --json fehlgeschlagen: {type(e).__name__}: {e}")
         return None
 
 
 def has_unloaded_all_models() -> bool:
-    """Unload all models and wait until the LMS process reports no loaded models.
-
-    Polls `lms ps --json` (the canonical LMS state source) instead of pinging
-    /v1/chat/completions with `model:"check"`. The HTTP-ping approach is
-    racy because LM Studio can answer the bogus "check" model with HTTP 400,
-    which the old code misinterpreted as "model gone" while the old model
-    was still resident. See Code-Review 2026-07-18, Bug 1.
+    """Unload all models via LM Studio REST API.
+    
+    Uses POST /api/v1/models/unload for each loaded model, then polls
+    GET /api/v1/models until no models are reported loaded.
     """
-    print("  [INFO] Unloading all models...")
-    try:
-        r = subprocess.run(["lms", "unload", "--all"],
-                           capture_output=True, text=True, timeout=TIMEOUT_CLI,
-                           encoding="utf-8", errors="replace")
-        if r.returncode == 0:
-            print("  [OK] Unload command sent")
+    info("Unloading all models...")
+    
+    # Get list of loaded models
+    models_data = _rest_request("/api/v1/models", method="GET")
+    if models_data is None:
+        warn("Could not fetch model list")
+        return False
+    
+    models = models_data.get("models", [])
+    loaded_instances = []
+    for model in models:
+        for inst in model.get("loaded_instances", []):
+            loaded_instances.append(inst.get("id"))
+    
+    if not loaded_instances:
+        ok("No models loaded")
+        return True
+    
+    # Unload each loaded model
+    for instance_id in loaded_instances:
+        result = _rest_request("/api/v1/models/unload", method="POST",
+                              data={"instance_id": instance_id})
+        if result is not None:
+            ok(f"Unloaded {instance_id}")
         else:
-            print(f"  [WARN] lms unload: {r.stderr.strip()[:100]}")
-    except FileNotFoundError:
-        print("[ERROR] lms.exe not found")
-        return False
-    except subprocess.TimeoutExpired:
-        print("[WARN] lms unload --all timeout")
-        return False
-
-    # Poll lms ps --json until no models are reported loaded. This is the
-    # single source of truth for LMS state (no HTTP 400 vs. 200 ambiguity).
+            warn(f"Failed to unload {instance_id}")
+    
+    # Poll until no models are loaded
     for attempt in range(15):
         time.sleep(2)
-        try:
-            r = subprocess.run(["lms", "ps", "--json"],
-                               capture_output=True, text=True, timeout=10,
-                               encoding="utf-8", errors="replace")
-            if r.returncode != 0:
-                print(f"  [WARN] lms ps failed (attempt {attempt+1}/15): "
-                      f"{r.stderr.strip()[:80]}")
-                continue
-            try:
-                loaded_entries = safe_json_loads(r.stdout)
-            except json.JSONDecodeError:
-                print(f"  [WARN] lms ps: invalid JSON (attempt {attempt+1}/15)")
-                continue
-            if not loaded_entries:
-                print("  [OK] Old model fully unloaded")
-                return True
-            print(f"  [WARN] {len(loaded_entries)} model(s) still loaded "
-                  f"(attempt {attempt+1}/15)")
-        except subprocess.TimeoutExpired:
-            print(f"  [WARN] lms ps timeout (attempt {attempt+1}/15)")
-    print("  [WARN] Could not confirm unload – continuing")
+        models_data = _rest_request("/api/v1/models", method="GET")
+        if models_data is None:
+            warn(f"Could not fetch model list (attempt {attempt+1}/15)")
+            continue
+        
+        models = models_data.get("models", [])
+        still_loaded = sum(len(m.get("loaded_instances", [])) for m in models)
+        
+        if still_loaded == 0:
+            ok("Old model fully unloaded")
+            return True
+        
+        warn(f"{still_loaded} model(s) still loaded (attempt {attempt+1}/15)")
+    
+    warn("Could not confirm unload - continuing")
     return False
 
 
@@ -195,7 +235,7 @@ def _load_registry_data() -> dict:
         return _REGISTRY_CACHE
     from ruamel.yaml import YAML
     from ruamel.yaml.error import YAMLError
-    rpath = Path(__file__).resolve().parent / "doc-git" / "model_registry.yaml"
+    rpath = Path(__file__).resolve().parent.parent / "doc-git" / "model_registry.yaml"
     if not rpath.exists():
         _REGISTRY_CACHE = {}
         return _REGISTRY_CACHE
@@ -205,7 +245,7 @@ def _load_registry_data() -> dict:
         with open(rpath, "r", encoding="utf-8") as f:
             data = y.load(f) or {}
     except (YAMLError, OSError, UnicodeDecodeError) as e:
-        print(f"  [WARN] model_registry.yaml fehlerhaft: {e}", file=sys.stderr)
+        warn(f"model_registry.yaml fehlerhaft: {e}")
         data = {}
     _REGISTRY_CACHE = data
     return data
@@ -246,7 +286,11 @@ def get_available_models(exclude_keywords: Optional[list[str]] = None, registry_
                     quant = item.get("quantization", {}) or {}
                     quant_name = quant.get("name", "") if isinstance(quant, dict) else ""
                     sv = item.get("selectedVariant") or ""
-                    unique_key = sv if sv and sv != base_key else (f"{base_key}@{quant_name}" if quant_name else base_key)
+                    unique_key = sv if sv and sv != base_key else (
+                        f"{base_key}@{quant_name}" if quant_name
+                        and not base_key.lower().endswith(f"@{quant_name.lower()}")
+                        else base_key
+                    )
                     display = item.get("displayName", base_key)
                     if quant_name:
                         if "@" in display:
@@ -302,15 +346,14 @@ def get_available_models(exclude_keywords: Optional[list[str]] = None, registry_
                             filtered.append(m)
                     missing = len(models) - len(filtered)
                     if missing:
-                        print(f"  [WARN] {missing} Modelle nicht in Registry – mit `python registry_tool.py sync` hinzufügen. Ignoriert.",
-                              file=sys.stderr)
+                        warn(f"{missing} Modelle nicht in Registry - mit `python registry_tool.py sync` hinzufügen. Ignoriert.")
                     models = filtered
                 return models
-        print(f"[WARN] lms ls failed: {result.stderr.strip()}")
+        warn(f"lms ls failed: {result.stderr.strip()}")
     except FileNotFoundError:
-        print("[ERROR] lms.exe not found. Is LM Studio installed?")
+        error("lms.exe not found. Is LM Studio installed?")
     except (subprocess.TimeoutExpired, json.JSONDecodeError) as e:
-        print(f"[WARN] Error with lms ls: {e}")
+        warn(f"Error with lms ls: {e}")
     return []
 
 
@@ -365,7 +408,7 @@ def _is_lmstudio_running() -> bool:
         with urlopen(req, timeout=3) as resp:
             if resp.status == 200:
                 return True
-    except Exception:
+    except (URLError, OSError, TimeoutError):
         pass
 
     # 2. Try `lms server start` (preferred – LMS handles daemon internally)
@@ -380,18 +423,18 @@ def _is_lmstudio_running() -> bool:
             req = Request(f"{API_BASE}/models", method="GET")
             with urlopen(req, timeout=3) as resp:
                 if resp.status == 200:
-                    print("  [OK] LM Studio-Server gestartet via 'lms server start'")
+                    ok("LM Studio-Server gestartet via 'lms server start'")
                     return True
-        except Exception:
+        except (URLError, OSError, TimeoutError):
             pass
-        print(f"  [WARN] 'lms server start' brachte Server nicht hoch: "
-              f"{r.stderr.strip()[:120]}")
+        warn(f"'lms server start' brachte Server nicht hoch: "
+             f"{r.stderr.strip()[:120]}")
     except FileNotFoundError:
-        print("  [WARN] lms.exe nicht im PATH – versuche llmster.exe direkt")
+        warn("lms.exe nicht im PATH - versuche llmster.exe direkt")
     except subprocess.TimeoutExpired:
-        print("  [WARN] 'lms server start' Timeout")
-    except Exception as e:
-        print(f"  [WARN] 'lms server start' Fehler: {e}")
+        warn("'lms server start' Timeout")
+    except (OSError, subprocess.SubprocessError) as e:
+        warn(f"'lms server start' Fehler: {e}")
 
     # 3. Fallback: find the newest llmster.exe under .lmstudio/llmster/*/
     llmster_root = Path(os.path.dirname(os.path.dirname(__file__))) / ".lmstudio" / "llmster"
@@ -405,7 +448,7 @@ def _is_lmstudio_running() -> bool:
         for ver_dir in candidates:
             exe = ver_dir / "llmster.exe"
             if exe.is_file():
-                print(f"  [INFO] Starte llmster {ver_dir.name}...")
+                info(f"Starte llmster {ver_dir.name}...")
                 try:
                     subprocess.Popen([str(exe)])
                     time.sleep(5)
@@ -419,16 +462,16 @@ def _is_lmstudio_running() -> bool:
                                                capture_output=True, text=True, timeout=30,
                                                encoding="utf-8", errors="replace")
                                 time.sleep(5)
-                                print("  [OK] LM Studio-Server gestartet via llmster")
+                                ok("LM Studio-Server gestartet via llmster")
                                 return True
                     except (URLError, OSError):
                         # Server didn't respond yet after llmster start;
                         # try the next version. This is intentionally
                         # silent (Code-Review 2026-07-18 §5.2).
                         pass
-                except Exception as e:
-                    print(f"  [WARN] llmster {ver_dir.name} start fehlgeschlagen: {e}")
-    print("  [ERROR] Konnte LM Studio-Server nicht starten")
+                except (OSError, subprocess.SubprocessError) as e:
+                    warn(f"llmster {ver_dir.name} start fehlgeschlagen: {e}")
+    error("Konnte LM Studio-Server nicht starten")
     return False
 
 
@@ -456,54 +499,59 @@ def _validate_model_identifier(model_identifier: str) -> str:
 
 
 def load_model_via_lms(model_identifier: str, gpu_offload: Optional[float] = None) -> tuple[bool, Optional[str]]:
-    # Code-Review 2026-07-18 §6.1: validate input early. subprocess.run
-    # already uses list-form (no shell injection possible), but bad
-    # input should fail with a clear message, not a cryptic CLI error.
+    """Load model via LM Studio REST API.
+    
+    Uses POST /api/v1/models/load to load a model into memory.
+    Returns (success, instance_id) tuple.
+    """
+    # Code-Review 2026-07-18 §6.1: validate input early.
     try:
         _validate_model_identifier(model_identifier)
     except ValueError as e:
-        print(f"  [ERROR] {e}")
+        error(str(e))
         return False, None
-    print(f"\n  [INFO] Loading '{model_identifier}'...")
-    cmd = ["lms", "load", model_identifier, "--yes"]
+    
+    info(f"Loading '{model_identifier}'...")
+    
+    # Build load request payload
+    payload = {"model": model_identifier}
     if gpu_offload is not None:
-        cmd.extend(["--gpu", str(gpu_offload)])
+        payload["gpu_offload"] = gpu_offload
+    
     for attempt in range(2):
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True, text=True, timeout=TIMEOUT_LOAD_MODEL,
-                encoding="utf-8", errors="replace"
-            )
-        except subprocess.TimeoutExpired:
-            print(f"  [WARN] Load timeout ({TIMEOUT_LOAD_MODEL}s)")
-            return False, None
-        except FileNotFoundError:
-            print("[ERROR] lms.exe not found")
-            return False, None
-        if result.returncode == 0:
-            print("  [OK] Loaded")
-            for _ in range(10):
-                time.sleep(1)
-                loaded = get_current_loaded_model()
-                if loaded:
-                    print(f"  [INFO] Exact model ID: {loaded['identifier']}")
-                    return True, loaded["identifier"]
+        result = _rest_request("/api/v1/models/load", method="POST", data=payload,
+                              timeout=TIMEOUT_LOAD_MODEL)
+        
+        if result is not None and result.get("status") == "loaded":
+            instance_id = result.get("instance_id", model_identifier)
+            load_time = result.get("load_time_seconds", 0)
+            ok(f"Loaded in {load_time:.1f}s")
+            info(f"Instance ID: {instance_id}")
+            return True, instance_id
+        
+        if result is not None:
+            ok("Model already loaded")
+            models_data = _rest_request("/api/v1/models", method="GET")
+            if models_data:
+                for model in models_data.get("models", []):
+                    if model.get("key") == model_identifier or model_identifier in model.get("key", ""):
+                        for inst in model.get("loaded_instances", []):
+                            return True, inst.get("id", model_identifier)
             return True, model_identifier
-        stderr = result.stderr.strip()
-        if "already loaded" in stderr.lower():
-            print("  [OK] Already loaded")
-            loaded = get_current_loaded_model()
-            if loaded:
-                return True, loaded["identifier"]
-            return True, model_identifier
-        if attempt == 0 and ("No LM Runtime" in stderr or "Runtime not found" in stderr):
-            print(f"  [WARN] Daemon error – restarting LM Studio...")
+        
+        # Handle specific errors
+        if attempt == 0:
+            # Check if LM Studio is running, retry if needed
             if _is_lmstudio_running():
+                warn("Load failed - retrying...")
                 time.sleep(3)
                 continue
-        print(f"  [WARN] Load failed: {stderr[:200]}")
+            else:
+                warn("LM Studio not running")
+        
+        warn(f"Load failed (attempt {attempt+1}/2)")
         return False, None
+    
     return False, None
 
 
@@ -537,6 +585,7 @@ def is_model_ready(timeout: int = TIMEOUT_MODEL_READY) -> bool:
             pass
         except (RuntimeError, ValueError, TimeoutError) as e:
             # Server-side protocol errors (JSON parse, malformed response, etc.) → keep waiting
-            print(f"  [WARN] Health-check protocol error: {e}", file=sys.stderr)
+            warn(f"Health-check protocol error: {e}")
     print(" TIMEOUT")
+    warn("Model readiness timeout")
     return False

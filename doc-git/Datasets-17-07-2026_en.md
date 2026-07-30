@@ -7,8 +7,8 @@ JSONL files in the `simple_evals/` directory.
 
 **Since v21 (23.06.2026):** The overall score weighting focuses on **Coding + Math**.
 
-**Since v10 (30.06.2026):** All three pipelines run via `run_benchmarks.py` as launcher:
-- Custom Benchmarks (DS1000, CoderEval) via `custom_benchmark.py`.
+**Since v10 (30.06.2026):** All three pipelines run via `src/run_benchmarks.py` as launcher:
+- Custom Benchmarks (DS1000, CoderEval) via `src/custom_benchmark.py`.
 - LM-Eval Tasks (MathQA, ARC, HellaSwag, TruthfulQA, MMLU-Pro) via `lm_eval` CLI.
 - EvalPlus Tasks (HumanEval+, MBPP+) via `evalplus` CLI. Agentic via `tool_eval_bench` CLI.
 
@@ -24,7 +24,7 @@ The seed of the random generator can also be set via option, see
 For benchmarks with thematic subgroups (subsets, libraries, subject areas), `ceil(SampleSize / NumGroups)`
 questions are drawn per group, so that each group is equally represented.
 
-Running the benchmark script `custom_benchmark.py` **no longer** requires internet access –
+Running the benchmark script `src/custom_benchmark.py` **no longer** requires internet access –
 only for the preceding download of test data.
 
 ---
@@ -136,7 +136,7 @@ Liu et al., "HumanEval+ and MBPP+: Extended Benchmarks", NeurIPS 2023
 - **self_contained:** Code runs entirely with embedded test data
 - **slib_runnable:** Requires external libraries (numpy, pandas, etc.)
 
-**Pipeline:** Executed via `custom_benchmark.py` (together with DS1000).
+**Pipeline:** Executed via `src/custom_benchmark.py` (together with DS1000).
 
 ---
 
@@ -164,7 +164,7 @@ The following benchmarks are executed via the `lm_eval` CLI (no longer via custo
 |-------------|----------------------------------------------------------------|
 | CLI         | `tool_eval_bench`                                               |
 | Tasks       | 69 scenarios (TC-01 to TC-69)                                  |
-| Selection   | Random selection via `TOOL_EVAL_SCENARIO_IDS` from `benchmark_config.py` |
+| Selection   | Random selection via `TOOL_EVAL_SCENARIO_IDS` from `src/benchmark_config.py` |
 | Type        | Multi-turn tool calling                                         |
 | Evaluation  | `final_score` (0-100) from JSON envelope, normalized to 0-1    |
 
@@ -185,7 +185,7 @@ The following benchmarks are executed via the `lm_eval` CLI (no longer via custo
 | Evaluation  | Result metrics from `lm_eval` `results_*.json` (pipeline uses v13 typically `inst_level_loose_acc`) |
 | Dependency  | `langdetect` (error-prone when package missing; imported at module level by `lm_eval/tasks/ifeval`) |
 
-**Integration:** Runs via `run_benchmarks.py` (pipeline "LM-Eval").
+**Integration:** Runs via `src/run_benchmarks.py` (pipeline "LM-Eval").
 
 ---
 
@@ -200,7 +200,7 @@ The following benchmarks are executed via the `lm_eval` CLI (no longer via custo
 | Evaluation  | `exact_match` via `lm_eval` results (parsed from `results_*.json`) |
 | Timeout     | Increased via `timeout_mult = 3`                                |
 
-**Integration:** Runs via `run_benchmarks.py` (pipeline "LM-Eval").
+**Integration:** Runs via `src/run_benchmarks.py` (pipeline "LM-Eval").
 
 ---
 

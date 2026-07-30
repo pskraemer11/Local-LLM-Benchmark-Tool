@@ -47,10 +47,13 @@ from unittest.mock import MagicMock
 import pytest
 
 
-# Make repo root importable for all tests
+# Make repo root + src/ importable for all tests
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_SRC_DIR = os.path.join(_REPO_ROOT, "src")
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
+if _SRC_DIR not in sys.path:
+    sys.path.insert(0, _SRC_DIR)
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -260,7 +263,7 @@ class SubprocessScriptMocker:
         return self
 
     def when_argv1(self, script: str, response: Any) -> "SubprocessScriptMocker":
-        """Register response for a specific script (e.g. custom_benchmark_v13.py)."""
+        """Register response for a specific script (e.g. custom_benchmark.py)."""
         self._by_argv1[script] = response
         return self
 
@@ -291,7 +294,7 @@ def subprocess_scripts() -> SubprocessScriptMocker:
             mocker.patch(
                 "subprocess.run",
                 side_effect=subprocess_scripts
-                    .when_argv1("custom_benchmark_v13.py", MagicMock(
+                    .when_argv1("custom_benchmark.py", MagicMock(
                         returncode=0, stdout="Average score: 50%"
                     ))
                     .when_argv0("lms", MagicMock(returncode=0, stdout="Loaded"))

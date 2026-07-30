@@ -8,11 +8,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 
-import consolidate_results_v13 as cr
+import consolidate_results as cr
 from benchmark_config import CAT_WEIGHTS, OVERALL_WEIGHTS, QUANT_MAP
-from consolidate_results_v13 import (
+from consolidate_results import (
     _auto_delimiter,
     _find_newest_by_mtime,
     _normalize_model_keys,

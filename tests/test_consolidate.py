@@ -1,4 +1,4 @@
-"""Tests for consolidate_results_v13.py – Prio 4.16 (Code-Review §4 Prio 4).
+"""Tests for consolidate_results.py – Prio 4.16 (Code-Review §4 Prio 4).
 
 Targets the deterministic helpers first (no I/O, no LM Studio
 dependency):
@@ -24,11 +24,11 @@ from typing import Any
 
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-import consolidate_results_v13 as cr
+import consolidate_results as cr
 from benchmark_config import CAT_WEIGHTS, OVERALL_WEIGHTS, QUANT_MAP
-from consolidate_results_v13 import (
+from consolidate_results import (
     _auto_delimiter,
     _normalize_model_keys,
     _percentile,
@@ -315,8 +315,8 @@ class TestNormalizeModelKeys:
     def test_quant_map_priority_for_exact_match(self):
         # If a key is in QUANT_MAP, that's the source of truth
         result = _normalize_model_keys(["devstral-small-2-24b-instruct-2512"])
-        # Should pick up IQ3_XXS from QUANT_MAP
-        assert "devstral-small-2-24b-instruct-2512@iq3_xxs" in result
+        # QUANT_MAP has Q3_K_S for this key -> normalized to @q3_k_s
+        assert "devstral-small-2-24b-instruct-2512@q3_k_s" in result
 
 
 # ─────────────────────────────────────────────────────────────────────

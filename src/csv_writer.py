@@ -9,12 +9,12 @@ Shared CSV writer – unified schema for ALL benchmark pipelines.
 
     Pipeline             Writes                Read by (consolidation)
     ────────             ─────────             ──────────────────────────
-    Custom               tasks_*.csv           consolidate_results_v13.py
-    EvalPlus             modell_*.csv           consolidate_results_v13.py
-    LM-Eval              modell_*.csv           consolidate_results_v13.py
-    Agentic              modell_*.csv           consolidate_results_v13.py
+    Custom               tasks_*.csv           consolidate_results.py
+    EvalPlus             modell_*.csv           consolidate_results.py
+    LM-Eval              modell_*.csv           consolidate_results.py
+    Agentic              modell_*.csv           consolidate_results.py
 
-  The launcher (run_benchmarks_v13.py) calls write_accumulative_summary()
+  The launcher (run_benchmarks.py) calls write_accumulative_summary()
   for each model's interim summary and write_konsolidiert_aktuell()
   for the final overview at the end.
 
@@ -60,18 +60,18 @@ except locale.Error:
 
 # ── Directory ────────────────────────────────────────────────────
 
-def _results_dir(base_dir=None):
+def _results_dir(base_dir: str | None = None) -> str:
     if base_dir:
         d = os.path.join(base_dir, "ergebnisse")
     else:
-        d = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ergebnisse")
+        d = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ergebnisse")
     os.makedirs(d, exist_ok=True)
     return d
 
 
 # ── Field definitions ────────────────────────────────────────────
 
-# WARNING: Column names must match the readers in consolidate_results_v13.py
+# WARNING: Column names must match the readers in consolidate_results.py
 # (read_custom_csv, read_lmeval_per_model, try_read_evalplus).
 # Any changes here MUST also update the readers.
 

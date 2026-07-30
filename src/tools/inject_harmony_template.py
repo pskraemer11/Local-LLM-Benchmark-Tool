@@ -4,7 +4,7 @@ import json
 import shutil
 from pathlib import Path
 
-TEMPLATE_FILE = Path(__file__).parents[1] / "doc-git" / "Jinja-Chat-Templates" / "gpt-oss-20b-template_unsloth.jinja"
+TEMPLATE_FILE = Path(__file__).resolve().parents[2] / "doc-git" / "Jinja-Chat-Templates" / "gpt-oss-20b-template_unsloth.jinja"
 CONFIG_DIR = Path.home() / ".lmstudio" / ".internal" / "user-concrete-model-default-config"
 
 CONFIGS = [

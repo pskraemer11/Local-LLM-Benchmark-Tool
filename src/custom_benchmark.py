@@ -128,9 +128,10 @@ def _model_supports_reasoning(model_identifier: str) -> Optional[bool]:
     return None
 
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(BASE_DIR, "simple_evals")
-RESULTS_DIR = os.path.join(BASE_DIR, "ergebnisse")
+SRC_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(SRC_DIR)
+DATA_DIR = os.path.join(PROJECT_ROOT, "simple_evals")
+RESULTS_DIR = os.path.join(PROJECT_ROOT, "ergebnisse")
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
 TIMEOUT_LOAD_MODEL = 180
@@ -1138,7 +1139,7 @@ def exec_sandboxed(code: str, timeout: int = TIMEOUT_EXEC) -> tuple[bool, Option
     return res["ok"], (res["error"] if not res["ok"] else None)
 
 
-DS1000_DIR = _os.path.join(_os.path.dirname(__file__), 'ds1000_official')
+DS1000_DIR = _os.path.join(_os.path.dirname(_os.path.dirname(__file__)), 'ds1000_official')
 _TIMEOUT_DS1000 = 120  # offizielles DS1000-Timeout
 
 def _unwrap_solution_for_insert(solution: str, setup_code: str) -> str:
@@ -1472,123 +1473,103 @@ def run_task(task: dict[str, Any], task_type: str, model_identifier: Optional[st
         entry_point = task.get("entry_point", "")
         tests_field = task.get("tests", [])
         setup_code = task.get("setup_code", "")
-        full_prompt = (
-            "Complete the following Python function. "
-            "Output only the function code, no additional text.\n\n"
-            f"{prompt}"
-        )
-        if entry_point:
-            full_prompt += f"\n\nCreate the function `{entry_point}`."
-        gcfg = GenerationConfig(
-            prompt=full_prompt, **generation_parameters,
-            response_format=STRUCTURED_OUTPUT_SCHEMA if _can_use_structured_output(model_identifier) else None
-        )
-        response, latency, t_in, t_out, tps, think_tok, err_type, err_detail = generate_answer(gcfg)
-        if response is None:
-            return {"response": None, "extracted_code": "", "score": 0.0,
-                    "score_detail": f"Timeout/API error ({latency:.1f}s)", "latency": latency,
-                    "tokens_in": t_in, "tokens_out": t_out, "tokens_per_sec": tps,
-                    "thinking_tokens": think_tok, "error_type": err_type, "error_detail": err_detail}
-        code = extract_code(response, is_structured=_can_use_structured_output(model_identifier)) if response else ""
-        if not code and response:
-            m = re.search(r"```(?:python)?\s*\n(.*?)```", response, re.DOTALL)
-            if m:
-                code = m.group(1).strip()
-            else:
-                code = "\n".join(
-                    l for l in response.strip().split("\n")
-                    if _is_bare_statement(l.strip())
-                )
-        score, detail = evaluate_code(code, entry_point, tests_field, "", setup_code=setup_code)
-        return {
-            "response": response,
-            "extracted_code": code,
-            "score": score,
-            "score_detail": detail,
-            "latency": latency,
-            "tokens_in": t_in,
-            "tokens_out": t_out,
-            "tokens_per_sec": tps,
-            "thinking_tokens": think_tok,
-        }
+        full_prompt = _make_codereval_prompt(prompt, entry_point)
+        result = _call_and_evaluate(full_prompt, generation_parameters, model_identifier, entry_point, tests_field, "", setup_code)
+        return result
 
     elif task_type == "data_science":
         entry_point = task.get("entry_point", "")
         tests_field = task.get("tests", [])
         reference_code = task.get("reference_code", "")
-        full_prompt = (
-            "Complete the following Python code. "
-            "Only output the code, no additional text.\n\n"
-            f"{prompt}"
-        )
-        if entry_point:
-            full_prompt += f"\n\nCreate the function `{entry_point}`."
-
-        setup_code = task.get("code_context", "")
-        for marker in ("# SOLUTION START", "BEGIN SOLUTION\n<code>"):
-            idx = prompt.find(marker)
-            if idx >= 0:
-                prefix = prompt[:idx]
-                code_blocks = re.findall(r"<code>(.*?)</code>", prefix, re.DOTALL)
-                if code_blocks:
-                    setup_code += "\n" + "\n".join(code_blocks)
-                else:
-                    setup_code += "\n" + prefix.strip()
-                break
-        setup_code = setup_code.strip()
-
-        agg_needed = any(kw in (setup_code + reference_code)
-                         for kw in ("matplotlib", "plt.", "seaborn"))
-        if agg_needed:
-            agg_setup = (
-                "import matplotlib\n"
-                "matplotlib.use('Agg')\n"
-                "import matplotlib.pyplot as plt\n"
-                "plt.ioff()\n"
-            )
-            setup_code = agg_setup + setup_code
-
-        gcfg = GenerationConfig(
-            prompt=full_prompt, **generation_parameters,
-            response_format=STRUCTURED_OUTPUT_SCHEMA if _can_use_structured_output(model_identifier) else None
-        )
-        response, latency, t_in, t_out, tps, think_tok, err_type, err_detail = generate_answer(gcfg)
-        if response is None:
-            return {"response": None, "extracted_code": "", "score": 0.0,
-                    "score_detail": f"Timeout/API error ({latency:.1f}s)", "latency": latency,
-                    "tokens_in": t_in, "tokens_out": t_out, "tokens_per_sec": tps,
-                    "thinking_tokens": think_tok, "error_type": err_type, "error_detail": err_detail}
-        code = extract_code(response, is_structured=_can_use_structured_output(model_identifier)) if response else ""
-        if not code and response:
-            m = re.search(r"```(?:python)?\s*\n(.*?)```", response, re.DOTALL)
-            if m:
-                code = m.group(1).strip()
-            else:
-                code = "\n".join(
-                    l for l in response.strip().split("\n")
-                    if _is_bare_statement(l.strip())
-                )
-        score, detail = evaluate_code(code, entry_point, tests_field, reference_code, setup_code=setup_code)
+        full_prompt = _make_datascience_prompt(prompt, entry_point)
+        setup_code = _extract_setup_code(task, prompt, reference_code)
+        result = _call_and_evaluate(full_prompt, generation_parameters, model_identifier, entry_point, tests_field, reference_code, setup_code)
         try:
             import matplotlib.pyplot as _plt
             _plt.close("all")
         except (ImportError, AttributeError, RuntimeError):
             pass
-        return {
-            "response": response,
-            "extracted_code": code,
-            "score": score,
-            "score_detail": detail,
-            "latency": latency,
-            "tokens_in": t_in,
-            "tokens_out": t_out,
-            "tokens_per_sec": tps,
-            "thinking_tokens": think_tok,
-        }
+        return result
 
     return {"response": None, "extracted_code": "", "score": 0.0,
             "score_detail": f"Unknown task_type: {task_type}", "latency": 0.0,
             "tokens_in": 0, "tokens_out": 0, "tokens_per_sec": 0, "thinking_tokens": 0}
+
+
+def _make_codereval_prompt(prompt: str, entry_point: str) -> str:
+    full = "Complete the following Python function. Output only the function code, no additional text.\n\n" + prompt
+    if entry_point:
+        full += f"\n\nCreate the function `{entry_point}`."
+    return full
+
+
+def _make_datascience_prompt(prompt: str, entry_point: str) -> str:
+    full = "Complete the following Python code. Only output the code, no additional text.\n\n" + prompt
+    if entry_point:
+        full += f"\n\nCreate the function `{entry_point}`."
+    return full
+
+
+def _extract_setup_code(task: dict[str, Any], prompt: str, reference_code: str) -> str:
+    setup_code = task.get("code_context", "")
+    for marker in ("# SOLUTION START", "BEGIN SOLUTION\n<code>"):
+        idx = prompt.find(marker)
+        if idx >= 0:
+            prefix = prompt[:idx]
+            code_blocks = re.findall(r"<code>(.*?)</code>", prefix, re.DOTALL)
+            if code_blocks:
+                setup_code += "\n" + "\n".join(code_blocks)
+            else:
+                setup_code += "\n" + prefix.strip()
+            break
+    setup_code = setup_code.strip()
+    agg_needed = any(kw in (setup_code + reference_code)
+                     for kw in ("matplotlib", "plt.", "seaborn"))
+    if agg_needed:
+        agg_setup = (
+            "import matplotlib\n"
+            "matplotlib.use('Agg')\n"
+            "import matplotlib.pyplot as plt\n"
+            "plt.ioff()\n"
+        )
+        setup_code = agg_setup + setup_code
+    return setup_code
+
+
+def _call_and_evaluate(full_prompt: str, generation_parameters: dict[str, Any], model_identifier: Optional[str],
+                       entry_point: str, tests_field: list, reference_code: str, setup_code: str) -> TaskResult:
+    gcfg = GenerationConfig(
+        prompt=full_prompt, **generation_parameters,
+        response_format=STRUCTURED_OUTPUT_SCHEMA if _can_use_structured_output(model_identifier) else None
+    )
+    response, latency, t_in, t_out, tps, think_tok, err_type, err_detail = generate_answer(gcfg)
+    if response is None:
+        return {"response": None, "extracted_code": "", "score": 0.0,
+                "score_detail": f"Timeout/API error ({latency:.1f}s)", "latency": latency,
+                "tokens_in": t_in, "tokens_out": t_out, "tokens_per_sec": tps,
+                "thinking_tokens": think_tok, "error_type": err_type, "error_detail": err_detail}
+    code = extract_code(response, is_structured=_can_use_structured_output(model_identifier)) if response else ""
+    if not code and response:
+        m = re.search(r"```(?:python)?\s*\n(.*?)```", response, re.DOTALL)
+        if m:
+            code = m.group(1).strip()
+        else:
+            code = "\n".join(
+                l for l in response.strip().split("\n")
+                if _is_bare_statement(l.strip())
+            )
+    score, detail = evaluate_code(code, entry_point, tests_field, reference_code, setup_code=setup_code)
+    return {
+        "response": response,
+        "extracted_code": code,
+        "score": score,
+        "score_detail": detail,
+        "latency": latency,
+        "tokens_in": t_in,
+        "tokens_out": t_out,
+        "tokens_per_sec": tps,
+        "thinking_tokens": think_tok,
+    }
 
 
 def get_task_type(benchmark_file: str) -> str:

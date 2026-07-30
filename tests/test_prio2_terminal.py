@@ -4,11 +4,11 @@ Code-Review_2026-07-12.md §7.7 (Prio 0/2/3 terminal-output findings).
 import os
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import pytest
 
-from custom_benchmark_v13 import (
+from custom_benchmark import (
     _patch_matplotlib_compat,
     _unwrap_solution_for_insert,
     extract_code,
@@ -245,14 +245,14 @@ class TestTruthfulQATaskSwitch:
 
     def test_truthfulqa_gen_in_registry(self):
         """truthfulqa_gen should be the default task name (chat-compatible)."""
-        from run_benchmarks_v13 import LMEVAL_BENCHMARKS
+        from run_benchmarks import LMEVAL_BENCHMARKS
         truthfulqa = next(b for b in LMEVAL_BENCHMARKS if b["name"] == "TruthfulQA")
         assert truthfulqa["task"] == "truthfulqa_gen"
 
     def test_truthfulqa_gen_alias_in_consolidation(self):
-        """consolidate_results_v13 must handle truthfulqa_gen alias."""
-        import consolidate_results_v13
+        """consolidate_results must handle truthfulqa_gen alias."""
+        import consolidate_results
         import inspect
-        source = inspect.getsource(consolidate_results_v13)
+        source = inspect.getsource(consolidate_results)
         assert '"truthfulqa_gen"' in source
         assert '"truthfulqa_mc2"' in source

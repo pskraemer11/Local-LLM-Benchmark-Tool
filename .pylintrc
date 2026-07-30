@@ -1,0 +1,39 @@
+[MAIN]
+# Nur diese Regeln aktivieren, alle anderen deaktiviert
+disable=all
+enable=R0902,R0903,R0913,R0914,R0801
+
+# Ignoriere generated/venv/tests
+ignore=CVS,.git,.venv,venv,__pycache__,.mypy_cache,.ruff_cache
+
+# Jobs: parallel laufen lassen
+jobs=4
+
+[MESSAGES CONTROL]
+# Zusätzliche Regeln, die dauerhaft deaktiviert bleiben (auch wenn enable gesetzt ist)
+# C0114/C0115/C0116 = fehlende Docstrings (Research-Codebase: zu viele)
+# W0613 = unused-argument (oft nötig für Callback-Schnittstellen)
+disable=C0114,C0115,C0116,W0613
+
+[BASIC]
+# Funktionen/Methoden ohne `self`/`cls` als erstes Argument erlauben
+no-docstring-rgx=.*
+
+[DESIGN]
+# Grenzen für die aktivierten R09xx-Regeln anpassen
+max-args=8          # R0913: Zu viele Argumente (Default 5)
+max-locals=20       # R0914: Zu viele lokale Variablen (Default 15)
+max-attributes=15   # R0902: Zu viele Instanz-Attribute (Default 7)
+max-public-methods=30 # R0903: Zu wenige public Methods (Default 20)
+max-statements=100  # R0915: Zu viele Statements (Default 50)
+
+[SIMILARITIES]
+# R0801: Code-Duplikate
+ignore-comments=yes
+ignore-docstrings=yes
+ignore-imports=yes
+min-similarity-lines=15  # Default 4 ist zu aggressiv; erst ab 15 gleichen Zeilen warnen
+
+[REPORTS]
+output-format=colorized
+score=no

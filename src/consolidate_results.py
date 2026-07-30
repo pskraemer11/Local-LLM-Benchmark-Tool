@@ -21,17 +21,20 @@ Computes weighted category scores + efficiency.
 """
 from __future__ import annotations
 
-import csv, json, os, sys, re, random
+import argparse
+import csv, itertools, json, os, sys, re, random
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from statistics import mean, median
 from typing import Any, Dict, List, Optional, Tuple
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-RESULTS_DIR = os.path.join(BASE_DIR, "ergebnisse")
+SRC_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(SRC_DIR)
+RESULTS_DIR = os.path.join(PROJECT_ROOT, "ergebnisse")
 INSTALLED_CACHE = None
 
+from utils.terminal import ok, warn, error, info
 from benchmark_config import (MMLU_PRO_SUBSETS, LB_MEANS_BLACKLIST,
                              CAT_WEIGHTS, OVERALL_WEIGHTS, QUANT_MAP, get_quant)
 
@@ -1165,6 +1168,122 @@ def read_data(model_keys: Optional[List[str]] = None, min_sample_size: int = 0,
     return [r.to_csv_dict() for r in rows]
 
 
+# ── helpers ──
+def _val(key: str, r: Dict[str, Any], pct: bool = True) -> str:
+    v = r.get(key, "")
+    if v in (None, "", "—"):
+        return "—"
+    try:
+        fv = float(v)
+        if not pct:
+            if fv < 100:
+                return f"{fv:.1f}"
+            return f"{fv:.0f}"
+        s = f"{fv:.0f}"
+        return f"{s}%"
+    except (ValueError, TypeError):
+        return str(v)
+
+def _top(rows: List[Dict[str, Any]], sort_key: str) -> List[Dict[str, Any]]:
+    valid = [r for r in rows if r.get(sort_key) not in (None, "", "—")]
+    if not valid:
+        return []
+    return sorted(valid, key=lambda x: float(x.get(sort_key, 0)), reverse=True)[:5]
+
+def _write_tbl(f: Any, title: str, headers: List[str], sorted_rows: List[Dict[str, Any]], keys: List[str], pct_flags: Optional[List[bool]] = None) -> None:
+    if not sorted_rows:
+        return
+    if pct_flags is None:
+        pct_flags = [True] * len(keys)
+    f.write(f"\n### {title}\n")
+    all_h = ["Rang"] + headers
+    ws = []
+    for h in all_h:
+        if h == "Rang":
+            ws.append(5)
+        elif h == headers[0]:
+            ws.append(max(29, len(h)))
+        else:
+            ws.append(max(8, len(h)))
+    def cell(txt: str, i: int) -> str:
+        w = ws[i]
+        if i == 0:
+            return txt.center(w)
+        elif i == 1:
+            return txt.ljust(w)
+        else:
+            return txt.rjust(w)
+    cells_header = [cell(h, i) for i, h in enumerate(all_h)]
+    f.write("| " + " | ".join(cells_header) + " |\n")
+    cells_sep = []
+    for i, w in enumerate(ws):
+        if i == 0:
+            cells_sep.append(":" + "-" * (w - 2) + ":")
+        elif i == 1:
+            cells_sep.append(":" + "-" * (w - 1))
+        else:
+            cells_sep.append("-" * (w - 1) + ":")
+    f.write("| " + " | ".join(cells_sep) + " |\n")
+    for i, r in enumerate(sorted_rows, 1):
+        vals = [str(i), r['Model']]
+        for key, pct_flag in zip(keys, pct_flags):
+            vals.append(_val(key, r, pct=pct_flag))
+        cells_data = [cell(v, j) for j, v in enumerate(vals)]
+        f.write("| " + " | ".join(cells_data) + " |\n")
+
+
+def _run_comparison_mode(args: argparse.Namespace) -> None:
+    """Paired bootstrap comparison for 2+ models."""
+    parts = [p.strip() for p in args.compare.split(",")]
+    if len(parts) < 2:
+        error("--compare requires at least two comma-separated model keys")
+        sys.exit(1)
+    print("=" * 60)
+    print("  Paired Quant Comparison (v13)")
+    print(f"  Models: {', '.join(parts)}")
+    print(f"  Seed: {args.seed}")
+    print("=" * 60)
+    merge_runs = args.runs if args.runs > 0 else (2 if args.merge else 0)
+    ds1000_files, codereval_files = find_latest_csvs(
+        min_sample_size=args.sample_size, since=args.since, until=args.until,
+        all_runs=args.all_runs, merge_runs=merge_runs)
+    benchmarks_to_compare = []
+    if args.compare_benchmark == "all":
+        benchmarks_to_compare = [("DS1000", ds1000_files), ("CoderEval", codereval_files)]
+    elif args.compare_benchmark in ("DS1000", "CoderEval"):
+        benchmarks_to_compare = [
+            (args.compare_benchmark, ds1000_files if args.compare_benchmark == "DS1000" else codereval_files)
+        ]
+    else:
+        benchmarks_to_compare = [("DS1000", ds1000_files), ("CoderEval", codereval_files)]
+    results = []
+    for bench_name, files_dict in benchmarks_to_compare:
+        print(f"\n  --- {bench_name} ---")
+        for key_a, key_b in itertools.combinations(parts, 2):
+            path_a = files_dict.get(key_a)
+            path_b = files_dict.get(key_b)
+            if not path_a or not path_b:
+                missing = key_a if not path_a else key_b
+                warn(f"No CSV for {missing}, skipping {key_a} vs {key_b}")
+                continue
+            scores_a, scores_b = read_paired_scores(path_a, path_b)
+            if not scores_a:
+                warn(f"No overlapping items for {key_a} vs {key_b}, skipping")
+                continue
+            result = compare_two_quants(key_a, key_b, scores_a, scores_b, args.seed)
+            results.append(result)
+            pval = result["p_value"]
+            stars = " ***" if pval < 0.001 else (" **" if pval < 0.01 else (" *" if pval < 0.05 else ""))
+            direction = f"scored {result['diff']:+.1f} points" if result["key_a_higher"] else f"scored {result['diff']:+.1f} points (inverted)"
+            print(f"    {result['key_a']} vs {result['key_b']}: {result['mean_a']:.1f} vs {result['mean_b']:.1f} ({direction}), p={pval:.4f}{stars}")
+    print(f"\n  {'='*50}")
+    if results:
+        avg_diff = sum(r["diff"] for r in results) / len(results)
+        print(f"  Average diff: {avg_diff:+.1f} points")
+    print("  Done.")
+    sys.exit(0)
+
+
 def main() -> None:
     import argparse
     parser = argparse.ArgumentParser(description="Consolidate benchmark results")
@@ -1201,60 +1320,8 @@ def main() -> None:
 
     # --compare mode: paired bootstrap analysis (2+ models, all pairwise)
     if args.compare:
-        parts = [p.strip() for p in args.compare.split(",")]
-        if len(parts) < 2:
-            print("[ERROR] --compare requires at least two comma-separated model keys")
-            sys.exit(1)
-        print("=" * 60)
-        print("  Paired Quant Comparison (v13)")
-        print(f"  Models: {', '.join(parts)}")
-        print(f"  Seed: {args.seed}")
-        print("=" * 60)
-        merge_runs = args.runs if args.runs > 0 else (2 if args.merge else 0)
-        ds1000_files, codereval_files = find_latest_csvs(
-            min_sample_size=args.sample_size, since=args.since, until=args.until,
-            all_runs=args.all_runs, merge_runs=merge_runs)
-        benchmarks_to_compare = []
-        if args.compare_benchmark == "all":
-            benchmarks_to_compare = [("DS1000", ds1000_files), ("CoderEval", codereval_files)]
-        elif args.compare_benchmark in ("DS1000", "CoderEval"):
-            benchmarks_to_compare = [
-                (args.compare_benchmark, ds1000_files if args.compare_benchmark == "DS1000" else codereval_files)
-            ]
-        else:
-            benchmarks_to_compare = [("DS1000", ds1000_files), ("CoderEval", codereval_files)]
-        results = []
-        for bench_name, files_dict in benchmarks_to_compare:
-            print(f"\n  --- {bench_name} ---")
-            for key_a, key_b in __import__('itertools').combinations(parts, 2):
-                path_a = files_dict.get(key_a)
-                path_b = files_dict.get(key_b)
-                if not path_a or not path_b:
-                    missing = key_a if not path_a else key_b
-                    print(f"    [WARN] No CSV for {missing}, skipping {key_a} vs {key_b}")
-                    continue
-                scores_a, scores_b = read_paired_scores(path_a, path_b)
-                if not scores_a:
-                    print(f"    [WARN] No overlapping items for {key_a} vs {key_b}, skipping")
-                    continue
-                cmp = compare_two_quants(key_a, key_b, scores_a, scores_b, seed=args.seed)
-                cmp["benchmark"] = bench_name
-                cmp["key_a"] = key_a
-                cmp["key_b"] = key_b
-                results.append(cmp)
-                sig = "***" if cmp["p_value"] < 0.001 else "**" if cmp["p_value"] < 0.01 else "*" if cmp["p_value"] < 0.05 else "n.s."
-                print(f"    {key_a} vs {key_b}:  {cmp['mean_a']:.1f}% vs {cmp['mean_b']:.1f}%  "
-                      f"Diff={cmp['mean_diff']:+.2f}% [{cmp['ci_lo']:+.2f}, {cmp['ci_hi']:+.2f}]  p={cmp['p_value']:.4f} {sig}")
-        if results:
-            print(f"\n{'=' * 60}")
-            print("  Summary")
-            print(f"{'=' * 60}")
-            for r in results:
-                sig = "***" if r["p_value"] < 0.001 else "**" if r["p_value"] < 0.01 else "*" if r["p_value"] < 0.05 else "n.s."
-                winner = r.get("key_a", "") if r["sign"] == "+" else r.get("key_b", "") if r["sign"] == "-" else "neither"
-                print(f"  {r['benchmark']} | {r.get('key_a','')} vs {r.get('key_b','')}: "
-                      f"{winner} wins ({r['mean_diff']:+.2f}%, p={r['p_value']:.4f} {sig})")
-        sys.exit(0)
+        _run_comparison_mode(args)
+        return
 
     merge_runs = args.runs if args.runs > 0 else 0
     if args.merge:
@@ -1306,69 +1373,6 @@ def main() -> None:
         w.writeheader()
         w.writerows(rows)
     print(f"\n  CSV: {csv_path}")
-
-    # ── helpers ──
-    def _val(key: str, r: Dict[str, Any], pct: bool = True) -> str:
-        v = r.get(key, "")
-        if v in (None, "", "—"):
-            return "—"
-        try:
-            fv = float(v)
-            if not pct:
-                if fv < 100:
-                    return f"{fv:.1f}"
-                return f"{fv:.0f}"
-            s = f"{fv:.0f}"
-            return f"{s}%"
-        except (ValueError, TypeError):
-            return str(v)
-
-    def _top(rows: List[Dict[str, Any]], sort_key: str) -> List[Dict[str, Any]]:
-        valid = [r for r in rows if r.get(sort_key) not in (None, "", "—")]
-        if not valid:
-            return []
-        return sorted(valid, key=lambda x: float(x.get(sort_key, 0)), reverse=True)[:5]
-
-    def _write_tbl(f: Any, title: str, headers: List[str], sorted_rows: List[Dict[str, Any]], keys: List[str], pct_flags: Optional[List[bool]] = None) -> None:
-        if not sorted_rows:
-            return
-        if pct_flags is None:
-            pct_flags = [True] * len(keys)
-        f.write(f"\n### {title}\n")
-        all_h = ["Rang"] + headers
-        ws = []
-        for h in all_h:
-            if h == "Rang":
-                ws.append(5)
-            elif h == headers[0]:
-                ws.append(max(29, len(h)))
-            else:
-                ws.append(max(8, len(h)))
-        def cell(txt: str, i: int) -> str:
-            w = ws[i]
-            if i == 0:
-                return txt.center(w)
-            elif i == 1:
-                return txt.ljust(w)
-            else:
-                return txt.rjust(w)
-        cells_header = [cell(h, i) for i, h in enumerate(all_h)]
-        f.write("| " + " | ".join(cells_header) + " |\n")
-        cells_sep = []
-        for i, w in enumerate(ws):
-            if i == 0:
-                cells_sep.append(":" + "-" * (w - 2) + ":")
-            elif i == 1:
-                cells_sep.append(":" + "-" * (w - 1))
-            else:
-                cells_sep.append("-" * (w - 1) + ":")
-        f.write("| " + " | ".join(cells_sep) + " |\n")
-        for i, r in enumerate(sorted_rows, 1):
-            vals = [str(i), r['Model']]
-            for key, pct_flag in zip(keys, pct_flags):
-                vals.append(_val(key, r, pct=pct_flag))
-            cells_data = [cell(v, j) for j, v in enumerate(vals)]
-            f.write("| " + " | ".join(cells_data) + " |\n")
 
     # Markdown
     md_path = os.path.join(RESULTS_DIR, f"konsolidiert_{ts}.md")

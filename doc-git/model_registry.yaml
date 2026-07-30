@@ -24,8 +24,7 @@ essentialai/rnj-1:
   n_layers: 32
   hidden_dim: 4096
   max_context_length: 32768
-  quants:
-    - Q8_0
+  quants: [Q8_0]
 
 opea/gemma-3-12b-it-autoround:
   publisher: OPEA
@@ -83,8 +82,7 @@ jetbrains/mellum2-12b-a2.5b-thinking-mxfp4:
   hidden_dim: 2304
   reasoning: instruct
   max_context_length: 131072
-  quants:
-    - MXFP4
+  quants: [MXFP4]
   capabilities: coding, text
   blueprint: coding_agent
   truncation: full
@@ -109,8 +107,7 @@ mistralai/codestral-22b-v0.1:
   n_layers: 56
   hidden_dim: 6144
   max_context_length: 32768
-  quants:
-    - IQ4_XS
+  quants: [IQ4_XS]
 
 openai/gpt-oss-20b:
   publisher: openai
@@ -210,8 +207,7 @@ bartowski/openai_gpt-oss-20b:
   truncation: full
   useUnifiedKvCache: true
   max_context_length: 131072
-  quants:
-    - MXFP4
+  quants: [MXFP4]
 
 Intel/gpt-oss-20b-q4ks-autoround:
   publisher: Intel
@@ -259,8 +255,7 @@ unsloth/phi-4:
   n_layers: 40
   hidden_dim: 5120
   max_context_length: 16384
-  quants:
-    - Q5_K_M
+  quants: [Q5_K_M]
 
 mradermacher/acemath-7b-instruct:
   publisher: "mradermacher"
@@ -710,8 +705,7 @@ mradermacher/gemma-4-26b-a4b-it-i1:
   n_layers: 30
   hidden_dim: 2816
   max_context_length: 262144
-  quants:
-    - IQ4_XS
+  quants: [IQ4_XS]
 
 unsloth/gemma-4-26b-a4b-it-ud@iq3_s:
   publisher: "unsloth"
@@ -1129,8 +1123,7 @@ mistralai/magistral-small:
   n_layers: 40
   hidden_dim: 5120
   max_context_length: 131072
-  quants: &id001
-    - Q3_K_M
+  quants: &id001 [Q3_K_M]
 
 mistralai/magistral-small-2509:
   publisher: "mistralai"
@@ -1839,8 +1832,7 @@ unsloth/north-mini-code-1.0:
   n_layers: 49
   hidden_dim: 2048
   max_context_length: 500000
-  quants:
-    - IQ3_S
+  quants: [IQ3_S]
 
 qwen/qwen2.5-coder-14b-instruct@q5_0:
   publisher: Qwen
@@ -1997,8 +1989,7 @@ unsloth/qwen3.6-27b-ud:
   publisher: "unsloth"
   hf_url: "https://qwen.ai/blog?id=qwen3.6-27b"
   pub_url: https://qwen.ai/blog?id=qwen3.6-27b
-  quants:
-    - Q3_K_S
+  quants: [Q3_K_S]
   arch: "Qwen3.5 Dense"
   k_cache: "q5_1"
   v_cache: "iq4_nl"
@@ -2079,9 +2070,7 @@ mradermacher/qwen3.6-28b-reap-i1@iq3_s:
   n_layers: 40
   hidden_dim: 2048
   max_context_length: 262144
-  quants: &id002
-    - IQ3_S
-    - Q3_K_S
+  quants: &id002 [IQ3_S, Q3_K_S]
 
 mradermacher/qwen3.6-28b-reap-i1@q3_k_s:
   publisher: mradermacher
@@ -2169,8 +2158,7 @@ bartowski/mistralai_magistral-small-2509:
   hidden_dim: 5120
   useUnifiedKvCache: true
   max_context_length: 131072
-  quants:
-    - Q3_K_M
+  quants: [Q3_K_M]
 
 lmstudio-community/deepseek-r1-distill-qwen-14b:
   publisher: "lmstudio-community"
@@ -2235,8 +2223,7 @@ bartowski/ai21labs_ai21-jamba2-mini:
   blueprint: default_chat
   truncation: full
   max_context_length: 262144
-  quants:
-    - IQ2_XXS
+  quants: [IQ2_XXS]
 
 gabriellarson/mamba-codestral-7b-v0.1:
   publisher: gabriellarson
@@ -2258,8 +2245,7 @@ gabriellarson/mamba-codestral-7b-v0.1:
   blueprint: coding_agent
   truncation: full
   max_context_length: 1048576
-  quants:
-    - Q8_0
+  quants: [Q8_0]
 
 tiiuae/falcon3-mamba-7b-instruct:
   publisher: tiiuae
@@ -2282,8 +2268,7 @@ tiiuae/falcon3-mamba-7b-instruct:
   blueprint: coding_agent
   truncation: full
   max_context_length: 1048576
-  quants:
-    - Q8_0
+  quants: [Q8_0]
 
 lilyanatia/bonsai-8b-requantized:
   publisher: lilyanatia
@@ -2305,8 +2290,7 @@ lilyanatia/bonsai-8b-requantized:
   blueprint: reasoning_assistant
   truncation: full
   max_context_length: 65536
-  quants:
-    - Q2_K
+  quants: [Q2_K]
 
 vinpix/ternary-bonsai-27b-stock-mtp:
   publisher: vinpix
@@ -2328,8 +2312,7 @@ vinpix/ternary-bonsai-27b-stock-mtp:
   blueprint: reasoning_assistant
   truncation: full
   max_context_length: 262144
-  quants:
-    - TQ2_0
+  quants: [TQ2_0]
 
 prism-ml/bonsai-27b:
   publisher: prism-ml
@@ -2351,9 +2334,7 @@ prism-ml/bonsai-27b:
   blueprint: reasoning_assistant
   truncation: full
   max_context_length: 262144
-  quants:
-    - BF16
-    - Q1_0
+  quants: [BF16, Q1_0]
 
 internlm/internlm2_5-20b-chat:
   publisher: internlm
@@ -2375,8 +2356,7 @@ internlm/internlm2_5-20b-chat:
   truncation: full
   useUnifiedKvCache: true
   max_context_length: 32768
-  quants:
-    - Q4_K_M
+  quants: [Q4_K_M]
 
 mradermacher/gemma-4-19b-a4b-it-reap-i1:
   publisher: mradermacher
@@ -2399,8 +2379,7 @@ mradermacher/gemma-4-19b-a4b-it-reap-i1:
   blueprint: gemma_reasoning
   truncation: medium
   max_context_length: 262144
-  quants:
-    - Q4_K_M
+  quants: [Q4_K_M]
 
 lmstudio-community/deepseek-coder-v2-lite-instruct:
   publisher: lmstudio-community
@@ -2421,8 +2400,7 @@ lmstudio-community/deepseek-coder-v2-lite-instruct:
   blueprint: coding_agent
   truncation: full
   max_context_length: 163840
-  quants:
-    - Q5_K_M
+  quants: [Q5_K_M]
 
 lmstudio-community/internlm2-math-plus-20b:
   publisher: lmstudio-community
@@ -2443,8 +2421,7 @@ lmstudio-community/internlm2-math-plus-20b:
   blueprint: default_chat
   truncation: full
   max_context_length: 8192
-  quants:
-    - Q4_K_M
+  quants: [Q4_K_M]
 
 google/gemma-4-12b-it-qat:
   publisher: google
@@ -2465,8 +2442,7 @@ google/gemma-4-12b-it-qat:
   blueprint: gemma_reasoning
   truncation: full
   max_context_length: 262144
-  quants:
-    - Q4_0
+  quants: [Q4_0]
 
 bartowski/google_gemma-4-26b-a4b-it:
   publisher: bartowski
@@ -2487,8 +2463,7 @@ bartowski/google_gemma-4-26b-a4b-it:
   blueprint: gemma_reasoning
   truncation: minimal
   max_context_length: 262144
-  quants:
-    - Q3_K_S
+  quants: [Q3_K_S]
 
 unsloth/gemma-4-26b-a4b-it:
   publisher: unsloth
@@ -2509,8 +2484,7 @@ unsloth/gemma-4-26b-a4b-it:
   blueprint: gemma_reasoning
   truncation: minimal
   max_context_length: 262144
-  quants:
-    - IQ3_S
+  quants: [IQ3_S]
 
 quietimpostor/nemotron-3-nano-reap-21b-a3b:
   publisher: QuietImpostor
@@ -2527,8 +2501,7 @@ quietimpostor/nemotron-3-nano-reap-21b-a3b:
   hidden_dim: 2688
   reasoning: instruct
   max_context_length: 1048576
-  quants:
-    - MXFP4
+  quants: [MXFP4]
   capabilities: coding, text
   blueprint: coding_agent
   truncation: full
@@ -2549,8 +2522,7 @@ intel/qwen3-8b-q4km-autoround-inc-v1:
   hidden_dim: 4096
   reasoning: instruct
   max_context_length: 40960
-  quants:
-    - Q4_K_M
+  quants: [Q4_K_M]
   capabilities: coding, vision, text
   blueprint: coding_agent
   truncation: full
@@ -2570,8 +2542,7 @@ intel/qwen3-30b-a3b-instruct-2507-q2ks-mixed-autoround:
   hidden_dim: 2048
   reasoning: instruct
   max_context_length: 262144
-  quants:
-    - Q2_K_S
+  quants: [Q2_K_S]
   capabilities: coding, vision, text
   blueprint: coding_agent
   truncation: full
@@ -2591,8 +2562,7 @@ intel/qwen3-30b-a3b-thinking-2507-q2ks-mixed-autoround:
   hidden_dim: 2048
   reasoning: thinking
   max_context_length: 262144
-  quants:
-    - Q2_K_S
+  quants: [Q2_K_S]
   capabilities: coding, vision, text
   blueprint: reasoning_coding
   truncation: full
@@ -2612,8 +2582,7 @@ intel/qwen3-coder-30b-a3b-instruct-q2ks-mixed-autoround:
   hidden_dim: 2048
   reasoning: instruct
   max_context_length: 262144
-  quants:
-    - Q2_K_S
+  quants: [Q2_K_S]
   capabilities: coding, vision, text
   blueprint: coding_agent
   truncation: minimal
@@ -2633,8 +2602,7 @@ intel/mirothinker-v1.5-30b-q2ks-mixed-autoround:
   hidden_dim: 2048
   reasoning: thinking
   max_context_length: 262144
-  quants:
-    - Q2_K_S
+  quants: [Q2_K_S]
   capabilities: text
   blueprint: reasoning_assistant
   truncation: full

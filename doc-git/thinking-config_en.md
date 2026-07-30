@@ -115,7 +115,7 @@ Since 21.07., `_is_reasoning_model()` no longer uses keyword matching but reads 
 from `model_registry.yaml`. Detection flow:
 
 1. **GGUF header** (`_read_gguf_arch()`): Reads `tokenizer.chat_template`, returns `is_reasoning=True/False/None`
-2. **fill-reasoning** (`registry_tool.py`): Writes `reasoning: thinking|instruct` into registry for entries without it
+2. **fill-reasoning** (`src/registry_tool.py`): Writes `reasoning: thinking|instruct` into registry for entries without it
 3. **Runtime** (`run_benchmarks.py:_is_reasoning_model()`): Looks up `model_identifier` in registry,
    strips `@quant` suffix, returns `True` for `reasoning: thinking`, `False` otherwise
 
@@ -124,7 +124,7 @@ Fallback: If registry data is missing, prints a warning and returns `False`.
 ## MODEL_CONFIG in _get_lmeval_params (v13)
 
 Since v13, the thinking parameters are no longer managed in MODEL_CONFIG (custom_benchmark.py), 
-but centrally in `_get_lmeval_params()` in `run_benchmarks.py`. This avoids duplicate configuration 
+but centrally in `_get_lmeval_params()` in `src/run_benchmarks.py`. This avoids duplicate configuration 
 between the custom pipeline and the lm_eval pipeline.
 
 The model classification (_is_reasoning_model, _is_qwen3_6_model, _is_gptoss_model, _is_gemma_model, 
@@ -148,11 +148,11 @@ MODEL_CONFIG in custom_benchmark.py now only contains the custom pipeline parame
 ### 2026-07-21
 - **Reasoning detection via Registry:** `_is_reasoning_model()` now reads `model_registry.yaml:reasoning` field. No longer keyword-based. Registry populated automatically from GGUF `tokenizer.chat_template` via `registry_tool.py fill-reasoning`.
 - **BUGFIX `_read_gguf_arch()`:** Returns `is_reasoning = False` (not `None`) when no chat template found, preventing models without templates from incorrectly triggering the reasoning path.
-- **BUGFIX @quant suffix:** Both `run_benchmarks.py` and `custom_benchmark.py` now strip `@quant` suffix before registry lookup, so `model_identifier=model@q4_0` matches registry key `publisher/model`.
+- **BUGFIX @quant suffix:** Both `src/run_benchmarks.py` and `src/custom_benchmark.py` now strip `@quant` suffix before registry lookup, so `model_identifier=model@q4_0` matches registry key `publisher/model`.
 
 ### 2026-07-20
 - **Native REST API (Option 2):** `custom_benchmark.py:generate_answer()`: When `enable_thinking=False`, routes to `_generate_answer_native()` which uses LM Studio's native REST API (`/api/v1/chat`) with `reasoning: "off"` — a **dedicated, reliable** parameter that guarantees thinking is disabled. This is the fallback after `chat_template_kwargs` may be ignored by the OpenAI-compatible endpoint.
-- **lm_eval double coverage:** `run_benchmarks.py`: Added `gen_kwargs["reasoning"] = "off"` alongside existing `chat_template_kwargs.enable_thinking`, plus `"reasoning"` in both `gen_kwargs_keys` sets. If LM Studio's OpenAI endpoint forwards `reasoning`, this provides a second path to disable thinking.
+- **lm_eval double coverage:** `src/run_benchmarks.py`: Added `gen_kwargs["reasoning"] = "off"` alongside existing `chat_template_kwargs.enable_thinking`, plus `"reasoning"` in both `gen_kwargs_keys` sets. If LM Studio's OpenAI endpoint forwards `reasoning`, this provides a second path to disable thinking.
 - **Reason for native API:** The OpenAI-compatible endpoint (`/v1/chat/completions`) does not list `chat_template_kwargs` or `reasoning` as supported parameters. The native REST API (`/api/v1/chat`) has `reasoning: "off"|"low"|"medium"|"high"|"on"` as a first-class parameter.
 
 ### 2026-07-19

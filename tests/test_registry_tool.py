@@ -18,7 +18,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import registry_tool as rt
 from registry_tool import (
@@ -307,26 +307,21 @@ class TestMatchCascade:
 # ─────────────────────────────────────────────────────────────────────
 
 class TestInferNumParallel:
-    """Rules: ERNIE → 1, MoE → 4, GPT-OSS → 4, MTP → 2, Dense → 1."""
+    """Rules: ERNIE → 1, High-Expert MoE → 2/3, MoE → 4, GPT-OSS → 4, MTP → 2, Dense → 1."""
 
     def test_dense_default(self):
-        # No keywords → 1
         assert _infer_num_parallel("Llama Dense", "llama-3.1-8b") == 1
 
     def test_ernie_forced_to_1(self):
-        # ERNIE always gets np=1 (CUDA kernel overhead)
         assert _infer_num_parallel("ERNIE MoE", "baidu/ernie-4.5-21b") == 1
 
     def test_ernie_substring(self):
-        # "ernie" anywhere in arch → 1
         assert _infer_num_parallel("Something-ernie-like", "any-model") == 1
 
     def test_moe_in_arch(self):
-        # "moe" in arch field → 4
         assert _infer_num_parallel("Llama MoE", "model") == 4
 
     def test_moe_substring_in_key_a4b(self):
-        # a4b = active params → MoE
         assert _infer_num_parallel("Llama Dense", "gemma-4-26b-a4b") == 4
 
     def test_moe_substring_in_key_a3b(self):
@@ -339,30 +334,36 @@ class TestInferNumParallel:
         assert _infer_num_parallel("Llama Dense", "kimi-linear-48b-a3b") == 4
 
     def test_moe_substring_glm_flash(self):
-        assert _infer_num_parallel("Llama Dense", "glm-4.7-flash") == 4
+        # GLM-4.7 Flash: 24 experts → VRAM-bound at 16 GB
+        assert _infer_num_parallel("Llama Dense", "glm-4.7-flash") == 2
 
     def test_gpt_oss_forced_to_4(self):
-        # GPT-OSS despite being Dense benefits from parallel
         assert _infer_num_parallel("GPT-OSS Dense", "openai/gpt-oss-20b") == 4
 
     def test_gpt_oss_underscore_alias(self):
         assert _infer_num_parallel("Llama", "gpt_oss_20b") == 4
 
     def test_mtp_forced_to_2(self):
-        # MTP models need np >= Max Draft Tokens
         assert _infer_num_parallel("Qwen Dense", "qwen3.6-27b-mtp") == 2
 
     def test_priority_ernie_beats_moe(self):
-        # Even if both "ernie" and "moe" appear, ERNIE rule wins (early check)
         assert _infer_num_parallel("ERNIE MoE", "model-a4b") == 1
 
     def test_priority_moe_beats_a4b_keyword(self):
-        # arch says "moe" → 4 regardless of model_identifier
         assert _infer_num_parallel("Custom MoE", "model-a4b") == 4
 
     def test_priority_kimi_beats_a4b(self):
-        # kimi in key OR a4b in key → 4 (kimi hits first in substring list)
         assert _infer_num_parallel("Llama", "kimi-a4b") == 4
+
+    def test_qwen3_moe_16_experts(self):
+        # Qwen3 MoE: 16 experts at 16 GB VRAM → np=3
+        assert _infer_num_parallel("Qwen3 MoE", "unsloth/qwen3-30b-a3b-instruct-2507") == 3
+        assert _infer_num_parallel("Qwen3 MoE", "unsloth/qwen3-coder-30b-a3b-instruct") == 3
+        assert _infer_num_parallel("Qwen3 MoE", "mradermacher/qwen3.6-28b-reap-i1@iq3_s") == 3
+
+    def test_qwen3_dense_unchanged(self):
+        # Qwen3 Dense (no a3b/a4b) → 1
+        assert _infer_num_parallel("Qwen Dense", "qwen/qwen3-14b") == 1
 
 
 # ─────────────────────────────────────────────────────────────────────

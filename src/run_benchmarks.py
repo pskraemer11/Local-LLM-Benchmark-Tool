@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Unified benchmark launcher v13 – integrates:
-  [1] Custom: DS1000, CoderEval (custom_benchmark_v13.py)
+  [1] Custom: DS1000, CoderEval (custom_benchmark.py)
   [2] EvalPlus: HumanEval+, MBPP+ (evalplus.codegen + evalplus.evaluate)
   [3] LM-Eval: ARC, HellaSwag, TruthfulQA, IFEval, MATH-500 (lm_eval)
   [4] Agentic: tool-eval-bench (SampleSize scenarios, random selection)
@@ -15,19 +15,19 @@ Unified benchmark launcher v13 – integrates:
 
   Pipeline         Script/Tool                Data Source
   ────────         ───────────                ───────────
-  Custom           custom_benchmark_v13.py    JSONL under simple_evals/
+  Custom           custom_benchmark.py    JSONL under simple_evals/
   EvalPlus         evalplus.codegen/evaluate  evalplus-native datasets
   LM-Eval          lm_eval CLI                lm-eval built-in + custom YAML
   Agentic          tool_eval_bench (<-m)      HuggingFace tool_eval_bench
 
   All results are output via csv_writer.py with a uniform schema
-  (; delimiter, UTF-8) and consolidated by consolidate_results_v13.py
+  (; delimiter, UTF-8) and consolidated by consolidate_results.py
   into rankings.
 
 ── Script Hierarchy ────────────────────────────────────────────────
-  run_benchmarks_v13.py  (Launcher, ONLY HERE load/unload)
+  run_benchmarks.py  (Launcher, ONLY HERE load/unload)
     ├── model_manager.py         (load/unload/check via lms CLI)
-    ├── custom_benchmark_v13.py (subprocess: DS1000, CoderEval)
+    ├── custom_benchmark.py (subprocess: DS1000, CoderEval)
     ├── csv_writer.py            (uniform CSV output)
     ├── evalplus (external library, via -m)
     ├── lm_eval   (external library, via -m)
@@ -67,9 +67,11 @@ from typing import Any, Optional
 
 from type_defs import AvailableModelInfo, BenchmarkDef, PipelineResult
 
+from utils.terminal import green, yellow, red, cyan, bold, ok, warn, error, info, progress_bar
+
 # ── Model Management from Shared Module ──────────────────────
 # Load/Unload is ONLY initiated in main() of this script.
-# The subprocesses (custom_benchmark_v13.py, evalplus, lm_eval, tool_eval_bench)
+# The subprocesses (custom_benchmark.py, evalplus, lm_eval, tool_eval_bench)
 # must NOT load/unload themselves – they receive the model ID
 # via model_info["_api_model"] and only call the API.
 #
@@ -121,7 +123,7 @@ def _is_reasoning_model(model_identifier: str) -> bool:
                 return False
         print(f"  [WARN] {model_identifier}: reasoning nicht in Registry – "
               "`python registry_tool.py sync` ausführen.", file=sys.stderr)
-    except Exception:
+    except (ImportError, KeyError, OSError):
         pass
     return False
 
@@ -142,7 +144,7 @@ def _check_reasoning_registry(model_identifier: str) -> Optional[bool]:
             if reasoning_val == "instruct":
                 return False
         return None
-    except Exception:
+    except (ImportError, KeyError, OSError):
         return None
 
 def _is_mamba_model(model_identifier: str) -> bool:
@@ -168,17 +170,15 @@ def _model_short_name(model_identifier: str) -> str:
             s = s.rsplit(sep, 1)[-1]
     return s[:30]
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-RESULTS_DIR = os.path.join(BASE_DIR, "ergebnisse")
-DATA_DIR = os.path.join(BASE_DIR, "simple_evals")
+SRC_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(SRC_DIR)
+RESULTS_DIR = os.path.join(PROJECT_ROOT, "ergebnisse")
+DATA_DIR = os.path.join(PROJECT_ROOT, "simple_evals")
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
 # ── LM-Eval Proxy ──────────────────────────────────────────────
-# Routes lm_eval's OpenAI Chat Completions requests through the native API
-# (/api/v1/chat) with reasoning='off' to suppress thinking tokens.
-# Only needed for reasoning models on lm_eval benchmarks.
 LMEVAL_PROXY_PORT = 1235
-LMEVAL_PROXY_SCRIPT = os.path.join(BASE_DIR, "tools", "lmeval_proxy.py")
+LMEVAL_PROXY_SCRIPT = os.path.join(SRC_DIR, "tools", "lmeval_proxy.py")
 _lmeval_proxy_proc: Optional[subprocess.Popen] = None
 
 
@@ -207,13 +207,13 @@ def _start_lmeval_proxy() -> None:
                     s.settimeout(0.5)
                     s.connect(("127.0.0.1", LMEVAL_PROXY_PORT))
                     s.close()
-                    print(f"  [OK] LM-Eval Proxy on port {LMEVAL_PROXY_PORT} (reasoning=off for lm_eval)")
+                    print(f"  [OK] LM-Eval Proxy on port {LMEVAL_PROXY_PORT}")
                     return
                 except (ConnectionRefusedError, OSError):
                     pass
             time.sleep(0.3)
         print(f"  [WARN] lmeval_proxy started but not responding on port {LMEVAL_PROXY_PORT}")
-    except Exception as e:
+    except (OSError, subprocess.SubprocessError) as e:
         print(f"  [WARN] lmeval_proxy failed to start: {e}")
 
 
@@ -226,7 +226,7 @@ def _stop_lmeval_proxy() -> None:
         _lmeval_proxy_proc.wait(timeout=5)
     except subprocess.TimeoutExpired:
         _lmeval_proxy_proc.kill()
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         pass
     _lmeval_proxy_proc = None
 
@@ -241,27 +241,16 @@ os.environ.setdefault("PYTHONIOENCODING", "utf-8")
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
 
-LMEVAL_TASKS_DIR = os.path.join(BASE_DIR, "lm_eval_tasks")
+LMEVAL_TASKS_DIR = os.path.join(PROJECT_ROOT, "lm_eval_tasks")
 
-# ── Versioned Script References (dynamic) ──────────────────
-# Automatically finds the highest version of custom_benchmark_v*.py.
-# No manual update after Copy-Item needed anymore.
-# Prio 3.12 (Code-Review_2026-07-12.md §3.1 D1): log the resolved path
-# so it's clear which script version is actually being used.
-_custom_scripts = glob.glob(os.path.join(BASE_DIR, "custom_benchmark_v*.py"))
-_versions = []
-for _s in _custom_scripts:
-    _m = re.search(r'_v(\d+)\.py$', _s)
-    if _m:
-        _versions.append((int(_m.group(1)), _s))
-if not _versions:
-    sys.exit("[FATAL] No custom_benchmark_v*.py found.")
-CUSTOM_BENCHMARK_SCRIPT = max(_versions, key=lambda x: x[0])[1]
-print(f"[INFO] Using custom_benchmark script: {os.path.basename(CUSTOM_BENCHMARK_SCRIPT)} "
-      f"(version v{max(_versions, key=lambda x: x[0])[0]})")
+# ── Script References ──────────────────────────────────────
+# Custom benchmark script (renamed from custom_benchmark_v13.py).
+CUSTOM_BENCHMARK_SCRIPT = os.path.join(SRC_DIR, "custom_benchmark.py")
+if not os.path.exists(CUSTOM_BENCHMARK_SCRIPT):
+    sys.exit(f"[FATAL] custom_benchmark.py not found at {CUSTOM_BENCHMARK_SCRIPT}")
+print(f"[INFO] Using custom_benchmark script: {os.path.basename(CUSTOM_BENCHMARK_SCRIPT)}")
 print(f"[INFO] Subprocess interpreter: {sys.executable}")
-print(f"[INFO] Repository root:        {BASE_DIR}")
-del _custom_scripts, _versions, _m, _s
+print(f"[INFO] Repository root:        {PROJECT_ROOT}")
 
 # ── Benchmark Definitions ──────────────────────────────────────
 # Each benchmark is assigned to exactly ONE pipeline:
@@ -326,7 +315,7 @@ def _load_registry_for_context() -> tuple[dict[str, Any], dict[str, str]]:
     from assemble_blueprint import normalize_model_name
     from pathlib import Path
 
-    rpath = Path(__file__).resolve().parent / "doc-git" / "model_registry.yaml"
+    rpath = Path(__file__).resolve().parent.parent / "doc-git" / "model_registry.yaml"
     if not rpath.exists():
         _REGISTRY_DATA = {}
         _REGISTRY_NORM = {}
@@ -579,16 +568,30 @@ def _get_evaluation_parameters(model_identifier: str, bench_name: str = "") -> d
     if config.get("stop"):
         generation_parameters["until"] = config["stop"]
 
-    # chat_template_kwargs for enable_thinking / reasoning_effort
-    ctw = {}
-    if config.get("enable_thinking") is not None:
-        ctw["enable_thinking"] = config["enable_thinking"]
-    if config.get("reasoning_effort") is not None:
-        ctw["reasoning_effort"] = config["reasoning_effort"]
-    if ctw:
-        generation_parameters["chat_template_kwargs"] = ctw
-    if config.get("enable_thinking") is False:
-        generation_parameters["reasoning"] = "off"
+    # ── chat_template_kwargs for enable_thinking / reasoning_effort ──
+    #
+    # WICHTIG: chat_template_kwargs ist KEIN OpenAI-Standard-Parameter.
+    #   Er wird NUR von Qwen-Modellen (Qwen3, Qwen3.5) unterstuetzt.
+    #   Quelle: https://github.com/lmstudio-ai/lmstudio-bug-tracker/issues/1573
+    #   Fuer gpt-oss wird reasoning_effort als Top-Level-Parameter gesendet
+    #   (OpenAI-kompatibles /v1/chat/completions unterstuetzt das).
+    #
+    gptoss = _is_gptoss_model(model_identifier)
+    # gpt-oss: reasoning_effort + max_thinking_tokens als Top-Level-Param
+    if gptoss:
+        if config.get("reasoning_effort") is not None:
+            generation_parameters["reasoning_effort"] = config["reasoning_effort"]
+        if config.get("max_thinking_tokens") is not None:
+            generation_parameters["max_thinking_tokens"] = config["max_thinking_tokens"]
+    # Qwen: chat_template_kwargs (Qwen-spezifisch)
+    else:
+        ctw = {}
+        if config.get("enable_thinking") is not None:
+            ctw["enable_thinking"] = config["enable_thinking"]
+        if config.get("reasoning_effort") is not None:
+            ctw["reasoning_effort"] = config["reasoning_effort"]
+        if ctw:
+            generation_parameters["chat_template_kwargs"] = ctw
 
     return generation_parameters
 
@@ -601,21 +604,17 @@ def _build_lmeval_cmd(model_identifier: str, api_model: str, subset_task: str, p
     """
     gptoss = _is_gptoss_model(model_identifier)
     evaluation_parameters = _get_evaluation_parameters(model_identifier, bench_name=bench_name)
-    if _is_reasoning_model(model_identifier) and evaluation_parameters.get("reasoning") == "off":
-        print(f"  [WARN] _build_lmeval_cmd: Reasoning model via OpenAI endpoint – `reasoning: \"off\"`")
-        print(f"         may be IGNORED by LM Studio. See run_lmeval() warning for details.")
     model_settings = {
         "base_url": f"{API_BASE}/chat/completions",
         "model": api_model,
         "num_concurrent": 1,
-        "max_gen_toks": 512,   # fallback if YAML generation_parameters has no max_gen_toks
     }
     # eos_string only for GPT-OSS; other models use YAML until sequences or generation_parameters
     if gptoss and "until" not in evaluation_parameters:
         model_settings["eos_string"] = "<|endoftext|>"
     # Generation params go to --generation_parameters (overrides YAML generation_parameters via merge)
     generation_parameters_keys = {"max_tokens", "temperature", "top_p", "top_k", "min_p",
-                       "until", "chat_template_kwargs", "reasoning"}
+                       "until", "chat_template_kwargs", "reasoning", "reasoning_effort", "max_thinking_tokens"}
     generation_parameters = {k: v for k, v in evaluation_parameters.items()
                   if k in generation_parameters_keys and v is not None}
     model_args = json.dumps(model_settings, ensure_ascii=False)
@@ -658,13 +657,13 @@ def _parse_subset_score(sub_output_dir: str, subset_task: str) -> Optional[float
 
 
 # ── Pipeline 1/4: Custom (DS1000, CoderEval) ──────────────────
-# Starts custom_benchmark_v13.py as subprocess.
+# Starts custom_benchmark.py as subprocess.
 # This script reads JSONL files from simple_evals/, queries the
 # model via LM-Studio-REST-API and evaluates code execution
 # in a sandbox (exec_sandboxed).
 #
 # IMPORTANT: This call passes --api-model as the exact load ID
-# from lms ps --json. custom_benchmark_v13.py uses this ID for all
+# from lms ps --json. custom_benchmark.py uses this ID for all
 # API calls. On mismatch, LM Studio responds with HTTP 400.
 #
 # Qwen3.5 compatibility: --qwen-prompt enables prompt-based
@@ -704,7 +703,7 @@ def run_custom_benchmark(model_info: AvailableModelInfo, bench: BenchmarkDef, sa
     print(f"\n  >>> Custom: {bench['name']} / {model_display}")
     api_model = model_info.get("_api_model") or model_identifier
     cmd = [
-        sys.executable, os.path.join(BASE_DIR, CUSTOM_BENCHMARK_SCRIPT),
+        sys.executable, CUSTOM_BENCHMARK_SCRIPT,
         "--non-interactive",
         "--model-key", model_identifier,
         "--api-model", api_model,
@@ -744,7 +743,7 @@ def run_custom_benchmark(model_info: AvailableModelInfo, bench: BenchmarkDef, sa
     # --no-structured-output instead of returning a 0% score.
     # Detection via the [CHANNEL-ERROR] marker printed by the subprozess
     # when error_detail contains "Cannot combine structured output" /
-    # "Channel Error" (see custom_benchmark_v13.py run benchmark loop).
+    # "Channel Error" (see custom_benchmark.py run benchmark loop).
     if not is_structured_output_disabled and "[CHANNEL-ERROR]" in (result.stdout or ""):
         print(f"  [INFO] Channel-Error detected – retrying with --no-structured-output")
         return run_custom_benchmark(model_info, bench, sample_size=sample_size,
@@ -804,6 +803,8 @@ def run_evalplus(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_siz
 
     # Sentinel name required by evalplus; the actual model ID is sent
     # via the OpenAI-compatible request (Code-Review 2026-07-18 §5.3).
+    evaluation_parameters = _get_evaluation_parameters(model_identifier, bench_name=dataset)
+    max_tokens = evaluation_parameters.get("max_tokens", 2048)
     model_obj = make_model(
         model=EVALPLUS_SENTINEL_MODEL,
         backend="openai",
@@ -812,6 +813,7 @@ def run_evalplus(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_siz
         temperature=0.0 if not gptoss else 0.7,
         instruction_prefix="Please provide a self-contained Python script that solves the following problem in a markdown code block:",
         response_prefix="Below is a Python script with a self-contained function that solves the problem and passes corresponding tests:",
+        max_new_tokens=max_tokens,
     )
 
     temp_str = "1.0" if gptoss else "0.0"
@@ -833,16 +835,46 @@ def run_evalplus(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_siz
     eval_timeout = (eval_base * 2 if is_reasoning_model else eval_base) * limit_scale
 
     from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FUTimeout
+    import io
+    from contextlib import redirect_stdout
+    progress_dots = [0]
+    _total_tasks = len(filtered_tasks)
+    def _codegen_wrapper() -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            evalplus_codegen(
+                target_path=samples_path,
+                model=model_obj,
+                dataset=filtered_tasks,
+                greedy=not gptoss,
+                n_samples=1,
+                resume=False,
+            )
+        progress_dots[0] = _total_tasks
+        print(f"  [{'.' * _total_tasks}] {_total_tasks}/{_total_tasks}")
+    def _codegen_progress() -> None:
+        import sys as _sys
+        dots_printed = [0]
+        while dots_printed[0] < _total_tasks:
+            time.sleep(2)
+            import glob as _g
+            if os.path.exists(samples_path):
+                try:
+                    with open(samples_path, "r", encoding="utf-8") as f:
+                        done = sum(1 for _ in f)
+                except (OSError, UnicodeDecodeError):
+                    done = dots_printed[0]
+            else:
+                done = 0
+            if done > dots_printed[0]:
+                delta = done - dots_printed[0]
+                print(f"  [{'.' * done}{' ' * (_total_tasks - done)}] {done}/{_total_tasks}", end="\r")
+                _sys.stdout.flush()
+                dots_printed[0] = done
+    progress_thread = threading.Thread(target=_codegen_progress, daemon=True)
     executor = ThreadPoolExecutor(max_workers=1)
-    future = executor.submit(
-        evalplus_codegen,
-        target_path=samples_path,
-        model=model_obj,
-        dataset=filtered_tasks,
-        greedy=not gptoss,
-        n_samples=1,
-        resume=False,
-    )
+    future = executor.submit(_codegen_wrapper)
+    progress_thread.start()
     try:
         future.result(timeout=eval_timeout)
         print(f"  [OK] codegen finished ({len(filtered_tasks)} tasks)")
@@ -921,19 +953,11 @@ def run_lmeval(model_info: AvailableModelInfo, bench: BenchmarkDef, limit: int =
     print(f"\n  >>> LM-Eval: {bench['name']} / {model_display}")
     t0 = time.time()
     evaluation_parameters = _get_evaluation_parameters(model_identifier, bench_name=bench['name'])
-    if is_reasoning_model and evaluation_parameters.get("reasoning") == "off":
-        if _proxy_is_running():
-            print(f"  [INFO] Reasoning model via proxy – requests routed to Native API with reasoning='off'")
-        else:
-            print(f"  [WARN] Reasoning model via OpenAI endpoint – `reasoning: \"off\"` ignored by LM Studio.")
-            print(f"         Native API (/api/v1/chat with reasoning='off') is NOT used by lm_eval.")
-            print(f"         → If latency is 10-20x higher, this is the cause. Skip lm_eval benchmarks")
-            print(f"           for reasoning models, or use --lmeval-proxy.")
     #
     # Split params: constructor-level (--model_args) vs. generation-level (--generation_parameters).
     #
     # model_args is consumed by LocalChatCompletion.__init__(**kwargs).
-    #   Keys like base_url, model, num_concurrent, max_gen_toks, eos_string
+    #   Keys like base_url, model, num_concurrent, eos_string
     #   are constructor params. All other params in evaluation_parameters are silently
     #   dropped by the constructor (openai_completions.py:158 **kwargs).
     #
@@ -946,13 +970,13 @@ def run_lmeval(model_info: AvailableModelInfo, bench: BenchmarkDef, limit: int =
     #           otherwise LM Studio responds with HTTP 400 "model not found".
     #           A test with "model=check" (invalid name) causes the request to HANG
     #           (no timeout, no error response) – therefore ALWAYS use api_model.
-    use_proxy = _proxy_is_running() and evaluation_parameters.get("reasoning") == "off"
+    # Use proxy only when explicitly started (e.g. for custom base_url routing)
+    use_proxy = _proxy_is_running()
     lm_base_url = f"http://127.0.0.1:{LMEVAL_PROXY_PORT}/v1/chat/completions" if use_proxy else f"{API_BASE}/chat/completions"
     model_settings = {
         "base_url": lm_base_url,
         "model": api_model,
         "num_concurrent": 1,
-        "max_gen_toks": 512,
     }
     # Only set eos_string for models that explicitly need a fixed EOS token.
     # GPT-OSS uses <|endoftext|> as its primary stop; other chat models rely on
@@ -961,7 +985,7 @@ def run_lmeval(model_info: AvailableModelInfo, bench: BenchmarkDef, limit: int =
         model_settings["eos_string"] = "<|endoftext|>"
     # Gen_kwargs keys that should override YAML generation_kwargs per request.
     generation_parameters_keys = {"max_tokens", "temperature", "top_p", "top_k", "min_p",
-                       "until", "chat_template_kwargs", "reasoning"}
+                       "until", "chat_template_kwargs", "reasoning", "reasoning_effort", "max_thinking_tokens"}
     generation_parameters = {k: v for k, v in evaluation_parameters.items()
                   if k in generation_parameters_keys and v is not None}
     model_args = json.dumps(model_settings, ensure_ascii=False)
@@ -1002,11 +1026,29 @@ def run_lmeval(model_info: AvailableModelInfo, bench: BenchmarkDef, limit: int =
                                 text=True, encoding="utf-8", errors="replace", env=lm_env)
         stdout_lines = []
         stderr_lines = []
-        def _stream_stdout():
+        def _stream_stdout() -> None:
+            import re as _re
+            progress_re = _re.compile(r'(\d+)/(\d+)')
+            last_bar_len = [0]
             for line in iter(proc.stdout.readline, ""):
-                print(line.rstrip())
                 stdout_lines.append(line)
-        def _collect_stderr():
+                m = progress_re.search(line)
+                if m:
+                    done, total = int(m.group(1)), int(m.group(2))
+                    bar_w = min(total, 50)
+                    filled = int(bar_w * done / total) if total > 0 else 0
+                    bar = '#' * filled + '.' * (bar_w - filled)
+                    progress_str = f"  [{bar}] {done}/{total}"
+                    pad = ' ' * max(0, last_bar_len[0] - len(progress_str))
+                    print(f"\r{progress_str}{pad}", end="", flush=True)
+                    last_bar_len[0] = len(progress_str)
+                    if done >= total:
+                        print()
+                else:
+                    stripped = line.rstrip()
+                    if stripped:
+                        print(f"  {stripped}")
+        def _collect_stderr() -> None:
             for line in iter(proc.stderr.readline, ""):
                 stderr_lines.append(line)
         tout = threading.Thread(target=_stream_stdout, daemon=True)
@@ -1106,7 +1148,7 @@ def run_agentic(model_info: AvailableModelInfo, limit: int = 5) -> Optional[Pipe
 
     selected = random.sample(TOOL_EVAL_SCENARIO_IDS, min(limit, len(TOOL_EVAL_SCENARIO_IDS)))
 
-    print(f"\n  >>> Agentic (tool-eval-bench): {model_display}")
+    print(f"\n  {green('>>>')} Agentic ({cyan('tool-eval-bench')}): {model_display}")
     print(f"      Scenarios: {len(selected)}/{len(TOOL_EVAL_SCENARIO_IDS)} randomly selected")
 
     t0 = time.time()
@@ -1119,46 +1161,76 @@ def run_agentic(model_info: AvailableModelInfo, limit: int = 5) -> Optional[Pipe
         "--no-live",
     ]
 
-
-
+    scenario_timeout = PIPELINE_TIMEOUTS["agentic_scenario"]
+    total_timeout = limit * scenario_timeout + 600  # 10 min buffer
     lm_env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
     score = None
-    stdout = ""
+    stdout_lines: list[str] = []
+    stderr_lines: list[str] = []
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True,
-                           timeout=PIPELINE_TIMEOUTS["agentic_subprocess"],
-                           encoding="utf-8", errors="replace", env=lm_env)
-        stdout = r.stdout or ""
-        stderr = r.stderr or ""
+        proc = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            encoding="utf-8", errors="replace", env=lm_env
+        )
+
+        def _stream_stdout(out_list: list[str]) -> None:
+            if proc.stdout is None:
+                return
+            for line in iter(proc.stdout.readline, ""):
+                out_list.append(line)
+                stripped = line.rstrip("\n\r")
+                if stripped:
+                    m = re.search(r"Scenario\s+(\S+)\s+-\s+score:\s*([\d.]+)", stripped)
+                    if m:
+                        scenario = m.group(1)
+                        done = sum(1 for l in out_list if "score:" in l)
+                        progress_bar(done, limit, prefix=f"  {cyan(scenario)}")
+                    else:
+                        print(f"    {stripped}")
+
+        def _collect_stderr(err_list: list[str]) -> None:
+            if proc.stderr is None:
+                return
+            for line in iter(proc.stderr.readline, ""):
+                err_list.append(line)
+
+        tout = threading.Thread(target=_stream_stdout, args=(stdout_lines,), daemon=True)
+        terr = threading.Thread(target=_collect_stderr, args=(stderr_lines,), daemon=True)
+        tout.start()
+        terr.start()
+        tout.join(timeout=total_timeout)
+        proc.wait(timeout=max(total_timeout - 10, 10))
+        terr.join(timeout=5)
+
         elapsed = time.time() - t0
-        if r.returncode == 0:
-            print(f"  [OK] Agentic done ({elapsed:.0f}s)")
+        if proc.returncode == 0:
+            ok(f"Agentic done ({elapsed:.0f}s)")
         else:
-            print(f"  [WARN] tool-eval-bench returncode={r.returncode}")
-            for line in stderr.split("\n")[-5:]:
-                print(f"    | {line}")
+            warn(f"tool-eval-bench returncode={proc.returncode}")
+            if stderr_lines:
+                for line in stderr_lines[-5:]:
+                    print(f"    | {line.rstrip()}")
 
         # Parse JSON result – tool-eval-bench envelope format
         if os.path.exists(json_path):
             with open(json_path, encoding="utf-8") as f:
                 data = json.load(f)
-            # final_score: int 0-100 im Envelope, auf 0-1 normalisieren
             raw = data.get("final_score") if isinstance(data, dict) else None
             if raw is not None:
                 score = raw / 100.0
             else:
-                # Fallback: average scenario_results
                 scores_meta = data.get("scores", {}) if isinstance(data, dict) else {}
                 results = scores_meta.get("scenario_results", [])
                 if results:
                     vals = [s.get("score", 0) for s in results if isinstance(s, dict)]
                     score = sum(vals) / len(vals) if vals else None
     except subprocess.TimeoutExpired:
+        proc.kill()
         elapsed = time.time() - t0
-        print(f"  [WARN] Agentic TIMEOUT after {elapsed:.0f}s")
+        warn(f"Agentic TIMEOUT after {elapsed:.0f}s (limit {total_timeout}s)")
     except (subprocess.SubprocessError, OSError, json.JSONDecodeError, KeyError, ValueError) as e:
         elapsed = time.time() - t0
-        print(f"  [WARN] Agentic ERROR: {e}")
+        warn(f"Agentic ERROR: {e}")
 
     return {"pipeline": "agentic", "bench": "Agentic", "category": "agentic",
             "model": model_display,
@@ -1173,7 +1245,7 @@ def save_summary_csv(results: list[dict[str, Any]], model_info: Optional[dict[st
         results, model_info or {},
         sample_size=sample_size, seed=seed, exclude_benchmarks=exclude_benchmarks,
         no_structured_output=no_structured_output, no_unload_between=no_unload_between,
-        base_dir=BASE_DIR,
+        base_dir=PROJECT_ROOT,
     )
 
 
@@ -1182,21 +1254,10 @@ def save_summary_csv(results: list[dict[str, Any]], model_info: Optional[dict[st
 # csv_writer.write_accumulative_summary(...) nutzen.
 
 
-def main() -> None:
-    # ── Entry Point ─────────────────────────────────────────
-    # Flow:
-    #   1. Resolve models (CLI argument or interactive)
-    #   2. Resolve benchmarks (CLI argument or interactive)
-    #   3. For each model:
-    #      a. Load model (via model_manager.load_model_via_lms)
-    #      b. For each benchmark: call pipeline function
-    #      c. Intermediate summary via csv_writer
-    #   4. Unload model
-    #   5. Consolidated overview via csv_writer
-    #
-    # Important: All pipelines use model_info["_api_model"]
-    # as unified model ID – no more mismatch between
-    # loaded ID and API call.
+# ── main() Orchestrierungs-Helfer ──────────────────────────────
+
+def _parse_args() -> tuple[Any, str]:
+    """Phase 1: CLI-Parse + Versionsinfo."""
     parser = argparse.ArgumentParser(description="Unified Benchmark Launcher v13")
     parser.add_argument("--sample-size", "-s", type=int, default=5,
                         help="Tasks per benchmark (default: 5)")
@@ -1219,12 +1280,8 @@ def main() -> None:
                         help="Write the full LLM response to per-task CSVs (default: truncated to 200 chars, see W1 in Code-Review_2026-07-12.md)")
     args = parser.parse_args()
 
-    global IS_THINKING_ENABLED
-    IS_THINKING_ENABLED = args.thinking
-
-    # Read version from VERSION file (Prio 4.17 – single source of truth)
-    _version = "13.0.0-p3"
-    _version_file = os.path.join(BASE_DIR, "VERSION")
+    _version = "13.0.0-p7"
+    _version_file = os.path.join(PROJECT_ROOT, "VERSION")
     if os.path.isfile(_version_file):
         with open(_version_file, "r", encoding="utf-8") as _vf:
             for _line in _vf:
@@ -1237,33 +1294,31 @@ def main() -> None:
     print(f"  SampleSize: {args.sample_size}")
     if args.thinking:
         print("  Thinking mode: ON (MATH-500, reasoning models, force-enabled via --thinking)")
-        print("  Pipelines: Custom (DS1000/CoderEval), EvalPlus, LM-Eval (ARC/HS/TQA/IFEval/M500), Agentic (tool-eval-bench)")
+    print("  Pipelines: Custom (DS1000/CoderEval), EvalPlus, LM-Eval (ARC/HS/TQA/IFEval/M500), Agentic (tool-eval-bench)")
     print("  CSV-Format: csv_writer (; Delimiter, utf-8)")
     print("=" * 60)
+    return args, _version
 
-    available = get_available_models(exclude_keywords=EXCLUDE_KEYWORDS, registry_only=True)
+
+def _resolve_models(args: Any, available: list[AvailableModelInfo]) -> list[AvailableModelInfo]:
+    """Phase 2a: Modelle aus CLI oder interaktiv auflösen."""
     if not available:
         print("[ERROR] No models available. Aborting.")
         sys.exit(1)
-
-    if args.model:
-        models = resolve_models(available, args.model)
-    else:
-        models = select_models_interactive(available)
+    models = resolve_models(available, args.model) if args.model else select_models_interactive(available)
     if not models:
         print("[ERROR] No models selected. Aborting.")
         sys.exit(1)
     print(f"  Models: {', '.join(m['display'] for m in models)}")
+    return models
 
-    if args.benchmarks:
-        benchmarks = resolve_benchmarks(args.benchmarks)
-    else:
-        benchmarks = select_benchmarks_interactive()
+
+def _resolve_benchmarks(args: Any) -> list[BenchmarkDef]:
+    """Phase 2b: Benchmarks aus CLI oder interaktiv auflösen + exclude-Filter."""
+    benchmarks = resolve_benchmarks(args.benchmarks) if args.benchmarks else select_benchmarks_interactive()
     if not benchmarks:
         print("[ERROR] No benchmarks selected. Aborting.")
         sys.exit(1)
-
-    # Apply --exclude-benchmarks filter
     if args.exclude_benchmarks:
         exclude_names = {n.strip().lower() for n in args.exclude_benchmarks.split(",")}
         excluded = [b for b in benchmarks if b["name"].lower() in exclude_names]
@@ -1273,107 +1328,237 @@ def main() -> None:
         if not benchmarks:
             print("[ERROR] All benchmarks excluded. Aborting.")
             sys.exit(1)
-
     print(f"  Benchmarks: {', '.join(b['name'] for b in benchmarks)}")
+    return benchmarks
 
-    # Start LM-Eval proxy if needed: reasoning model + lm_eval benchmarks
+
+def _start_proxy_if_needed(models: list[AvailableModelInfo], benchmarks: list[BenchmarkDef]) -> None:
+    """Phase 2c: LM-Eval-Proxy starten falls Reasoning-Modell + lm_eval-Benchmarks."""
     lmeval_names = {b["name"] for b in LMEVAL_BENCHMARKS}
     has_lmeval = any(b["name"] in lmeval_names for b in benchmarks)
-    has_reasoning_model = any(
-        _is_reasoning_model(m["key"])
-        for m in models
-    )
-    if has_lmeval and has_reasoning_model:
+    has_reasoning = any(_is_reasoning_model(m["key"]) for m in models)
+    if has_lmeval and has_reasoning:
         _start_lmeval_proxy()
 
-    all_summary = []
+
+def _check_registry_for_model(model_identifier: str, model_display: str) -> Optional[bool]:
+    """Registry-Prüfungen (7 Checks). Gibt is_reasoning zurück oder None (skip)."""
+    try:
+        from assemble_blueprint import normalize_model_name
+        registry, rnorm = _load_registry_for_context()
+        normalized_key = normalize_model_name(model_identifier)
+        base_key = normalized_key.split("@")[0]
+
+        if normalized_key not in rnorm and base_key not in rnorm:
+            print(f"\n  [ERROR] {model_display}: nicht in Registry – "
+                  "`python registry_tool.py sync` ausführen. Überspringe.")
+            return None
+
+        matched_key = rnorm.get(normalized_key) or rnorm.get(base_key)
+        reasoning_val = registry[matched_key].get("reasoning")
+        if reasoning_val is None:
+            print(f"\n  [ERROR] {model_display}: reasoning-Feld fehlt – "
+                  "`python registry_tool.py sync` ausführen. Überspringe.")
+            return None
+
+        tpl = registry[matched_key].get("template")
+        if tpl:
+            from registry_tool import TEMPLATE_DIR
+            if not (TEMPLATE_DIR / tpl).exists():
+                print(f"\n  [WARN] {model_display}: template='{tpl}' -> Datei nicht gefunden")
+
+        caps = registry[matched_key].get("capabilities")
+        if not caps:
+            print(f"\n  [ERROR] {model_display}: capabilities-Feld fehlt – Überspringe.")
+            return None
+
+        bp = registry[matched_key].get("blueprint")
+        if not bp or bp == "none":
+            print(f"\n  [ERROR] {model_display}: blueprint-Feld fehlt oder 'none' – Überspringe.")
+            return None
+
+        trunc = registry[matched_key].get("truncation")
+        if trunc not in ("full", "medium", "minimal"):
+            print(f"\n  [WARN] {model_display}: truncation-Feld fehlt – setze default='full'.")
+            registry[matched_key]["truncation"] = "full"
+
+        # Check assembled systemPrompt in Config JSON
+        try:
+            from assemble_blueprint import read_lms_configs
+            from pathlib import Path as _Path
+            cfgs = read_lms_configs(_Path.home() / ".lmstudio" / ".internal" / "user-concrete-model-default-config")
+            cfg_key = normalize_model_name(model_identifier)
+            for c in cfgs:
+                if normalize_model_name(c.get("dir_name", "")) == cfg_key:
+                    _data = json.loads(_Path(c["json_path"]).read_text(encoding="utf-8-sig"))
+                    sys_prompt = next((_f.get("value", "") for _f in _data.get("operation", {}).get("fields", [])
+                                      if _f.get("key") == "llm.prediction.systemPrompt"), "")
+                    if not sys_prompt:
+                        print(f"\n  [WARN] {model_display}: systemPrompt in Config JSON ist leer – "
+                              "`assemble_blueprint.py assemble` ausführen.")
+                    break
+        except (ImportError, KeyError, OSError, ValueError):
+            pass
+
+        return (reasoning_val == "thinking") or _is_qwen3_6_model(model_identifier)
+    except (ImportError, KeyError, OSError, ValueError):
+        print(f"\n  [WARN] Registry nicht lesbar – ohne Reasoning-Info fortfahren.")
+        return False
+
+
+def _load_model(model_info: AvailableModelInfo, model_load_key: str, args: Any) -> Optional[str]:
+    """Modell laden + API-Ready prüfen. Gibt api_model zurück oder None (skip)."""
+    loaded = get_current_loaded_model()
+    api_model = None
+
+    if loaded:
+        li = loaded["identifier"].lower()
+        lk = loaded["model_identifier"].lower()
+        mk = model_info["key"].lower()
+        if mk in li or mk in lk or li in mk or lk in mk:
+            api_model = loaded["identifier"]
+            print(f"  [OK] '{model_info['display']}' already loaded – ID: {api_model}")
+        else:
+            print(f"  [INFO] Different model loaded ({loaded['display_name']}) – unloading...")
+            has_unloaded_all_models()
+            ok, api_model = load_model_via_lms(model_load_key)
+            if not ok:
+                return None
+    else:
+        ok, api_model = load_model_via_lms(model_load_key)
+        if not ok:
+            return None
+
+    print("  [INFO] Waiting for API readiness...")
+    if not is_model_ready(timeout=60):
+        print("  [WARN] Model readiness check timed out – continuing anyway")
+
+    model_info["_api_model"] = api_model
+
+    # Warn on variant mismatch
+    all_variants = model_info.get("variants") or []
+    if len(all_variants) > 1 and api_model:
+        desired_quant = model_info.get("quant", "").lower()
+        if desired_quant and desired_quant not in api_model.lower():
+            print(f"  [WARN] Requested '@{desired_quant}' but '{api_model}' loaded")
+            print(f"  [WARN] Available variants: {', '.join(v.split('@')[-1] for v in all_variants)}")
+
+    return api_model
+
+
+def _run_benchmarks_for_model(model_info: AvailableModelInfo, benchmarks: list[BenchmarkDef],
+                               args: Any, is_reasoning_model: bool,
+                               all_summary: list[dict]) -> list[dict]:
+    """Benchmark-Dispatch: Custom/EvalPlus/LM-Eval/Agentic für ein Modell."""
+    model_results: list[dict] = []
+    model_load_key = model_info.get("model_identifier", model_info["key"])
+
+    for bidx, bench in enumerate(benchmarks):
+        if args.unload_between and bidx > 0:
+            print(f"  [INFO] Unloading/reloading model between benchmarks...")
+            has_unloaded_all_models()
+            time.sleep(2)
+            ok, api_model = load_model_via_lms(model_load_key)
+            if not ok:
+                print(f"  [ERROR] Reload before {bench['name']} failed. Skipping.")
+                continue
+            print("  [INFO] Waiting for API re-initialization...")
+            if not is_model_ready(timeout=60):
+                print("  [WARN] Model readiness check timed out – continuing anyway")
+            model_info["_api_model"] = api_model
+
+        bname = bench["name"]
+        ep_names = {b["name"] for b in EVALPLUS_BENCHMARKS}
+        lmeval_names = {b["name"] for b in LMEVAL_BENCHMARKS}
+        agentic_names = {b["name"] for b in AGENTIC_BENCHMARKS}
+
+        try:
+            if bname in agentic_names:
+                result = run_agentic(model_info, limit=args.sample_size)
+            elif bname in ep_names:
+                result = run_evalplus(model_info, bench, sample_size=args.sample_size,
+                                      seed=args.seed, is_reasoning_model=is_reasoning_model)
+            elif bname in lmeval_names:
+                per_limit = max(bench.get("min_limit", 0), args.sample_size)
+                result = run_lmeval(model_info, bench, limit=per_limit,
+                                    is_reasoning_model=is_reasoning_model)
+            else:
+                result = run_custom_benchmark(model_info, bench, sample_size=args.sample_size,
+                                              seed=args.seed, is_structured_output_disabled=args.no_structured_output,
+                                              should_keep_response=args.keep_response)
+
+            if result:
+                model_results.append(result)
+                all_summary.append(result)
+
+            _ensure_model_still_loaded(model_info["key"], model_load_key, bench_name=bname)
+        except subprocess.TimeoutExpired:
+            print(f"  [ERROR] {bench['name']} timeout (expired)")
+        except (subprocess.SubprocessError, OSError, ValueError, TypeError, KeyError) as e:
+            print(f"  [ERROR] {bench['name']}: {e}")
+
+    return model_results
+
+
+def _write_intermediate_summary(model_results: list[dict], model_info: AvailableModelInfo, args: Any) -> None:
+    """Zwischen-Summary pro Modell via csv_writer."""
+    if model_results:
+        csv_writer.write_accumulative_summary(
+            model_results, model_info,
+            sample_size=args.sample_size,
+            seed=str(args.seed or ""),
+            exclude_benchmarks=args.exclude_benchmarks or "",
+            no_structured_output=str(args.no_structured_output or ""),
+            no_unload_between='True' if not args.unload_between else '',
+            base_dir=PROJECT_ROOT,
+        )
+
+
+def _print_final_summary(all_summary: list[dict]) -> None:
+    """Konsolen-Ausgabe aller Ergebnisse."""
+    print("\n" + "=" * 60)
+    print("  FINISHED")
+    print("=" * 60)
+    for s in all_summary:
+        cat = s.get("category", "").ljust(9)
+        print(f"  [{s['pipeline']}] {s['model']} / {cat}{s['bench']}")
+
+
+def _write_consolidated_overview(all_summary: list[dict], models: list, args: Any) -> None:
+    """Konsolidierte Übersicht (konsolidiert_aktuell.csv) bei Mehrfach-Modell-Läufen."""
+    if all_summary and len(models) > 1:
+        csv_writer.write_konsolidiert_aktuell(
+            all_summary,
+            sample_size=args.sample_size,
+            seed=str(args.seed or ""),
+            exclude_benchmarks=args.exclude_benchmarks or "",
+            no_structured_output=str(args.no_structured_output or ""),
+            no_unload_between='True' if not args.unload_between else '',
+            base_dir=PROJECT_ROOT,
+        )
+
+
+def main() -> None:
+    args, _version = _parse_args()
+
+    global IS_THINKING_ENABLED
+    IS_THINKING_ENABLED = args.thinking
+
+    available = get_available_models(exclude_keywords=EXCLUDE_KEYWORDS, registry_only=True)
+    models = _resolve_models(args, available)
+    benchmarks = _resolve_benchmarks(args)
+    _start_proxy_if_needed(models, benchmarks)
+
+    all_summary: list[dict] = []
+
     for midx, model_info in enumerate(models, 1):
         model_identifier = model_info["key"]
-        model_load_key = model_info.get("model_identifier", model_identifier)   # base key for lms load
+        model_load_key = model_info.get("model_identifier", model_identifier)
         model_display = model_info["display"]
 
-        # ── Registry-Prüfungen VOR dem Laden ──────────────────────────
-        try:
-            from assemble_blueprint import normalize_model_name
-            registry, rnorm = _load_registry_for_context()
-            normalized_key = normalize_model_name(model_identifier)
-            # Ohne @quant-Suffix versuchen (Registry-Keys haben kein Quant)
-            base_key = normalized_key.split("@")[0]
-
-            # 1. Ist das Modell überhaupt in der Registry?
-            if normalized_key not in rnorm and base_key not in rnorm:
-                print(f"\n  [ERROR] {model_display}: nicht in Registry – "
-                      "`python registry_tool.py sync` ausführen. Überspringe.")
-                continue
-
-            # 2. Hat der Registry-Eintrag ein `reasoning`-Feld?
-            matched_key = rnorm.get(normalized_key) or rnorm.get(base_key)
-            reasoning_val = registry[matched_key].get("reasoning")
-            if reasoning_val is None:
-                print(f"\n  [ERROR] {model_display}: reasoning-Feld fehlt – "
-                      "`python registry_tool.py sync` ausführen (fill-arch liest es aus GGUF). Überspringe.")
-                continue
-
-            # 3. YAML template: -> Config JSON promptTemplate vorhanden?
-            tpl = registry[matched_key].get("template")
-            if tpl:
-                from registry_tool import TEMPLATE_DIR
-                tpl_path = TEMPLATE_DIR / tpl
-                if not tpl_path.exists():
-                    print(f"\n  [WARN] {model_display}: template='{tpl}' -> Datei nicht gefunden ({tpl_path})")
-
-            # 4. `capabilities`-Feld vorhanden?
-            caps = registry[matched_key].get("capabilities")
-            if not caps:
-                print(f"\n  [ERROR] {model_display}: capabilities-Feld fehlt – "
-                      "`assemble_blueprint.py classify` ausführen. Überspringe.")
-                continue
-
-            # 5. `blueprint`-Feld vorhanden?
-            bp = registry[matched_key].get("blueprint")
-            if not bp or bp == "none":
-                print(f"\n  [ERROR] {model_display}: blueprint-Feld fehlt oder 'none' – "
-                      "`assemble_blueprint.py classify` ausführen. Überspringe.")
-                continue
-
-            # 6. `truncation`-Feld vorhanden?
-            trunc = registry[matched_key].get("truncation")
-            if trunc not in ("full", "medium", "minimal"):
-                print(f"\n  [WARN] {model_display}: truncation-Feld fehlt oder ungültig ('{trunc}') – "
-                      "`assemble_blueprint.py classify` ausführen. Setze default='full'.")
-                registry[matched_key]["truncation"] = "full"
-
-            # 7. Wurde `assemble` bereits ausgeführt? (systemPrompt in Config JSON)
-            try:
-                from assemble_blueprint import read_lms_configs
-                from pathlib import Path as _Path
-                cfgs = read_lms_configs(_Path.home() / ".lmstudio" / ".internal" / "user-concrete-model-default-config")
-                cfg_key = normalize_model_name(model_identifier)
-                found_cfg = None
-                for c in cfgs:
-                    if normalize_model_name(c.get("dir_name", "")) == cfg_key:
-                        found_cfg = c
-                        break
-                if found_cfg:
-                    jp = _Path(found_cfg["json_path"])
-                    if jp.exists():
-                        _data = json.loads(jp.read_text(encoding="utf-8-sig"))
-                        sys_prompt = ""
-                        for _f in _data.get("operation", {}).get("fields", []):
-                            if _f.get("key") == "llm.prediction.systemPrompt":
-                                sys_prompt = _f.get("value", "")
-                                break
-                        if not sys_prompt:
-                            print(f"\n  [WARN] {model_display}: systemPrompt in Config JSON ist leer – "
-                                  "`assemble_blueprint.py assemble` ausführen.")
-            except Exception:
-                pass
-
-            is_reasoning_model = (reasoning_val == "thinking") or _is_qwen3_6_model(model_identifier)
-        except Exception:
-            # Registry nicht lesbar – trotzdem fortfahren (Fallback: kein Reasoning)
-            print(f"\n  [WARN] Registry nicht lesbar – ohne Reasoning-Info fortfahren.")
-            is_reasoning_model = False
+        is_reasoning_model = _check_registry_for_model(model_identifier, model_display)
+        if is_reasoning_model is None:
+            continue
 
         print(f"\n{'=' * 60}")
         print(f"  Model {midx}/{len(models)}: {model_display}")
@@ -1383,130 +1568,22 @@ def main() -> None:
             print(f"  * MoE model (detected)")
         print(f"{'=' * 60}")
 
-        # CENTRAL Model management: load + determine exact identifiers
-        loaded = get_current_loaded_model()
-        api_model = None
+        api_model = _load_model(model_info, model_load_key, args)
+        if api_model is None:
+            print(f"  [ERROR] Loading failed. Skipping.")
+            continue
 
-        if loaded:
-            li = loaded["identifier"].lower()
-            lk = loaded["model_identifier"].lower()
-            mk = model_identifier.lower()
-            if mk in li or mk in lk or li in mk or lk in mk:
-                api_model = loaded["identifier"]
-                print(f"  [OK] '{model_display}' already loaded – ID: {api_model}")
-            else:
-                print(f"  [INFO] Different model loaded ({loaded['display_name']}) – unloading...")
-                has_unloaded_all_models()
-                ok, api_model = load_model_via_lms(model_load_key)
-                if not ok:
-                    print(f"  [ERROR] Loading failed. Skipping.")
-                    continue
-        else:
-            ok, api_model = load_model_via_lms(model_load_key)
-            if not ok:
-                print(f"  [ERROR] Loading failed. Skipping.")
-                continue
+        model_results = _run_benchmarks_for_model(model_info, benchmarks, args,
+                                                   is_reasoning_model, all_summary)
+        _write_intermediate_summary(model_results, model_info, args)
 
-        # Short pause – the model is confirmed loaded via lms ps,
-        # but the REST server needs a moment to initialize.
-        # 30B models can take 30-60s to finish loading on RTX 5070 Ti
-        # (see Server-Log 12.07.2026: 13x "No models loaded" with 30s timeout).
-        print("  [INFO] Waiting for API readiness...")
-        if not is_model_ready(timeout=60):
-            print("  [WARN] Model readiness check timed out – continuing anyway")
-        model_info["_api_model"] = api_model  # Unified ID for ALL pipelines
-
-        # Warn if loaded variant differs from requested quant
-        all_variants = model_info.get("variants") or []
-        if len(all_variants) > 1 and api_model:
-            desired_quant = model_info.get("quant", "").lower()
-            if desired_quant and desired_quant not in api_model.lower():
-                print(f"  [WARN] Requested '@{desired_quant}' but '{api_model}' loaded")
-                print(f"  [WARN] Available variants: {', '.join(v.split('@')[-1] for v in all_variants)}")
-                print(f"  [WARN] Load specific quant via LM Studio GUI or install only the desired variant")
-
-        model_results = []
-
-        for bidx, bench in enumerate(benchmarks):
-            # Unload/reload between benchmarks — off by default, opt-in via --unload-between
-            if args.unload_between and bidx > 0:
-                print(f"  [INFO] Unloading/reloading model between benchmarks...")
-                has_unloaded_all_models()
-                time.sleep(2)
-                ok, api_model = load_model_via_lms(model_load_key)
-                if not ok:
-                    print(f"  [ERROR] Reload before {bench['name']} failed. Skipping.")
-                    continue
-                print("  [INFO] Waiting for API re-initialization...")
-                if not is_model_ready(timeout=60):
-                    print("  [WARN] Model readiness check timed out – continuing anyway")
-                model_info["_api_model"] = api_model
-
-            try:
-                bname = bench["name"]
-                ep_names = {b["name"] for b in EVALPLUS_BENCHMARKS}
-                lmeval_names = {b["name"] for b in LMEVAL_BENCHMARKS}
-                agentic_names = {b["name"] for b in AGENTIC_BENCHMARKS}
-
-                if bname in agentic_names:
-                    result = run_agentic(model_info, limit=args.sample_size)
-                elif bname in ep_names:
-                    result = run_evalplus(model_info, bench, sample_size=args.sample_size, seed=args.seed, is_reasoning_model=is_reasoning_model)
-                elif bname in lmeval_names:
-                    per_limit = max(bench.get("min_limit", 0), args.sample_size)
-                    result = run_lmeval(model_info, bench, limit=per_limit, is_reasoning_model=is_reasoning_model)
-                else:
-                    result = run_custom_benchmark(model_info, bench, sample_size=args.sample_size, seed=args.seed, is_structured_output_disabled=args.no_structured_output, should_keep_response=args.keep_response)
-
-                if result:
-                    model_results.append(result)
-
-                # After custom benchmarks: check model status
-                if result:
-                    all_summary.append(result)
-
-                # After EVERY benchmark: check whether the model is still loaded.
-                # Previously this was only for Custom – EvalPlus/LM-Eval/Agentic
-                # could silently lose the model between runs.
-                _ensure_model_still_loaded(model_identifier, model_load_key, bench_name=bname)
-            except subprocess.TimeoutExpired:
-                print(f"  [ERROR] {bench['name']} timeout (expired)")
-            except (subprocess.SubprocessError, OSError, ValueError, TypeError, KeyError) as e:
-                print(f"  [ERROR] {bench['name']}: {e}")
-
-        # Intermediate summary per model (csv_writer, uniform schema)
-        if model_results:
-            csv_writer.write_accumulative_summary(model_results, model_info,
-                                                  sample_size=args.sample_size,
-                                                  seed=str(args.seed or ""),
-                                                  exclude_benchmarks=args.exclude_benchmarks or "",
-                                                  no_structured_output=str(args.no_structured_output or ""),
-                                                  no_unload_between='True' if not args.unload_between else '',
-                                                  base_dir=BASE_DIR)
-
-    # Stop LM-Eval proxy
     _stop_lmeval_proxy()
+    _print_final_summary(all_summary)
 
-    print("\n" + "=" * 60)
-    print("  FINISHED")
-    print("=" * 60)
-    for s in all_summary:
-        cat = s.get("category", "").ljust(9)
-        print(f"  [{s['pipeline']}] {s['model']} / {cat}{s['bench']}")
-
-    # Free memory: unload model
     print("\n  [INFO] Cleaning up – unloading model(s)...")
     has_unloaded_all_models()
 
-    # Consolidated overall overview (csv_writer)
-    if all_summary and len(models) > 1:
-        csv_writer.write_konsolidiert_aktuell(all_summary,
-                                              sample_size=args.sample_size,
-                                              seed=str(args.seed or ""),
-                                              exclude_benchmarks=args.exclude_benchmarks or "",
-                                              no_structured_output=str(args.no_structured_output or ""),
-                                               no_unload_between='True' if not args.unload_between else '',
-                                              base_dir=BASE_DIR)
+    _write_consolidated_overview(all_summary, models, args)
 
 
 if __name__ == "__main__":

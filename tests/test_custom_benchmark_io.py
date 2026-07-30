@@ -1,4 +1,4 @@
-"""Tests for I/O-heavy parts of custom_benchmark_v13.py – Stufe 4.7.
+"""Tests for I/O-heavy parts of custom_benchmark.py – Stufe 4.7.
 
 Targets:
     - _build_sandbox_script: pure function (string-in, string-out)
@@ -17,10 +17,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-import custom_benchmark_v13 as cb
-from custom_benchmark_v13 import (
+import custom_benchmark as cb
+from custom_benchmark import (
     _SANDBOX_BLOCKED_MODULES,
     _SANDBOX_SAFE_BUILTINS,
     _build_sandbox_script,

@@ -17,7 +17,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import assemble_blueprint as ab
 from assemble_blueprint import (
@@ -50,8 +50,8 @@ class TestNormalizeModelName:
     def test_strip_gguf_standalone(self):
         assert normalize_model_name("model-gguf") == "model"
 
-    def test_strip_mxpr4(self):
-        assert normalize_model_name("model-mxpr4") == "model"
+    def test_strip_mxfp4(self):
+        assert normalize_model_name("model-mxfp4") == "model"
 
     def test_dots_to_hyphens(self):
         assert normalize_model_name("Qwen3.6-27B") == "qwen3-6-27b"
