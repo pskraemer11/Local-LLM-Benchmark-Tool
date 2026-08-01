@@ -50,6 +50,7 @@ Features:
 from __future__ import annotations
 
 import argparse
+import atexit
 import csv_writer as csv_writer
 import glob
 import json
@@ -64,6 +65,8 @@ import time
 import warnings
 from datetime import datetime
 from typing import Any, Optional
+
+import psutil
 
 from type_defs import AvailableModelInfo, BenchmarkDef, PipelineResult
 
@@ -229,6 +232,60 @@ def _stop_lmeval_proxy() -> None:
     except (OSError, subprocess.SubprocessError):
         pass
     _lmeval_proxy_proc = None
+
+# ── Single-Instance Lock ─────────────────────────────────────────
+# Prevents parallel launcher instances: concurrent runs load/unload
+# models against each other (VRAM first, then system RAM – observed
+# 2026-07-31 with 3 parallel runs: 32 GB system RAM exhausted, hang).
+LOCK_PATH = os.path.join(RESULTS_DIR, ".benchmark.lock")
+
+
+def _acquire_single_instance_lock(lock_path: Optional[str] = None) -> Optional[str]:
+    """Acquire the single-instance lock file.
+
+    Returns an error message if another LIVE launcher holds the lock,
+    else None on success (lock file written for this PID).
+    Stale lock files (dead PID or corrupt content) are overwritten.
+    """
+    lock_path = lock_path or LOCK_PATH
+    if os.path.exists(lock_path):
+        try:
+            with open(lock_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            pid = int(data.get("pid", -1))
+            started = data.get("started", "?")
+            if pid > 0 and psutil.pid_exists(pid):
+                proc = psutil.Process(pid)
+                if proc.is_running():
+                    return (f"[FATAL] Another benchmark launcher is already running "
+                            f"(PID {pid}, started {started}). Parallel runs load/unload "
+                            f"models against each other and exhaust VRAM/system RAM. "
+                            f"Wait until it finishes or kill it first.")
+        except (OSError, ValueError, KeyError):
+            pass  # corrupt or unreadable lock file -> treat as stale
+        except psutil.Error:
+            pass  # process vanished while checking -> stale
+    try:
+        with open(lock_path, "w", encoding="utf-8") as f:
+            json.dump({"pid": os.getpid(),
+                       "started": datetime.now().isoformat(timespec="seconds")}, f)
+    except OSError as e:
+        print(f"  [WARN] Cannot write lock file {lock_path}: {e}")
+    return None
+
+
+def _release_single_instance_lock(lock_path: Optional[str] = None) -> None:
+    """Remove the lock file if this process still owns it."""
+    lock_path = lock_path or LOCK_PATH
+    try:
+        if os.path.exists(lock_path):
+            with open(lock_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if int(data.get("pid", -1)) == os.getpid():
+                os.remove(lock_path)
+    except (OSError, ValueError, KeyError):
+        pass
+
 
 # Magic-string constants (Code-Review 2026-07-18 §5.3): sentinel model
 # name required by evalplus.provider.make_model(). The actual model
@@ -571,10 +628,13 @@ def _get_evaluation_parameters(model_identifier: str, bench_name: str = "") -> d
     # ── chat_template_kwargs for enable_thinking / reasoning_effort ──
     #
     # WICHTIG: chat_template_kwargs ist KEIN OpenAI-Standard-Parameter.
-    #   Er wird NUR von Qwen-Modellen (Qwen3, Qwen3.5) unterstuetzt.
+    #   Er wird NUR von Qwen-Templates unterstuetzt (Qwen3, Qwen3.5 und
+    #   Qwen-basierte Distills wie deepseek-r1-distill-qwen-14b).
     #   Quelle: https://github.com/lmstudio-ai/lmstudio-bug-tracker/issues/1573
     #   Fuer gpt-oss wird reasoning_effort als Top-Level-Parameter gesendet
     #   (OpenAI-kompatibles /v1/chat/completions unterstuetzt das).
+    #   enable_thinking=True fuer Registry-Thinking-Modelle kommt via
+    #   get_model_config() aus der Registry (reasoning: thinking).
     #
     gptoss = _is_gptoss_model(model_identifier)
     # gpt-oss: reasoning_effort + max_thinking_tokens als Top-Level-Param
@@ -1144,7 +1204,7 @@ def run_agentic(model_info: AvailableModelInfo, limit: int = 5) -> Optional[Pipe
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_dir = os.path.join(RESULTS_DIR, f"agentic_{safe}")
     os.makedirs(output_dir, exist_ok=True)
-    json_path = os.path.join(output_dir, f"agentic_{model_identifier}_{ts}.json")
+    json_path = os.path.join(output_dir, f"agentic_{safe}_{ts}.json")
 
     selected = random.sample(TOOL_EVAL_SCENARIO_IDS, min(limit, len(TOOL_EVAL_SCENARIO_IDS)))
 
@@ -1540,6 +1600,12 @@ def _write_consolidated_overview(all_summary: list[dict], models: list, args: An
 
 def main() -> None:
     args, _version = _parse_args()
+
+    lock_error = _acquire_single_instance_lock()
+    if lock_error:
+        print(lock_error)
+        sys.exit(1)
+    atexit.register(_release_single_instance_lock)
 
     global IS_THINKING_ENABLED
     IS_THINKING_ENABLED = args.thinking

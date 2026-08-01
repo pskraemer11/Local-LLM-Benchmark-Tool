@@ -18,7 +18,7 @@ Bei neuen Modellen: registry_tool.py gen-quant-map --write ausfuehren.
 
 from __future__ import annotations
 import sys
-from typing import Any
+from typing import Any, Optional
 
 from utils.terminal import warn
 from type_defs import ModelConfig
@@ -344,6 +344,45 @@ REASONING_PATTERNS = {
 }
 
 
+def _registry_reasoning(model_identifier: str) -> Optional[str]:
+    """Look up `reasoning` field in model_registry.yaml.
+
+    Returns "thinking", "instruct" or None (no entry / unknown).
+    Matching mirrors get_quant(): publisher prefix and @quant suffix are
+    stripped. Publisher-prefixed input only matches an entry with the same
+    publisher; bare names fall back to the first registry match. Unlike
+    get_quant() there is no cross-publisher fallback: a model without a
+    `reasoning` field must not inherit the verdict of another publisher's
+    same-named model.
+    """
+    if not model_identifier:
+        return None
+    import re as _re
+    stripped = _re.sub(r"^[a-z0-9_-]+[/\\]", "", model_identifier)
+    base = _re.sub(r"@.*$", "", stripped).lower()
+    if not base:
+        return None
+    inp_pub = model_identifier.split("/")[0] if "/" in model_identifier else None
+    data = _load_quant_registry()
+    pub_match = None
+    fallback_match = None
+    for key, entry in data.items():
+        if not isinstance(entry, dict) or "reasoning" not in entry:
+            continue
+        key_stripped = _re.sub(r"^[a-z0-9_-]+[/\\]", "", key).lower()
+        key_base = _re.sub(r"@.*$", "", key_stripped)
+        if base != key_base:
+            continue
+        reasoning = entry["reasoning"]
+        if inp_pub is not None and "/" in key and key.split("/")[0] == inp_pub:
+            pub_match = reasoning
+        elif inp_pub is None and fallback_match is None:
+            fallback_match = reasoning
+    if pub_match is not None:
+        return pub_match
+    return fallback_match
+
+
 def _word_boundary_match(pattern: str, text: str) -> bool:
     """Substring match with word-boundary check to avoid false overlaps.
     
@@ -367,11 +406,12 @@ def _word_boundary_match(pattern: str, text: str) -> bool:
 
 def get_model_config(model_identifier: str, category: str = "coding", is_thinking_enabled: bool = False) -> ModelConfig:
     """Merge category defaults + model override + thinking flag.
-    
+
     Priority (lower = higher):
       1. BENCHMARK_CATEGORY_DEFAULTS[category]  (Basis)
       2. MODEL_TEMP_OVERRIDES[pattern]           (additiver Merge)
-      3. thinking=True + REASONING_PATTERNS      (force enable_thinking)
+      3. Registry `reasoning: thinking`          (thinking an, falls 2. kein enable_thinking setzt)
+      4. thinking=True + REASONING_PATTERNS      (force enable_thinking)
     """
     key_lower = model_identifier.lower() if model_identifier else ""
     cat = category if category in BENCHMARK_CATEGORY_DEFAULTS else "coding"
@@ -379,10 +419,17 @@ def get_model_config(model_identifier: str, category: str = "coding", is_thinkin
     # Apply model override (boundary-aware substring matching).
     # Sort by key length descending so specific (longer) patterns match first,
     # preventing shadowing (e.g. "deepseek-r1-distill" before "deepseek-coder").
+    thinking_overridden = False
     for pattern, override in sorted(MODEL_TEMP_OVERRIDES.items(), key=lambda kv: len(kv[0]), reverse=True):
         if _word_boundary_match(pattern, key_lower):
             config.update(override)
+            thinking_overridden = "enable_thinking" in override
             break
+    # Registry-Fall: Thinking-Modelle (reasoning: thinking) denken standardmaessig.
+    # Explizite MODEL_TEMP_OVERRIDES-Eintraege gewinnen (z.B. kimi/qwen3.6/gemma
+    # mit enable_thinking=False als experimenteller Workaround).
+    if not thinking_overridden and _registry_reasoning(model_identifier) == "thinking":
+        config["enable_thinking"] = True
     # Thinking-Flag: force enable_thinking=True fuer Reasoning-Modelle
     if is_thinking_enabled and any(_word_boundary_match(p, key_lower) for p in REASONING_PATTERNS):
         config["enable_thinking"] = True

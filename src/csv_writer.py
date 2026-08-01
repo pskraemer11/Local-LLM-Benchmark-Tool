@@ -204,6 +204,13 @@ def _truncate_response(response: str, max_chars: int = 200) -> str:
     return f"{response[:max_chars]}\n[…truncated, {len(response)} chars total]"
 
 
+def _fmt_float(value, default: str = "0.0") -> str:
+    """Format a float with one decimal; None/strings fall back to default."""
+    if value is None or not isinstance(value, (int, float)):
+        return default
+    return f"{value:.1f}"
+
+
 def _write_csv(path: str, fieldnames: list[str], rows: list[dict], delimiter: str = ";") -> str:
     with open(path, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=fieldnames, delimiter=delimiter, extrasaction="ignore")
@@ -307,8 +314,8 @@ def write_per_model_csv(entries: list[dict], model_display: str, model_key: str 
             "no_unload_between": no_unload_between,
             "num_tasks": e.get("num_tasks", e.get("sample_len", "")),
             "avg_score_pct": f"{e.get('avg_score', 0) * 100:.1f}" if e.get("avg_score") is not None else "",
-            "avg_latency_s": f"{e.get('avg_latency', e.get('avg_latency_s', 0)):.1f}",
-            "avg_tokens_per_sec": f"{e.get('avg_tps', e.get('avg_tokens_per_sec', 0)):.1f}",
+            "avg_latency_s": _fmt_float(e.get("avg_latency", e.get("avg_latency_s"))),
+            "avg_tokens_per_sec": _fmt_float(e.get("avg_tps", e.get("avg_tokens_per_sec"))),
             "avg_cpu_pct": f"{e.get('avg_cpu', 0):.1f}" if e.get("avg_cpu") is not None else "",
             "avg_gpu_pct": f"{e.get('avg_gpu', 0):.1f}" if e.get("avg_gpu") is not None else "",
             "avg_ram_gb": f"{e.get('avg_ram', 0):.1f}" if e.get("avg_ram") is not None else "",

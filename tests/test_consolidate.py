@@ -29,10 +29,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 import consolidate_results as cr
 from benchmark_config import CAT_WEIGHTS, OVERALL_WEIGHTS, QUANT_MAP
 from consolidate_results import (
+    _align_decimal_cells,
     _auto_delimiter,
+    _describe_sample_sizes,
     _normalize_model_keys,
     _percentile,
     _read_col,
+    _render_complete_table,
     _try_float,
     bootstrap_ci,
     compute_category_scores,
@@ -668,3 +671,117 @@ class TestCompareTwoQuantsSign:
         # With 500 resamples and 100% sign agreement, lo should be
         # very close to 1.0
         assert lo > 0.9
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Markdown table rendering (content-driven widths + decimal alignment)
+# ─────────────────────────────────────────────────────────────────────
+
+class TestAlignDecimalCells:
+    """_align_decimal_cells: decimal points align within a column."""
+
+    def test_decimal_points_aligned(self):
+        cells = ["5.3", "12.1", "7.0"]
+        _align_decimal_cells(cells)
+        assert cells == [" 5.3", "12.1", " 7.0"]
+
+    def test_integers_right_aligned_to_dot_position(self):
+        cells = ["3.7", "42"]
+        _align_decimal_cells(cells)
+        # int_w comes from the dotted values only ("3"), ints are padded
+        # to int_w + dot + frac_w
+        assert cells == ["3.7", " 42"]
+
+    def test_non_numeric_cells_untouched(self):
+        cells = ["80%", "3.7", "—"]
+        _align_decimal_cells(cells)
+        assert cells == ["80%", "3.7", "—"]
+
+    def test_no_dotted_value_is_noop(self):
+        cells = ["1", "22", "333"]
+        _align_decimal_cells(cells)
+        assert cells == ["1", "22", "333"]
+
+    def test_fractional_parts_padded(self):
+        cells = ["1.5", "2.75"]
+        _align_decimal_cells(cells)
+        assert cells == ["1.5 ", "2.75"]
+
+    def test_empty_list(self):
+        cells = []
+        _align_decimal_cells(cells)
+        assert cells == []
+
+
+class TestDescribeSampleSizes:
+    """_describe_sample_sizes: human-readable SampleSize summary."""
+
+    def test_empty_returns_mixed(self):
+        assert _describe_sample_sizes({}) == "mixed"
+
+    def test_single_benchmark(self):
+        assert _describe_sample_sizes({"DS1000": {20}}) == "20 (DS1000)"
+
+    def test_benchmarks_grouped_by_size(self):
+        sizes = {"DS1000": {20}, "CoderEval": {20}, "EvalPlus": {5}}
+        assert _describe_sample_sizes(sizes) == "20 (DS1000, CoderEval), 5 (EvalPlus)"
+
+    def test_mixed_sizes_per_benchmark(self):
+        assert _describe_sample_sizes({"DS1000": {20, 30}}) == "20,30 (DS1000)"
+
+    def test_mixed_sizes_sorted_ascending(self):
+        assert _describe_sample_sizes({"EvalPlus": {100, 2, 5}}) == "2,5,100 (EvalPlus)"
+
+    def test_sizes_sorted_descending(self):
+        sizes = {"Agentic": {5}, "DS1000": {20}}
+        assert _describe_sample_sizes(sizes) == "20 (DS1000), 5 (Agentic)"
+
+
+class TestRenderCompleteTable:
+    """_render_complete_table: column separators and decimal points align."""
+
+    @staticmethod
+    def _pipe_positions(line: str) -> list[int]:
+        return [i for i, ch in enumerate(line) if ch == "|"]
+
+    def test_pipe_separators_aligned_across_all_lines(self):
+        rows = [
+            {"Model": "Alpha", "Coding": "80%", "Runtime (min)": "3.7"},
+            {"Model": "Beta Model", "Coding": "5%", "Runtime (min)": "12.1"},
+        ]
+        lines = _render_complete_table(
+            rows, ["Model", "Coding", "Runtime"], ["", "%", "min"],
+            ["Model", "Coding", "Runtime (min)"])
+        expected = self._pipe_positions(lines[0])
+        assert len(lines) == 5  # header + units + separator + 2 data rows
+        for line in lines[1:]:
+            assert self._pipe_positions(line) == expected
+
+    def test_decimal_points_aligned_in_data_rows(self):
+        rows = [
+            {"Model": "A", "Runtime (min)": "5.3"},
+            {"Model": "Longer Model", "Runtime (min)": "12.1"},
+        ]
+        lines = _render_complete_table(
+            rows, ["Model", "Runtime"], ["", "min"], ["Model", "Runtime (min)"])
+        dots = [line.index(".") for line in lines[3:]]
+        assert len(set(dots)) == 1
+
+    def test_model_column_width_by_longest_name(self):
+        rows = [
+            {"Model": "Short", "Coding": "80%"},
+            {"Model": "Long Model Name Here", "Coding": "5%"},
+        ]
+        lines = _render_complete_table(
+            rows, ["Model", "Coding"], ["", "%"], ["Model", "Coding"])
+        # Second pipe sits right after "| " + padded cell + " " (from " | ")
+        assert self._pipe_positions(lines[3])[1] == 3 + len("Long Model Name Here")
+        assert self._pipe_positions(lines[4])[1] == 3 + len("Long Model Name Here")
+
+    def test_header_with_longer_abbreviation_sets_width(self):
+        # "Cod.Eff" (7) is longer than the values "1.1" (3) -> width 7
+        rows = [{"Model": "M", "Coding Eff (Score/h)": "1.1"}]
+        lines = _render_complete_table(
+            rows, ["Model", "Cod.Eff"], ["", "%p/h"], ["Model", "Coding Eff (Score/h)"])
+        second_pipe = self._pipe_positions(lines[0])[1]
+        assert second_pipe == self._pipe_positions(lines[3])[1]

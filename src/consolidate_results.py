@@ -535,10 +535,21 @@ def _ts_filter(ts: str, since: Optional[str], until: Optional[str]) -> bool:
     return True
 
 
+def _extract_csv_sizes(mapping: Dict[str, Any], path_ss: Dict[str, int]) -> Dict[str, int]:
+    """Map model_key -> sample_size for a selected {model_key: path-or-(ts,path)} mapping."""
+    out: Dict[str, int] = {}
+    for mk, val in mapping.items():
+        p = val[1] if isinstance(val, tuple) else val
+        ss = path_ss.get(p)
+        if ss:
+            out[mk] = ss
+    return out
+
+
 def find_latest_csvs(min_sample_size: int = 0, since: Optional[str] = None,
                      until: Optional[str] = None, all_runs: bool = False,
                      merge_runs: int = 0
-                     ) -> Tuple[Dict[str, str], Dict[str, str]]:
+                     ) -> Tuple[Dict[str, str], Dict[str, str], Dict[str, Dict[str, int]]]:
     """Find CSV files for DS1000 and CoderEval, with time + run filtering.
     
     Args:
@@ -550,7 +561,9 @@ def find_latest_csvs(min_sample_size: int = 0, since: Optional[str] = None,
         merge_runs: If > 0, keep only the N newest timestamp clusters (runs),
                     per model the newest CSV. Overrides all_runs.
     
-    Returns dicts keyed by model_key (from CSV content), path.
+    Returns (ds1000, codereval, custom_sizes): the first two are dicts keyed by
+    model_key (from CSV content) -> path, the third maps "DS1000"/"CoderEval"
+    -> {model_key: sample_size} for the selected CSVs.
     """
     # Pattern: (optional tasks_) + YYYYMMDD_HHMMSS + DS1000|CoderEval + _ModelName.csv
     pat = re.compile(
@@ -558,6 +571,7 @@ def find_latest_csvs(min_sample_size: int = 0, since: Optional[str] = None,
     )
     # Collect all valid entries: list of (ts, btype, lookup_key, fpath)
     all_entries: list[tuple[str, str, str, str]] = []
+    path_ss: Dict[str, int] = {}  # fpath -> sample_size
     for fname in os.listdir(RESULTS_DIR):
         m = pat.match(fname)
         if not m:
@@ -589,6 +603,7 @@ def find_latest_csvs(min_sample_size: int = 0, since: Optional[str] = None,
                     break
         except Exception:
             print(f"  [WARN] find_latest_csvs: skipping unreadable {fname}", file=sys.stderr)
+        path_ss[fpath] = file_sample_size
         
         if min_sample_size > 0 and file_sample_size < min_sample_size:
             continue
@@ -605,7 +620,7 @@ def find_latest_csvs(min_sample_size: int = 0, since: Optional[str] = None,
         all_entries.append((ts, btype, lookup_key, fpath))
     
     if not all_entries:
-        return {}, {}
+        return {}, {}, {}
     
     if merge_runs > 0:
         # Merge N newest model runs. DS1000 and CoderEval CSVs for the same
@@ -635,7 +650,9 @@ def find_latest_csvs(min_sample_size: int = 0, since: Optional[str] = None,
                 ds1000[mk] = mg["ds1000"][1]
             if mg["codereval"]:
                 codereval[mk] = mg["codereval"][1]
-        return ds1000, codereval
+        custom_sizes = {"DS1000": _extract_csv_sizes(ds1000, path_ss),
+                        "CoderEval": _extract_csv_sizes(codereval, path_ss)}
+        return ds1000, codereval, custom_sizes
     elif all_runs:
         # Keep latest per model (all historical runs)
         ds1000: dict[str, tuple[str, str]] = {}
@@ -644,7 +661,9 @@ def find_latest_csvs(min_sample_size: int = 0, since: Optional[str] = None,
             target = ds1000 if btype == "DS1000" else codereval
             if lookup_key not in target or ts > target[lookup_key][0]:
                 target[lookup_key] = (ts, fpath)
-        return {k: v[1] for k, v in ds1000.items()}, {k: v[1] for k, v in codereval.items()}
+        custom_sizes = {"DS1000": _extract_csv_sizes(ds1000, path_ss),
+                        "CoderEval": _extract_csv_sizes(codereval, path_ss)}
+        return {k: v[1] for k, v in ds1000.items()}, {k: v[1] for k, v in codereval.items()}, custom_sizes
     else:
         # Only keep CSVs from the latest timestamp overall (single benchmark run)
         latest_ts = max(ts for ts, _, _, _ in all_entries)
@@ -656,7 +675,9 @@ def find_latest_csvs(min_sample_size: int = 0, since: Optional[str] = None,
             target = ds1000 if btype == "DS1000" else codereval
             if lookup_key not in target or ts > target[lookup_key][0]:
                 target[lookup_key] = (ts, fpath)
-        return {k: v[1] for k, v in ds1000.items()}, {k: v[1] for k, v in codereval.items()}
+        custom_sizes = {"DS1000": _extract_csv_sizes(ds1000, path_ss),
+                        "CoderEval": _extract_csv_sizes(codereval, path_ss)}
+        return {k: v[1] for k, v in ds1000.items()}, {k: v[1] for k, v in codereval.items()}, custom_sizes
 
 
 def _find_newest_by_mtime(prefix: str, model_key: str) -> Optional[str]:
@@ -683,7 +704,12 @@ def _find_newest_by_mtime(prefix: str, model_key: str) -> Optional[str]:
             candidates.append((os.path.getmtime(dpath), dpath))
             seen.add(dname.lower())
 
-    # Fallback: ohne @variant
+    # Fallback: ohne @variant – nur EXAKTE Base-Matches oder Base@variant.
+    # Fix 2026-07-31: Vorher matchte `startswith(base)` auch Modelle mit
+    # gleichem Präfix und anderem Suffix (z.B. "qwen3-30b-a3b-instruct-2507"
+    # matchte "qwen3-30b-a3b-instruct-2507-q2ks-mixed-autoround@Q2_K_S").
+    # Bei neuerer mtime gewann dann das falsche Verzeichnis (leer) und
+    # read_lmeval_per_model() lieferte None für alle LM-Eval-Benchmarks.
     base = model_key.split("@")[0].replace("/", "_").lower()
     if base != safe:
         for dname in os.listdir(RESULTS_DIR):
@@ -692,8 +718,8 @@ def _find_newest_by_mtime(prefix: str, model_key: str) -> Optional[str]:
                 continue
             if not dname.lower().startswith(target_prefix):
                 continue
-            rest = dname[len(target_prefix):]
-            if rest.lower().startswith(base):
+            rest = dname[len(target_prefix):].lower()
+            if rest == base or rest.startswith(base + "@"):
                 candidates.append((os.path.getmtime(dpath), dpath))
 
     if not candidates:
@@ -832,14 +858,7 @@ def read_agentic(model_key: str) -> Optional[float]:
                 all_json.append(os.path.join(dirpath, fname))
     if not all_json:
         return None
-    # Pick the one with the highest timestamp in its name
-    def _extract_ts(p: str) -> str:
-        bn = os.path.basename(p).replace(".json", "")
-        for part in bn.split("_"):
-            if len(part) == 14 and part.isdigit():
-                return part
-        return bn  # fallback
-    all_json.sort(key=_extract_ts, reverse=True)
+    all_json.sort(key=_agentic_ts_from_filename, reverse=True)
     latest = all_json[0]
     try:
         with open(latest, "r", encoding="utf-8") as f:
@@ -856,6 +875,107 @@ def read_agentic(model_key: str) -> Optional[float]:
         print(f"  [WARN] _try_read_agentic_score: could not parse {os.path.basename(latest)}", file=sys.stderr)
         return None
     return None
+
+
+def _agentic_ts_from_filename(p: str) -> str:
+    """Extract the 14-digit timestamp from an agentic JSON filename (fallback: basename)."""
+    bn = os.path.basename(p).replace(".json", "")
+    for part in bn.split("_"):
+        if len(part) == 14 and part.isdigit():
+            return part
+    return bn
+
+
+def _collect_pipeline_sample_sizes(model_keys: List[str]) -> Dict[str, set[int]]:
+    """Distinct sample sizes per non-custom pipeline (EvalPlus/LM-Eval/Agentic).
+
+    Reads the newest result files of the given model keys. Any unreadable
+    or missing data is skipped silently.
+    """
+    sizes: Dict[str, set[int]] = {}
+    for mk in model_keys:
+        # EvalPlus: len(eval) of the newest humaneval/mbpp eval_results.json
+        root = _find_newest_by_mtime("evalplus", mk)
+        if root:
+            for ds in ("humaneval", "mbpp"):
+                dpath = os.path.join(root, ds)
+                if not os.path.isdir(dpath):
+                    continue
+                eval_file = _pick_newest_eval_file(dpath)
+                if not eval_file:
+                    continue
+                try:
+                    with open(eval_file, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    n = len(data.get("eval", {}))
+                except Exception:
+                    continue
+                if n:
+                    sizes.setdefault("EvalPlus", set()).add(n)
+
+        # LM-Eval: sample_len from the newest results_*.json (any task)
+        root = _find_newest_by_mtime("lmeval", mk)
+        if root:
+            candidates: list[tuple[float, str]] = []
+            for item in os.listdir(root):
+                sub = os.path.join(root, item)
+                if not os.path.isdir(sub):
+                    continue
+                for fname in os.listdir(sub):
+                    if fname.startswith("results_") and fname.endswith(".json"):
+                        fpath = os.path.join(sub, fname)
+                        candidates.append((os.path.getmtime(fpath), fpath))
+            if candidates:
+                candidates.sort(key=lambda x: x[0], reverse=True)
+                try:
+                    with open(candidates[0][1], "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    for td in data.get("results", {}).values():
+                        n = td.get("sample_len") if isinstance(td, dict) else None
+                        if n:
+                            sizes.setdefault("LM-Eval", set()).add(n)
+                            break
+                except Exception:
+                    pass
+
+        # Agentic: total_scenarios from the newest JSON
+        root = _find_newest_by_mtime("agentic", mk)
+        if root:
+            all_json: list[str] = []
+            for dirpath, _, filenames in os.walk(root):
+                for fname in filenames:
+                    if fname.endswith(".json"):
+                        all_json.append(os.path.join(dirpath, fname))
+            if all_json:
+                all_json.sort(key=_agentic_ts_from_filename, reverse=True)
+                try:
+                    with open(all_json[0], "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    n = data.get("total_scenarios") if isinstance(data, dict) else None
+                except Exception:
+                    n = None
+                if n:
+                    sizes.setdefault("Agentic", set()).add(n)
+    return sizes
+
+
+def _describe_sample_sizes(sizes: Dict[str, set[int]]) -> str:
+    """Human-readable sample-size summary: '20 (DS1000, CoderEval), 5 (EvalPlus)'."""
+    if not sizes:
+        return "mixed"
+    grouped: Dict[int, List[str]] = {}
+    mixed_parts: List[str] = []
+    for bench in ("DS1000", "CoderEval", "EvalPlus", "LM-Eval", "Agentic"):
+        ss = sizes.get(bench)
+        if not ss:
+            continue
+        if len(ss) == 1:
+            grouped.setdefault(next(iter(ss)), []).append(bench)
+        else:
+            mixed_parts.append(f"{','.join(str(v) for v in sorted(ss))} ({bench})")
+    parts = [f"{size} ({', '.join(grouped[size])})" for size in sorted(grouped, reverse=True)]
+    parts += mixed_parts
+    return ", ".join(parts) if parts else "mixed"
 
 
 def compute_category_scores(bench_scores: Dict[str, Optional[float]]) -> Dict[str, Optional[float]]:
@@ -964,11 +1084,15 @@ def read_data(model_keys: Optional[List[str]] = None, min_sample_size: int = 0,
               exclude_benchmarks: Optional[List[str]] = None,
               since: Optional[str] = None, until: Optional[str] = None,
               all_runs: bool = False, no_installed: bool = False,
-              merge_runs: int = 0) -> List[Dict[str, Any]]:
-    ds1000_files, codereval_files = find_latest_csvs(
+              merge_runs: int = 0,
+              out_sample_sizes: Optional[Dict[str, Dict[str, int]]] = None,
+              out_model_keys: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+    ds1000_files, codereval_files, custom_sizes = find_latest_csvs(
         min_sample_size=min_sample_size, since=since, until=until, all_runs=all_runs, merge_runs=merge_runs)
     print(f"  DS1000 CSVs:  {len(ds1000_files)}")
     print(f"  CoderEval:    {len(codereval_files)}")
+    if out_sample_sizes is not None:
+        out_sample_sizes.update(custom_sizes)
 
     # Auto-discover model keys from result CSVs if none specified
     if model_keys is None:
@@ -1165,10 +1289,86 @@ def read_data(model_keys: Optional[List[str]] = None, min_sample_size: int = 0,
             ram_p90=sys_metrics.get("RAM_p90"),
             gpu_temp_p90=sys_metrics.get("GPU_Temp_p90"),
         ))
+    if out_model_keys is not None:
+        out_model_keys.extend(model_keys)
     return [r.to_csv_dict() for r in rows]
 
 
 # ── helpers ──
+_NUMERIC_CELL_RE = re.compile(r"^-?\d+(?:\.\d+)?$")
+
+
+def _align_decimal_cells(cells: List[str]) -> None:
+    """Right-align numeric cells in place so decimal points align per column.
+
+    Only cells matching a plain number (optional minus sign, integer part,
+    optional fractional part) are touched; all other values (e.g. "80%",
+    "0% [0%-0%]", "—") are left as-is and are right-aligned afterwards to
+    the full column width.
+    """
+    int_w = 0
+    frac_w = 0
+    dotted = [False] * len(cells)
+    for i, v in enumerate(cells):
+        if _NUMERIC_CELL_RE.match(v) and "." in v:
+            ip, fp = v.split(".", 1)
+            int_w = max(int_w, len(ip))
+            frac_w = max(frac_w, len(fp))
+            dotted[i] = True
+    if not int_w:
+        return
+    for i, v in enumerate(cells):
+        if dotted[i]:
+            ip, fp = v.split(".", 1)
+            cells[i] = ip.rjust(int_w) + "." + fp.ljust(frac_w)
+        elif _NUMERIC_CELL_RE.match(v):
+            cells[i] = v.rjust(int_w + 1 + frac_w)
+
+
+def _render_complete_table(rows: List[Dict[str, Any]], header_names: List[str],
+                           header_units: List[str], cols_md: List[str]) -> List[str]:
+    """Render the complete-results Markdown table.
+
+    Column widths are content-driven: the longest header, unit or data cell
+    determines the width of its column (the longest model name therefore
+    sizes the first column). Numeric cells are aligned on their decimal
+    point. Returns the table lines (two-line header + separator + data rows).
+    """
+    # Decimal-aligned cells per column
+    col_cells: List[List[str]] = []
+    widths: List[int] = []
+    for i, c in enumerate(cols_md):
+        cells = [str(r.get(c, "")) for r in rows]
+        _align_decimal_cells(cells)
+        col_cells.append(cells)
+        w = max(len(header_names[i]), len(header_units[i]),
+                *(len(cell) for cell in cells))
+        if i == 0:
+            w = max(w, len("Model"))
+        widths.append(w)
+
+    def _md_cell(txt: str, w: int, is_model: bool = False) -> str:
+        s = str(txt)
+        return s.ljust(w) if is_model else s.rjust(w)
+
+    lines: List[str] = []
+    parts = [_md_cell(header_names[0], widths[0], True)]
+    parts += [_md_cell(h, w) for h, w in zip(header_names[1:], widths[1:])]
+    lines.append("| " + " | ".join(parts) + " |")
+
+    parts = [_md_cell(header_units[0], widths[0], True)]
+    parts += [_md_cell(u, w) for u, w in zip(header_units[1:], widths[1:])]
+    lines.append("| " + " | ".join(parts) + " |")
+
+    lines.append("| " + " | ".join("-" * max(3, w) for w in widths) + " |")
+
+    for r_i in range(len(rows)):
+        parts = [_md_cell(col_cells[i][r_i], widths[i], i == 0)
+                 for i in range(len(cols_md))]
+        lines.append("| " + " | ".join(parts) + " |")
+    return lines
+
+
 def _val(key: str, r: Dict[str, Any], pct: bool = True) -> str:
     v = r.get(key, "")
     if v in (None, "", "—"):
@@ -1197,14 +1397,24 @@ def _write_tbl(f: Any, title: str, headers: List[str], sorted_rows: List[Dict[st
         pct_flags = [True] * len(keys)
     f.write(f"\n### {title}\n")
     all_h = ["Rang"] + headers
+
+    # Content-driven widths: longest header or data cell per column,
+    # numeric cells aligned on their decimal point.
+    data_rows = []
+    for i, r in enumerate(sorted_rows, 1):
+        vals = [str(i), r['Model']]
+        for key, pct_flag in zip(keys, pct_flags):
+            vals.append(_val(key, r, pct=pct_flag))
+        data_rows.append(vals)
     ws = []
-    for h in all_h:
-        if h == "Rang":
-            ws.append(5)
-        elif h == headers[0]:
-            ws.append(max(29, len(h)))
-        else:
-            ws.append(max(8, len(h)))
+    for col in range(len(all_h)):
+        cells = [all_h[col]] + [row[col] for row in data_rows]
+        if col >= 2:
+            _align_decimal_cells(cells)
+        for ri in range(len(data_rows)):
+            data_rows[ri][col] = cells[ri + 1]
+        ws.append(max(3, max(len(c) for c in cells)))
+
     def cell(txt: str, i: int) -> str:
         w = ws[i]
         if i == 0:
@@ -1224,11 +1434,8 @@ def _write_tbl(f: Any, title: str, headers: List[str], sorted_rows: List[Dict[st
         else:
             cells_sep.append("-" * (w - 1) + ":")
     f.write("| " + " | ".join(cells_sep) + " |\n")
-    for i, r in enumerate(sorted_rows, 1):
-        vals = [str(i), r['Model']]
-        for key, pct_flag in zip(keys, pct_flags):
-            vals.append(_val(key, r, pct=pct_flag))
-        cells_data = [cell(v, j) for j, v in enumerate(vals)]
+    for row in data_rows:
+        cells_data = [cell(v, j) for j, v in enumerate(row)]
         f.write("| " + " | ".join(cells_data) + " |\n")
 
 
@@ -1244,7 +1451,7 @@ def _run_comparison_mode(args: argparse.Namespace) -> None:
     print(f"  Seed: {args.seed}")
     print("=" * 60)
     merge_runs = args.runs if args.runs > 0 else (2 if args.merge else 0)
-    ds1000_files, codereval_files = find_latest_csvs(
+    ds1000_files, codereval_files, _ = find_latest_csvs(
         min_sample_size=args.sample_size, since=args.since, until=args.until,
         all_runs=args.all_runs, merge_runs=merge_runs)
     benchmarks_to_compare = []
@@ -1347,10 +1554,18 @@ def main() -> None:
     filter_str = f" [{', '.join(filters)}]" if filters else ""
     print(f"  {datetime.now().strftime('%Y-%m-%d %H:%M')}{ss_str}{filter_str}")
     print("=" * 60)
+    ss_sizes: Dict[str, Dict[str, int]] = {}
+    model_keys_used: List[str] = []
     rows = read_data(model_keys=model_keys, min_sample_size=args.sample_size,
                      exclude_benchmarks=exclude, since=args.since, until=args.until,
                      all_runs=args.all_runs, no_installed=args.no_installed,
-                     merge_runs=merge_runs)
+                     merge_runs=merge_runs,
+                     out_sample_sizes=ss_sizes, out_model_keys=model_keys_used)
+
+    # Sample sizes actually used across the included runs (for the MD header)
+    ss_ctx: Dict[str, set[int]] = {btype: set(m2s.values()) for btype, m2s in ss_sizes.items()}
+    if not args.sample_size:
+        ss_ctx.update(_collect_pipeline_sample_sizes(model_keys_used))
 
     # CSV – build columns dynamically
     fn_csv = ["Model"]
@@ -1437,8 +1652,12 @@ def main() -> None:
 
     with open(md_path, "w", encoding="utf-8") as f:
         f.write(f"# Consolidated Results – Dense Run (15+ Models)\n")
-        ss_display = args.sample_size if args.sample_size else "mixed"
-        ss_note = f" (DS1000/CoderEval CSVs only)" if args.sample_size else ""
+        if args.sample_size:
+            ss_display = str(args.sample_size)
+            ss_note = " (DS1000/CoderEval CSVs only)"
+        else:
+            ss_display = _describe_sample_sizes(ss_ctx)
+            ss_note = ""
         f.write(f"\nAs of: {datetime.now().strftime('%Y-%m-%d %H:%M')}, SampleSize={ss_display}{ss_note}\n\n")
         f.write("** New Weighting Total Score: Coding 35%, Math 25%, Agentic & Instruction 25%, Knowledge 15% **\n")
         f.write("**Efficiency = Score / Runtime (in hours)** – Runtime based on measured DS1000+CoderEval latency.\n\n")
@@ -1463,35 +1682,8 @@ def main() -> None:
                         "%", "%",
                         "%", "%", "°C"]
 
-        md_widths = [45] + [13, 13] + [7] * (len(cols_md) - 3)
-
-        def _md_cell(txt: str, w: int, is_model: bool = False) -> str:
-            s = str(txt)
-            if is_model:
-                return s.ljust(w)
-            return s.rjust(w)
-
-        # header row: abbreviated names
-        parts = [_md_cell(header_names[0], md_widths[0], True)]
-        parts += [_md_cell(h, w) for h, w in zip(header_names[1:], md_widths[1:])]
-        f.write("| " + " | ".join(parts) + " |\n")
-
-        # units row
-        parts = [_md_cell(header_units[0], md_widths[0], True)]
-        parts += [_md_cell(h, w) for h, w in zip(header_units[1:], md_widths[1:])]
-        f.write("| " + " | ".join(parts) + " |\n")
-
-        # separator
-        parts = ["-" * w for w in md_widths]
-        f.write("| " + " | ".join(parts) + " |\n")
-
-        # data rows
-        for sr in str_rows:
-            parts = []
-            for i, c in enumerate(cols_md):
-                val = str(sr.get(c, ""))
-                parts.append(_md_cell(val, md_widths[i], c == "Model"))
-            f.write("| " + " | ".join(parts) + " |\n")
+        for line in _render_complete_table(str_rows, header_names, header_units, cols_md):
+            f.write(line + "\n")
 
         f.write("\n---\n")
         f.write("\n**Weighting:**\n")

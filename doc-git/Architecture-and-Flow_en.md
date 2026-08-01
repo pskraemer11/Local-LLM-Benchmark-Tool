@@ -1,4 +1,4 @@
-# Architecture & Flow – Status 24.07.2026 (v13.0.5)
+# Architecture & Flow – Status 01.08.2026 (v13.0.7 + uncommitted 01.08.)
 
 > **Version Convention:** see [`../VERSION`](../VERSION) – Single Source of Truth for project version. The filename `_v24.md` is legacy (last updated 17.07.2026) – planned migration to `_v13.md` in a future major version.
 > **Review Reference:** See `Doku-intern/Code-Review-2026-07-18.md` for the full review that informed the 18.07. changes.
@@ -318,10 +318,14 @@ _ARCH_REASONING_MAP = {
     "qwen3": "thinking",    "qwen35": "thinking",
     "qwen35moe": "thinking", "qwen3moe": "thinking",
     "deepseek2": "thinking", "kimi-linear": "thinking",
-    "gpt-oss": "instruct",   # override für Keyword-Fehlklassifikation
+    "gpt-oss": "thinking",  # 27.07.: Harmony-Template (analysis/commentary/final-Kanaele)
     "nomic-bert": "none",    "flux": "none",
 }
 ```
+
+> **Qwen3-Familie (01.08.):** `classify_reasoning()` prüft für `qwen*`-Architekturen den **Modellnamen**:
+> `-instruct`-Varianten → `instruct`, `-thinking`-Varianten → `thinking` (HF-Karte
+> Qwen3-30B-A3B-Instruct-2507; Qwen3.6 dual-mode).
 
 **Weitere Detektionen:**
 
@@ -333,6 +337,14 @@ _is_reasoning_model()      → reads registry reasoning field (Timeouts x2)
 ```
 
 Das Registry-`reasoning`-Feld wird automatisch aus GGUF chat_templates via `registry_tool.py fill-reasoning` befüllt (Teil der `sync`-Pipeline). `_load_registry_for_context()` lädt das gesamte Registry (kein Filter nach `context_length` mehr).
+
+> **Registry-getriebenes enable_thinking (31.07.):** `get_model_config()` (`benchmark_config.py`) hat
+> seit dem 31.07. eine **neue Prioritätsstufe**: Ist das Registry-`reasoning`-Feld des Modells
+> `thinking`, wird `enable_thinking=True` gesetzt — ohne `--thinking`-Flag. Explizite
+> `MODEL_TEMP_OVERRIDES`-Einträge gewinnen (kimi/qwen3.5/qwen3.6/gemma bleiben `False`).
+> Lookup via `_registry_reasoning()` (Publisher-Präfix und `@quant`-Suffix werden gestrippt; kein
+> Cross-Publisher-Fallback). Bewirkt, dass deepseek-r1-distill-qwen-14b standardmäßig denkt.
+> Details: `doc-git/thinking-config_en.md`.
 
 **Sampling-Parameter** werden seit Variant C+ nicht mehr pro Modellklasse, sondern via Kategoriesystem vergeben (siehe §2.10).
 
@@ -842,6 +854,14 @@ consolidate_results.py
 ├── --models – Model filter
 ├── --compare-benchmark DS1000|CoderEval|all
 ├── width duplication removed (only one widths block)
+├── _extract_csv_sizes() – per-file sample_size aus Dateinamen/Inhalt; find_latest_csvs()
+│   gibt 3. Rückgabewert custom_sizes {benchmark: {model_key: sample_size}} zurück
+├── _collect_pipeline_sample_sizes() – EvalPlus len(eval), LM-Eval sample_len, Agentic total_scenarios
+├── _describe_sample_sizes() – MD-Header "SampleSize=5,20 (DS1000), …" statt fixem "mixed" (01.08.)
+├── _render_complete_table() – content-driven Spaltenbreiten, `|`-Fluchtung, Dezimalpunkt-Alignment
+│   (längster Modellname bestimmt Spaltenbreite; Zahlen rechtsbündig auf den Punkt ausgerichtet)
+├── _align_decimal_cells() – in-place-Alignment numerischer Zellen
+├── _write_tbl() – TOP5/BOTTOM5-Tabellen: Rang zentriert, Model links, Zahlen rechts (01.08.)
 └── Generate CSV + MD (alphabetically sorted)
 ```
 
@@ -993,6 +1013,17 @@ Changes need ONLY be made in `src/model_manager.py` – no more searching for ha
 - Background: Whitelist was redundant (selection also possible interactively/CLI), DISPLAY_NAMES replaceable by dynamic sources.
 
 **Removed in p8 (18.07.):** `MMLU_PRO_ENABLED = False` – was imported by `src/run_benchmarks.py` and `src/consolidate_results.py` but never read.
+
+### From custom_benchmark.py (stop strings)
+
+| Constant | Value | Purpose |
+|----------|-------|---------|
+| `STOP_TOKENS_CODING` | `["\n```\n", "\n# Task", "\n// ", "<|endoftext|>"]` | Coding-Stops. **01.08.:** `"\n```\n"` statt `"\n```"` – der alte Stop matchte die Codeblock-**Öffnung** (`\n```python`), wodurch DeepSeek-R1-Distill die Antwort auf ~0 Tokens abbrach ("No code generated", 0% DS1000/CoderEval). Mit trailing `\n` matcht der Stop nur das **Schließen**. Details + Live-Experiment: `doc-git/thinking-config_en.md` §"Stop-String Trap" |
+| `STOP_TOKENS_DEFAULT` | `["<|endoftext|>"]` | Default-Stop ohne Override |
+
+### Single-Instance-Lock (run_benchmarks.py, 01.08.)
+
+`RESULTS_DIR/.benchmark.lock` (JSON `{pid, started}`): verhindert **parallele Launcher-Instanzen** — beobachtet 31.07.: 3 parallele Läufe luden/entluden Modelle gegeneinander (VRAM, dann System-RAM erschöpft, System-Hang). Stale Locks (tote PID, korrupt) werden überschrieben. `psutil.pid_exists()` als PID-Check.
 
 ---
 
@@ -1178,6 +1209,19 @@ pytest tests/ -v
 
 | Date   | File                                         | Change                                                                           |
 |--------|-----------------------------------------------|----------------------------------------------------------------------------------|
+| 01.08. | `src/custom_benchmark.py`                     | **BUGFIX Stop-String:** `STOP_TOKENS_CODING` `"\n```"` → `"\n```\n"` (Z. 192). `\n```` matchte die Codeblock-Öffnung von DeepSeek-R1-Distill → 0% DS1000/CoderEval ("No code generated"). Verifiziert: DS1000 35%, CoderEval 67% (seed 42, SS20) statt 0%. Details §15 + thinking-config_en.md |
+| 01.08. | `src/consolidate_results.py`                  | **SampleSize-Angabe + Tabellen-Formatierung:** MD-Header zeigt `SampleSize=5,20 (DS1000), …` statt `mixed` (`_describe_sample_sizes`, `_collect_pipeline_sample_sizes`, `_extract_csv_sizes`). Tabellen content-driven: längster Modellname bestimmt Breite, `|` fluchten vertikal, Dezimalpunkte ausgerichtet (`_render_complete_table`, `_align_decimal_cells`, `_write_tbl`) |
+| 01.08. | `src/run_benchmarks.py`                       | **Single-Instance-Lock:** `.benchmark.lock` (PID+Startzeit) verhindert parallele Launcher (31.07.: 3 Läufe → RAM-Exhaustion). Stale Locks werden überschrieben |
+| 31.07. | `src/benchmark_config.py`                     | **Registry-getriebenes enable_thinking:** `_registry_reasoning()`; `get_model_config()` setzt `enable_thinking=True`, wenn Registry `reasoning: thinking` und kein Override existiert (DeepSeek denkt standardmäßig). Details §2.6 |
+| 31.07. | `src/custom_benchmark.py`                     | **Streaming-Thinking-Fixes:** `_extract_reasoning_delta()` (unterstützt `reasoning_content` + `reasoning`/gpt-oss); Start-/Stall-Timeout zählt Thinking-Streams; `_non_streaming_fallback` liest `reasoning_content`; `_uses_qwen_template()` deckt Qwen-basierte Distills (deepseek-r1-distill-qwen-14b) |
+| 31.07. | `src/registry_tool.py`                        | **NEW `rm`-Befehl:** Registry-Eintrag löschen (optional `--delete-files` + Configs). **Pfad-Auflösung:** `_resolve_model_path_multi()` (exakt → Substring → Word-Match ≥2 Wörter); `_normalize_variants()`/`_quant_variant()` |
+| 31.07. | `src/assemble_blueprint.py`                   | **gpt-oss → thinking** in `_ARCH_REASONING_MAP` (Harmony-Template, Review 27.07.). **Qwen3-Familie name-basiert:** `-instruct` → instruct, `-thinking` → thinking |
+| 31.07. | `src/csv_writer.py`                           | `_fmt_float()` – None-sichere Zahlenformatierung |
+| 31.07. | `doc-git/model_registry.yaml`                 | Bereinigt: nicht-installierte Varianten entfernt (u.a. Intel/gpt-oss-20b-q4ks-autoround, opea-gemma3-autoround, noctrex/lfm2, jetbrains/mellum2-thinking); `rnj-1` arch → `dense` |
+| 31.07. | `src/tools/parallel_ab.py` (+Tests)           | **NEW A/B-Slots-Test:** vergleicht `num_parallel` (1/2/4) je Modell. Ergebnis 31.07./01.08.: `num_parallel: 4` bestätigt (Rang 1, 4 von 5 Modellen) – siehe `ergebnisse/parallel_ab_20260801_004539.md` |
+| 31.07. | `src/tools/patch_reasoning_effort.py` (+Tests) | **NEW** Hilfstool für reasoning_effort-Patches |
+| 30.07. | gesamt (v13.0.7)                              | **Coding-Textbausteine erweitert** (blueprint_definitions.yaml, assemble_blueprint), **Template-Injection**, **Name-Normalisierung** (registry_tool.py), Registry-Updates |
+| 30.07. | gesamt (v13.0.6)                              | **src/-Migration abgeschlossen:** alle Scripts nach `src/` (custom_benchmark_v13.py, run_benchmarks_v13.py, consolidate_results_v13.py entfernt), CLI-Menü, quants-Normalisierung, `.pylintrc`, `run_lint.ps1`, README/Doku-Update |
 | 29.07. | `utils/terminal.py`                           | **NEW:** ANSI-Farben + Progress-Bar Utility (`ok`, `warn`, `error`, `info`, `progress_bar`) – löst §2.3 "Keine visuellen Indikatoren" |
 | 29.07. | `src/type_defs.py`                                | **NEW `GenerationConfig`-Dataclass:** `generate_answer()` von 16 Einzelparametern auf `cfg: GenerationConfig` umgestellt (P3-Befund aus Review 28.07.) |
 | 29.07. | `src/custom_benchmark.py`                         | **Refactored `run_task()`:** 4 Helfer extrahiert (`_call_and_evaluate`, `_make_codereval_prompt`, `_make_datascience_prompt`, `_extract_setup_code`) – löst P3 "run_task()-Duplikation" |
@@ -1331,7 +1375,7 @@ pytest tests/ -v
 
 ---
 
-*Created: 28.06.2026 | Updated: 29.07.2026*
+*Created: 28.06.2026 | Updated: 01.08.2026*
 *Based on: v13.0.5 – Pipeline-Validierung, Hybrid-Klassifikation (GGUF+Architektur-Map), vereinfachter Workflow*
 *24.07.: registry_tool.py validate (7 Checks), _word_boundary_match(), Pre-Run-Checks in run_benchmarks.py*
 *24.07.: _ARCH_REASONING_MAP, classify_reasoning() Priority-Chain, _detect_reasoning_from_template() Regex*
@@ -1339,3 +1383,6 @@ pytest tests/ -v
 *29.07.: Refactoring-Sprint (Terminal-Farben, GenerationConfig, run_task-Helfer, main()-Split, Typ-Hints 100%)*
 *29.07.: 4 neue Chat-Templates (Gemma-4 QAT, Phi-4 Unsloth, GPT-OSS Unsloth)*
 *29.07.: Benchmark-Lauf 3 Modelle × 4 Pipelines × SampleSize 5 + Server-Log-Analyse*
+*30.07.: v13.0.6 (src/-Migration, CLI-Menü, quants-Normalisierung) + v13.0.7 (Coding-Textbausteine, Template-Injection, Name-Normalisierung)*
+*31.07.: Registry-getriebenes enable_thinking, Streaming-Thinking-Fixes, registry_tool rm, Single-Instance-Lock, A/B-Slots, gpt-oss→thinking, Qwen3-Instruct-Fix, Registry-Bereinigung*
+*01.08.: STOP_TOKENS_CODING-Fix (\n```\n) – DeepSeek DS1000 35%/CoderEval 67%; consolidate_results SampleSize+Tabellen-Formatierung*

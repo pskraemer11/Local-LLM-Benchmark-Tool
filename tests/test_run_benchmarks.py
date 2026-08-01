@@ -1,4 +1,5 @@
 import json
+import io
 import os
 import sys
 from unittest.mock import MagicMock, patch
@@ -520,3 +521,82 @@ class TestEnsureModelStillLoaded:
                     out = capsys.readouterr().out
                     assert "[WARN]" in out
                     assert "MATH-500" in out
+
+
+# ======================================================================
+# run_agentic – JSON-Pfad (Fix 2026-07-31)
+# ======================================================================
+
+class TestRunAgentic:
+    def test_json_path_uses_safe_identifier_not_slash(self, monkeypatch, tmp_path):
+        # Fix 2026-07-31: model_identifier mit Slash (z.B. "essentialai/rnj-1@q8_0")
+        # erzeugte einen Unterordner im JSON-Pfad ("agentic_essentialai/rnj-1@...").
+        # Der Pfad muss den "safe"-Namen verwenden.
+        monkeypatch.setattr(rb, "RESULTS_DIR", str(tmp_path))
+        fake_proc = MagicMock()
+        fake_proc.returncode = 0
+        fake_proc.stdout = io.StringIO("")
+        fake_proc.stderr = io.StringIO("")
+        model_info = {"key": "essentialai/rnj-1@q8_0", "display": "RNJ-1"}
+        with patch.object(rb.subprocess, "Popen", return_value=fake_proc) as popen:
+            rb.run_agentic(model_info, limit=2)
+        cmd = popen.call_args.args[0]
+        json_idx = cmd.index("--json-file")
+        json_path = cmd[json_idx + 1]
+        expected_dir = os.path.join(str(tmp_path), "agentic_essentialai_rnj-1@q8_0")
+        assert os.path.dirname(json_path) == expected_dir
+        assert os.path.basename(json_path).startswith("agentic_essentialai_rnj-1@q8_0_")
+        assert "essentialai/rnj-1" not in json_path
+
+
+# ======================================================================
+# Single-Instance Lock (Fix 2026-07-31: parallele Launcher)
+# ======================================================================
+
+class TestSingleInstanceLock:
+    DEAD_PID = 2147483647  # max int32 – no live process
+
+    def test_acquire_creates_lock_file(self, tmp_path):
+        lock_path = os.path.join(str(tmp_path), ".benchmark.lock")
+        assert rb._acquire_single_instance_lock(lock_path) is None
+        assert os.path.exists(lock_path)
+        with open(lock_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        assert data["pid"] == os.getpid()
+        assert "started" in data
+
+    def test_acquire_blocks_live_owner(self, tmp_path):
+        lock_path = os.path.join(str(tmp_path), ".benchmark.lock")
+        with open(lock_path, "w", encoding="utf-8") as f:
+            json.dump({"pid": os.getpid(), "started": "2026-07-31T22:00:00"}, f)
+        err = rb._acquire_single_instance_lock(lock_path)
+        assert err is not None
+        assert "FATAL" in err
+        assert str(os.getpid()) in err
+
+    def test_acquire_overwrites_stale_lock(self, tmp_path):
+        lock_path = os.path.join(str(tmp_path), ".benchmark.lock")
+        with open(lock_path, "w", encoding="utf-8") as f:
+            json.dump({"pid": self.DEAD_PID, "started": "2026-07-31T22:00:00"}, f)
+        assert rb._acquire_single_instance_lock(lock_path) is None
+        with open(lock_path, "r", encoding="utf-8") as f:
+            assert json.load(f)["pid"] == os.getpid()
+
+    def test_acquire_overwrites_corrupt_lock(self, tmp_path):
+        lock_path = os.path.join(str(tmp_path), ".benchmark.lock")
+        with open(lock_path, "w", encoding="utf-8") as f:
+            f.write("not-json")
+        assert rb._acquire_single_instance_lock(lock_path) is None
+
+    def test_release_removes_own_lock(self, tmp_path):
+        lock_path = os.path.join(str(tmp_path), ".benchmark.lock")
+        assert rb._acquire_single_instance_lock(lock_path) is None
+        rb._release_single_instance_lock(lock_path)
+        assert not os.path.exists(lock_path)
+
+    def test_release_keeps_foreign_lock(self, tmp_path):
+        lock_path = os.path.join(str(tmp_path), ".benchmark.lock")
+        with open(lock_path, "w", encoding="utf-8") as f:
+            json.dump({"pid": self.DEAD_PID, "started": "x"}, f)
+        rb._release_single_instance_lock(lock_path)
+        assert os.path.exists(lock_path)

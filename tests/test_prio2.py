@@ -8,14 +8,25 @@
 import os
 import sys
 import math
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import pytest
 
-from benchmark_config import QUANT_MAP, get_quant
-from custom_benchmark import strip_thinking_tokens
+from benchmark_config import QUANT_MAP, get_model_config, get_quant
+from custom_benchmark import _uses_qwen_template, strip_thinking_tokens
 from csv_writer import _truncate_response
+
+# Synthetische Registry für get_quant-Fallback-Tests: unabhängig von der
+# realen model_registry.yaml (die durch fix-np-Bereinigungen ändert).
+FAKE_QUANT_REG = {
+    "openai/gpt-oss-20b": {"quants": ["MXFP4"], "reasoning": "thinking"},
+    "lmstudio-community/gpt-oss-20b": {"quants": ["MXFP4"]},
+    "unsloth/gpt-oss-20b": {"quants": ["Q6_K"]},
+    "lmstudio-community/deepseek-r1-distill-qwen-14b": {"reasoning": "thinking"},
+    "moonshotai/kimi-k2-instruct": {"reasoning": "instruct"},
+}
 
 
 class TestGetQuant:
@@ -23,13 +34,16 @@ class TestGetQuant:
 
     def test_exact_match(self):
         # bare name (no publisher): picks first registry match
-        assert get_quant("gpt-oss-20b") == "MXFP4"
+        with patch("benchmark_config._load_quant_registry", return_value=FAKE_QUANT_REG):
+            assert get_quant("gpt-oss-20b") == "MXFP4"
 
     def test_exact_match_with_publisher(self):
-        assert get_quant("lmstudio-community/gpt-oss-20b") == "MXFP4"
+        with patch("benchmark_config._load_quant_registry", return_value=FAKE_QUANT_REG):
+            assert get_quant("lmstudio-community/gpt-oss-20b") == "MXFP4"
 
     def test_exact_match_unsloth(self):
-        assert get_quant("unsloth/gpt-oss-20b") == "Q6_K"
+        with patch("benchmark_config._load_quant_registry", return_value=FAKE_QUANT_REG):
+            assert get_quant("unsloth/gpt-oss-20b") == "Q6_K"
 
     def test_different_quants_distinct(self):
         # devstral base name -> QUANT_MAP entry (Q3_K_S)
@@ -168,16 +182,17 @@ class TestLookupVramFuzzyFix:
         would have caused wrong fuzzy matches). The new logic requires
         length-ratio >= 0.85 for substring matches.
         """
-        # gpt-oss-20b is a base/short key
-        # lmstudio-community/gpt-oss-20b is the longer publisher-prefixed key
-        # The exact-match lookup should return DIFFERENT quants for these.
-        q1 = get_quant("gpt-oss-20b")           # MXFP4 (bare name, first reg match)
-        q2 = get_quant("lmstudio-community/gpt-oss-20b")  # MXFP4 (same publisher entry)
-        q3 = get_quant("unsloth/gpt-oss-20b")   # Q6_K (different publisher)
-        assert q1 != q3, f"q1={q1} q3={q3}"
-        assert q1 == "MXFP4"
-        assert q2 == "MXFP4"
-        assert q3 == "Q6_K"
+        with patch("benchmark_config._load_quant_registry", return_value=FAKE_QUANT_REG):
+            # gpt-oss-20b is a base/short key
+            # lmstudio-community/gpt-oss-20b is the longer publisher-prefixed key
+            # The exact-match lookup should return DIFFERENT quants for these.
+            q1 = get_quant("gpt-oss-20b")           # MXFP4 (bare name, first reg match)
+            q2 = get_quant("lmstudio-community/gpt-oss-20b")  # MXFP4 (same publisher entry)
+            q3 = get_quant("unsloth/gpt-oss-20b")   # Q6_K (different publisher)
+            assert q1 != q3, f"q1={q1} q3={q3}"
+            assert q1 == "MXFP4"
+            assert q2 == "MXFP4"
+            assert q3 == "Q6_K"
 
     def test_quant_does_not_collapse_devstral_variants(self):
         """Q3_K_S (base) and Q3_K_S (@q3_k_s) both resolve to Q3_K_S."""
@@ -193,3 +208,58 @@ class TestLookupVramFuzzyFix:
         assert default == "Q3_K_M"
         assert custom == "Q4_K_S"
         assert default != custom
+
+
+class TestGetModelConfigRegistryThinking:
+    """Registry `reasoning: thinking` aktiviert enable_thinking in get_model_config."""
+
+    def test_registry_thinking_forces_enable_thinking(self):
+        with patch("benchmark_config._load_quant_registry", return_value=FAKE_QUANT_REG):
+            cfg = get_model_config("lmstudio-community/deepseek-r1-distill-qwen-14b")
+        assert cfg["enable_thinking"] is True
+
+    def test_registry_thinking_with_quant_suffix(self):
+        with patch("benchmark_config._load_quant_registry", return_value=FAKE_QUANT_REG):
+            cfg = get_model_config("lmstudio-community/deepseek-r1-distill-qwen-14b@Q4_K_M")
+        assert cfg["enable_thinking"] is True
+
+    def test_registry_thinking_bare_name_fallback(self):
+        with patch("benchmark_config._load_quant_registry", return_value=FAKE_QUANT_REG):
+            cfg = get_model_config("deepseek-r1-distill-qwen-14b")
+        assert cfg["enable_thinking"] is True
+
+    def test_no_registry_entry_keeps_default(self):
+        with patch("benchmark_config._load_quant_registry", return_value=FAKE_QUANT_REG):
+            cfg = get_model_config("lmstudio-community/gpt-oss-20b")
+        assert cfg["enable_thinking"] is False
+
+    def test_registry_instruct_keeps_default(self):
+        with patch("benchmark_config._load_quant_registry", return_value=FAKE_QUANT_REG):
+            cfg = get_model_config("moonshotai/kimi-k2-instruct")
+        assert cfg["enable_thinking"] is False
+
+    def test_explicit_override_wins_over_registry(self):
+        """MODEL_TEMP_OVERRIDES enable_thinking=False gewinnt gegen Registry thinking."""
+        reg = {"lmstudio-community/qwen3.5-8b": {"reasoning": "thinking"}}
+        with patch("benchmark_config._load_quant_registry", return_value=reg):
+            cfg = get_model_config("lmstudio-community/qwen3.5-8b")
+        assert cfg["enable_thinking"] is False
+
+
+class TestUsesQwenTemplate:
+    """_uses_qwen_template: Qwen-basierte Templates unterstuetzen chat_template_kwargs."""
+
+    def test_qwen3(self):
+        assert _uses_qwen_template("lmstudio-community/qwen3-8b") is True
+
+    def test_qwen3_5(self):
+        assert _uses_qwen_template("lmstudio-community/qwen3.5-8b") is True
+
+    def test_deepseek_r1_distill_qwen(self):
+        assert _uses_qwen_template("lmstudio-community/deepseek-r1-distill-qwen-14b") is True
+
+    def test_non_qwen_model(self):
+        assert _uses_qwen_template("lmstudio-community/ministral-8b-instruct-2410") is False
+
+    def test_none(self):
+        assert _uses_qwen_template(None) is False

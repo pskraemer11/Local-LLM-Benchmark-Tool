@@ -23,6 +23,8 @@ import assemble_blueprint as ab
 from assemble_blueprint import (
     normalize_model_name,
     classify_capabilities,
+    classify_reasoning,
+    select_blueprint,
     extract_params,
     read_lms_configs,
     format_publishers,
@@ -151,6 +153,55 @@ class TestClassifyCapabilities:
     def test_coder_in_arch(self):
         caps = classify_capabilities("model", arch="Llama (coder)")
         assert "coding" in caps
+
+
+# ─────────────────────────────────────────────────────────────────────
+# classify_reasoning (Qwen3 Instruct vs. Thinking vs. Dual-Mode)
+# ─────────────────────────────────────────────────────────────────────
+
+class TestClassifyReasoningQwen3:
+    """Qwen3-Varianten korrekt klassifizieren (Fix 2026-08-01).
+
+    - Qwen3-*-Instruct-2507 / Qwen3-Coder-*-Instruct: Non-Thinking-only
+      (HF-Karte Qwen3-30B-A3B-Instruct-2507)
+    - Qwen3-*-Thinking-*: Thinking
+    - Qwen3.6 (dual mode): thinking erlaubt
+    """
+
+    def test_qwen3_instruct_is_non_thinking(self):
+        r = classify_reasoning("qwen3-30b-a3b-instruct-2507", arch="Qwen3 MoE")
+        assert r == "instruct"
+
+    def test_qwen3_instruct_moe_lowercase_arch(self):
+        r = classify_reasoning("qwen3-30b-a3b-instruct-2507", arch="moe")
+        assert r == "instruct"
+
+    def test_qwen3_coder_instruct_is_non_thinking(self):
+        r = classify_reasoning("qwen3-coder-30b-a3b-instruct", arch="Qwen3 MoE")
+        assert r == "instruct"
+
+    def test_qwen3_thinking_stays_thinking(self):
+        r = classify_reasoning("qwen3-30b-a3b-thinking-2507", arch="Qwen3 MoE")
+        assert r == "thinking"
+
+    def test_qwen3_6_dual_mode_is_thinking(self):
+        r = classify_reasoning("qwen3.6-27b", arch="Qwen3.5 Dense")
+        assert r == "thinking"
+
+    def test_existing_reasoning_has_priority(self):
+        r = classify_reasoning("qwen3-30b-a3b-instruct-2507",
+                               arch="Qwen3 MoE", existing_reasoning="thinking")
+        assert r == "thinking"
+
+    def test_instruct_blueprint_is_coding_agent(self):
+        bp = select_blueprint("instruct", "coding, text", arch="Qwen3 MoE",
+                              model_name="qwen3-30b-a3b-instruct-2507")
+        assert bp == "coding_agent"
+
+    def test_qwen3_instruct_assembled_prompt_has_no_reasoning(self):
+        bp = select_blueprint("instruct", "coding, text", arch="Qwen3 MoE",
+                              model_name="qwen3-30b-a3b-instruct-2507")
+        assert bp != "reasoning_coding"
 
 
 # ─────────────────────────────────────────────────────────────────────

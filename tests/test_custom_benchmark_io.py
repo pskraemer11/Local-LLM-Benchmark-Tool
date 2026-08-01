@@ -24,8 +24,39 @@ from custom_benchmark import (
     _SANDBOX_BLOCKED_MODULES,
     _SANDBOX_SAFE_BUILTINS,
     _build_sandbox_script,
+    _extract_reasoning_delta,
     exec_sandboxed,
 )
+
+
+# ─────────────────────────────────────────────────────────────────────
+# _extract_reasoning_delta
+# ─────────────────────────────────────────────────────────────────────
+
+class TestExtractReasoningDelta:
+    """Reasoning-Content aus Stream-Deltas extrahieren.
+
+    DeepSeek R1 (0.3.9+): delta.reasoning_content
+    gpt-oss (0.3.23+, o3-mini-konform): delta.reasoning
+    """
+
+    def test_reasoning_content_field(self):
+        assert _extract_reasoning_delta({"reasoning_content": "Need to"}) == "Need to"
+
+    def test_reasoning_field(self):
+        assert _extract_reasoning_delta({"reasoning": "Need to"}) == "Need to"
+
+    def test_reasoning_content_takes_priority(self):
+        assert _extract_reasoning_delta({"reasoning": "a", "reasoning_content": "b"}) == "b"
+
+    def test_reasoning_non_string_ignored(self):
+        assert _extract_reasoning_delta({"reasoning": {"effort": "low"}}) == ""
+
+    def test_empty_delta(self):
+        assert _extract_reasoning_delta({}) == ""
+
+    def test_only_content(self):
+        assert _extract_reasoning_delta({"content": "Hello"}) == ""
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -187,3 +218,33 @@ class TestExecSandboxed:
         # First positional arg should be [sys.executable, <tmpfile_path>]
         first_arg = call_args.args[0] if call_args.args else call_args[0][0]
         assert first_arg[0] == sys.executable
+
+
+class TestThinkingCodeOnlyPrompts:
+    """Prompt-Härtung für Thinking-Modelle (Fix 2026-07-31)."""
+
+    def test_datascience_default_no_suffix(self):
+        p = cb._make_datascience_prompt("task", "entry")
+        assert "```python" not in p
+        assert p.startswith("Complete the following Python code.")
+
+    def test_datascience_code_only_adds_suffix(self):
+        p = cb._make_datascience_prompt("task", "", code_only=True)
+        assert "```python" in p
+        assert "FINAL answer" in p
+        assert p.endswith("commentary.")
+
+    def test_codereval_default_no_suffix(self):
+        p = cb._make_codereval_prompt("task", "fn")
+        assert "```python" not in p
+        assert "fn" in p
+
+    def test_codereval_code_only_adds_suffix(self):
+        p = cb._make_codereval_prompt("task", "fn", code_only=True)
+        assert "```python" in p
+        assert "FINAL answer" in p
+
+    def test_entry_point_preserved_with_code_only(self):
+        p = cb._make_codereval_prompt("task", "my_fn", code_only=True)
+        assert "my_fn" in p
+        assert p.index("my_fn") < p.index("```python")

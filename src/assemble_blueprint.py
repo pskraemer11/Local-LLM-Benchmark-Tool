@@ -55,7 +55,9 @@ _ARCH_REASONING_MAP = {
     "qwen3moe": "thinking",
     "deepseek2": "thinking",
     "kimi-linear": "thinking",
-    "gpt-oss": "instruct",
+    # gpt-oss (Harmony-Template: analysis/commentary/final-Kanaele) ist ein
+    # Reasoning-Modell – siehe Code-Review 2026-07-27 (registry: thinking)
+    "gpt-oss": "thinking",
     "nomic-bert": "none",
     "flux": "none",
 }
@@ -225,6 +227,14 @@ def classify_reasoning(
         arch_lower = arch.lower()
         for arch_key, reasoning_type in _ARCH_REASONING_MAP.items():
             if arch_key in arch_lower:
+                # Qwen3-Familie: -Instruct-Varianten sind Non-Thinking-only
+                # (HF-Karte Qwen3-30B-A3B-Instruct-2507); Qwen3.6 dual-mode.
+                # Der Modellname entscheidet über die konkrete Variante.
+                if arch_key.startswith("qwen"):
+                    if "thinking" in name_lower:
+                        return "thinking"
+                    if "instruct" in name_lower:
+                        return "instruct"
                 return reasoning_type
 
     for kw in NON_REASONING_MODELS:

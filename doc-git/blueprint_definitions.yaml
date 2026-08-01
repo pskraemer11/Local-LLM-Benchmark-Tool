@@ -1,5 +1,5 @@
 version: '1.0'
-created: '2026-07-30 16:14:41'
+created: '2026-07-30 16:20:36'
 blueprints:
   default_chat:
     description: Standard Chat-Assistent
@@ -15,8 +15,8 @@ blueprints:
     role_template: You are {name}, a {arch} model{params_label} by {publisher}, specialized
       in {capabilities}{type_label}.
     modules:
-      - safety_block
       - coding_principles
+      - safety_block
       - output_style_technical
   reasoning_assistant:
     description: Reasoning/Thinking-Modell (instruct-mode)
@@ -35,8 +35,8 @@ blueprints:
       in {capabilities}{type_label}.
     modules:
       - thinking_instruction
-      - safety_block
       - coding_principles
+      - safety_block
       - output_style_technical
   gemma_assistant:
     description: Gemma-4 spezifisch (Standard)

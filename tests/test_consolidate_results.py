@@ -239,6 +239,23 @@ class TestFindNewestByMtime:
         result = _find_newest_by_mtime("lmeval", "model")
         assert result == str(d_new)
 
+    def test_base_fallback_does_not_match_prefix_collision(self, monkeypatch, tmp_path):
+        # Fix 2026-07-31: Ein Verzeichnis mit gleichem Basis-Präfix aber
+        # anderem Suffix ("...-q2ks-mixed-autoround@Q2_K_S") darf beim
+        # @-Fallback NICHT als Kandidat für "...@q3_k_s" gelten – auch
+        # dann nicht, wenn es neuer ist. Vorher gewann das leere
+        # q2ks-Verzeichnis per mtime und read_lmeval_per_model() lieferte None.
+        monkeypatch.setattr(cr, "RESULTS_DIR", str(tmp_path))
+        d_real = tmp_path / "lmeval_qwen3-30b-a3b-instruct-2507@Q3_K_S"
+        d_real.mkdir()
+        d_decoy = tmp_path / "lmeval_qwen3-30b-a3b-instruct-2507-q2ks-mixed-autoround@Q2_K_S"
+        d_decoy.mkdir()
+        # Real dir old, decoy new → nur ohne Fix würde der Decoy gewinnen
+        old_mtime = 1000000
+        os.utime(str(d_real), (old_mtime, old_mtime))
+        result = _find_newest_by_mtime("lmeval", "qwen3-30b-a3b-instruct-2507@q3_k_s")
+        assert os.path.normpath(result).lower() == os.path.normpath(str(d_real)).lower()
+
 
 # ======================================================================
 # bootstrap_ci

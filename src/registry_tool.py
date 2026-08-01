@@ -24,6 +24,8 @@ Commands:
   fmt           Normalize blank lines in registry YAML (no blanks within entries,
                 one blank between entries)
   migrate-keys  Re-key entries without publisher prefix to publisher/model-name
+  rm            Remove registry entry (optionally delete files + configs too):
+                python registry_tool.py rm <model-key> [--delete-files] [--yes]
   validate      Check model_registry.yaml consistency: template files exist,
                 Config JSON promptTemplate matches YAML, override overlap,
                 required fields present, etc.
@@ -33,7 +35,7 @@ Commands:
 
 from __future__ import annotations
 
-import csv, json, os, re, struct, sys, subprocess, tempfile, concurrent.futures
+import csv, json, os, re, shutil, struct, sys, subprocess, tempfile, concurrent.futures
 from pathlib import Path
 from collections import OrderedDict
 from typing import Any, Callable
@@ -68,22 +70,12 @@ from benchmark_config import (
     LEGACY_MODEL_GB_THRESHOLD_GB as _LEGACY_MODEL_GB_THRESHOLD_GB,
 )
 
-_ARCH_MAP = {
-    "llama": "Llama Dense", "mistral3": "Mistral Dense",
-    "qwen2": "Qwen2 Dense", "qwen3": "Qwen3 Dense", "qwen35": "Qwen3.5 Dense",
-    "qwen35moe": "Qwen3.5 MoE", "qwen3moe": "Qwen3 MoE",
-    "gemma3": "Gemma-3 Dense", "gemma4": "Gemma-4 Dense",
-    "granite": "Granite Dense", "granitehybrid": "Granite Hybrid",
-    "deepseek2": "DeepSeek 2", "ernie4_5-moe": "ERNIE MoE",
-    "gpt-oss": "GPT-OSS Dense", "cohere2moe": "Cohere 2 MoE",
-    "flux": "Flux", "kimi-linear": "Kimi Linear",
-    "lfm2moe": "LFM2 MoE", "mellum": "Mellum MoE", "nomic-bert": "Nomic BERT",
-}
-
 
 # ── I/O helpers ────────────────────────────────────────────────────
 
-def load_registry(path: Path = REGISTRY_PATH) -> dict[str, RegistryEntry]:
+def load_registry(path: Path | None = None) -> dict[str, RegistryEntry]:
+    if path is None:
+        path = REGISTRY_PATH
     with open(path, "r", encoding="utf-8") as f:
         return y.load(f) or {}
 
@@ -96,7 +88,9 @@ def _normalize_quants_flow_style(path: Path) -> None:
         path.write_text(new, "utf-8")
 
 
-def save_registry(reg: dict[str, Any], path: Path = REGISTRY_PATH) -> None:
+def save_registry(reg: dict[str, Any], path: Path | None = None) -> None:
+    if path is None:
+        path = REGISTRY_PATH
     with open(path, "w", encoding="utf-8") as f:
         y.dump(reg, f)
     _format_blank_lines(path)
@@ -265,25 +259,261 @@ def cmd_fill_size() -> None:
     print(f"[OK] {updated} entries got file_size_bytes from LMS")
 
 
+_GGUF_FILE_CACHE: list[Path] | None = None
+
+
+def _get_all_ggufs() -> list[Path]:
+    """Return (and cache) all ``.gguf`` files under ``MODELS_CACHE``."""
+    global _GGUF_FILE_CACHE
+    if _GGUF_FILE_CACHE is None:
+        _GGUF_FILE_CACHE = sorted(MODELS_CACHE.rglob("*.gguf"))
+    return _GGUF_FILE_CACHE
+
+
+def _norm(s: str) -> str:
+    """Lower-case, strip ``.gguf``, replace ``-``/``_``/``\\``/``/``/``@`` with space."""
+    s = s.lower().replace(".gguf", "").replace("-", " ").replace("_", " ").replace("\\", " ").replace("/", " ").replace("@", " ")
+    return " ".join(s.split())
+
+
+def _significant_words(s: str) -> set[str]:
+    """Split *s* into lower-case words, keep only ≥3-char tokens."""
+    return {w for w in _norm(s).split() if len(w) >= 3}
+
+
+def _resolve_model_path_multi(key: str) -> str:
+    """Resolve GGUF path — exact substring match first, then word-match fallback.
+
+    1. Exact ``MODELS_CACHE / key`` — library-level path from LM Studio.
+    2. Substring match (normalised key suffix in normalised GGUF path).
+    3. Word-match fallback (at least 2 significant words in common).
+    Returns ``""`` if nothing suitable is found.
+    """
+    candidate = MODELS_CACHE / key
+    if candidate.is_file():
+        return str(candidate)
+
+    suffix = key.split("/", 1)[1] if "/" in key else key
+    sn = _norm(suffix)
+
+    # 2) Substring match
+    for g in _get_all_ggufs():
+        if "mmproj" in g.name.lower():
+            continue
+        if sn in _norm(str(g.relative_to(MODELS_CACHE))):
+            return str(g)
+
+    # 3) Word-match fallback — require ≥ 2 significant words in common
+    sw = _significant_words(suffix)
+    if len(sw) < 2:
+        return ""
+    best: tuple[int, str] = (0, "")
+    for g in _get_all_ggufs():
+        if "mmproj" in g.name.lower():
+            continue
+        gw = _significant_words(str(g.relative_to(MODELS_CACHE)))
+        match = len(sw & gw)
+        if match >= 2 and match > best[0]:
+            best = (match, str(g))
+    return best[1]
+
+
 # ── fix-np command ─────────────────────────────────────────────────
 
+def _normalize_variants(key: str) -> set[str]:
+    """All normalized spellings of a model key.
+
+    Covers publisher prefixes (``unsloth/x`` vs ``x`` vs ``unsloth_x``),
+    quant suffixes are stripped via the ``@`` split. Only used for
+    **exact** comparisons, never for fuzzy word matching.
+    """
+    base = key.split("@", 1)[0]
+    variants = {normalize_model_name(base)}
+    if "/" in base:
+        variants.add(normalize_model_name(base.split("/", 1)[1]))
+    if "_" in base:
+        variants.add(normalize_model_name(base.replace("_", "-")))
+    return variants
+
+
+def _quant_variant(key: str) -> str:
+    """Normalized spelling of a quant-suffixed key (``...@q5_0`` → ``...@q5-0``).
+
+    Keeps the quant, so keys with different quantizations stay distinct.
+    """
+    return normalize_model_name(key)
+
+
+def _resolve_exact(reg_key: str, lms_path_map: dict[str, str]) -> str:
+    """Exact-only path resolution (library-level, lms map, substring).
+
+    Deliberately **no** word-match fallback: only identical files may
+    end up in the same duplicate-collapse group.
+    """
+    candidate = MODELS_CACHE / reg_key
+    if candidate.is_file():
+        return str(candidate)
+    for probe in (reg_key.lower(), normalize_model_name(reg_key)):
+        mp = lms_path_map.get(probe, "")
+        if mp and os.path.isfile(mp):
+            return mp
+    if "/" in reg_key:
+        suffix = reg_key.split("/", 1)[1].lower()
+        for probe in (suffix, normalize_model_name(suffix)):
+            mp = lms_path_map.get(probe, "")
+            if mp and os.path.isfile(mp):
+                return mp
+    sn = _norm(reg_key.split("/", 1)[1] if "/" in reg_key else reg_key)
+    for g in _get_all_ggufs():
+        if "mmproj" in g.name.lower():
+            continue
+        if sn in _norm(str(g.relative_to(MODELS_CACHE))):
+            return str(g)
+    return ""
+
+
 def cmd_fix_np() -> None:
-    """Recompute num_parallel for ALL entries based on architecture."""
+    """Recompute arch classification + num_parallel, remove stale entries.
+
+    - Reads ``expert_count`` from GGUF header as single source of truth
+      for MoE detection.
+    - Drops entries that have **neither** an exactly matching ``lms``
+      entry **nor** a GGUF file on disk (stale / uninstalled models).
+    - Collapses duplicate registry entries that resolve to the same
+      installed model, keeping the best-matching key. This only runs
+      when ``lms ls`` returned data — without it, resolution would
+      degrade to fuzzy word matching and legit entries (e.g. quant
+      variants) could be collapsed into each other.
+    """
     reg = load_registry()
+    lms_models = _run_lms_ls()
+    if not lms_models:
+        print("[WARN] lms ls lieferte keine Daten – Duplikat-Kollaps übersprungen, nur Phantome werden gelöscht.")
+
+    # ── build lookup maps from lms ls ──
+    lms_path_map: dict[str, str] = {}
+    lms_variants: dict[str, str] = {}   # normalized variant → lms key
+    lms_quant: dict[str, str] = {}      # normalized quant form → lms key
+    lms_file_map: dict[str, str] = {}   # normcased file path → lms key
+    for m in lms_models:
+        mk = str(m.get("modelKey", "")).lower()
+        rp = m.get("path", "")
+        full_path = str(MODELS_CACHE / rp) if rp else ""
+        lms_path_map[mk] = full_path
+        lms_path_map[normalize_model_name(mk)] = full_path
+        for i, ch in enumerate(mk):
+            if ch == "/":
+                lms_path_map[mk[i+1:]] = full_path
+                lms_path_map[normalize_model_name(mk[i+1:])] = full_path
+                break
+        for variant in _normalize_variants(mk):
+            lms_variants.setdefault(variant, mk)
+        if "@" in mk:
+            lms_quant.setdefault(_quant_variant(mk), mk)
+        if full_path and os.path.isfile(full_path):
+            lms_file_map.setdefault(os.path.normcase(full_path), mk)
+
+    def _exact_lms_match(reg_key: str) -> str | None:
+        """Return the lms key whose normalized form **exactly** matches a
+        normalized spelling of the registry key (no word-substring fuzz).
+
+        Quant-suffixed keys compare with their quant form first, so
+        ``x@q5_0`` only matches ``x@q5_0``, not ``x@q6_k``.
+        """
+        if "@" in reg_key:
+            lmk = lms_quant.get(_quant_variant(reg_key))
+            if lmk is not None:
+                return lmk
+        for variant in _normalize_variants(reg_key):
+            lmk = lms_variants.get(variant)
+            if lmk is not None:
+                return lmk
+        return None
+
+    def _resolve_path(reg_key: str) -> str:
+        model_path = lms_path_map.get(reg_key.lower()) or lms_path_map.get(normalize_model_name(reg_key), "")
+        if "/" in reg_key:
+            suffix = reg_key.split("/", 1)[1].lower()
+            mp = lms_path_map.get(suffix) or lms_path_map.get(normalize_model_name(suffix), "")
+            if mp:
+                model_path = mp
+        if not model_path or not os.path.isfile(model_path):
+            found = _resolve_model_path_multi(reg_key)
+            if found:
+                model_path = found
+        return model_path
+
     updated = 0
-    for key, entry in reg.items():
+    removed = 0
+    keys = list(reg.keys())  # snapshot to allow deletion during iteration
+
+    # ── pass 1: drop phantoms, group survivors by resolved target ──
+    groups: dict[str, list[tuple[str, int, int]]] = {}  # target id → [(key, score, idx)]
+    for idx, key in enumerate(keys):
+        entry = reg[key]
         if not isinstance(entry, dict):
             continue
-        arch = entry.get("arch", "")
-        current = entry.get("num_parallel")
-        expected = _infer_num_parallel(arch, key)
-        if current != expected:
-            entry["num_parallel"] = expected
+        lmk = _exact_lms_match(key)
+        exact = _resolve_exact(key, lms_path_map) if lmk is None else ""
+        has_file = bool(exact)
+
+        # ── remove stale entries (no exact lms match + no GGUF) ──
+        if lmk is None and not has_file:
+            del reg[key]
+            removed += 1
+            print(f"  {key}: gelöscht (nicht installiert)")
+            continue
+
+        if lmk is not None:
+            gid = "lms:" + lmk
+            score = 2
+            pub = key.split("/", 1)[0].lower() if "/" in key else ""
+            if pub and pub in lmk:
+                score += 1
+        elif lms_models:
+            if os.path.normcase(exact) in lms_file_map:
+                gid = "lms:" + lms_file_map[os.path.normcase(exact)]
+                score = 0
+            else:
+                gid = "file:" + os.path.normcase(exact)
+                score = 0
+        else:
+            # no lms data → keep every survivor isolated (no collapse)
+            gid = "key:" + key
+            score = 0
+        groups.setdefault(gid, []).append((key, score, idx))
+
+    # ── pass 2: collapse duplicates per target, keep best match ──
+    for gid, members in groups.items():
+        if len(members) < 2:
+            continue
+        members.sort(key=lambda t: (-t[1], t[2]))
+        keeper = members[0][0]
+        for key, _, _ in members[1:]:
+            del reg[key]
+            removed += 1
+            print(f"  {key}: gelöscht (Duplikat von {keeper})")
+
+    # ── pass 3: reclassify survivors ──
+    for key in list(reg.keys()):
+        entry = reg[key]
+        if not isinstance(entry, dict):
+            continue
+        model_path = _resolve_path(key)
+        classification = _classify_arch(key, model_path)
+        old_arch = entry.get("arch", "")
+        old_np = entry.get("num_parallel")
+        new_np = _infer_num_parallel(classification)
+        changed = (classification != old_arch) or (new_np != old_np)
+        entry["arch"] = classification
+        entry["num_parallel"] = new_np
+        if changed:
             updated += 1
-            print(f"  {key}: np {current} → {expected}  (arch={arch})")
-    if updated:
+            print(f"  {key}: arch {old_arch}→{classification}, np {old_np}→{new_np}")
+
+    if updated or removed:
         save_registry(reg)
-    print(f"[OK] {updated} entries updated num_parallel")
+    print(f"[OK] {updated} aktualisiert, {removed} gelöscht")
 
 
 # ── compare command ────────────────────────────────────────────────
@@ -343,35 +573,31 @@ def cmd_compare() -> dict[str, Any]:
 
 # ── np inference helper ────────────────────────────────────────────
 
-def _infer_num_parallel(arch: str, model_identifier: str = "") -> int:
-    """Determine num_parallel from architecture string + model key.
-    
-    Rules:
-      - ERNIE                 → 1 (CUDA kernel overhead)
-      - arch contains "moe"   → 4
-      - model key contains MoE indicators (a4b, a3b, a2b, kimi, glm flash) → 4
-      - GPT-OSS               → 4 (special: 20B MoE-like Dense, benefits from parallel)
-      - MTP (multi-token prediction) → 2 (np matches Max Draft Tokens)
-      - Dense                 → 1 (LCP=0 in benchmarks, wastes VRAM)
+def _classify_arch(
+    model_identifier: str = "",
+    model_path: str = "",
+) -> str:
+    """Classify a model as ``"moe"``, ``"mtp"``, or ``"dense"``.
+
+    Uses GGUF header (``expert_count``) as single source of truth for MoE.
+    Falls back to ``"mtp"`` keyword in the model identifier.
+    Everything else → ``"dense"``.
     """
-    al = arch.lower()
     kl = model_identifier.lower()
-    if "ernie" in al:
-        return 1
-    if "moe" in al:
-        return 4
-    # Model-key-based MoE detection (arch field may not say "moe")
-    # Gemma-4/Kimi/GLM Flash variants: "a4b", "a3b", "a2b" = active params → MoE
-    # and known-MoE model families
-    if any(x in kl for x in ["a4b", "a3b", "a2b", "kimi", "glm-4.7-flash"]):
-        return 4
-    # GPT-OSS override: despite Dense arch, np=4 is empirically better
-    if "gpt-oss" in kl or "gpt_oss" in kl:
-        return 4
-    # MTP: needs np >= Max Draft Tokens for speculative decoding
+
+    if model_path and os.path.isfile(model_path) and _gguf_has_experts(model_path):
+        return "moe"
     if "mtp" in kl:
-        return 2
-    return 1
+        return "mtp"
+    return "dense"
+
+
+def _infer_num_parallel(classification: str) -> int:
+    """Determine num_parallel from a classification string.
+
+    ``"moe"`` / ``"mtp"`` → 4, everything else → 1.
+    """
+    return 4 if classification in ("moe", "mtp") else 1
 
 
 # ── add command ────────────────────────────────────────────────────
@@ -395,10 +621,15 @@ def cmd_add(models: list[dict[str, Any]], interactive: bool = False) -> dict[str
         if any(kw in mk.lower() for kw in BLACKLIST):
             skipped.append((mk, "blacklisted"))
             continue
-        ar = _ARCH_MAP.get(m.get("arch", ""), m.get("arch", "?"))
-        is_mtp = "mtp" in mk.lower()
-        nt = f"Architektur: {ar}"
-        if is_mtp:
+        model_path = ""
+        rp = m.get("path", "")
+        if rp:
+            mp_candidate = str(MODELS_CACHE / rp)
+            if os.path.isfile(mp_candidate):
+                model_path = mp_candidate
+        classification = _classify_arch(mk, model_path)
+        nt = f"Architektur: {classification}"
+        if classification == "mtp":
             nt += " | Multi-Token Prediction"
         if m.get("params"):
             nt += f" | {m['params']} Parameter"
@@ -406,12 +637,12 @@ def cmd_add(models: list[dict[str, Any]], interactive: bool = False) -> dict[str
             nt += " | Vision"
         if m.get("tools"):
             nt += " | Tool-Use"
-        num_p = _infer_num_parallel(ar, mk)
+        num_p = _infer_num_parallel(classification)
         size_bytes = m.get("size_bytes", 0) or m.get("sizeBytes", 0)
         entry = {
             "publisher": pub,
             "hf_url": f"https://huggingface.co/{canonical}",
-            "arch": ar,
+            "arch": classification,
             "k_cache": "q8_0",
             "v_cache": "iq4_nl",
             "offload": 1,
@@ -440,7 +671,7 @@ def cmd_add(models: list[dict[str, Any]], interactive: bool = False) -> dict[str
         # Interactive reasoning prompt (fallback: no GGUF data available)
         if "reasoning" not in entry and interactive:
             print(f"\n  Modell: {mk}")
-            print(f"  Architektur: {ar}")
+            print(f"  Architektur: {classification}")
             print(f"  Keine GGUF-Datei gefunden – Reasoning-Typ kann nicht automatisch erkannt werden.")
             ans = input("  Reasoning-Typ? [i]nstruct / [t]hinking / [n]one / (d=instruct): ").strip().lower()
             if ans in ("t", "thinking"):
@@ -554,6 +785,80 @@ def cmd_configs() -> dict[str, Any]:
     result = {"updated": updated, "skipped": skipped, "blacklisted": blacklisted, "errors": errors}
     print(json.dumps(result, ensure_ascii=False))
     return result
+
+
+# ── rm command (NEW 2026-07-31) ───────────────────────────────────
+
+def cmd_rm(model_key: str, delete_files: bool = False, assume_yes: bool = False) -> int:
+    """Remove a model entry from the registry.
+
+    Optionally (--delete-files) also removes:
+      - LM Studio JSON config(s) incl. .bak-* backups
+      - the model files under ~/.lmstudio/hub/models/<publisher>/<name>
+
+    Returns 0 on success, 1 on error/abort.
+    """
+    reg = load_registry()
+    target = normalize_model_name(model_key)
+    matches = [
+        k for k, v in reg.items()
+        if isinstance(v, dict)
+        and (normalize_model_name(k) == target
+             or normalize_model_name(k).endswith("-" + target))
+    ]
+    if not matches:
+        print(f"[ERROR] Kein Registry-Eintrag gefunden für: {model_key} (normalisiert: {target})")
+        return 1
+    if len(matches) > 1:
+        print(f"[ERROR] Mehrdeutig – mehrere Einträge matchen: {matches}")
+        return 1
+    key = matches[0]
+
+    configs = read_lms_configs(CONFIG_ROOT)
+    cfg_paths = [c["json_path"] for c in find_all_configs_for_registry_key(key, configs)]
+    hub_dir = Path.home() / ".lmstudio" / "hub" / "models" / Path(*key.split("/"))
+    models_dir = Path.home() / ".lmstudio" / "models" / Path(*key.split("/"))
+    model_dirs = [d for d in (hub_dir, models_dir) if d.exists()]
+
+    print(f"  Registry-Eintrag : {key}")
+    if cfg_paths:
+        for p in cfg_paths:
+            print(f"  JSON-Config      : {p}")
+    else:
+        print("  JSON-Config      : (keine gefunden)")
+    if delete_files:
+        if model_dirs:
+            for d in model_dirs:
+                size_gb = sum(f.stat().st_size for f in d.rglob("*") if f.is_file()) / 1e9
+                print(f"  Modell-Dateien   : {d} ({size_gb:.2f} GB)")
+        else:
+            print(f"  Modell-Dateien   : (nicht gefunden unter {hub_dir} / {models_dir})")
+
+    if not assume_yes:
+        answer = input("  Wirklich löschen? [y/N] ").strip().lower()
+        if answer != "y":
+            print("[OK] Abgebrochen – nichts gelöscht.")
+            return 0
+
+    del reg[key]
+    save_registry(reg)
+    print(f"[OK] Registry-Eintrag gelöscht: {key}")
+
+    if delete_files:
+        for p in cfg_paths:
+            path = Path(p)
+            for bak in sorted(path.parent.glob(path.name + ".bak-*")):
+                bak.unlink()
+                print(f"  [rm] Backup gelöscht: {bak}")
+            path.unlink()
+            print(f"  [rm] Config gelöscht: {path}")
+        if model_dirs:
+            for d in model_dirs:
+                shutil.rmtree(d)
+                print(f"  [rm] Modell-Dateien gelöscht: {d}")
+    else:
+        print("  [INFO] Dateien belassen. Mit --delete-files auch Dateien löschen.")
+    return 0
 
 
 # ── sync-from-configs command ────────────────────────────────────
@@ -886,7 +1191,11 @@ def _read_gguf_arch(model_path: str) -> tuple[Optional[int], Optional[int], Opti
                     embedding_length = int(val)
                 elif key == "tokenizer.chat_template":
                     chat_template = str(val)
-                if block_count and embedding_length:
+                # Erst abbrechen, wenn ALLE drei Werte gelesen sind: tokenizer.chat_template
+                # steht im GGUF-Header meist NACH block_count/embedding_length. Der fruehe
+                # Abbruch hier hat die Reasoning-Erkennung de facto deaktiviert
+                # (is_reasoning war fast immer False).
+                if block_count is not None and embedding_length is not None and chat_template is not None:
                     break
         is_reasoning = _detect_reasoning_from_template(chat_template) if chat_template else False
         return block_count, embedding_length, is_reasoning
@@ -897,7 +1206,8 @@ def _read_gguf_arch(model_path: str) -> tuple[Optional[int], Optional[int], Opti
 
 _REASONING_TOKEN_RE = re.compile(
     r'<\s*/?\s*(?:think|thinking|thought)\s*>|'
-    r'<\|channel>\s*(?:thought|think)',
+    r'<\|channel>\s*(?:thought|think)|'
+    r'<\|channel\|>\s*analysis',
     re.IGNORECASE,
 )
 
@@ -914,6 +1224,45 @@ def _detect_reasoning_from_template(template: str) -> bool:
 
 
 MODELS_CACHE = Path.home() / ".lmstudio" / "models"
+
+# ── GGUF expert_count check (for MoE detection) ───────────────────
+# Cache: model_path -> bool (has experts / MoE)
+_GGUF_EXPERT_CACHE: dict[str, bool] = {}
+_GGUF_MOE_READER_LOCK: Any = None  # lazy import for threading
+
+def _gguf_has_experts(model_path: str) -> bool:
+    """Read GGUF header and return True if expert_count > 0 (MoE).
+
+    Uses the 'gguf' library. The GGUF stores expert_count in an
+    architecture-specific key like ``{arch}.expert_count`` (e.g.
+    ``ernie4_5-moe.expert_count``). Dense models have no such key.
+    Results are cached in _GGUF_EXPERT_CACHE.
+    """
+    if model_path in _GGUF_EXPERT_CACHE:
+        return _GGUF_EXPERT_CACHE[model_path]
+    try:
+        import gguf
+        reader = gguf.GGUFReader(model_path)
+        arch_field = reader.fields.get("general.architecture")
+        if arch_field is None:
+            _GGUF_EXPERT_CACHE[model_path] = False
+            return False
+        arch_bytes = arch_field.parts[-1]
+        if isinstance(arch_bytes, (bytes, bytearray)):
+            arch = arch_bytes.decode("utf-8", errors="replace")
+        else:
+            arch = bytes(arch_bytes).decode("utf-8", errors="replace")
+        ec_field = reader.fields.get(f"{arch}.expert_count")
+        if ec_field is not None:
+            val_arr = ec_field.parts[-1]
+            result = bool(val_arr is not None and len(val_arr) > 0 and int(val_arr[0]) > 0)
+        else:
+            result = False
+        _GGUF_EXPERT_CACHE[model_path] = result
+        return result
+    except Exception:
+        _GGUF_EXPERT_CACHE[model_path] = False
+        return False
 
 
 def cmd_fill_arch() -> None:
@@ -1340,6 +1689,13 @@ def _run_menu_cmd(cmd: str) -> None:
                 cmd_add(models, interactive=True)
             else:
                 print("  [WARN] Keine Modelle von LMS erhalten.")
+    elif cmd == "rm":
+        key = input("  Model-Key (z.B. Intel/gpt-oss-20b-gguf-q4ks-AutoRound): ").strip()
+        if not key:
+            print("[OK] Abgebrochen")
+        else:
+            delete_files = input("  Auch Dateien löschen (Config + Hub)? [y/N] ").strip().lower() == "y"
+            cmd_rm(key, delete_files=delete_files)
     else:
         dispatch[cmd]()
     if input("\nDrücke Enter für das Menü ... oder q für Quit: ").strip().lower() == "q":
@@ -1365,6 +1721,7 @@ def _interactive_menu() -> None:
         ("sync-ctx",  "Sync context_length from JSON configs into registry"),
         ("sync-from-configs", "Sync offload/np/UKV from configs into registry"),
         ("migrate-keys", "Re-key entries without publisher prefix"),
+        ("rm",        "Remove registry entry (optionally files + configs too)"),
     ]
 
     _print_menu(cmds)
@@ -1439,6 +1796,13 @@ def main() -> None:
         cmd_fmt()
     elif cmd == "migrate-keys":
         cmd_migrate_keys()
+    elif cmd == "rm":
+        if len(sys.argv) < 3:
+            print("[ERROR] Nutzung: python registry_tool.py rm <model-key> [--delete-files] [--yes]")
+            sys.exit(1)
+        delete_files = "--delete-files" in sys.argv
+        assume_yes = "--yes" in sys.argv
+        sys.exit(cmd_rm(sys.argv[2], delete_files=delete_files, assume_yes=assume_yes))
     elif cmd == "validate":
         cmd_validate()
     elif cmd == "sync":

@@ -92,6 +92,37 @@ The following overrides only override deviating category defaults:
 
 > `–` in the max_tokens column = category default applies (no override).
 
+## Stop-String Trap: `"\n```"` breaks Code-Block Opening (2026-08-01)
+
+**Symptom:** deepseek-r1-distill-qwen-14b scored 0% on DS1000 and CoderEval (20/20 `No code generated`,
+`tokens_out=0`, reasoning 237–1344 tokens) despite prompt hardening (`_THINKING_CODE_ONLY_SUFFIX`).
+
+**Root cause:** `STOP_TOKENS_CODING` contained `"\n```"`. DeepSeek R1 Distill starts its final answer
+(after thinking) with `\n```python` — i.e. the **opening** of a Markdown code block. LM Studio applies
+stop strings eagerly, so the answer was cut off right after the block opened → nearly empty content.
+
+Why only DeepSeek? Other models (Qwen3, LLaMA, ...) don't begin answers with `\n```; DeepSeek R1 Distill
+does, because the final answer starts with a code block (suffix forces this).
+
+**Live verification** (01.08.2026, direct API to localhost:1234, same prompt as benchmark run):
+
+| Stop list                          | content_len | Result                                  |
+|------------------------------------|-------------|-----------------------------------------|
+| `["\n```", "\n# Task", ...]` (alt) | 1 (`"\n"`) | finish_reason=stop, code killed at open |
+| no `\n``` ` stop                   | 338         | full code block                         |
+| `["\n```\n", "\n# Task", ...]`     | 338         | full code block, stops at **close**     |
+
+**Fix:** `custom_benchmark.py:192` — `"\n```"` → `"\n```\n"`. The trailing newline means the stop only
+matches the **closing** fence (`\n```\n`, line end) and never the opening (`\n```python`).
+
+**Result (verification run, seed 42, sample-size 20):** DS1000 **7/20 = 35%**, CoderEval **8/12 = 67%**
+(previously 0/0). No more `No code generated`; remaining failures are real code-quality issues.
+Consistent with older SS30 runs from 23./24.07. (40% / 58%) — the 0% runs were a regression, not model failure.
+
+> **General rule:** stop strings with ` ``` ` must include the trailing `\n` (`\n```\n`) for any
+> thinking/reasoning model whose final answer starts with a code block. The same applies to future
+> stop-list additions for other code benchmarks.
+
 ## --thinking Flag Behavior (v13 Clarification)
 
 The `--thinking` CLI flag has a limited effect since v13:
@@ -138,6 +169,32 @@ _is_qwen3_5_model) controls:
 MODEL_CONFIG in custom_benchmark.py now only contains the custom pipeline parameters.
 
 ## History
+
+### 2026-08-01
+- **BUGFIX stop-string kills code-block opening:** `STOP_TOKENS_CODING` (`custom_benchmark.py:192`)
+  `"\n```"` → `"\n```\n"`. Root cause: deepseek-r1-distill-qwen-14b begins its final answer with
+  `\n```python` (opening fence); the old stop matched the opening and aborted the response after ~0 tokens
+  (`No code generated`). Verified live (content_len 1 vs 338) and by re-run: DS1000 35%, CoderEval 67%
+  (seed 42, SS20) instead of 0%/0%. See "Stop-String Trap" section above.
+- **Prompt hardening verified:** `_THINKING_CODE_ONLY_SUFFIX` (`custom_benchmark.py:1541`) is effective —
+  with it the model returns ONLY a ` ```python ` block. The 0% results were caused by the stop string,
+  not by the suffix or thinking mode itself.
+
+### 2026-07-31
+- **Registry-driven enable_thinking (general solution):** `get_model_config()` now reads `reasoning: thinking`
+  from `model_registry.yaml` and forces `enable_thinking=True` — no `--thinking` flag needed. Explicit
+  `MODEL_TEMP_OVERRIDES` entries still win (kimi/qwen3.5/qwen3.6/gemma keep `enable_thinking=False` as
+  experimental workarounds). Affects both pipelines (custom + lm_eval via `_get_evaluation_parameters`).
+  Fixes deepseek-r1-distill-qwen-14b (registry `reasoning: thinking`, Qwen2 arch): quality over runtime.
+- **Qwen template detection broadened:** `_uses_qwen_template()` replaces the qwen3/qwen-3 name checks in
+  `generate_answer()` — covers Qwen-based distills (deepseek-r1-distill-qwen-14b) for
+  `chat_template_kwargs.enable_thinking`.
+- **Streaming reasoning deltas:** `_extract_reasoning_delta()` handles both formats:
+  - `delta.reasoning_content` — DeepSeek R1, LM Studio 0.3.9+ (App Settings > Developer
+    "Separate reasoning_content in Chat Completion responses"; blog/lmstudio-v0.3.9)
+  - `delta.reasoning` — gpt-oss, LM Studio 0.3.23+ (o3-mini-conform; docs/developer/api-changelog
+    "Reasoning content and tool-calling reliability")
+  Non-streaming fallback already read both `message.reasoning` and `message.reasoning_content`.
 
 ### 2026-07-28
 - **chat_template_kwargs nur fuer Qwen:** Parameter wird nur noch fuer Qwen3/Qwen3.5 Modelle verwendet. Quelle: https://github.com/lmstudio-ai/lmstudio-bug-tracker/issues/1573

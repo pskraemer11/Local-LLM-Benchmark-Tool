@@ -189,7 +189,12 @@ START_TIMEOUT = 30           # max seconds until first token
 FINISH_TIMEOUT = 25          # max seconds between tokens (stall detection)
 MAX_RETRIES = 3              # max retries on API errors
 RETRY_MULTIPLIER = 1.5       # Timeout-Multiplikator pro Retry
-STOP_TOKENS_CODING = ["\n```", "\n# Task", "\n// ", "<|endoftext|>"]
+# \n```\n (statt \n```) : "\n```" matcht die OEFFNUNG eines Markdown-Codeblocks
+# (Modelle wie deepseek-r1-distill-qwen-14b beginnen die Antwort mit "\n```python"),
+# schneidet die gesamte Antwort auf ~0 Tokens ab ("No code generated").
+# Mit folgendem Newline matcht der Stop nur das SCHLIESSEN des Blocks.
+# Siehe: Server-Experiment 01.08.2026 – DeepSeek-Verifikationslauf 0% trotz Prompt-Hardening.
+STOP_TOKENS_CODING = ["\n```\n", "\n# Task", "\n// ", "<|endoftext|>"]
 STOP_TOKENS_DEFAULT = ["<|endoftext|>"]
 
 BENCHMARKS = [
@@ -535,11 +540,12 @@ def _stream_chat_completion(url: str, headers: dict[str, str], body: dict[str, A
                                 with result_lock:
                                     result["usage"] = chunk["usage"]
                             delta = chunk.get("choices", [{}])[0].get("delta", {})
+                            reasoning_delta = _extract_reasoning_delta(delta)
                             with result_lock:
                                 if delta.get("content"):
                                     result["content"] += delta["content"]
-                                if delta.get("reasoning_content"):
-                                    result["thinking"] += delta["reasoning_content"]
+                                if reasoning_delta:
+                                    result["thinking"] += reasoning_delta
                         except json.JSONDecodeError:
                             pass
                 _set_result("done", True)
@@ -571,8 +577,13 @@ def _stream_chat_completion(url: str, headers: dict[str, str], body: dict[str, A
             with result_lock:
                 done = result["done"]
                 content = result["content"]
+                thinking = result["thinking"]
                 error = result["error"]
-            if done or content or error:
+            # Reasoning-Modelle (z.B. DeepSeek R1 Distill) streamen zunaechst
+            # NUR reasoning_content; content folgt erst nach dem Denken. Wird
+            # nur auf content gewartet, laeuft der Start-Timeout ab und der
+            # Stream wird abgebrochen, obwohl das Modell aktiv arbeitet.
+            if done or content or thinking or error:
                 break
             time.sleep(0.05)
         elapsed = time.time() - start
@@ -586,7 +597,7 @@ def _stream_chat_completion(url: str, headers: dict[str, str], body: dict[str, A
                 continue
             return None, elapsed, 0, 0, 0, 0, "api_error", error_val
         with result_lock:
-            has_content = bool(result["content"])
+            has_content = bool(result["content"]) or bool(result["thinking"])
             is_done = result["done"]
         if not has_content and not is_done:
             cancel_event.set()
@@ -603,7 +614,7 @@ def _stream_chat_completion(url: str, headers: dict[str, str], body: dict[str, A
             if is_done:
                 break
             with result_lock:
-                current_len = len(result["content"])
+                current_len = len(result["content"]) + len(result["thinking"])
             if current_len > last_content_len:
                 last_content_len = current_len
                 stall_start = time.time()
@@ -709,6 +720,9 @@ def _non_streaming_fallback(url: str, body: dict[str, Any], timeout: int) -> tup
         thinking_tokens = 0
         # gpt-oss: Reasoning ist in message.reasoning (nicht in content)
         reasoning_content = message.get("reasoning", "")
+        # DeepSeek R1 Distill etc.: LM Studio liefert reasoning_content
+        if not reasoning_content:
+            reasoning_content = message.get("reasoning_content", "")
         if reasoning_content:
             thinking_tokens = len(reasoning_content.split())
         content, think_tags = strip_thinking_tokens(raw_content)
@@ -720,6 +734,33 @@ def _non_streaming_fallback(url: str, body: dict[str, Any], timeout: int) -> tup
     except (URLError, HTTPError, json.JSONDecodeError, KeyError, TimeoutError) as e:
         error(f"API error (Fallback, {type(e).__name__}): {e}")
         return None, 0, 0, 0
+
+
+def _extract_reasoning_delta(delta: dict) -> str:
+    """Extract reasoning content from a streamed chat delta chunk.
+
+    The field name depends on model and LM Studio version:
+      - DeepSeek R1 (LM Studio 0.3.9+, App Settings > Developer
+        "Separate reasoning_content"): `delta.reasoning_content`
+      - gpt-oss (LM Studio 0.3.23+, o3-mini-conform, see
+        /docs/developer/api-changelog): `delta.reasoning`
+    Returns "" when no reasoning content is present.
+    """
+    reasoning = delta.get("reasoning_content")
+    if reasoning is None and isinstance(delta.get("reasoning"), str):
+        reasoning = delta["reasoning"]
+    return reasoning or ""
+
+
+def _uses_qwen_template(model_identifier: Optional[str]) -> bool:
+    """True if the model uses the Qwen chat template.
+
+    chat_template_kwargs (enable_thinking / reasoning_effort) is only
+    supported by Qwen-based templates. This covers Qwen3/Qwen3.5 and
+    Qwen-based distills (e.g. deepseek-r1-distill-qwen-14b), which ship
+    a Qwen2 arch with the Qwen chat template.
+    """
+    return bool(model_identifier) and "qwen" in model_identifier.lower()
 
 
 def generate_answer(cfg: GenerationConfig) -> tuple[Optional[str], float, int, int, float, int, Optional[str], Optional[str]]:
@@ -745,8 +786,9 @@ def generate_answer(cfg: GenerationConfig) -> tuple[Optional[str], float, int, i
     # Quellen:
     #   - gpt-oss: LM Studio native REST API /api/v1/chat (reasoning-Parameter)
     #     Docs: https://lmstudio.ai/docs/developer/rest/chat
-    #   - Qwen3/Qwen3.5: chat_template_kwargs (nur fuer Qwen-Modelle)
-    #     Quelle: https://github.com/lmstudio-ai/lmstudio-bug-tracker/issues/1573
+    #   - Qwen3/Qwen3.5 und Qwen-basierte Distills: chat_template_kwargs
+    #     (nur fuer Qwen-Templates) Quelle:
+    #     https://github.com/lmstudio-ai/lmstudio-bug-tracker/issues/1573
     #
     # WICHTIG: chat_template_kwargs ist KEIN OpenAI-Standard-Parameter und wird
     #   nur von Qwen-Modellen unterstuetzt. Fuer andere Modelle keine
@@ -756,7 +798,7 @@ def generate_answer(cfg: GenerationConfig) -> tuple[Optional[str], float, int, i
         if cfg.model_identifier and "gpt-oss" in cfg.model_identifier.lower():
             body["reasoning_effort"] = "low"
             body["max_thinking_tokens"] = 200
-        elif cfg.model_identifier and any(p in cfg.model_identifier.lower() for p in ["qwen3", "qwen-3"]):
+        elif _uses_qwen_template(cfg.model_identifier):
             body["chat_template_kwargs"] = {"enable_thinking": False}
     elif cfg.is_thinking_enabled is not None or cfg.reasoning_effort is not None:
         kwargs = {}
@@ -768,7 +810,7 @@ def generate_answer(cfg: GenerationConfig) -> tuple[Optional[str], float, int, i
             if cfg.reasoning_effort is not None:
                 body["reasoning_effort"] = cfg.reasoning_effort
             body["max_thinking_tokens"] = 200
-        elif cfg.model_identifier and any(p in cfg.model_identifier.lower() for p in ["qwen3", "qwen-3"]):
+        elif _uses_qwen_template(cfg.model_identifier):
             body["chat_template_kwargs"] = kwargs
     if cfg.stop:
         body["stop"] = cfg.stop
@@ -1463,6 +1505,7 @@ def run_task(task: dict[str, Any], task_type: str, model_identifier: Optional[st
 
     no_system_msg = model_config.get("no_system_msg", False)
     max_tokens_task = model_config.get("max_tokens", MAX_TOKENS_GENERAL)
+    code_only = bool(model_config.get("enable_thinking"))
 
     # Qwen3.5 compatibility: embed system message in user prompt
     if no_system_msg and IS_QWEN_PROMPT_MODE:
@@ -1473,7 +1516,7 @@ def run_task(task: dict[str, Any], task_type: str, model_identifier: Optional[st
         entry_point = task.get("entry_point", "")
         tests_field = task.get("tests", [])
         setup_code = task.get("setup_code", "")
-        full_prompt = _make_codereval_prompt(prompt, entry_point)
+        full_prompt = _make_codereval_prompt(prompt, entry_point, code_only=code_only)
         result = _call_and_evaluate(full_prompt, generation_parameters, model_identifier, entry_point, tests_field, "", setup_code)
         return result
 
@@ -1481,7 +1524,7 @@ def run_task(task: dict[str, Any], task_type: str, model_identifier: Optional[st
         entry_point = task.get("entry_point", "")
         tests_field = task.get("tests", [])
         reference_code = task.get("reference_code", "")
-        full_prompt = _make_datascience_prompt(prompt, entry_point)
+        full_prompt = _make_datascience_prompt(prompt, entry_point, code_only=code_only)
         setup_code = _extract_setup_code(task, prompt, reference_code)
         result = _call_and_evaluate(full_prompt, generation_parameters, model_identifier, entry_point, tests_field, reference_code, setup_code)
         try:
@@ -1496,17 +1539,32 @@ def run_task(task: dict[str, Any], task_type: str, model_identifier: Optional[st
             "tokens_in": 0, "tokens_out": 0, "tokens_per_sec": 0, "thinking_tokens": 0}
 
 
-def _make_codereval_prompt(prompt: str, entry_point: str) -> str:
+# Thinking-Modelle (enable_thinking=True) neigen dazu, statt Code eine
+# Erklaerung auszugeben ("No code generated" – beobachtet 2026-07-31 bei
+# DeepSeek R1 Distill Qwen 14B). Haertung: finale Antwort = NUR Code in
+# einem ```python-Block, Erklaerungen gehoeren in die Thinking-Phase.
+_THINKING_CODE_ONLY_SUFFIX = (
+    "\n\nIMPORTANT: You may reason during your thinking phase, but your FINAL "
+    "answer must contain ONLY the complete Python code inside a single "
+    "```python code block. No explanations, no prose, no commentary."
+)
+
+
+def _make_codereval_prompt(prompt: str, entry_point: str, code_only: bool = False) -> str:
     full = "Complete the following Python function. Output only the function code, no additional text.\n\n" + prompt
     if entry_point:
         full += f"\n\nCreate the function `{entry_point}`."
+    if code_only:
+        full += _THINKING_CODE_ONLY_SUFFIX
     return full
 
 
-def _make_datascience_prompt(prompt: str, entry_point: str) -> str:
+def _make_datascience_prompt(prompt: str, entry_point: str, code_only: bool = False) -> str:
     full = "Complete the following Python code. Only output the code, no additional text.\n\n" + prompt
     if entry_point:
         full += f"\n\nCreate the function `{entry_point}`."
+    if code_only:
+        full += _THINKING_CODE_ONLY_SUFFIX
     return full
 
 

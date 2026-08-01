@@ -7,7 +7,7 @@ test coverage was the largest gap in the review.
 Targets:
   5.1  _max_ctx_from_vram() and VRAM constants
   5.2  Match cascade in cmd_configs (registry ↔ JSON config)
-  5.3  _infer_num_parallel() with all keyword rules
+  5.3  _infer_num_parallel() classification rules (post-refactoring)
 """
 from __future__ import annotations
 
@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import registry_tool as rt
 from registry_tool import (
+    _classify_arch,
     _infer_num_parallel,
     _max_ctx_from_vram,
     _KV_BYTES,
@@ -303,67 +304,64 @@ class TestMatchCascade:
 
 
 # ─────────────────────────────────────────────────────────────────────
-# 5.3 _infer_num_parallel
+# 5.3 _infer_num_parallel / _classify_arch
 # ─────────────────────────────────────────────────────────────────────
 
+class TestClassifyArch:
+    """Classification nach Refactoring 2026-07-31: GGUF expert_count als
+    Single Source of Truth für MoE, "mtp"-Keyword im Namen, sonst dense."""
+
+    def test_gguf_with_experts_returns_moe(self, tmp_path):
+        fake = tmp_path / "model.gguf"
+        fake.write_bytes(b"x")
+        with patch.object(rt, "_gguf_has_experts", return_value=True) as g:
+            assert _classify_arch("some-model", str(fake)) == "moe"
+            g.assert_called_once_with(str(fake))
+
+    def test_gguf_without_experts_falls_back_to_mtp_keyword(self, tmp_path):
+        fake = tmp_path / "model.gguf"
+        fake.write_bytes(b"x")
+        with patch.object(rt, "_gguf_has_experts", return_value=False):
+            assert _classify_arch("qwen3.6-27b-mtp", str(fake)) == "mtp"
+
+    def test_gguf_without_experts_dense(self, tmp_path):
+        fake = tmp_path / "model.gguf"
+        fake.write_bytes(b"x")
+        with patch.object(rt, "_gguf_has_experts", return_value=False):
+            assert _classify_arch("llama-3.1-8b", str(fake)) == "dense"
+
+    def test_missing_path_ignores_gguf(self):
+        assert _classify_arch("gemma-4-26b-a4b", "C:/does/not/exist.gguf") == "dense"
+
+    def test_mtp_keyword_in_identifier(self):
+        assert _classify_arch("unsloth/qwen3.6-27b-mtp") == "mtp"
+
+    def test_empty_input_returns_dense(self):
+        assert _classify_arch("") == "dense"
+
+
 class TestInferNumParallel:
-    """Rules: ERNIE → 1, High-Expert MoE → 2/3, MoE → 4, GPT-OSS → 4, MTP → 2, Dense → 1."""
+    """Rules (nach Refactoring 2026-07-31): ``"moe"`` / ``"mtp"`` → 4, sonst → 1.
 
-    def test_dense_default(self):
-        assert _infer_num_parallel("Llama Dense", "llama-3.1-8b") == 1
+    Die alte Heuristik (ERNIE→1, GPT-OSS→4, MTP→2, a3b/a4b-Keywords) wurde
+    entfernt: MoE-Erkennung kommt jetzt aus dem GGUF-``expert_count``
+    (Single Source of Truth, siehe ``_classify_arch``).
+    """
 
-    def test_ernie_forced_to_1(self):
-        assert _infer_num_parallel("ERNIE MoE", "baidu/ernie-4.5-21b") == 1
+    def test_moe_returns_4(self):
+        assert _infer_num_parallel("moe") == 4
 
-    def test_ernie_substring(self):
-        assert _infer_num_parallel("Something-ernie-like", "any-model") == 1
+    def test_mtp_returns_4(self):
+        assert _infer_num_parallel("mtp") == 4
 
-    def test_moe_in_arch(self):
-        assert _infer_num_parallel("Llama MoE", "model") == 4
+    def test_dense_returns_1(self):
+        assert _infer_num_parallel("dense") == 1
 
-    def test_moe_substring_in_key_a4b(self):
-        assert _infer_num_parallel("Llama Dense", "gemma-4-26b-a4b") == 4
+    def test_unknown_classification_returns_1(self):
+        assert _infer_num_parallel("unknown-arch") == 1
 
-    def test_moe_substring_in_key_a3b(self):
-        assert _infer_num_parallel("Llama Dense", "kimi-linear-35b-a3b") == 4
-
-    def test_moe_substring_a2b(self):
-        assert _infer_num_parallel("Llama Dense", "lfm2-24b-a2b") == 4
-
-    def test_moe_substring_kimi(self):
-        assert _infer_num_parallel("Llama Dense", "kimi-linear-48b-a3b") == 4
-
-    def test_moe_substring_glm_flash(self):
-        # GLM-4.7 Flash: 24 experts → VRAM-bound at 16 GB
-        assert _infer_num_parallel("Llama Dense", "glm-4.7-flash") == 2
-
-    def test_gpt_oss_forced_to_4(self):
-        assert _infer_num_parallel("GPT-OSS Dense", "openai/gpt-oss-20b") == 4
-
-    def test_gpt_oss_underscore_alias(self):
-        assert _infer_num_parallel("Llama", "gpt_oss_20b") == 4
-
-    def test_mtp_forced_to_2(self):
-        assert _infer_num_parallel("Qwen Dense", "qwen3.6-27b-mtp") == 2
-
-    def test_priority_ernie_beats_moe(self):
-        assert _infer_num_parallel("ERNIE MoE", "model-a4b") == 1
-
-    def test_priority_moe_beats_a4b_keyword(self):
-        assert _infer_num_parallel("Custom MoE", "model-a4b") == 4
-
-    def test_priority_kimi_beats_a4b(self):
-        assert _infer_num_parallel("Llama", "kimi-a4b") == 4
-
-    def test_qwen3_moe_16_experts(self):
-        # Qwen3 MoE: 16 experts at 16 GB VRAM → np=3
-        assert _infer_num_parallel("Qwen3 MoE", "unsloth/qwen3-30b-a3b-instruct-2507") == 3
-        assert _infer_num_parallel("Qwen3 MoE", "unsloth/qwen3-coder-30b-a3b-instruct") == 3
-        assert _infer_num_parallel("Qwen3 MoE", "mradermacher/qwen3.6-28b-reap-i1@iq3_s") == 3
-
-    def test_qwen3_dense_unchanged(self):
-        # Qwen3 Dense (no a3b/a4b) → 1
-        assert _infer_num_parallel("Qwen Dense", "qwen/qwen3-14b") == 1
+    def test_empty_returns_1(self):
+        assert _infer_num_parallel("") == 1
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -401,3 +399,320 @@ class TestCmdConfigsIntegration:
             data = json.load(f)
         # JSON should be unchanged (no new fields added)
         assert data["load"]["fields"] == []
+
+
+# ─────────────────────────────────────────────────────────────────────
+# cmd_fix_np: exaktes lms-Matching + Duplikat-Kollaps
+# ─────────────────────────────────────────────────────────────────────
+
+class TestFixNp:
+    """cmd_fix_np nach Verschärfung 2026-07-31.
+
+    Früher genügte der Besitz von ≥2 signifikanten Wörtern (Fuzz-Match),
+    wodurch Phantom-Varianten (-ud, -mxfp4, -imatrix, doppelte Publisher)
+    und Duplikate in der Registry überlebten. Jetzt gilt:
+    - exakter normalize-Match gegen die lms-Key-Varianten, oder
+    - eigene GGUF-Datei, oder
+    - Auflösung auf eine Datei, die einem lms-Modell gehört → Duplikat
+    Mehrere Registry-Keys auf dasselbe Ziel → nur der beste bleibt.
+    """
+
+    def _run(self, registry, lms_models, tmp_path, resolve="", gguf_experts=False):
+        saved = {}
+        if callable(resolve):
+            resolve_patch = patch.object(rt, "_resolve_model_path_multi", side_effect=resolve)
+        else:
+            resolve_patch = patch.object(rt, "_resolve_model_path_multi", return_value=resolve)
+        with patch.object(rt, "load_registry", return_value=registry), \
+             patch.object(rt, "save_registry", side_effect=lambda r: saved.update(r)), \
+             patch.object(rt, "_run_lms_ls", return_value=lms_models), \
+             patch.object(rt, "MODELS_CACHE", tmp_path), \
+             patch.object(rt, "_GGUF_FILE_CACHE", None), \
+             resolve_patch, \
+             patch.object(rt, "_gguf_has_experts", return_value=gguf_experts):
+            rt.cmd_fix_np()
+        return saved
+
+    def test_normalize_variants_strips_publisher_and_underscore(self):
+        assert rt._normalize_variants("unsloth/phi-4") == {"phi-4"}
+        assert rt._normalize_variants("['microsoft', 'unsloth']/phi-4") == {"phi-4"}
+        assert rt._normalize_variants("mistralai_magistral-small-2509") == {
+            "mistralai-magistral-small-2509",
+        }
+        assert rt._normalize_variants("qwen3.6-27b@q5_0") == {"qwen3-6-27b"}
+
+    def test_quant_suffixed_keys_stay_distinct(self, tmp_path):
+        # lms unterscheidet Quants; @-Keys dürfen NICHT als Duplikate
+        # voneinander gelöscht werden (ehemalige Kollision: base-Variante
+        # ist für alle Quants identisch).
+        (tmp_path / "q").mkdir(parents=True)
+        for f in ("q5_0.gguf", "q6_k.gguf"):
+            (tmp_path / "q" / f).write_bytes(b"x")
+        lms = [
+            {"modelKey": "qwen2.5-coder-14b-instruct@q5_0", "path": "q/q5_0.gguf"},
+            {"modelKey": "qwen2.5-coder-14b-instruct@q6_k", "path": "q/q6_k.gguf"},
+        ]
+        registry = {
+            "qwen2.5-coder-14b-instruct@q5_0": {"file_size_bytes": 1},
+            "qwen2.5-coder-14b-instruct@q6_k": {"file_size_bytes": 2},
+        }
+        saved = self._run(registry, lms, tmp_path)
+        assert set(saved) == {
+            "qwen2.5-coder-14b-instruct@q5_0",
+            "qwen2.5-coder-14b-instruct@q6_k",
+        }
+
+    def test_duplicate_publisher_keys_collapse_keeping_best(self, tmp_path):
+        # unsloth/phi-4 (Publisher im lms-Key enthalten → Score-Bonus)
+        # gewinnt gegen ['microsoft', 'unsloth']/phi-4.
+        p = tmp_path / "unsloth" / "phi-4"
+        p.mkdir(parents=True)
+        (p / "phi-4-Q5_K_M.gguf").write_bytes(b"x")
+        lms = [{"modelKey": "unsloth/phi-4", "path": "unsloth/phi-4/phi-4-Q5_K_M.gguf"}]
+        registry = {
+            "unsloth/phi-4": {"file_size_bytes": 1},
+            "['microsoft', 'unsloth']/phi-4": {"file_size_bytes": 1},
+        }
+        saved = self._run(registry, lms, tmp_path)
+        assert set(saved) == {"unsloth/phi-4"}
+
+    def test_phantom_without_lms_and_without_file_is_removed(self, tmp_path):
+        lms = [{"modelKey": "unsloth/phi-4", "path": "unsloth/phi-4/phi-4-Q5_K_M.gguf"}]
+        registry = {
+            "unsloth/phi-4": {"file_size_bytes": 1},
+            "bartowski/gpt-oss-20b": {"file_size_bytes": 1},          # kein lms, keine Datei
+            "unsloth/qwen3.6-27b-ud": {"file_size_bytes": 1},         # Varianten-Phantom
+            "google/gemma-4-26b-a4b-it-quat@q4_0": {"file_size_bytes": 1},
+        }
+        saved = self._run(registry, lms, tmp_path)
+        assert set(saved) == {"unsloth/phi-4"}
+
+    def test_duplicate_via_file_resolution_is_removed(self, tmp_path):
+        # mistralai/magistral-small-2509 hat KEINEN exakten Key-Match,
+        # löst aber auf die Datei von lms 'mistralai_magistral-small-2509'
+        # auf → Duplikat. Der exakt passende bartowski-Key bleibt.
+        p = tmp_path / "bartowski" / "mistralai_Magistral-Small-2509-GGUF"
+        p.mkdir(parents=True)
+        mag = p / "mistralai_Magistral-Small-2509-Q3_K_M.gguf"
+        mag.write_bytes(b"x")
+
+        lms = [{
+            "modelKey": "mistralai_magistral-small-2509",
+            "path": "bartowski/mistralai_Magistral-Small-2509-GGUF/mistralai_Magistral-Small-2509-Q3_K_M.gguf",
+        }]
+        registry = {
+            "bartowski/mistralai_magistral-small-2509": {"file_size_bytes": 1},
+            "mistralai/magistral-small-2509": {"file_size_bytes": 1},
+            "mistralai/magistral-small": {"file_size_bytes": 1},
+        }
+        saved = self._run(registry, lms, tmp_path)
+        assert set(saved) == {"bartowski/mistralai_magistral-small-2509"}
+
+    def test_ud_entry_resolving_to_base_file_is_duplicate(self, tmp_path):
+        # unsloth/qwen3.6-27b-ud besitzt keine eigene Datei; die Auflösung
+        # landet auf der Datei des MTP-Modells → Duplikat, Basismodelle
+        # bleiben beide erhalten.
+        p = tmp_path / "unsloth" / "qwen3.6-27b-mtp"
+        p.mkdir(parents=True)
+        ud_file = p / "Qwen3.6-27B-UD-IQ3_XXS.gguf"
+        ud_file.write_bytes(b"x")
+        lms = [
+            {"modelKey": "qwen3.6-27b", "path": "unsloth/qwen3.6-27b/Qwen3.6-27B-Q3_K_S.gguf"},
+            {"modelKey": "qwen3.6-27b-mtp", "path": "unsloth/qwen3.6-27b-mtp/Qwen3.6-27B-UD-IQ3_XXS.gguf"},
+        ]
+        registry = {
+            "unsloth/qwen3.6-27b": {"file_size_bytes": 1},
+            "unsloth/qwen3.6-27b-mtp": {"file_size_bytes": 1},
+            "unsloth/qwen3.6-27b-ud": {"file_size_bytes": 1},
+        }
+
+        def fake_resolve(key):
+            if key == "unsloth/qwen3.6-27b-ud":
+                return str(ud_file)
+            return ""
+
+        with patch.object(rt, "_resolve_model_path_multi", side_effect=fake_resolve):
+            saved = self._run(registry, lms, tmp_path)
+        assert set(saved) == {"unsloth/qwen3.6-27b", "unsloth/qwen3.6-27b-mtp"}
+
+    def test_directory_models_keep_best_publisher_key(self, tmp_path):
+        # openai/gpt-oss-20b ist ein Verzeichnis-Modell (kein GGUF).
+        # Alle drei Registry-Keys matchen exakt; der mit dem Publisher,
+        # der im lms-Key vorkommt, gewinnt.
+        lms = [{"modelKey": "openai/gpt-oss-20b", "path": "openai/gpt-oss-20b"}]
+        registry = {
+            "openai/gpt-oss-20b": {"file_size_bytes": 1},
+            "lmstudio-community/gpt-oss-20b": {"file_size_bytes": 1},
+            "unsloth/gpt-oss-20b": {"file_size_bytes": 1},
+        }
+        saved = self._run(registry, lms, tmp_path)
+        assert set(saved) == {"openai/gpt-oss-20b"}
+
+    def test_classification_applied_to_survivors(self, tmp_path):
+        p = tmp_path / "unsloth" / "qwen3.6-27b"
+        p.mkdir(parents=True)
+        (p / "Qwen3.6-27B-Q3_K_S.gguf").write_bytes(b"x")
+        lms = [{"modelKey": "qwen3.6-27b", "path": "unsloth/qwen3.6-27b/Qwen3.6-27B-Q3_K_S.gguf"}]
+        registry = {"unsloth/qwen3.6-27b": {"file_size_bytes": 1}}
+        saved = self._run(registry, lms, tmp_path, gguf_experts=True)
+        assert saved["unsloth/qwen3.6-27b"]["arch"] == "moe"
+        assert saved["unsloth/qwen3.6-27b"]["num_parallel"] == 4
+
+    def test_no_lms_data_means_no_duplicate_collapse(self, tmp_path):
+        # lms ls fehlgeschlagen (leere Liste): Quant-Varianten dürfen NICHT
+        # kollabieren (Regression: qwen2.5-coder-14b-instruct@q6_k wurde
+        # fälschlich als "Duplikat von @q5_0" gelöscht). Jede Quant-Datei
+        # existiert eigenständig → beide Einträge bleiben erhalten.
+        p = tmp_path / "Qwen" / "Qwen2.5-Coder-14B-Instruct-GGUF"
+        p.mkdir(parents=True)
+        (p / "qwen2.5-coder-14b-instruct-q5_0.gguf").write_bytes(b"x")
+        (p / "qwen2.5-coder-14b-instruct-q6_k.gguf").write_bytes(b"x")
+        registry = {
+            "qwen/qwen2.5-coder-14b-instruct@q5_0": {"file_size_bytes": 1},
+            "qwen/qwen2.5-coder-14b-instruct@q6_k": {"file_size_bytes": 1},
+        }
+        saved = self._run(registry, [], tmp_path)
+        assert set(saved) == {
+            "qwen/qwen2.5-coder-14b-instruct@q5_0",
+            "qwen/qwen2.5-coder-14b-instruct@q6_k",
+        }
+
+
+# ─────────────────────────────────────────────────────────────────────
+# GGUF-Reasoning-Erkennung (_read_gguf_arch / _detect_reasoning_from_template)
+# ─────────────────────────────────────────────────────────────────────
+
+def _make_mini_gguf(block_count: int, embedding_length: int, chat_template: str | None) -> bytes:
+    """Synthetischer GGUF-Header: block_count/embedding_length VOR chat_template."""
+    import struct
+
+    buf = bytearray(b"GGUF")
+    buf += struct.pack("<IQ", 3, 0)  # version, tensor_count
+    kvs = []
+    for key, vtype, payload in [
+        ("qwen2.block_count", 4, struct.pack("<I", block_count)),
+        ("qwen2.embedding_length", 4, struct.pack("<I", embedding_length)),
+    ]:
+        kb = key.encode("utf-8")
+        kvs.append((kb, vtype, payload))
+    if chat_template is not None:
+        tb = chat_template.encode("utf-8")
+        kvs.append((b"tokenizer.chat_template", 8, struct.pack("<Q", len(tb)) + tb))
+    buf += struct.pack("<Q", len(kvs))
+    for kb, vtype, payload in kvs:
+        buf += struct.pack("<Q", len(kb)) + kb
+        buf += struct.pack("<I", vtype)
+        buf += payload
+    return bytes(buf)
+
+
+class TestReadGgufArchReasoning:
+    """_read_gguf_arch liest tokenizer.chat_template auch NACH block_count/embedding_length."""
+
+    def test_reasoning_detected_when_template_after_arch(self, tmp_path):
+        p = tmp_path / "model.gguf"
+        p.write_bytes(_make_mini_gguf(48, 5120, "{% if enable_thinking %}<think>{% endif %}"))
+        nl, hd, is_reasoning = rt._read_gguf_arch(str(p))
+        assert nl == 48
+        assert hd == 5120
+        assert is_reasoning is True
+
+    def test_no_template_yields_false(self, tmp_path):
+        p = tmp_path / "model.gguf"
+        p.write_bytes(_make_mini_gguf(48, 5120, None))
+        nl, hd, is_reasoning = rt._read_gguf_arch(str(p))
+        assert (nl, hd, is_reasoning) == (48, 5120, False)
+
+    def test_corrupt_file_yields_none(self, tmp_path):
+        p = tmp_path / "broken.gguf"
+        p.write_bytes(b"not a gguf file")
+        assert rt._read_gguf_arch(str(p)) == (None, None, None)
+
+
+class TestDetectReasoningFromTemplate:
+    """Template-Marker der real installierten Modelle (deepseek-r1-distill, gpt-oss Harmony)."""
+
+    def test_enable_thinking_marker(self):
+        assert rt._detect_reasoning_from_template("{% if enable_thinking %}...{% endif %}") is True
+
+    def test_reasoning_effort_marker(self):
+        assert rt._detect_reasoning_from_template("{% if reasoning_effort %}...{% endif %}") is True
+
+    def test_think_tag_marker(self):
+        assert rt._detect_reasoning_from_template("{% if '</think>' in content %}") is True
+
+    def test_analysis_channel_marker(self):
+        assert rt._detect_reasoning_from_template("<|start|>assistant<|channel|>analysis<|message|>") is True
+
+    def test_plain_qwen2_template_is_not_reasoning(self):
+        assert rt._detect_reasoning_from_template("{% for message in messages %}...{% endfor %}") is False
+
+
+# ─────────────────────────────────────────────────────────────────────
+# 5.8 rm command (Fix 2026-07-31: Registry bereinigen)
+# ─────────────────────────────────────────────────────────────────────
+
+class TestCmdRm:
+    """registry_tool.py rm – Registry-Eintrag löschen (+ optional Dateien)."""
+
+    def _write_registry(self, path, entries):
+        with open(path, "w", encoding="utf-8") as f:
+            rt.y.dump(entries, f)
+
+    def test_removes_entry_by_full_key(self, tmp_path, monkeypatch):
+        reg_path = tmp_path / "registry.yaml"
+        self._write_registry(reg_path, {
+            "Intel/gpt-oss-20b-gguf-q4ks-AutoRound": {"reasoning": "thinking", "offload": 1.0},
+            "openai/gpt-oss-20b": {"reasoning": "thinking"},
+        })
+        monkeypatch.setattr(rt, "REGISTRY_PATH", reg_path)
+        monkeypatch.setattr(rt, "CONFIG_ROOT", tmp_path / "empty")
+        rc = rt.cmd_rm("Intel/gpt-oss-20b-gguf-q4ks-AutoRound", assume_yes=True)
+        assert rc == 0
+        reg = rt.load_registry(reg_path)
+        assert "Intel/gpt-oss-20b-gguf-q4ks-AutoRound" not in reg
+        assert "openai/gpt-oss-20b" in reg
+
+    def test_removes_entry_by_short_key(self, tmp_path, monkeypatch):
+        reg_path = tmp_path / "registry.yaml"
+        self._write_registry(reg_path, {"Intel/gpt-oss-20b-gguf-q4ks-AutoRound": {"reasoning": "thinking"}})
+        monkeypatch.setattr(rt, "REGISTRY_PATH", reg_path)
+        monkeypatch.setattr(rt, "CONFIG_ROOT", tmp_path / "empty")
+        assert rt.cmd_rm("gpt-oss-20b-gguf-q4ks-AutoRound", assume_yes=True) == 0
+        assert rt.load_registry(reg_path) == {}
+
+    def test_unknown_key_returns_error(self, tmp_path, monkeypatch):
+        reg_path = tmp_path / "registry.yaml"
+        self._write_registry(reg_path, {"openai/gpt-oss-20b": {"reasoning": "thinking"}})
+        monkeypatch.setattr(rt, "REGISTRY_PATH", reg_path)
+        monkeypatch.setattr(rt, "CONFIG_ROOT", tmp_path / "empty")
+        assert rt.cmd_rm("nicht-vorhanden", assume_yes=True) == 1
+        assert "openai/gpt-oss-20b" in rt.load_registry(reg_path)
+
+    def test_abort_without_yes(self, tmp_path, monkeypatch):
+        reg_path = tmp_path / "registry.yaml"
+        self._write_registry(reg_path, {"openai/gpt-oss-20b": {"reasoning": "thinking"}})
+        monkeypatch.setattr(rt, "REGISTRY_PATH", reg_path)
+        monkeypatch.setattr(rt, "CONFIG_ROOT", tmp_path / "empty")
+        monkeypatch.setattr("builtins.input", lambda *a, **k: "n")
+        assert rt.cmd_rm("openai/gpt-oss-20b") == 0
+        assert "openai/gpt-oss-20b" in rt.load_registry(reg_path)
+
+    def test_delete_files_removes_config_and_backup(self, tmp_path, monkeypatch):
+        reg_path = tmp_path / "registry.yaml"
+        self._write_registry(reg_path, {
+            "Intel/gpt-oss-20b-gguf-q4ks-AutoRound": {"reasoning": "thinking"},
+        })
+        cfg_dir = tmp_path / "configs" / "Intel" / "gpt-oss-20b-gguf-q4ks-AutoRound"
+        cfg_dir.mkdir(parents=True)
+        cfg_file = cfg_dir / "gpt-oss-20b-32x2.4B-Q4_K_S.gguf.json"
+        cfg_file.write_text(json.dumps({"operation": {"fields": []}}), encoding="utf-8")
+        backup = cfg_dir / "gpt-oss-20b-32x2.4B-Q4_K_S.gguf.json.bak-20260731_120000"
+        backup.write_text("backup", encoding="utf-8")
+        monkeypatch.setattr(rt, "REGISTRY_PATH", reg_path)
+        monkeypatch.setattr(rt, "CONFIG_ROOT", tmp_path / "configs")
+        assert rt.cmd_rm("Intel/gpt-oss-20b-gguf-q4ks-AutoRound",
+                         delete_files=True, assume_yes=True) == 0
+        assert not cfg_file.exists()
+        assert not backup.exists()
+        assert rt.load_registry(reg_path) == {}
