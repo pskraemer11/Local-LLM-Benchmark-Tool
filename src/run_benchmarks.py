@@ -165,6 +165,133 @@ def _is_gptoss_model(model_identifier: str) -> bool:
 def _is_gemma_model(model_identifier: str) -> bool:
     return "gemma" in model_identifier.lower()
 
+# ── GGUF EOS lookup (for tasks without YAML until sequences, e.g. IFEval) ──
+# Root cause of IFEval HTTP 500 "does not match the expected peg-native format"
+# (llama.cpp post-generation PEG parser, see ggml-org/llama.cpp #20260):
+# ifeval.yaml ships `until: []`, so no stop string is sent to the engine and
+# the model generates freely until its own EOS – at extreme quants (e.g. Jamba2
+# IQ2_XXS) this frequently produces output that violates the model's chat
+# template format. Other lm_eval tasks define `until` in their YAML and are
+# unaffected. Fix: resolve the model's EOS token from the GGUF header and send
+# it as `eos_string` (-> `stop` in the OpenAI payload) for such tasks.
+_GGUF_EOS_CACHE: dict[str, Optional[str]] = {}
+_GGUF_EOS_LOCK = threading.Lock()
+
+def _resolve_model_gguf_path(model_identifier: str) -> Optional[str]:
+    """Find the model's GGUF file under the LM Studio models cache.
+
+    Substring match on the normalised identifier suffix (like
+    registry_tool._resolve_model_path_multi, but self-contained).
+    """
+    models_root = os.path.expanduser(os.path.join("~", ".lmstudio", "models"))
+    if not os.path.isdir(models_root):
+        return None
+    suffix = model_identifier.split("/", 1)[1] if "/" in model_identifier else model_identifier
+    suffix_norm = suffix.replace("_", "").replace("-", "").replace("@", "").lower()
+    for g in sorted(glob.glob(os.path.join(models_root, "**", "*.gguf"), recursive=True)):
+        if "mmproj" in os.path.basename(g).lower():
+            continue
+        g_norm = os.path.basename(g).replace("_", "").replace("-", "").lower()
+        if suffix_norm and suffix_norm in g_norm:
+            return g
+    return None
+
+
+def _get_model_eos_string(model_identifier: str) -> Optional[str]:
+    """Return the EOS token string of a model from its GGUF header (cached).
+
+    Reads tokenizer.ggml.eos_token_id + the interleaved string-array vocab
+    (GGUF v3: header parts, then per string [uint64 length, uint8 data]).
+    Returns None on any parse failure – callers must keep the previous behaviour.
+    """
+    with _GGUF_EOS_LOCK:
+        if model_identifier in _GGUF_EOS_CACHE:
+            return _GGUF_EOS_CACHE[model_identifier]
+    path = _resolve_model_gguf_path(model_identifier)
+    if not path:
+        _GGUF_EOS_CACHE[model_identifier] = None
+        return None
+    try:
+        from gguf import GGUFReader  # installed; used by registry_tool.py
+        reader = GGUFReader(path)
+        eos_field = reader.fields.get("tokenizer.ggml.eos_token_id")
+        tokens_field = reader.fields.get("tokenizer.ggml.tokens")
+        if eos_field is None or tokens_field is None:
+            _GGUF_EOS_CACHE[model_identifier] = None
+            return None
+        eos_id = int(eos_field.parts[-1][0])
+        parts = tokens_field.parts
+        # Header: 5 parts (key len, key bytes, vtype, elem type, count),
+        # then per token [uint64 length, uint8 data].
+        if len(parts) < 7 + 2 * eos_id + 1:
+            _GGUF_EOS_CACHE[model_identifier] = None
+            return None
+        length = int(parts[5 + 2 * eos_id][0])
+        raw = bytes(parts[6 + 2 * eos_id][:length])
+        eos_str = raw.decode("utf-8", errors="replace")
+        result = eos_str if eos_str else None
+    except Exception:
+        result = None
+    _GGUF_EOS_CACHE[model_identifier] = result
+    return result
+
+
+def _task_yaml_has_until_sequence(task_name: str) -> bool:
+    """Check whether the task's YAML defines `generation_kwargs.until`.
+
+    Looks in the custom lm_eval_tasks dir first, then in the installed
+    lm_eval package. Returns True on any read failure (conservative: keep
+    the existing behaviour of NOT sending an eos_string).
+    """
+    candidates = [
+        os.path.join(LMEVAL_TASKS_DIR, f"{task_name}.yaml"),
+        os.path.join(LMEVAL_TASKS_DIR, task_name, f"{task_name}.yaml"),
+    ]
+    try:
+        import lm_eval  # noqa: F401
+        lm_eval_tasks = os.path.join(os.path.dirname(lm_eval.__file__), "tasks")
+        candidates += [
+            os.path.join(lm_eval_tasks, f"{task_name}.yaml"),
+            os.path.join(lm_eval_tasks, task_name, f"{task_name}.yaml"),
+        ]
+    except (ImportError, AttributeError):
+        pass
+    import yaml
+    class _NoopLoader(yaml.SafeLoader):
+        pass
+    def _noop_tag(loader: Any, tag_suffix: Any, node: Any) -> Any:
+        # lm_eval YAML files use tags like !function utils.process_results;
+        # for the until check the scalar value is all we need.
+        if isinstance(node, yaml.ScalarNode):
+            return loader.construct_scalar(node)
+        if isinstance(node, yaml.SequenceNode):
+            return loader.construct_sequence(node, deep=True)
+        return loader.construct_mapping(node, deep=True)
+    _NoopLoader.add_multi_constructor("!", _noop_tag)
+    for p in candidates:
+        if os.path.isfile(p):
+            try:
+                with open(p, "r", encoding="utf-8") as fh:
+                    data = yaml.load(fh, Loader=_NoopLoader)
+                gen = data.get("generation_kwargs") or {}
+                until = gen.get("until")
+                return bool(until)
+            except Exception:
+                return True  # cannot verify -> keep current behaviour
+    return True  # task not found -> keep current behaviour
+
+
+def _lmeval_needs_eos_string(task_name: str, evaluation_parameters: dict[str, Any]) -> bool:
+    """True if this lm_eval invocation needs an explicit eos_string stop.
+
+    Covers tasks without an until sequence in their YAML (e.g. IFEval) and
+    without a model-config until override.
+    """
+    if "until" in evaluation_parameters and evaluation_parameters.get("until"):
+        return False
+    return not _task_yaml_has_until_sequence(task_name)
+
+
 def _model_short_name(model_identifier: str) -> str:
     """Generates a short filename-compatible model name."""
     s = model_identifier.replace("/", "_").replace("\\", "_").replace(" ", "_")
@@ -670,8 +797,13 @@ def _build_lmeval_cmd(model_identifier: str, api_model: str, subset_task: str, p
         "num_concurrent": 1,
     }
     # eos_string only for GPT-OSS; other models use YAML until sequences or generation_parameters
+    # (except tasks without until, e.g. IFEval: GGUF-EOS fallback, see run_lmeval)
     if gptoss and "until" not in evaluation_parameters:
         model_settings["eos_string"] = "<|endoftext|>"
+    elif _lmeval_needs_eos_string(subset_task, evaluation_parameters):
+        eos_str = _get_model_eos_string(model_identifier)
+        if eos_str:
+            model_settings["eos_string"] = eos_str
     # Generation params go to --generation_parameters (overrides YAML generation_parameters via merge)
     generation_parameters_keys = {"max_tokens", "temperature", "top_p", "top_k", "min_p",
                        "until", "chat_template_kwargs", "reasoning", "reasoning_effort", "max_thinking_tokens"}
@@ -1041,8 +1173,17 @@ def run_lmeval(model_info: AvailableModelInfo, bench: BenchmarkDef, limit: int =
     # Only set eos_string for models that explicitly need a fixed EOS token.
     # GPT-OSS uses <|endoftext|> as its primary stop; other chat models rely on
     # the YAML's until sequences ("\n\n", "Question:") or explicit generation_parameters.
+    # Tasks WITHOUT an until sequence (e.g. IFEval: `until: []`) get the model's
+    # GGUF EOS token as stop. Otherwise low-quant models generate freely and
+    # violate the chat template format -> HTTP 500 "peg-native format"
+    # (llama.cpp #20260, observed with Jamba2 Mini@IQ2_XXS).
     if gptoss and "until" not in evaluation_parameters:
         model_settings["eos_string"] = "<|endoftext|>"
+    elif _lmeval_needs_eos_string(task_name, evaluation_parameters):
+        eos_str = _get_model_eos_string(model_identifier)
+        if eos_str:
+            model_settings["eos_string"] = eos_str
+            print(f"  [CFG] eos_string={eos_str!r} (Task {task_name} hat keine until-Stops)")
     # Gen_kwargs keys that should override YAML generation_kwargs per request.
     generation_parameters_keys = {"max_tokens", "temperature", "top_p", "top_k", "min_p",
                        "until", "chat_template_kwargs", "reasoning", "reasoning_effort", "max_thinking_tokens"}
@@ -1124,9 +1265,20 @@ def run_lmeval(model_info: AvailableModelInfo, bench: BenchmarkDef, limit: int =
         if proc.returncode != 0:
             print(f"  [WARN] lm_eval returncode={proc.returncode}")
             if stderr:
-                print(f"  [WARN] lm_eval stderr ({len(stderr)} chars):")
-                for line in stderr.split("\n"):
-                    print(f"    | {line}")
+                if "peg-native" in stderr or "does not match the expected peg" in stderr:
+                    print(f"  [WARN] Bekannter Engine-Fehler (llama.cpp #20260): "
+                          f"post-generation PEG-Parser lehnt Modellausgabe ab "
+                          f"(HTTP 500 'peg-native format').")
+                    print(f"  [WARN] Dieser Lauf hat keine eos_string-Stops an die Engine gesendet "
+                          f"(Task-YAML ohne 'until'); der GGUF-EOS-Fallback greift ab "
+                          f"dem nächsten Start automatisch.")
+                    print(f"  [WARN] stderr-Kurzfassung ({len(stderr)} chars total):")
+                    for line in stderr.split("\n")[:12]:
+                        print(f"    | {line}")
+                else:
+                    print(f"  [WARN] lm_eval stderr ({len(stderr)} chars):")
+                    for line in stderr.split("\n"):
+                        print(f"    | {line}")
         else:
             print(f"  [OK] {bench['name']} done ({elapsed:.0f}s)")
     except subprocess.TimeoutExpired:
