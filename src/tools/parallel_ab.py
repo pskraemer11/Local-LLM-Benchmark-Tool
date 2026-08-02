@@ -53,17 +53,18 @@ LOCK_PATH = os.path.join(PROJECT_ROOT, "ergebnisse", ".benchmark.lock")
 DS1000_FILE = os.path.join(PROJECT_ROOT, "simple_evals", "data_science.jsonl")
 OUT_DIR = os.path.join(PROJECT_ROOT, "ergebnisse")
 
-MAX_TOKENS_DS1000 = 2048
+MAX_TOKENS_DS1000 = 4096
 MAX_TOKENS_SHORT = 64
 WARMUP_SAMPLES = 1
 REQUEST_TIMEOUT_TOTAL = 900.0
 RANDOM_SEED = 42
 
 
-def build_prompts(sample_size: int, benchmark: str) -> list[str]:
+def build_prompts(sample_size: int, benchmark: str, seed: Optional[int] = None) -> list[str]:
     """Echte DS1000-Prompts (identische Konstruktion wie custom_benchmark.py)."""
+    seed = RANDOM_SEED if seed is None else seed
     tasks = load_jsonl(DS1000_FILE)
-    random.seed(RANDOM_SEED)
+    random.seed(seed)
     tasks = subsample_tasks(tasks, "data_science", sample_size=sample_size)
     prompts = []
     for task in tasks:
@@ -81,9 +82,6 @@ def build_body(model: str, prompt: str, max_tokens: int) -> dict[str, Any]:
         "max_tokens": max_tokens,
         "stream": True,
     }
-    if "gpt-oss" in model.lower():
-        body["reasoning_effort"] = "low"
-        body["max_thinking_tokens"] = 200
     return body
 
 
@@ -245,6 +243,8 @@ def main() -> None:
                         help="Auf das Ende eines laufenden Benchmark-Laufs warten")
     parser.add_argument("--dry-run", action="store_true",
                         help="Nur Prompts laden und ausgeben, kein Modell laden")
+    parser.add_argument("--seed", type=int, default=None,
+                        help="Seed für reproduzierbare Prompt-Auswahl (default: fest 42)")
     args = parser.parse_args()
 
     slots = [int(s) for s in args.slots.split(",") if s.strip()]
@@ -252,7 +252,7 @@ def main() -> None:
         parser.error("--slots muss positive Zahlen enthalten (z.B. 1,2,4)")
 
     if args.dry_run:
-        prompts = build_prompts(args.sample_size, args.benchmark)
+        prompts = build_prompts(args.sample_size, args.benchmark, seed=args.seed)
         print(f"[DRY-RUN] {len(prompts)} Prompts, erster Prompt "
               f"({len(prompts[0])} Zeichen):")
         print(prompts[0][:300])
@@ -271,7 +271,7 @@ def main() -> None:
         time.sleep(60)
 
     max_tokens = MAX_TOKENS_DS1000 if args.benchmark == "ds1000" else MAX_TOKENS_SHORT
-    prompts = build_prompts(args.sample_size, args.benchmark)
+    prompts = build_prompts(args.sample_size, args.benchmark, seed=args.seed)
     print(f"[INFO] {len(prompts)} Prompts, Modell {args.model}, "
           f"max_tokens={max_tokens}, Slots {slots}, {args.reps} Wiederholungen")
 

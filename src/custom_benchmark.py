@@ -175,7 +175,7 @@ random.seed()
 
 MAX_TASKS_PER_BENCHMARK = 100
 
-MAX_TOKENS_GENERAL = 2048
+MAX_TOKENS_GENERAL = 4096
 MAX_TOKENS_MC = 64
 
 MONITOR_HISTORY_MAX = 500
@@ -498,16 +498,19 @@ def load_jsonl(filepath: str) -> list[dict[str, Any]]:
 
 
 
-def _stream_chat_completion(url: str, headers: dict[str, str], body: dict[str, Any], start_timeout: int = START_TIMEOUT, finish_timeout: int = FINISH_TIMEOUT, max_retries: int = MAX_RETRIES) -> tuple[Optional[str], float, int, int, float, int, Optional[str], Optional[str]]:
+def _stream_chat_completion(url: str, headers: dict[str, str], body: dict[str, Any], start_timeout: int = START_TIMEOUT, finish_timeout: int = FINISH_TIMEOUT, max_retries: int = MAX_RETRIES) -> tuple[Optional[str], float, int, int, float, int, bool, Optional[str], Optional[str]]:
     """Streaming chat completion with dual timeout and retry logic.
     
     Uses threading to monitor start_timeout (first token) and finish_timeout
     (between tokens) independently from the SSE stream.
-    Returns 8-tuple: (content, elapsed, t_in, t_out, tps, thinking_tokens, error_type, error_detail)
+    Returns 9-tuple: (content, elapsed, t_in, t_out, tps, thinking_tokens, truncated, error_type, error_detail)
+    truncated = True when the server stopped generation because the
+    token budget was reached (finish_reason "length" or tokens_out >= max_tokens).
     """
+    max_tokens_requested = body.get("max_tokens")
     for attempt in range(max_retries):
         current_start_timeout = start_timeout * (RETRY_MULTIPLIER ** attempt)
-        result = {"content": "", "thinking": "", "done": False, "error": None, "usage": None}
+        result = {"content": "", "thinking": "", "done": False, "error": None, "usage": None, "finish_reason": None}
         result_lock = threading.Lock()
         cancel_event = threading.Event()
 
@@ -539,6 +542,10 @@ def _stream_chat_completion(url: str, headers: dict[str, str], body: dict[str, A
                             if "usage" in chunk:
                                 with result_lock:
                                     result["usage"] = chunk["usage"]
+                            finish_reason = chunk.get("choices", [{}])[0].get("finish_reason")
+                            if finish_reason:
+                                with result_lock:
+                                    result["finish_reason"] = finish_reason
                             delta = chunk.get("choices", [{}])[0].get("delta", {})
                             reasoning_delta = _extract_reasoning_delta(delta)
                             with result_lock:
@@ -595,7 +602,7 @@ def _stream_chat_completion(url: str, headers: dict[str, str], body: dict[str, A
                 thread.join(timeout=1)
                 time.sleep(2 ** attempt)
                 continue
-            return None, elapsed, 0, 0, 0, 0, "api_error", error_val
+            return None, elapsed, 0, 0, 0, 0, False, "api_error", error_val
         with result_lock:
             has_content = bool(result["content"]) or bool(result["thinking"])
             is_done = result["done"]
@@ -605,7 +612,7 @@ def _stream_chat_completion(url: str, headers: dict[str, str], body: dict[str, A
             if attempt < max_retries - 1:
                 time.sleep(2 ** attempt)
                 continue
-            return None, elapsed, 0, 0, 0, 0, "api_error", f"No response within {current_start_timeout}s (attempt {attempt+1})"
+            return None, elapsed, 0, 0, 0, 0, False, "api_error", f"No response within {current_start_timeout}s (attempt {attempt+1})"
         last_content_len = 0
         stall_start = time.time()
         while time.time() - stall_start < finish_timeout:
@@ -629,16 +636,23 @@ def _stream_chat_completion(url: str, headers: dict[str, str], body: dict[str, A
             thinking_content = result["thinking"]
             content_raw = result["content"]
             usage = result.get("usage") or {}
+            finish_reason = result["finish_reason"]
         thinking_tokens = len(thinking_content.split()) if thinking_content else 0
         content, think_tags = strip_thinking_tokens(content_raw)
         thinking_tokens = thinking_tokens + think_tags
         tokens_in = usage.get("prompt_tokens", 0)
         tokens_out = usage.get("completion_tokens", 0)
-        if tokens_in == 0 and tokens_out == 0:
-            tokens_out = len(content.split()) if content else 0
+        usage_present = bool(usage)
+        if not usage_present:
+            # LM Studio liefert usage nicht immer im Stream – dann abschaetzen
+            # ueber Wortzahl (inkl. Thinking-Anteil fuer Reasoning-Modelle).
+            tokens_out = len((content_raw + " " + thinking_content).split())
+        truncated = finish_reason == "length"
+        if max_tokens_requested and usage_present and tokens_out >= max_tokens_requested:
+            truncated = True
         tokens_per_sec = tokens_out / full_elapsed if full_elapsed > 0 else 0
-        return content, full_elapsed, tokens_in, tokens_out, tokens_per_sec, thinking_tokens, None, None
-    return None, 0, 0, 0, 0, 0, "api_error", "Max retries exceeded"
+        return content, full_elapsed, tokens_in, tokens_out, tokens_per_sec, thinking_tokens, truncated, None, None
+    return None, 0, 0, 0, 0, 0, False, "api_error", "Max retries exceeded"
 
 
 def strip_thinking_tokens(text: Optional[str]) -> tuple[Optional[str], int]:
@@ -708,7 +722,7 @@ def strip_thinking_tokens(text: Optional[str]) -> tuple[Optional[str], int]:
     return cleaned, estimated_tokens
 
 
-def _non_streaming_fallback(url: str, body: dict[str, Any], timeout: int) -> tuple[Optional[str], int, int, int]:
+def _non_streaming_fallback(url: str, body: dict[str, Any], timeout: int) -> tuple[Optional[str], int, int, int, bool]:
     """Non-streaming fallback, if streaming fails."""
     try:
         payload = json.dumps(body).encode("utf-8")
@@ -730,10 +744,15 @@ def _non_streaming_fallback(url: str, body: dict[str, Any], timeout: int) -> tup
         usage = result.get("usage", {})
         tokens_in = usage.get("prompt_tokens", 0)
         tokens_out = usage.get("completion_tokens", 0)
-        return content, tokens_in, tokens_out, thinking_tokens
+        finish_reason = result.get("choices", [{}])[0].get("finish_reason")
+        truncated = finish_reason == "length"
+        max_tokens_requested = body.get("max_tokens")
+        if max_tokens_requested and usage and tokens_out >= max_tokens_requested:
+            truncated = True
+        return content, tokens_in, tokens_out, thinking_tokens, truncated
     except (URLError, HTTPError, json.JSONDecodeError, KeyError, TimeoutError) as e:
         error(f"API error (Fallback, {type(e).__name__}): {e}")
-        return None, 0, 0, 0
+        return None, 0, 0, 0, False
 
 
 def _extract_reasoning_delta(delta: dict) -> str:
@@ -763,7 +782,7 @@ def _uses_qwen_template(model_identifier: Optional[str]) -> bool:
     return bool(model_identifier) and "qwen" in model_identifier.lower()
 
 
-def generate_answer(cfg: GenerationConfig) -> tuple[Optional[str], float, int, int, float, int, Optional[str], Optional[str]]:
+def generate_answer(cfg: GenerationConfig) -> tuple[Optional[str], float, int, int, float, int, bool, Optional[str], Optional[str]]:
     messages = cfg.messages
     if messages is None:
         messages = []
@@ -781,11 +800,9 @@ def generate_answer(cfg: GenerationConfig) -> tuple[Optional[str], float, int, i
         body["top_k"] = cfg.top_k
     if cfg.min_p is not None:
         body["min_p"] = cfg.min_p
-    # ── Thinking-Modus ueber OpenAI-kompatibles API steuern (3-Ebenen-Strategie) ──
+    # ── Thinking-Modus ueber OpenAI-kompatibles API steuern ──
     #
-    # Quellen:
-    #   - gpt-oss: LM Studio native REST API /api/v1/chat (reasoning-Parameter)
-    #     Docs: https://lmstudio.ai/docs/developer/rest/chat
+    # Quelle:
     #   - Qwen3/Qwen3.5 und Qwen-basierte Distills: chat_template_kwargs
     #     (nur fuer Qwen-Templates) Quelle:
     #     https://github.com/lmstudio-ai/lmstudio-bug-tracker/issues/1573
@@ -794,11 +811,12 @@ def generate_answer(cfg: GenerationConfig) -> tuple[Optional[str], float, int, i
     #   nur von Qwen-Modellen unterstuetzt. Fuer andere Modelle keine
     #   Thinking-Steuerung ueber diese API moeglich.
     #
+    # 2026-08-02: Der gpt-oss-Override (reasoning_effort="low" +
+    #   max_thinking_tokens=200) wurde entfernt. Reasoning-Budget wird in
+    #   LM Studio GUI per Modell gesetzt (Slider); siehe Recovery.
+    #
     if cfg.is_thinking_enabled is False:
-        if cfg.model_identifier and "gpt-oss" in cfg.model_identifier.lower():
-            body["reasoning_effort"] = "low"
-            body["max_thinking_tokens"] = 200
-        elif _uses_qwen_template(cfg.model_identifier):
+        if _uses_qwen_template(cfg.model_identifier):
             body["chat_template_kwargs"] = {"enable_thinking": False}
     elif cfg.is_thinking_enabled is not None or cfg.reasoning_effort is not None:
         kwargs = {}
@@ -806,11 +824,7 @@ def generate_answer(cfg: GenerationConfig) -> tuple[Optional[str], float, int, i
             kwargs["enable_thinking"] = cfg.is_thinking_enabled
         if cfg.reasoning_effort is not None:
             kwargs["reasoning_effort"] = cfg.reasoning_effort
-        if cfg.model_identifier and "gpt-oss" in cfg.model_identifier.lower():
-            if cfg.reasoning_effort is not None:
-                body["reasoning_effort"] = cfg.reasoning_effort
-            body["max_thinking_tokens"] = 200
-        elif _uses_qwen_template(cfg.model_identifier):
+        if _uses_qwen_template(cfg.model_identifier):
             body["chat_template_kwargs"] = kwargs
     if cfg.stop:
         body["stop"] = cfg.stop
@@ -819,17 +833,48 @@ def generate_answer(cfg: GenerationConfig) -> tuple[Optional[str], float, int, i
     url = f"{API_BASE}/chat/completions"
     headers = {"Content-Type": "application/json"}
     if cfg.is_streaming:
-        content, elapsed, t_in, t_out, tps, think_tok, err_type, err_detail = _stream_chat_completion(url, headers, body)
+        content, elapsed, t_in, t_out, tps, think_tok, truncated, err_type, err_detail = _stream_chat_completion(url, headers, body)
         if content is not None:
-            return content, elapsed, t_in, t_out, tps, think_tok, err_type, err_detail
+            return content, elapsed, t_in, t_out, tps, think_tok, truncated, err_type, err_detail
         warn(f"Streaming failed ({err_detail}), fallback without streaming...")
     start = time.time()
-    content, t_in, t_out, think_tok = _non_streaming_fallback(url, {**body, "stream": False}, cfg.timeout)
+    content, t_in, t_out, think_tok, truncated = _non_streaming_fallback(url, {**body, "stream": False}, cfg.timeout)
     elapsed = time.time() - start
     if content is not None:
         tokens_per_sec = t_out / elapsed if elapsed > 0 else 0
-        return content, elapsed, t_in, t_out, tokens_per_sec, think_tok, None, None
-    return None, elapsed, t_in, t_out, 0, think_tok, "api_error", "Fallback also failed"
+        return content, elapsed, t_in, t_out, tokens_per_sec, think_tok, truncated, None, None
+    return None, elapsed, t_in, t_out, 0, think_tok, truncated, "api_error", "Fallback also failed"
+
+
+def classify_output(code: str, response: str, is_structured: bool, entry_point: str = "") -> dict[str, Any]:
+    """Diagnose how the response was converted to runnable code.
+
+    This is the "Struktur-Gate" diagnostic: it records HOW the raw LLM
+    output was translated into `code`, so we can measure structured-output
+    fidelity independently of the harness pass/fail.
+    """
+    status = "empty"
+    if response:
+        if is_structured:
+            try:
+                parsed = json.loads(response)
+            except (json.JSONDecodeError, TypeError, AttributeError):
+                status = "json_invalid"
+            else:
+                if isinstance(parsed, dict) and parsed.get("code"):
+                    status = "json_ok"
+                else:
+                    status = "json_missing_code"
+        else:
+            status = "fenced" if re.search(r"```", response) else "bare"
+    ep_found: Optional[bool] = None
+    if entry_point:
+        ep_found = bool(code and re.search(r"(?m)^\s*def\s+" + re.escape(entry_point) + r"\s*\(", code))
+    return {
+        "output_status": status,
+        "entry_point_found": ep_found,
+        "entry_point": entry_point or "",
+    }
 
 
 def extract_code(text: Optional[str], is_structured: bool = False) -> str:
@@ -1392,6 +1437,12 @@ def evaluate_code(generated_code: str, entry_point: str, tests_field: Any, refer
         return 0.0, "No code generated"
 
     tests = parse_tests_field(tests_field)
+    # Entry-Point-Triage: nur beim direkten Tests-Pfad (CoderEval), wo die
+    # aufgerufene Funktion auch wirklich benoetigt wird. DS1000-Harness und
+    # Namespace-/Bare-Execution verzichten darauf (entry_point dort leer oder
+    # die Signatur steckt im setup_code).
+    if tests and entry_point and not re.search(r"(?m)^\s*def\s+" + re.escape(entry_point) + r"\s*\(", generated_code):
+        return 0.0, f"Entry point '{entry_point}' not found in code"
 
     # --- DS1000-Harness (test_execution from code_context) ---
     if not tests and setup_code and "test_execution" in setup_code:
@@ -1536,7 +1587,8 @@ def run_task(task: dict[str, Any], task_type: str, model_identifier: Optional[st
 
     return {"response": None, "extracted_code": "", "score": 0.0,
             "score_detail": f"Unknown task_type: {task_type}", "latency": 0.0,
-            "tokens_in": 0, "tokens_out": 0, "tokens_per_sec": 0, "thinking_tokens": 0}
+            "tokens_in": 0, "tokens_out": 0, "tokens_per_sec": 0, "thinking_tokens": 0,
+            "truncated": False, "output_status": "empty", "entry_point_found": None}
 
 
 # Thinking-Modelle (enable_thinking=True) neigen dazu, statt Code eine
@@ -1600,13 +1652,16 @@ def _call_and_evaluate(full_prompt: str, generation_parameters: dict[str, Any], 
         prompt=full_prompt, **generation_parameters,
         response_format=STRUCTURED_OUTPUT_SCHEMA if _can_use_structured_output(model_identifier) else None
     )
-    response, latency, t_in, t_out, tps, think_tok, err_type, err_detail = generate_answer(gcfg)
+    response, latency, t_in, t_out, tps, think_tok, truncated, err_type, err_detail = generate_answer(gcfg)
     if response is None:
         return {"response": None, "extracted_code": "", "score": 0.0,
                 "score_detail": f"Timeout/API error ({latency:.1f}s)", "latency": latency,
                 "tokens_in": t_in, "tokens_out": t_out, "tokens_per_sec": tps,
-                "thinking_tokens": think_tok, "error_type": err_type, "error_detail": err_detail}
-    code = extract_code(response, is_structured=_can_use_structured_output(model_identifier)) if response else ""
+                "thinking_tokens": think_tok, "truncated": truncated,
+                "output_status": "empty", "entry_point_found": None,
+                "error_type": err_type, "error_detail": err_detail}
+    is_structured = _can_use_structured_output(model_identifier)
+    code = extract_code(response, is_structured=is_structured) if response else ""
     if not code and response:
         m = re.search(r"```(?:python)?\s*\n(.*?)```", response, re.DOTALL)
         if m:
@@ -1616,10 +1671,13 @@ def _call_and_evaluate(full_prompt: str, generation_parameters: dict[str, Any], 
                 l for l in response.strip().split("\n")
                 if _is_bare_statement(l.strip())
             )
+    struct = classify_output(code, response or "", is_structured, entry_point)
     score, detail = evaluate_code(code, entry_point, tests_field, reference_code, setup_code=setup_code)
     return {
         "response": response,
         "extracted_code": code,
+        "output_status": struct["output_status"],
+        "entry_point_found": struct["entry_point_found"],
         "score": score,
         "score_detail": detail,
         "latency": latency,
@@ -1627,6 +1685,7 @@ def _call_and_evaluate(full_prompt: str, generation_parameters: dict[str, Any], 
         "tokens_out": t_out,
         "tokens_per_sec": tps,
         "thinking_tokens": think_tok,
+        "truncated": truncated,
     }
 
 
@@ -1692,7 +1751,9 @@ def benchmark_model(model_info: Any, tasks: list[dict[str, Any]], task_type: str
                         "latency": 0.0,
                         "tokens_in": 0, "tokens_out": 0, "tokens_per_sec": 0,
                         "thinking_tokens": 0,
+                        "truncated": False,
                         "thinking_anteil": 0,
+                        "output_status": "empty", "entry_point_found": None,
                         "response": None,
                     }
         peak = monitor.stop_sampling()
@@ -1706,6 +1767,7 @@ def benchmark_model(model_info: Any, tasks: list[dict[str, Any]], task_type: str
         tok_out = result.get("tokens_out", 0)
         think_tok = result.get("thinking_tokens", 0)
         result["thinking_anteil"] = (think_tok / tok_out * 100) if tok_out > 0 else 0
+        trunc_mark = " | TRUNCATED" if result.get("truncated") else ""
         if result["score"] is not None:
             detail_str = result.get("score_detail", "")
             if detail_str:
@@ -1717,7 +1779,7 @@ def benchmark_model(model_info: Any, tasks: list[dict[str, Any]], task_type: str
                   f"CPU: {peak.get('cpu', after['cpu']):.0f}% | "
                   f"RAM: {peak.get('ram', after['ram']):.1f} GB | "
                   f"GPU: {peak.get('gpu', after['gpu']):.0f}% | "
-                  f"VRAM: {peak.get('vram', after['vram']):.1f} GB")
+                  f"VRAM: {peak.get('vram', after['vram']):.1f} GB{trunc_mark}")
         else:
             print(f"  Latenz: {result['latency']:.1f}s | "
                   f"{result['tokens_per_sec']:.1f} tok/s | "
@@ -1725,7 +1787,7 @@ def benchmark_model(model_info: Any, tasks: list[dict[str, Any]], task_type: str
                   f"CPU: {peak.get('cpu', after['cpu']):.0f}% | "
                   f"RAM: {peak.get('ram', after['ram']):.1f} GB | "
                   f"GPU: {peak.get('gpu', after['gpu']):.0f}% | "
-                  f"VRAM: {peak.get('vram', after['vram']):.1f} GB")
+                  f"VRAM: {peak.get('vram', after['vram']):.1f} GB{trunc_mark}")
         results.append(result)
     collector.stop()
     collector_summary = collector.get_summary()
@@ -1736,6 +1798,8 @@ def benchmark_model(model_info: Any, tasks: list[dict[str, Any]], task_type: str
     sum_think = sum(think_toks)
     sum_out = sum(tok_outs)
     think_ratio = (sum_think / sum_out * 100) if sum_out > 0 else 0
+    trunc_n = sum(1 for r in results if r.get("truncated"))
+    trunc_ratio = (trunc_n / len(results) * 100) if results else 0
     scores = [r["score"] for r in results if r["score"] is not None]
     avg_score = sum(scores) / len(scores) if scores else None
     # Always print average score for the launcher to parse, even in
@@ -1748,6 +1812,7 @@ def benchmark_model(model_info: Any, tasks: list[dict[str, Any]], task_type: str
         print(f"  Average latency: {avg_lat:.1f}s")
         print(f"  Average tokens/s: {avg_tps:.1f}")
         print(f"  \u2248{think_ratio:.0f}% Thinking ratio ({sum_think}/{sum_out} tokens)")
+        print(f"  Truncated: {trunc_n}/{len(results)} ({trunc_ratio:.0f}%)")
     # System metrics: from per-task peak values (monitor thread, ~5Hz during inference)
     # instead of MetricsCollector (only every 10s over entire run including idle)
     _ram_total_gb = psutil.virtual_memory().total / (1073741824)

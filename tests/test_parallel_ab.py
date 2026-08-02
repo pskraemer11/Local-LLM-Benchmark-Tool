@@ -25,10 +25,10 @@ class TestModeSequence:
 
 
 class TestBuildBody:
-    def test_gptoss_gets_reasoning_params(self):
+    def test_no_reasoning_params(self):
         body = build_body("openai/gpt-oss-20b", "prompt", 2048)
-        assert body["reasoning_effort"] == "low"
-        assert body["max_thinking_tokens"] == 200
+        assert "reasoning_effort" not in body
+        assert "max_thinking_tokens" not in body
 
     def test_non_gptoss_has_no_reasoning_params(self):
         body = build_body("deepseek-r1-distill-qwen-14b", "prompt", 2048)
@@ -53,6 +53,16 @@ class TestBuildPrompts:
         a = build_prompts(5, "ds1000")
         b = build_prompts(5, "ds1000")
         assert a == b
+
+    def test_explicit_seed_reproducible(self):
+        a = build_prompts(5, "ds1000", seed=2026)
+        b = build_prompts(5, "ds1000", seed=2026)
+        assert a == b
+
+    def test_explicit_seed_matches_default(self):
+        default = build_prompts(5, "ds1000")
+        seed42 = build_prompts(5, "ds1000", seed=42)
+        assert default == seed42
 
 
 class TestLock:

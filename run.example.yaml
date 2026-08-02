@@ -1,0 +1,34 @@
+# Beispiel-Run-Spec für den Unified Benchmark Launcher.
+# Verwendung: python run_benchmarks.py --run-spec run.example.yaml
+# Precedence:   CLI-Flags > Werte hier > Skript-Defaults.
+#               Ein CLI-Flag wie `--seed 99` überschreibt also `seed` unten.
+
+# Modell-Auswahl: Nummern, Namen, Ranges ("all", "1,3,5", "1-5") oder Liste.
+models: [1, 2]
+
+# Benchmark-Auswahl: Nummern, Namen oder Liste.
+benchmarks: ["DS1000", "Agentic"]
+
+# Anzahl Tasks pro Benchmark (jeder Pipeline).
+sample_size: 3
+
+# Fester Seed für reproduzierbare Task-Auswahl (custom + agentic + evalplus).
+seed: 2026
+
+# Agentic-Auswahlmodus: "random" (alle 69 Szenarien) oder "safety" (nur 13 Category-K).
+agentic_mode: "safety"
+
+# Benchmarks aus der Auswahl ausschließen (optional).
+# exclude_benchmarks: ["MATH-500"]
+
+# Thinking für MATH-500-Reasoning-Modelle erzwingen (default: off).
+thinking: false
+
+# Strukturiertes JSON-Output in custom_Benchmarks deaktivieren (fallback regex).
+no_structured_output: false
+
+# Modell zwischen Benchmarks neu laden (KV-Cache/GPU-Verfall).
+unload_between: false
+
+# Volle LLM-Antwort in pro-Task-CSVs schreiben (sonst 200-Zeichen-Truncation).
+keep_response: false

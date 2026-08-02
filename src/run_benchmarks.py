@@ -90,6 +90,7 @@ from utils.terminal import green, yellow, red, cyan, bold, ok, warn, error, info
 #   /v1/models                  GET  – OpenAI-Compat: model list
 #
 from benchmark_config import (PIPELINE_DISCOVERY, TOOL_EVAL_SCENARIO_IDS,
+                              AGENTIC_SAFETY_SCENARIO_IDS,
                               EXCLUDE_KEYWORDS, get_model_config,
                               BENCHMARK_CATEGORY_DEFAULTS)
 from model_manager import (
@@ -743,7 +744,7 @@ def _get_evaluation_parameters(model_identifier: str, bench_name: str = "") -> d
     generation_parameters = {
         "temperature": config.get("temperature", 0.0),
         "top_p": config.get("top_p", 1.0),
-        "max_tokens": config.get("max_tokens", 2048),
+        "max_tokens": config.get("max_tokens", 4096),
     }
     if config.get("top_k") is not None:
         generation_parameters["top_k"] = config["top_k"]
@@ -758,20 +759,13 @@ def _get_evaluation_parameters(model_identifier: str, bench_name: str = "") -> d
     #   Er wird NUR von Qwen-Templates unterstuetzt (Qwen3, Qwen3.5 und
     #   Qwen-basierte Distills wie deepseek-r1-distill-qwen-14b).
     #   Quelle: https://github.com/lmstudio-ai/lmstudio-bug-tracker/issues/1573
-    #   Fuer gpt-oss wird reasoning_effort als Top-Level-Parameter gesendet
-    #   (OpenAI-kompatibles /v1/chat/completions unterstuetzt das).
     #   enable_thinking=True fuer Registry-Thinking-Modelle kommt via
     #   get_model_config() aus der Registry (reasoning: thinking).
     #
-    gptoss = _is_gptoss_model(model_identifier)
-    # gpt-oss: reasoning_effort + max_thinking_tokens als Top-Level-Param
-    if gptoss:
-        if config.get("reasoning_effort") is not None:
-            generation_parameters["reasoning_effort"] = config["reasoning_effort"]
-        if config.get("max_thinking_tokens") is not None:
-            generation_parameters["max_thinking_tokens"] = config["max_thinking_tokens"]
-    # Qwen: chat_template_kwargs (Qwen-spezifisch)
-    else:
+    # 2026-08-02: gpt-oss-Override (reasoning_effort/max_thinking_tokens)
+    #   entfernt; Reasoning-Budget wird in LM Studio GUI per Modell gesetzt.
+    #
+    if not _is_gptoss_model(model_identifier):
         ctw = {}
         if config.get("enable_thinking") is not None:
             ctw["enable_thinking"] = config["enable_thinking"]
@@ -996,7 +990,7 @@ def run_evalplus(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_siz
     # Sentinel name required by evalplus; the actual model ID is sent
     # via the OpenAI-compatible request (Code-Review 2026-07-18 §5.3).
     evaluation_parameters = _get_evaluation_parameters(model_identifier, bench_name=dataset)
-    max_tokens = evaluation_parameters.get("max_tokens", 2048)
+    max_tokens = evaluation_parameters.get("max_tokens", 4096)
     model_obj = make_model(
         model=EVALPLUS_SENTINEL_MODEL,
         backend="openai",
@@ -1348,8 +1342,22 @@ def run_lmeval(model_info: AvailableModelInfo, bench: BenchmarkDef, limit: int =
 # tool-use capabilities (function calls, API usage).
 # Result is extracted from JSON envelope (final_score 0-100 -> 0-1).
 # Returns: dict with pipeline="agentic", score (0-1).
-def run_agentic(model_info: AvailableModelInfo, limit: int = 5) -> Optional[PipelineResult]:
-    """Agentic: tool-eval-bench with sample_size random scenarios."""
+def run_agentic(model_info: AvailableModelInfo, limit: int = 5, mode: str = "random",
+                seed: Optional[int] = None) -> Optional[PipelineResult]:
+    """Agentic: tool-eval-bench with sample_size scenarios.
+
+    mode:
+      - "random"   -> Zufallsauswahl aus allen 69 Szenarien (bisheriges Verhalten)
+      - "safety"   -> NUR die 13 Category-K-Szenarien (Safety & Boundaries)
+    seed: reproduzierbare Auswahl (überall deterministisch, auch bei safety).
+    """
+    if mode not in ("random", "safety"):
+        mode = "random"
+        print(f"      [WARN] Unknown agentic mode '{mode}' -> 'random'")
+    all_ids = AGENTIC_SAFETY_SCENARIO_IDS if mode == "safety" else TOOL_EVAL_SCENARIO_IDS
+    rng = random.Random(seed)
+    selected = rng.sample(all_ids, min(limit, len(all_ids)))
+
     model_identifier = model_info["key"]
     model_display = model_info["display"]
     safe = model_identifier.replace("/", "_").replace("\\", "_")
@@ -1358,10 +1366,9 @@ def run_agentic(model_info: AvailableModelInfo, limit: int = 5) -> Optional[Pipe
     os.makedirs(output_dir, exist_ok=True)
     json_path = os.path.join(output_dir, f"agentic_{safe}_{ts}.json")
 
-    selected = random.sample(TOOL_EVAL_SCENARIO_IDS, min(limit, len(TOOL_EVAL_SCENARIO_IDS)))
-
     print(f"\n  {green('>>>')} Agentic ({cyan('tool-eval-bench')}): {model_display}")
-    print(f"      Scenarios: {len(selected)}/{len(TOOL_EVAL_SCENARIO_IDS)} randomly selected")
+    label = "safety (Category K)" if mode == "safety" else "randomly"
+    print(f"      Scenarios: {len(selected)}/{len(all_ids)} {label} selected")
 
     t0 = time.time()
     cmd = [
@@ -1466,31 +1473,231 @@ def save_summary_csv(results: list[dict[str, Any]], model_info: Optional[dict[st
 # csv_writer.write_accumulative_summary(...) nutzen.
 
 
+# ── Run-Spec (YAML) Support ─────────────────────────────────
+# P3: Reproduzierbare Runs über --run-spec/config <datei.yaml>.
+# Precedence: CLI-Flags > YAML-Werte > Skript-Defaults.
+
+# YAML-Schlüssel -> CLI-Dest. Mehrere Aliase erlaubt (kebab/snake).
+RUN_SPEC_DEST_MAP = {
+    "sample_size": "sample_size", "sample-size": "sample_size",
+    "model": "model", "models": "model",
+    "benchmark": "benchmarks", "benchmarks": "benchmarks",
+    "seed": "seed",
+    "thinking": "thinking",
+    "agentic_mode": "agentic_mode", "agentic-mode": "agentic_mode",
+    "exclude_benchmarks": "exclude_benchmarks", "exclude-benchmarks": "exclude_benchmarks",
+    "no_structured_output": "no_structured_output", "no-structured-output": "no_structured_output",
+    "unload_between": "unload_between", "unload-between": "unload_between",
+    "keep_response": "keep_response", "keep-response": "keep_response",
+}
+
+# YAML-Schlüssel, die Listen erlauben (Liste -> Komma-String).
+_RUN_SPEC_CSV_KEYS = {"model", "models", "benchmark", "benchmarks",
+                      "exclude_benchmarks", "exclude-benchmarks"}
+# YAML-Schlüssel, die als Boolean erwartet werden.
+_RUN_SPEC_BOOL_KEYS = {"thinking", "unload_between", "unload-between",
+                       "no_structured_output", "no-structured-output",
+                       "keep_response", "keep-response"}
+
+# CLI-Defaults je Dest – für Precedence-Check (CLI explizit > YAML).
+RUN_SPEC_PARSER_DEFAULTS: dict[str, Any] = {
+    "sample_size": 5, "model": None, "benchmarks": None, "seed": None,
+    "thinking": False, "agentic_mode": "random", "exclude_benchmarks": None,
+    "no_structured_output": False, "unload_between": False, "keep_response": False,
+}
+
+
+def _normalize_available_keys(available: list[dict[str, Any]]) -> set[str]:
+    return {m.get("key", "").lower() for m in available} | {m.get("display", "").lower() for m in available}
+
+
+def _load_run_spec(path: str) -> dict[str, Any]:
+    """Run-Spec-YAML lesen + validieren. Unbekanntes -> Warn + igonrieren, fatale Fehler -> exit(1)."""
+    if not os.path.isfile(path):
+        print(f"[ERROR] Run-Spec-Datei nicht gefunden: {path}")
+        sys.exit(1)
+    yaml_lib = _run_spec_yaml()
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            data = yaml_lib.safe_load(fh)
+    except yaml_lib.YAMLError as e:
+        print(f"[ERROR] Run-Spec-YAML-Fehler: {e}")
+        sys.exit(1)
+
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        print(f"[ERROR] Run-Spec muss ein Mapping (top-level dict) sein, bekam: {type(data).__name__}")
+        sys.exit(1)
+
+    known = set(RUN_SPEC_DEST_MAP)
+    for key in sorted(set(data) - known):
+        print(f"  [WARN] Run-Spec: unbekannter Schlüssel '{key}' – wird ignoriert")
+
+    spec: dict[str, Any] = {}
+    for key, value in data.items():
+        if key not in known:
+            continue
+        dest = RUN_SPEC_DEST_MAP[key]
+        if key in _RUN_SPEC_CSV_KEYS and isinstance(value, list):
+            value = ",".join(str(v).strip() for v in value if str(v).strip())
+        if key in _RUN_SPEC_BOOL_KEYS:
+            if not isinstance(value, bool):
+                print(f"  [WARN] Run-Spec '{key}': erwartet bool, bekam {type(value).__name__} – ignoriert")
+                continue
+        spec[dest] = value
+
+    # Semantische Validierung einzelner Felder
+    if "sample_size" in spec:
+        try:
+            ss = int(spec["sample_size"])
+            if ss <= 0:
+                raise ValueError
+            spec["sample_size"] = ss
+        except (ValueError, TypeError):
+            print("  [WARN] Run-Spec sample_size muss positive int sein – ignoriert")
+            spec.pop("sample_size")
+    if "seed" in spec:
+        try:
+            sd = int(spec["seed"])
+            if sd <= 0:
+                raise ValueError
+            spec["seed"] = sd
+        except (ValueError, TypeError):
+            print("  [WARN] Run-Spec seed muss positive int sein – ignoriert")
+            spec.pop("seed")
+    if "agentic_mode" in spec and spec["agentic_mode"] not in ("random", "safety"):
+        print("  [WARN] Run-Spec agentic_mode muss 'random'/'safety' sein – ignoriert")
+        spec.pop("agentic_mode")
+
+    return spec
+
+
+def _validate_run_spec_selections(spec: dict[str, Any],
+                                  available_models: list[dict[str, Any]]) -> dict[str, Any]:
+    """Benchmark-/Modell-Namen aus der Run-Spec gegen bekannte Namen validieren (Warn bei Treffer-ern.Unbekannt)."""
+    # Benchmarks
+    if spec.get("benchmarks"):
+        for n in [x.strip().lower() for x in spec["benchmarks"].split(",") if x.strip()]:
+            if n in ALL_BENCH_NAMES or re.match(r"^[\d,\-]+$", n):
+                continue
+            print(f"  [WARN] Run-Spec: unbekannter Benchmark '{n}' (verwendbar: {', '.join(ALL_BENCH_NAMES)})")
+    # Models (nur textbasiert; "all"/Nummern/Ranges -> skip)
+    if spec.get("model") and available_models:
+        known = _normalize_available_keys(available_models)
+        for part in [p.strip() for p in str(spec["model"]).split(",") if p.strip()]:
+            if part == "all" or re.match(r"^[\d,\-]+$", part) or part.lower() in known:
+                continue
+            print(f"  [WARN] Run-Spec: unbekanntes Modell '{part}'")
+    return spec
+
+
+def _apply_run_spec(args: Any, spec: dict[str, Any],
+                    explicit_dests: Optional[set[str]] = None) -> Any:
+    """Rechne Run-Spec in das Namespace-Objekt ein.
+
+    Precedence: CLI (explizit gesetzt) > YAML > Defaults.
+    - explicit_dests: Menge der vom CLI explizit gesetzten Dest-Namen
+      (via SUPPRESS-Probe-Parse). Wenn None (z.B. Unit-Tests), fällt
+      eine Heuristik auf Basis RUN_SPEC_PARSER_DEFAULTS greift.
+    """
+    if not spec:
+        return args
+    for dest, value in spec.items():
+        if dest not in RUN_SPEC_PARSER_DEFAULTS:
+            continue
+        if explicit_dests is not None:
+            if dest in explicit_dests:
+                continue
+        elif getattr(args, dest, None) != RUN_SPEC_PARSER_DEFAULTS[dest]:
+            continue
+        setattr(args, dest, value)
+    return args
+
+
+def _run_spec_yaml() -> Any:
+    """Lazy-Lazy-Import von PyYAML (nur nötig wenn --run-spec benutzt wird)."""
+    try:
+        import yaml
+        return yaml
+    except ImportError:
+        print("[ERROR] PyYAML benötigt für --run-spec (pip install pyyaml).")
+        sys.exit(1)
+
+
 # ── main() Orchestrierungs-Helfer ──────────────────────────────
 
-def _parse_args() -> tuple[Any, str]:
-    """Phase 1: CLI-Parse + Versionsinfo."""
+# Argument-Definitionen, geteilt zwischen Haupt- und Probe-Parser.
+_LAUNCHER_ARG_SPECS: list[tuple[tuple[str, ...], dict[str, Any]]] = [
+    (("--sample-size", "-s"), {"type": int, "default": 5,
+                               "help": "Tasks per benchmark (default: 5)"}),
+    (("--model", "-m"), {"type": str, "default": None,
+                         "help": "Model selection: number(s) like '20', '1,3,5', '1-5', name or 'all'"}),
+    (("--benchmarks", "-b"), {"type": str, "default": None,
+                              "help": "Benchmark selection: number(s), name(s) or 'all'"}),
+    (("--thinking",), {"action": "store_true",
+                       "help": "Force-enable thinking for MATH-500 reasoning models (default: off)"}),
+    (("--seed",), {"type": int, "default": None,
+                   "help": "Random seed for reproducible task selection (passed to custom benchmarks)"}),
+    (("--agentic-mode",), {"type": str, "default": "random", "choices": ["random", "safety"],
+                           "help": "Agentic scenario selection: 'random' (all 69) or 'safety' (13 Category-K)"}),
+    (("--exclude-benchmarks", "-x"), {"type": str, "default": None,
+                                      "help": "Comma-separated benchmark names to exclude (e.g. 'MATH-500')"}),
+    (("--no-structured-output",), {"action": "store_true",
+                                   "help": "Disable structured JSON output in custom benchmarks (fallback to regex)"}),
+    (("--unload-between",), {"action": "store_true",
+                             "help": "Reload model between benchmarks (default: keep loaded). "
+                                     "Use if KV-cache/GPU memory degradation occurs."}),
+    (("--keep-response",), {"action": "store_true",
+                            "help": "Write the full LLM response to per-task CSVs (default: truncated to 200 chars, see W1 in Code-Review_2026-07-12.md)"}),
+]
+
+
+def _build_launcher_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Unified Benchmark Launcher v13")
-    parser.add_argument("--sample-size", "-s", type=int, default=5,
-                        help="Tasks per benchmark (default: 5)")
-    parser.add_argument("--model", "-m", type=str, default=None,
-                        help="Model selection: number(s) like '20', '1,3,5', '1-5', name or 'all'")
-    parser.add_argument("--benchmarks", "-b", type=str, default=None,
-                        help="Benchmark selection: number(s), name(s) or 'all'")
-    parser.add_argument("--thinking", action="store_true",
-                        help="Force-enable thinking for MATH-500 reasoning models (default: off)")
-    parser.add_argument("--seed", type=int, default=None,
-                        help="Random seed for reproducible task selection (passed to custom benchmarks)")
-    parser.add_argument("--exclude-benchmarks", "-x", type=str, default=None,
-                        help="Comma-separated benchmark names to exclude (e.g. 'MATH-500')")
-    parser.add_argument("--no-structured-output", action="store_true",
-                        help="Disable structured JSON output in custom benchmarks (fallback to regex)")
-    parser.add_argument("--unload-between", action="store_true",
-                        help="Reload model between benchmarks (default: keep loaded). "
-                             "Use if KV-cache/GPU memory degradation occurs.")
-    parser.add_argument("--keep-response", action="store_true",
-                        help="Write the full LLM response to per-task CSVs (default: truncated to 200 chars, see W1 in Code-Review_2026-07-12.md)")
-    args = parser.parse_args()
+    parser.add_argument("--run-spec", "--config", type=str, default=None,
+                        metavar="YAML",
+                        help="Run-Spec (run.yaml): models/benchmarks/seed/... - CLI flags override YAML")
+    for names, kwargs in _LAUNCHER_ARG_SPECS:
+        parser.add_argument(*names, **kwargs)
+    return parser
+
+
+def _parse_args(argv: Optional[list[str]] = None) -> tuple[Any, str]:
+    """Phase 1: CLI-Parse + Run-Spec (--run-spec/config) + Versionsinfo.
+
+    CLI-Flags haben Vorrang vor Run-Spec-Werten. Erkennung, welche
+    CLI-Flags explizit gesetzt wurden, erfolgt über einen SUPPRESS-
+    Probe-Parse (nur explizit gesetzte Dest-Namen landen im Namespace).
+    """
+    parser = _build_launcher_parser()
+    args = parser.parse_args(argv)
+
+    if args.run_spec:
+        spec = _load_run_spec(args.run_spec)
+        if spec.get("model"):
+            available = get_available_models(exclude_keywords=EXCLUDE_KEYWORDS, registry_only=True)
+        else:
+            available = []
+        spec = _validate_run_spec_selections(spec, available)
+
+        # Probe-Parse: nur explizit gesetzte CLI-Flags (SUPPRESS-Defaults).
+        probe = argparse.ArgumentParser(add_help=False)
+        probe.add_argument("--run-spec", "--config", type=str, default=argparse.SUPPRESS)
+        for names, kwargs in _LAUNCHER_ARG_SPECS:
+            probe_kwargs = dict(kwargs)
+            probe_kwargs["default"] = argparse.SUPPRESS
+            if "choices" in probe_kwargs:
+                probe_kwargs["choices"] = list(probe_kwargs["choices"])
+            probe.add_argument(*names, **probe_kwargs)
+        try:
+            probe_ns, _ = probe.parse_known_args(argv if argv is not None else None)
+            explicit_dests = set(vars(probe_ns)) - {"run_spec"}
+        except argparse.ArgumentError:
+            explicit_dests = None
+
+        args = _apply_run_spec(args, spec, explicit_dests=explicit_dests)
+        print(f"[INFO] Run-Spec angewendet: {os.path.basename(args.run_spec)} (CLI-Flags haben Vorrang)")
 
     _version = "13.0.0-p7"
     _version_file = os.path.join(PROJECT_ROOT, "VERSION")
@@ -1686,7 +1893,9 @@ def _run_benchmarks_for_model(model_info: AvailableModelInfo, benchmarks: list[B
 
         try:
             if bname in agentic_names:
-                result = run_agentic(model_info, limit=args.sample_size)
+                result = run_agentic(model_info, limit=args.sample_size,
+                                     mode=getattr(args, "agentic_mode", "random"),
+                                     seed=args.seed)
             elif bname in ep_names:
                 result = run_evalplus(model_info, bench, sample_size=args.sample_size,
                                       seed=args.seed, is_reasoning_model=is_reasoning_model)

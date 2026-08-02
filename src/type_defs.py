@@ -51,6 +51,8 @@ class BenchmarkDef(TypedDict):
 class TaskResult(TypedDict):
     response: Optional[str]
     extracted_code: str
+    output_status: NotRequired[str]
+    entry_point_found: NotRequired[Optional[bool]]
     score: float
     score_detail: str
     latency: float
@@ -58,6 +60,7 @@ class TaskResult(TypedDict):
     tokens_out: int
     tokens_per_sec: float
     thinking_tokens: int
+    truncated: NotRequired[bool]
     error_type: NotRequired[Optional[str]]
     error_detail: NotRequired[Optional[str]]
 

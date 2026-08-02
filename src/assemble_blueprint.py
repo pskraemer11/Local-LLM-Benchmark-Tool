@@ -30,7 +30,7 @@ _SRC_DIR = Path(__file__).parent
 PROJECT_ROOT = _SRC_DIR.parent
 sys.path.insert(0, str(_SRC_DIR))
 from utils.terminal import ok, warn, error
-from benchmark_config import BLACKLIST
+from benchmark_config import BLACKLIST, GPTOSS_REASONING_EFFORT
 REGISTRY_PATH = PROJECT_ROOT / "doc-git" / "model_registry.yaml"
 BLUEPRINT_PATH = PROJECT_ROOT / "doc-git" / "blueprint_definitions.yaml"
 CONFIG_ROOT = Path.home() / ".lmstudio" / ".internal" / "user-concrete-model-default-config"
@@ -702,7 +702,7 @@ def create_blueprint_definitions() -> None:
             "description": "GPT-OSS Harmony-Format (Reasoning + Coding)",
             "role": "You are GPT-OSS, a helpful AI assistant with coding and reasoning skills.",
             "role_template": "You are {name}, a {arch} model{params_label} by {publisher}, optimized for {capabilities}{type_label}.",
-            "modules": ["thinking_instruction", "coding_principles", "safety_block", "output_style_technical"],
+            "modules": ["gptoss_reasoning_level", "thinking_instruction", "coding_principles", "safety_block", "output_style_technical"],
         },
         "magistral_reasoning": {
             "description": "Magistral [THINK]-Format (Reasoning + Coding)",
@@ -765,6 +765,12 @@ def create_blueprint_definitions() -> None:
             "full": "<output>\n- Provide concrete code examples where useful.\n- Explain design decisions briefly.\n- Include error handling and edge cases.\n- Prefer clarity over verbosity.\n</output>",
             "medium": "<output>Provide code with error handling. Prefer clarity over verbosity.</output>",
             "minimal": "",
+        },
+        "gptoss_reasoning_level": {
+            "description": "GPT-OSS Reasoning-Level (OpenAI: 'The reasoning level can be set in the system prompts, e.g. Reasoning: high')",
+            "full": f"Reasoning: {GPTOSS_REASONING_EFFORT}",
+            "medium": f"Reasoning: {GPTOSS_REASONING_EFFORT}",
+            "minimal": f"Reasoning: {GPTOSS_REASONING_EFFORT}",
         },
         "thinking_instruction": {
             "description": "Chain-of-Thought Anweisung für Reasoning-Modelle",

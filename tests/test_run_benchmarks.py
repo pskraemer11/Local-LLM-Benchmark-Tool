@@ -282,7 +282,7 @@ class TestLmevalParams:
         params = _get_evaluation_parameters("plain-7b-model", "coding")
         assert params["temperature"] == 0.0        # coding = deterministisch
         assert params["top_p"] == 1.0
-        assert params["max_tokens"] == 2048
+        assert params["max_tokens"] == 4096
 
     def test_math_default_has_higher_max_tokens(self):
         params = _get_evaluation_parameters("plain-7b-model", "math")
@@ -291,7 +291,7 @@ class TestLmevalParams:
     def test_knowledge_default(self):
         params = _get_evaluation_parameters("plain-7b-model", "knowledge")
         assert params["temperature"] == 0.0
-        assert params["max_tokens"] == 2048
+        assert params["max_tokens"] == 4096
 
     def test_agentic_default(self):
         params = _get_evaluation_parameters("plain-7b-model", "agentic")
@@ -325,6 +325,26 @@ class TestLmevalParams:
         params = _get_evaluation_parameters("unsloth/gpt-oss-20b", "math")
         assert params["temperature"] == 1.0        # gpt-oss override
         assert params["top_k"] == 0               # top_k=0 fuer Harmony
+
+    def test_bonsai_27b_override_manufacturer_recommendation(self):
+        # PrismML-Bonsai-Modellkarten: temp 0.7 / top-p 0.95 / top-k 20 (Thinking-Mode).
+        # Vor dem Override ging der Kategorie-Default (coding: temp 0.0 greedy) durch.
+        params = _get_evaluation_parameters("vinpix/ternary-bonsai-27b-stock-mtp", "coding")
+        assert params["temperature"] == 0.7
+        assert params["top_p"] == 0.95
+        assert params["top_k"] == 20
+
+    def test_bonsai_27b_q1_0_variant_gets_override(self):
+        # @quant-Suffix muss den Bonsai-27B-Override trotzdem treffen.
+        params = _get_evaluation_parameters("prism-ml/bonsai-27b@Q1_0", "coding")
+        assert params["temperature"] == 0.7
+        assert params["top_k"] == 20
+
+    def test_bonsai_8b_override_manufacturer_recommendation(self):
+        # Bonsai-8B-Range: temp 0.5-0.7; wir verwenden 0.6.
+        params = _get_evaluation_parameters("vinpix/bonsai-8b-llama.cpp", "coding")
+        assert params["temperature"] == 0.6
+        assert params["top_k"] == 40
 
     def test_qwen3_5_override_includes_top_k(self):
         params = _get_evaluation_parameters("qwen3.5-72b-instruct", "coding")
@@ -548,6 +568,55 @@ class TestRunAgentic:
         assert os.path.basename(json_path).startswith("agentic_essentialai_rnj-1@q8_0_")
         assert "essentialai/rnj-1" not in json_path
 
+    def test_safety_mode_uses_only_category_k(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(rb, "RESULTS_DIR", str(tmp_path))
+        fake_proc = MagicMock()
+        fake_proc.returncode = 0
+        fake_proc.stdout = io.StringIO("")
+        fake_proc.stderr = io.StringIO("")
+        model_info = {"key": "test-model", "display": "Test Model"}
+        with patch.object(rb.subprocess, "Popen", return_value=fake_proc) as popen:
+            rb.run_agentic(model_info, limit=13, mode="safety", seed=42)
+        cmd = popen.call_args.args[0]
+        sc_idx = cmd.index("--scenarios")
+        selected = set(cmd[sc_idx + 1:sc_idx + 1 + 13])
+        assert selected == set(rb.AGENTIC_SAFETY_SCENARIO_IDS)
+
+    def test_safety_mode_honours_limit(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(rb, "RESULTS_DIR", str(tmp_path))
+        fake_proc = MagicMock()
+        fake_proc.returncode = 0
+        fake_proc.stdout = io.StringIO("")
+        fake_proc.stderr = io.StringIO("")
+        model_info = {"key": "test-model", "display": "Test Model"}
+        with patch.object(rb.subprocess, "Popen", return_value=fake_proc) as popen:
+            rb.run_agentic(model_info, limit=3, mode="safety", seed=42)
+        cmd = popen.call_args.args[0]
+        sc_idx = cmd.index("--scenarios")
+        selected = cmd[sc_idx + 1:sc_idx + 1 + 3]
+        assert len(selected) == 3
+        assert all(s in rb.AGENTIC_SAFETY_SCENARIO_IDS for s in selected)
+
+    def test_seed_reproduces_selection(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(rb, "RESULTS_DIR", str(tmp_path))
+        calls = []
+        def _fake_popen(cmd, *args, **kwargs):
+            fake = MagicMock()
+            fake.returncode = 0
+            fake.stdout = io.StringIO("")
+            fake.stderr = io.StringIO("")
+            calls.append(cmd)
+            return fake
+        with patch.object(rb.subprocess, "Popen", side_effect=_fake_popen):
+            rb.run_agentic({"key": "m1", "display": "M1"}, limit=6, seed=2026)
+            rb.run_agentic({"key": "m1", "display": "M1"}, limit=6, seed=2026)
+            rb.run_agentic({"key": "m1", "display": "M1"}, limit=6, seed=7)
+        def _selected(cmd):
+            sc_idx = cmd.index("--scenarios")
+            return tuple(cmd[sc_idx + 1:sc_idx + 1 + 6])
+        assert _selected(calls[0]) == _selected(calls[1])
+        assert _selected(calls[0]) != _selected(calls[2])
+
 
 # ======================================================================
 # Single-Instance Lock (Fix 2026-07-31: parallele Launcher)
@@ -600,3 +669,105 @@ class TestSingleInstanceLock:
             json.dump({"pid": self.DEAD_PID, "started": "x"}, f)
         rb._release_single_instance_lock(lock_path)
         assert os.path.exists(lock_path)
+
+
+# ======================================================================
+# Run-Spec (YAML) support
+# ======================================================================
+
+class _RunSpecArgs:
+    """Minimales Namespace-Objekt mit den CLI-Defaults des Launchers."""
+    def __init__(self, **overrides):
+        for dest, default in rb.RUN_SPEC_PARSER_DEFAULTS.items():
+            setattr(self, dest, default)
+        for k, v in overrides.items():
+            setattr(self, k, v)
+
+
+class TestRunSpec:
+    def _write_spec(self, tmp_path, content):
+        p = os.path.join(str(tmp_path), "run.yaml")
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(content)
+        return p
+
+    def test_load_basic_spec(self, tmp_path):
+        p = self._write_spec(tmp_path, """\
+models: ["m1", "m2"]
+benchmarks: ["DS1000", "Agentic"]
+sample_size: 3
+seed: 2026
+agentic_mode: safety
+thinking: true
+""")
+        spec = rb._load_run_spec(p)
+        assert spec == {
+            "model": "m1,m2",
+            "benchmarks": "DS1000,Agentic",
+            "sample_size": 3,
+            "seed": 2026,
+            "agentic_mode": "safety",
+            "thinking": True,
+        }
+
+    def test_load_spec_list_to_csv(self, tmp_path):
+        p = self._write_spec(tmp_path, "benchmarks:\n  - DS1000\n  - CoderEval\nmodels: [a, b]\n")
+        spec = rb._load_run_spec(p)
+        assert spec["benchmarks"] == "DS1000,CoderEval"
+        assert spec["model"] == "a,b"
+
+    def test_load_spec_unknown_key_warns(self, tmp_path, capsys):
+        p = self._write_spec(tmp_path, "bogus_key: 1\nseed: 5\n")
+        spec = rb._load_run_spec(p)
+        assert "seed" in spec
+        assert "bogus_key" not in spec
+        assert "unbekannter Schlüssel" in capsys.readouterr().out
+
+    def test_load_spec_bad_bool_ignored(self, tmp_path, capsys):
+        p = self._write_spec(tmp_path, "thinking: [nope]\n")
+        spec = rb._load_run_spec(p)
+        assert "thinking" not in spec
+        assert "erwartet bool" in capsys.readouterr().out
+
+    def test_load_spec_bad_sample_size_ignored(self, tmp_path, capsys):
+        p = self._write_spec(tmp_path, "sample_size: -3\n")
+        spec = rb._load_run_spec(p)
+        assert "sample_size" not in spec
+
+    def test_load_spec_missing_file_exits(self, tmp_path):
+        with pytest.raises(SystemExit):
+            rb._load_run_spec(os.path.join(str(tmp_path), "nope.yaml"))
+
+    def test_load_spec_invalid_yaml_exits(self, tmp_path):
+        p = self._write_spec(tmp_path, "models: [unclosed\n")
+        with pytest.raises(SystemExit):
+            rb._load_run_spec(p)
+
+    def test_apply_spec_fills_defaults(self):
+        args = _RunSpecArgs()
+        out = rb._apply_run_spec(args, {"sample_size": 3, "seed": 7})
+        assert out.sample_size == 3
+        assert out.seed == 7
+
+    def test_apply_spec_cli_overrides_yaml(self):
+        args = _RunSpecArgs(sample_size=9)
+        out = rb._apply_run_spec(args, {"sample_size": 3, "seed": 7})
+        assert out.sample_size == 9
+        assert out.seed == 7
+
+    def test_parse_args_run_spec_end_to_end(self, tmp_path, capsys):
+        p = self._write_spec(tmp_path, "sample_size: 3\nseed: 2026\n")
+        args, _ = rb._parse_args(["--run-spec", p])
+        assert args.sample_size == 3
+        assert args.seed == 2026
+
+    def test_parse_args_unknown_key_warns(self, tmp_path, capsys):
+        p = self._write_spec(tmp_path, "sample_size: 3\nbogus_flag: true\n")
+        rb._parse_args(["--run-spec", p])
+        assert "unbekannter Schlüssel" in capsys.readouterr().out
+
+    def test_parse_args_cli_flags_win_over_run_spec(self, tmp_path):
+        p = self._write_spec(tmp_path, "sample_size: 3\nseed: 2026\n")
+        args, _ = rb._parse_args(["--run-spec", p, "--sample-size", "19", "--seed", "7"])
+        assert args.sample_size == 19
+        assert args.seed == 7

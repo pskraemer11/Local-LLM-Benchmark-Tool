@@ -287,6 +287,66 @@ class TestWritePerTaskCSV:
             rows = list(csv.DictReader(f, delimiter=";"))
         assert rows[0]["response"] == ""
 
+    def test_structure_gate_columns_written(self, tmp_results_dir):
+        path = write_per_task_csv(
+            [_make_task_result(output_status="json_ok", entry_point_found=True,
+                               extracted_code="def f():\n    return 1")],
+            benchmark_name="DS1000",
+            model_display="test-model",
+            model_key="test@q4_k_m",
+            base_dir=tmp_results_dir,
+        )
+        with open(path, "r", encoding="utf-8") as f:
+            rows = list(csv.DictReader(f, delimiter=";"))
+        assert rows[0]["output_status"] == "json_ok"
+        assert rows[0]["entry_point_found"] == "True"
+        assert rows[0]["extracted_code"] == "def f():\n    return 1"
+
+    def test_extracted_code_truncated_by_default(self, tmp_results_dir):
+        long_code = "x" * 500
+        path = write_per_task_csv(
+            [_make_task_result(extracted_code=long_code)],
+            benchmark_name="DS1000",
+            model_display="test-model",
+            model_key="test@q4_k_m",
+            base_dir=tmp_results_dir,
+            keep_response=False,
+            response_max_chars=200,
+        )
+        with open(path, "r", encoding="utf-8") as f:
+            rows = list(csv.DictReader(f, delimiter=";"))
+        assert len(rows[0]["extracted_code"]) < 500
+        assert "truncated" in rows[0]["extracted_code"]
+
+    def test_extracted_code_full_when_keep_true(self, tmp_results_dir):
+        long_code = "x" * 500
+        path = write_per_task_csv(
+            [_make_task_result(extracted_code=long_code)],
+            benchmark_name="DS1000",
+            model_display="test-model",
+            model_key="test@q4_k_m",
+            base_dir=tmp_results_dir,
+            keep_response=True,
+        )
+        with open(path, "r", encoding="utf-8") as f:
+            rows = list(csv.DictReader(f, delimiter=";"))
+        assert rows[0]["extracted_code"] == long_code
+
+    def test_structure_gate_missing_fields_default_empty(self, tmp_results_dir):
+        # Result without structure-gate keys should not crash, columns empty
+        path = write_per_task_csv(
+            [_make_task_result()],
+            benchmark_name="DS1000",
+            model_display="test-model",
+            model_key="test@q4_k_m",
+            base_dir=tmp_results_dir,
+        )
+        with open(path, "r", encoding="utf-8") as f:
+            rows = list(csv.DictReader(f, delimiter=";"))
+        assert rows[0]["output_status"] == ""
+        assert rows[0]["entry_point_found"] == ""
+        assert rows[0]["extracted_code"] == ""
+
     def test_score_passes_through(self, tmp_results_dir):
         path = write_per_task_csv(
             [_make_task_result(score=0.85)],

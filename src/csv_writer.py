@@ -95,6 +95,7 @@ TASK_FIELDS = [
     "tokens_out",
     "tokens_per_sec",
     "thinking_tokens",
+    "truncated",
     "thinking_pct",
     "cpu_pct",
     "gpu_pct",
@@ -107,6 +108,9 @@ TASK_FIELDS = [
     "gpu_temp_max",
     "error_type",
     "error_detail",
+    "output_status",
+    "entry_point_found",
+    "extracted_code",
     "response",
 ]
 
@@ -248,6 +252,9 @@ def write_per_task_csv(results: list[dict], benchmark_name: str, model_display: 
         response = r.get("response", "")
         if response and not keep_response:
             response = _truncate_response(str(response), response_max_chars)
+        extracted_code = r.get("extracted_code", "")
+        if extracted_code and not keep_response:
+            extracted_code = _truncate_response(str(extracted_code), response_max_chars)
         rows.append({
             "pipeline": pipeline,
             "model": model_display,
@@ -267,6 +274,7 @@ def write_per_task_csv(results: list[dict], benchmark_name: str, model_display: 
             "tokens_out": r.get("tokens_out", ""),
             "tokens_per_sec": r.get("tokens_per_sec", ""),
             "thinking_tokens": r.get("thinking_tokens", ""),
+            "truncated": 1 if r.get("truncated") else "",
             "thinking_pct": r.get("thinking_anteil", ""),
             "cpu_pct": r.get("cpu_during", ""),
             "gpu_pct": r.get("gpu_during", ""),
@@ -279,6 +287,9 @@ def write_per_task_csv(results: list[dict], benchmark_name: str, model_display: 
             "gpu_temp_max": r.get("GPU_Temp_max", ""),
             "error_type": r.get("error_type", ""),
             "error_detail": r.get("error_detail", ""),
+            "output_status": r.get("output_status", ""),
+            "entry_point_found": str(r.get("entry_point_found")) if r.get("entry_point_found") is not None else "",
+            "extracted_code": extracted_code,
             "response": response,
         })
     _write_csv(path, TASK_FIELDS, rows)

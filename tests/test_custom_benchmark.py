@@ -17,6 +17,7 @@ from custom_benchmark import (
     evaluate_code,
     exec_sandboxed,
     extract_code,
+    classify_output,
     get_task_type,
     load_jsonl,
     parse_resource_avgs,
@@ -160,6 +161,49 @@ class TestExtractCode:
         text = "```python\nx = 1\n```"
         result = extract_code(text, is_structured=True)
         assert "x = 1" in result
+
+
+# ======================================================================
+# classify_output (Struktur-Gate / Structured-Output-Fidelity)
+# ======================================================================
+
+class TestClassifyOutput:
+    def test_empty_response(self):
+        assert classify_output("", "", False)["output_status"] == "empty"
+
+    def test_json_ok(self):
+        text = json.dumps({"code": "def f(): pass"})
+        meta = classify_output("def f(): pass", text, True)
+        assert meta["output_status"] == "json_ok"
+
+    def test_json_missing_code(self):
+        text = json.dumps({"code": ""})
+        meta = classify_output("", text, True)
+        assert meta["output_status"] == "json_missing_code"
+
+    def test_json_invalid(self):
+        meta = classify_output("", "not json{", True)
+        assert meta["output_status"] == "json_invalid"
+
+    def test_fenced(self):
+        meta = classify_output("x = 1", "```python\nx = 1\n```", False)
+        assert meta["output_status"] == "fenced"
+
+    def test_bare(self):
+        meta = classify_output("def f(): pass", "def f(): pass", False)
+        assert meta["output_status"] == "bare"
+
+    def test_entry_point_found(self):
+        meta = classify_output("def f():\n    return 1", "def f():\n    return 1", False, entry_point="f")
+        assert meta["entry_point_found"] is True
+
+    def test_entry_point_missing(self):
+        meta = classify_output("def g():\n    return 1", "def g():\n    return 1", False, entry_point="f")
+        assert meta["entry_point_found"] is False
+
+    def test_entry_point_empty_returns_none(self):
+        meta = classify_output("x = 1", "x = 1", False)
+        assert meta["entry_point_found"] is None
 
     def test_extracts_bare_python(self):
         text = "def hello():\n    return 1\necho"
@@ -447,6 +491,12 @@ class TestEvaluateCode:
         score, msg = evaluate_code("", "f", [])
         assert score == 0.0
         assert "No code" in msg
+
+    def test_entry_point_not_found_with_tests(self):
+        # Direct-tests path (CoderEval): entry_point must exist in code
+        score, msg = evaluate_code("def g(): return 1", "f", ["assert True"])
+        assert score == 0.0
+        assert "Entry point 'f' not found" in msg
 
     @patch.object(cb, "_run_sandbox")
     def test_direct_tests_passing(self, mock_sandbox):

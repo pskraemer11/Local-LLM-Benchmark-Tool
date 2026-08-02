@@ -242,7 +242,7 @@ BENCHMARK_CATEGORY_DEFAULTS = {
     "coding": {
         "temperature": 0.0,
         "top_p": 1.0,
-        "max_tokens": 2048,
+        "max_tokens": 4096,
         "enable_thinking": False,
     },
     "math": {
@@ -254,7 +254,7 @@ BENCHMARK_CATEGORY_DEFAULTS = {
     "knowledge": {
         "temperature": 0.0,
         "top_p": 1.0,
-        "max_tokens": 2048,
+        "max_tokens": 4096,
         "enable_thinking": False,
     },
     "agentic": {
@@ -265,10 +265,18 @@ BENCHMARK_CATEGORY_DEFAULTS = {
     },
 }
 
+# ── gpt-oss: Reasoning-Level / Budget (zentrale Quelle) ──
+# Steuert BOTH Ebenen, damit sie synchron bleiben:
+#   1. LM-Studio-Engine-Config (patch_reasoning_effort.py schreibt reasoningEffort/budgetTokens)
+#   2. System-Prompt des gptoss_reasoning-Blueprints (assemble_blueprint.py)
+# OpenAI: "The reasoning level can be set in the system prompts, e.g. 'Reasoning: high'."
+GPTOSS_REASONING_EFFORT = "medium"
+GPTOSS_REASONING_BUDGET = 4096
+
 # Modell-spezifische Overrides (flach, keine Kategorie-Differenzierung).
 # Werden per Substring-Match auf den Model-Key gemerged.
 # Nur hier eintragen, wenn die Hersteller-Empfehlung substantiell vom
-# Kategorie-Default abweicht (z.B. Phi-4 empfiehlt do_sample=True fuer alles).
+# Kategorie-Default abweicht (z.B. Phi-4 empfiehlt do_sample=True fuer ALLES).
 MODEL_TEMP_OVERRIDES = {
     "phi-4-reasoning": {
         "temperature": 0.8,
@@ -280,8 +288,21 @@ MODEL_TEMP_OVERRIDES = {
         "top_p": 1.0,
         "top_k": 0,
         "stop": ["<|return|>", "<|call|>"],
-        "reasoning_effort": "low",
-        "max_thinking_tokens": 200,
+    },
+    # PrismML Bonsai – Hersteller-Empfehlung (Modellkarten):
+    #   - Bonsai-27B (Ternary): temp 0.7 / top-p 0.95 / top-k 20 (Thinking-Mode)
+    #   - Bonsai-8B:            temp 0.6 (Range 0.5-0.7)
+    # Ohne Override wuerden sie mit Kategorie-Default temp 0.0 (greedy) laufen → Ursache
+    # der schlechten Scores (2026-08-02 DS1000-Testlauf).
+    "bonsai-27b": {
+        "temperature": 0.7,
+        "top_p": 0.95,
+        "top_k": 20,
+    },
+    "bonsai-8b": {
+        "temperature": 0.6,
+        "top_p": 0.95,
+        "top_k": 40,
     },
     "magistral": {
         "temperature": 0.7,
@@ -489,6 +510,17 @@ PIPELINE_TIMEOUTS = {
 }
 
 TOOL_EVAL_SCENARIO_IDS = [f"TC-{i:02d}" for i in range(1, 70)]
+
+# Safety & Boundaries (Category K) Szenarien aus tool_eval_bench v2.0.7.
+# Diese 13 TCs testen Injection-/Sicherheits- und Grenzfall-Verhalten
+# (Prompt-Injection, Authority Escalation, Sleeper Injection, Hallucination,
+# Scope Limitation ...). Bei --agentic-mode=safety wird NUR aus dieser Liste
+# gestartet. Quelle: evals/scenarios.py + evals/scenarios_adversarial.py.
+AGENTIC_SAFETY_SCENARIO_IDS = [
+    "TC-31", "TC-32", "TC-33", "TC-34", "TC-35", "TC-36",
+    "TC-41", "TC-42", "TC-43",
+    "TC-57", "TC-58", "TC-59", "TC-60",
+]
 
 PIPELINE_DISCOVERY = {
     "custom": {"module": None, "glob": "custom_benchmark_v*.py", "desc": "Subprozess (DS1000, CoderEval)"},

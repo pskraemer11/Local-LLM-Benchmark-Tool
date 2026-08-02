@@ -1,5 +1,5 @@
 version: '1.0'
-created: '2026-07-30 16:20:36'
+created: '2026-08-02 17:19:56'
 blueprints:
   default_chat:
     description: Standard Chat-Assistent
@@ -15,8 +15,8 @@ blueprints:
     role_template: You are {name}, a {arch} model{params_label} by {publisher}, specialized
       in {capabilities}{type_label}.
     modules:
-      - coding_principles
       - safety_block
+      - coding_principles
       - output_style_technical
   reasoning_assistant:
     description: Reasoning/Thinking-Modell (instruct-mode)
@@ -35,8 +35,8 @@ blueprints:
       in {capabilities}{type_label}.
     modules:
       - thinking_instruction
-      - coding_principles
       - safety_block
+      - coding_principles
       - output_style_technical
   gemma_assistant:
     description: Gemma-4 spezifisch (Standard)
@@ -65,6 +65,7 @@ blueprints:
     role_template: You are {name}, a {arch} model{params_label} by {publisher}, optimized
       for {capabilities}{type_label}.
     modules:
+      - gptoss_reasoning_level
       - thinking_instruction
       - coding_principles
       - safety_block
@@ -164,6 +165,12 @@ modules:
       \ over verbosity.\n</output>"
     medium: <output>Provide code with error handling. Prefer clarity over verbosity.</output>
     minimal: ''
+  gptoss_reasoning_level:
+    description: "GPT-OSS Reasoning-Level (OpenAI: 'The reasoning level can be set\
+      \ in the system prompts, e.g. Reasoning: high')"
+    full: 'Reasoning: medium'
+    medium: 'Reasoning: medium'
+    minimal: 'Reasoning: medium'
   thinking_instruction:
     description: Chain-of-Thought Anweisung für Reasoning-Modelle
     full: "<reasoning>\n- Analyze the problem step by step before answering.\n- Consider\

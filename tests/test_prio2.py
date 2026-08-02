@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import pytest
 
-from benchmark_config import QUANT_MAP, get_model_config, get_quant
+from benchmark_config import QUANT_MAP, GPTOSS_REASONING_EFFORT, GPTOSS_REASONING_BUDGET, get_model_config, get_quant
 from custom_benchmark import _uses_qwen_template, strip_thinking_tokens
 from csv_writer import _truncate_response
 
@@ -244,6 +244,20 @@ class TestGetModelConfigRegistryThinking:
         with patch("benchmark_config._load_quant_registry", return_value=reg):
             cfg = get_model_config("lmstudio-community/qwen3.5-8b")
         assert cfg["enable_thinking"] is False
+
+
+class TestGptOssReasoningConstants:
+    """Zentrale gpt-oss-Reasoning-Konstanten (synchrone Quelle fuer Patch+Blueprint)."""
+
+    def test_effort_is_valid_level(self):
+        assert GPTOSS_REASONING_EFFORT in ("low", "medium", "high")
+
+    def test_budget_is_positive(self):
+        assert isinstance(GPTOSS_REASONING_BUDGET, int) and GPTOSS_REASONING_BUDGET > 0
+
+    def test_default_is_medium(self):
+        # Hersteller-Benchmarks (SWE-bench-verified) nutzen medium/high; meist medium.
+        assert GPTOSS_REASONING_EFFORT == "medium"
 
 
 class TestUsesQwenTemplate:
