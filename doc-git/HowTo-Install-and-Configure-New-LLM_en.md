@@ -11,7 +11,7 @@
 
 ### Phase B – Manual check & our pipeline
 
-**Check: Is the model in the registry?**
+**Check: Is the model in the model registry?**
 ```bash
 grep -l "model-name" doc-git/model_registry.yaml
 ```
@@ -21,7 +21,7 @@ grep -l "model-name" doc-git/model_registry.yaml
 1. *ℹ BLACKLIST check:* 
       If the model name contains keywords like `embed`, `ocr`, `vision`, `whisper`, `german`, `rag`, `translat`, `audio`, `vl`, `flux`, `bge-m3`, `datagemma-rig`, `granitelib-rag`, or `em_german_13b`, 
       it is in `BLACKLIST` and **will be skipped** by `src/registry_tool.py`. 
-      These models are not suitable for coding/math-benchmark use (embeddings, OCR/vision/audio, <16K context length, etc.).
+      These models are not suitable for coding/math-benchmark use (e.g. embeddings, OCR/vision/audio, <16K context length, etc.).
 
 2. Simply run:
 ```
@@ -32,7 +32,12 @@ python src/registry_tool.py sync
 
 Easiest way: 
 Run in MS-PowerShell:
-`sync_model_configs.ps1 -AutoAdd` detects the model via `lms ls` and registers it automatically. 
+`sync_model_configs.ps1 -AutoAdd` detects the model via `lms ls` and registers it automatically.
+Internally it calls `python src/registry_tool.py sync` (+ `assemble_blueprint.py classify`).
+
+> ⚠️ **`sync_model_configs.ps1` resolves `registry_tool.py`/`assemble_blueprint.py` from `src/`**
+> (since the v13.0.6 migration; variable `$SRC` = `<root>\src`). The universal fallback is
+> `python src/registry_tool.py sync`. 
 
 or Manual:
 `doc-git/model_registry.yaml` – insert entry (alphabetical position):
@@ -125,6 +130,38 @@ mkdir -p ~/.lmstudio/hub/models/{publisher}/{model-name}/
 ```
 → Done. The old `model.yaml` (if present) is updated on `lms clone`/`lms get`, not on manual import.
 
+### Phase E – Remove a model / delete registry entry
+
+**Use case:** You deleted the GGUF in LM Studio (`lms uninstall` / manual delete) and no longer want
+the model in `model_registry.yaml`. The registry entry would otherwise stay forever
+(`compare` then shows it under "Registry entries not in LMS").
+
+**Remove registry entry** (keeps files + configs):
+```
+python src/registry_tool.py rm <model-key>
+```
+
+**Remove entry + JSON configs + GGUF files in one go:**
+```
+python src/registry_tool.py rm <model-key> --delete-files --yes
+```
+
+| Flag | Effect |
+|------|--------|
+| (none) | Only deletes the registry entry. Files/configs stay. Interactive confirm (`[y/N]`). |
+| `--delete-files` | Also deletes JSON configs (incl. `.bak-*` backups) and the model dir under `~/.lmstudio/hub/models/<pub>/<name>` / `~/.lmstudio/models/<pub>/<name>`. |
+| `--yes` | Skips the interactive confirmation. |
+
+**Note:** The JSON configs live in `~/.lmstudio/.internal/user-concrete-model-default-config`
+(`CONFIG_ROOT` in `registry_tool.py`) and are removed **only** with `--delete-files`.
+Plain `rm <key>` deletes just the registry entry and leaves all files intact.
+Re-adding the model later is automatic via `sync_model_configs.ps1` / `registry_tool.py sync`.
+
+**Related native script:** `.\sync_model_configs.ps1` (project root). It wraps `registry_tool.py`
+and `assemble_blueprint.py`, resolving both from `src/`. Flags: `-Status`, `-AutoAdd`
+(new models + sync + classify), `-FullSync` (additionally assemble + validate), `-SyncCtx`,
+`-FillCtx`, `-FillArch`, `-FixNp`, `-FixCtx`.
+
 ### Cheat Sheet
 
 ```bash
@@ -151,6 +188,9 @@ python src/registry_tool.py sync-from-configs
 
 # Compare registry vs LMS vs configs
 python src/registry_tool.py compare
+
+# Remove a model from the registry (files/configs stay; --delete-files removes everything)
+python src/registry_tool.py rm <model-key> [--delete-files] [--yes]
 
 # Prompt-Preview (ohne zu schreiben)
 python src/assemble_blueprint.py preview

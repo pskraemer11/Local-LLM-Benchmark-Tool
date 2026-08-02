@@ -1368,7 +1368,7 @@ vinpix/bonsai-8b-llama.cpp:
   arch: dense
   k_cache: q8_0
   v_cache: iq4_nl
-  offload: 1
+  offload: 1.0
   num_parallel: 1
   notes: 'Architektur: dense'
   file_size_bytes: 2985154240
@@ -1376,7 +1376,7 @@ vinpix/bonsai-8b-llama.cpp:
   n_layers: 36
   hidden_dim: 4096
   reasoning: thinking
-  useUnifiedKvCache: false
+  useUnifiedKvCache: true
   capabilities: text
   blueprint: reasoning_assistant
   truncation: full
@@ -1411,7 +1411,7 @@ qwen/qwen3.5-9b:
   notes: 'Architektur: dense | Vision'
   file_size_bytes: 8281142495
   context_length: 262144
-  useUnifiedKvCache: true
+  useUnifiedKvCache: false
   reasoning: instruct
   capabilities: vision, coding, text
   blueprint: coding_agent
@@ -1450,7 +1450,7 @@ prism-ml/bonsai-27b:
   n_layers: 64
   hidden_dim: 5120
   reasoning: thinking
-  useUnifiedKvCache: false
+  useUnifiedKvCache: true
   capabilities: vision, text
   blueprint: reasoning_assistant
   truncation: full

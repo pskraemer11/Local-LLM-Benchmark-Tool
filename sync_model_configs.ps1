@@ -123,9 +123,10 @@ WHAT THE SCRIPT DOES NOT DO:
 }
 
 $SR = Split-Path -Parent $PSCommandPath
-$RT = Join-Path $SR "registry_tool.py"
+$SRC = Join-Path $SR "src"
+$RT = Join-Path $SRC "registry_tool.py"
 $RP = Join-Path (Join-Path $SR "doc-git") "model_registry.yaml"
-$AS = Join-Path $SR "assemble_blueprint.py"
+$AS = Join-Path $SRC "assemble_blueprint.py"
 
 if (!(Test-Path $RP)) { Write-Error "Registry not found: $RP"; exit 1 }
 
