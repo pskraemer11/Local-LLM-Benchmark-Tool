@@ -1,7 +1,7 @@
-# Architecture & Flow – Status 01.08.2026 (v13.0.7 + uncommitted 01.08.)
+# Architecture & Flow – Status 02.08.2026 (v13.0.10)
 
-> **Version Convention:** see [`../VERSION`](../VERSION) – Single Source of Truth for project version. The filename `_v24.md` is legacy (last updated 17.07.2026) – planned migration to `_v13.md` in a future major version.
-> **Review Reference:** See `Doku-intern/Code-Review-2026-07-18.md` for the full review that informed the 18.07. changes.
+> **Version Convention:** See [`../VERSION`](../VERSION) – Single Source of Truth for project version. The existing `_en.md` filename is legacy (last updated 02.08.2026) – planned migration to `_v13.md` in a future major version.
+> **Review Reference:** See `doc-git/Reviews/Code-Review_2026-08-02_de.md` for the P1/P3/P4 review (Struktur-Gate, Agentic-Safety, Run-Spec) that informed the 02.08. changes. Earlier: `Doku-intern/Code-Review-2026-07-18.md`.
 
 ## 1. Overview
 
@@ -71,9 +71,11 @@ run_benchmarks.py (LAUNCHER - main(), v10)
 ├── API_BASE from model_manager.API_BASE
 ├── MMLU-Pro helper (removed in v13): _get_lmeval_params, _build_lmeval_cmd, _parse_subset_score
 ├── Task-Retry: MAX_RETRIES=3, exponential backoff
-├── --seed for reproducible task selection (passed to custom subprocess)
+├── --seed for reproducible task selection (custom + agentic + evalplus)
 ├── --no-structured-output for fallback in custom pipeline
-├── Context Length: Taken from the `user-concrete-model-default-config` JSONs
+├── --agentic-mode {random,safety} (02.08.): Agentic-Szenario-Auswahl – Kategorie K vs. alle 69
+├── --run-spec / --config <run.yaml> (02.08.): YAML-Run-Spec mit Precedence CLI>YAML>Defaults
+├── Context length: Taken from the `user-concrete-model-default-config` JSONs
 │   (no longer a parameter to `load_model_via_lms()`)
 ├── Frees memory at the end
 ├── Excludes: whisper, vision, ocr, audio, embed, vl
@@ -198,7 +200,7 @@ main()
 │   │
 │   ├── for BENCHMARK in benchmarks:
 │   │   ├── if agentic:
-│   │   │   └── run_agentic()                     # tool-eval-bench
+│   │   │   └── run_agentic(mode=args.agentic_mode, seed=args.seed)  # tool-eval-bench
 │   │   ├── if evalplus (HumanEval+/MBPP+):
 │   │   │   ├── evalplus.codegen --id-range [0,N) # exclusive end
 │   │   │   └── evalplus.evaluate
@@ -427,6 +429,8 @@ BENCHMARK_CATEGORY_DEFAULTS  (global, 4 entries)
 | `qwen3.6` | enable_thinking=False | Thinking tokens block token budget |
 | `qwen3.5` | temp=0.2, no_system_msg | System-less prompt embedding |
 | `gemma` | enable_thinking=False | Thinking disrupts coding benchmarks |
+| `bonsai-27b` | temp=0.7, top_p=0.95, top_k=20 | **02.08.:** PrismML-Modellkarte (Ternary, Thinking-Mode). Ohne Override lief es mit `temp=0.0` (greedy) – Ursache der schlechten 2026-08-02-DS1000-Scores |
+| `bonsai-8b` | temp=0.6, top_p=0.95, top_k=40 | **02.08.:** Hersteller-Range 0.5–0.7 |
 
 **Merge order** (higher wins):
 1. `BENCHMARK_CATEGORY_DEFAULTS[category]` – global default
@@ -449,6 +453,44 @@ BENCHMARK_CATEGORY_DEFAULTS  (global, 4 entries)
 | Model unloaded after custom bench | Automatic reload + 10s pause |
 | UnicodeEncodeError      | PYTHONIOENCODING=utf-8 set globally   |
 | Granite Tiny Experts=64 | `ggml_new_object: not enough space` at 1M Context; workaround: set Experts=16 |
+
+### 2.11 YAML Run-Spec (NEW 02.08., P3 / v13.0.10)
+
+Reproduzierbare Runs über eine YAML-Datei statt langer CLI-Aufrufe:
+
+```bash
+python run_benchmarks.py --run-spec run.example.yaml     # --config ist Alias
+```
+
+**Precedence: `CLI-Flags > YAML > Skript-Defaults`.** Die Erkennung, welche CLI-Flags
+explizit gesetzt wurden, erfolgt **exakt** über einen SUPPRESS-Probe-Parser in `_parse_args`
+– nicht über Default-Vergleich-Heuristik. Ein `--seed 99` auf der CLI gewinnt also immer
+gegen einen `seed:`-Wert in der YAML.
+
+**Mechanik in `src/run_benchmarks.py`:**
+- `RUN_SPEC_DEST_MAP`: YAML-Schlüssel → CLI-Dest (snake_case- + kebab-case-Aliase).
+- `_load_run_spec(path)`: PyYAML `safe_load` (lazy import, fatal bei fehlender Datei /
+  kaputtem YAML / Nicht-Mapping). Unbekannte Top-Level-Keys → `[WARN]`, Listen
+  (models/benchmarks/exclude_benchmarks) → Komma-String, Bool-/int-Validierung.
+- `_validate_run_spec_selections()`: Warn bei unbekannten Benchmark-/Modellnamen
+  (gegen `ALL_BENCH_NAMES` bzw. `lms ls --json`; `all`/Nummern/Ranges → skip).
+- `_apply_run_spec(...)`: wendet Werte nur an, wenn Dest **nicht** explizit per CLI
+  gesetzt (SUPPRESS-Probe-Parse-Namespace).
+- `_LAUNCHER_ARG_SPECS`: gemeinsame Arg-Definitionen für Haupt- & Probe-Parser.
+
+**Unterstützte Schlüssel** (Beispiel siehe `run.example.yaml`): `models`, `benchmarks`,
+`sample_size`, `seed`, `agentic_mode` (`random`/`safety`), `exclude_benchmarks`,
+`thinking`, `no_structured_output`, `unload_between`, `keep_response`.
+`temperature/top_p`-Overrides sind bewusst **nicht** im Spec – sie kommen aus
+`MODEL_TEMP_OVERRIDES` (Kategorie + Modell, §2.9).
+
+### 2.12 Seed-Durchgängigkeit (P3)
+
+Der `--seed`-Wert wird **durchgängig** an alle reproduzierbaren Pfade gereicht:
+- Custom-Pipeline (`custom_benchmark.py --seed`) → Task-Auswahl
+- Agentic (`run_agentic(..., seed=args.seed)`) → `random.Random(seed)`-Szenario-Auswahl
+- EvalPlus (`run_evalplus(..., seed=args.seed)`)
+- `tools/parallel_ab.py --seed` (Default `RANDOM_SEED=42`) → reproduzierbare Prompt-Auswahl in `build_prompts()`
 
 ---
 
@@ -492,17 +534,21 @@ with signal timeout.
 
 ## 5. Agentic Pipeline
 
-`run_agentic()` in `src/run_benchmarks.py`:
+`run_agentic(model_info, limit, mode="random", seed=None)` in `src/run_benchmarks.py`:
 
 ```
 tool_eval_bench CLI (v2.0.7+)
 ├── --base-url http://127.0.0.1:1234/v1
-├── --scenarios TC-XX ... (random from TOOL_EVAL_SCENARIO_IDS = TC-01..TC-69)
+├── --scenarios TC-XX ... (mode="random": from TOOL_EVAL_SCENARIO_IDS = TC-01..TC-69
+│                           mode="safety": from AGENTIC_SAFETY_SCENARIO_IDS = 13 Category-K)
 ├── --json-file <agentic_<model>_<ts>.json>
 ├── --timeout 600 (per scenario, from PIPELINE_TIMEOUTS["agentic_scenario"])
 ├── --no-live (no interactive UI)
 └── Result: final_score (0-100) from JSON envelope, normalized to 0-1
 ```
+
+Die Szenario-Auswahl ist **deterministisch**: `random.Random(seed).sample(all_ids, limit)` –
+nicht globales `random`. `seed=args.seed` kommt aus dem Launcher (bzw. der Run-Spec, §2.12).
 
 Timeout per scenario: `PIPELINE_TIMEOUTS["agentic_scenario"]` = 600s (10 minutes)
 Total runtime per model: `PIPELINE_TIMEOUTS["agentic_subprocess"]` = 3600s (60 minutes)
@@ -524,6 +570,29 @@ Seit dem Upgrade von tool-eval-bench auf v2.0.7 hat sich die CLI geändert:
 Der frühere Source-Patch in `tool_eval_bench\runner\orchestrator.py:379` (`max_tokens=4096→512`) wird **nicht mehr benötigt**, da v2.0.7 das Verhalten des Backends respektiert (LM Studio steuert `max_tokens` via Config).
 
 **Fallback bei zu langen Antworten:** `--backend-kwargs '{"max_tokens": 512}'` an den Befehl anhängen.
+
+### AGENTIC_SAFETY_SCENARIO_IDS – Adversarial-Safety-Modus (NEW 02.08.)
+
+`benchmark_config.py` definiert 13 "Category-K" Szenarien (Safety & Boundaries) aus
+tool_eval_bench v2.0.7 (Quelle: `evals/scenarios.py` + `evals/scenarios_adversarial.py`):
+
+```python
+AGENTIC_SAFETY_SCENARIO_IDS = [
+    "TC-31", "TC-32", "TC-33", "TC-34", "TC-35", "TC-36",   # Prompt-Injection-assoziiert
+    "TC-41", "TC-42", "TC-43",                               # Safety / Boundaries
+    "TC-57", "TC-58", "TC-59", "TC-60",                      # weitere Category-K
+]
+```
+
+**Auswahl via `--agentic-mode`** (CLI oder Run-Spec):
+| Mode | Szenarien | Zweck |
+|------|-----------|-------|
+| `random` (Default) | alle 69 (`TOOL_EVAL_SCENARIO_IDS`) | Regression / normaler Benchmark |
+| `safety` | nur die 13 Category-K | Adversarial-Safety-Selektion (C≥K) |
+
+Aufruf-Signatur: `run_agentic(model_info, limit, mode="random", seed=None)` – `mode` und
+`seed` werden vom Launcher gereicht (§2.1), `random.Random(seed)` macht die Auswahl
+reproduzierbar. Unbekannte Modes → WARN + Fallback auf `random`.
 
 ### --no-unload-between (NEW in v13)
 
@@ -807,6 +876,29 @@ agentic;Agentic;Phi-4;0.55;0;33;31;38;39;37;43;30;28;32;11.9;63;61
 **Intermediate summary:** `csv_writer.write_accumulative_summary()` after each model
 **Consolidation:** `csv_writer.write_konsolidiert_aktuell()` at the end (only for >1 model)
 
+### Struktur-Gate-Spalten (NEW 02.08., P1)
+
+`tasks_*.csv` (Per-Task-Raw, `TASK_FIELDS` in `csv_writer.py`) wurde um Diagnose-Spalten
+erweitert (reine Telemetrie, **keine** Score-/Pipeline-Veränderung):
+
+| Spalte | Bedeutung | Werte |
+|--------|-----------|-------|
+| `output_status` | `classify_output()`: wie die Roh-Antwort in lauffähigen Code übersetzt wurde | `empty`, `json_ok`, `json_missing_code`, `json_invalid`, `fenced`, `bare` |
+| `entry_point_found` | Entry-Point-Triage (nur wenn `entry_point`-Param gesetzt) | `true`/`false`/`""` |
+| `extracted_code` | extrahierter Code (ggf. 200-Zeichen-Truncation) | Text |
+| `response` | Roh-Antwort (200-Zeichen-Truncation, Volltext nur mit `--keep-response`) | Text |
+
+Klassifikation (structured Output erwartet JSON): `json_ok` = gültiges JSON mit `code`-Feld,
+`json_missing_code` = JSON ohne `code`, `json_invalid` = unparsbares JSON. Unstructured:
+`fenced` (Markdown-Codeblock erkannt) vs. `bare` (Code direkt). Leer → `empty`. Die
+Entry-Point-Triage prüft per Regex `^def <entry_point>(` nur im **Direkt-Tests-Pfad**
+(`tests and entry_point`); DS1000-Harness/Bare bleiben unverändert (→ `entry_point_found` leer).
+`classify_output()` in `custom_benchmark.py:849`.
+
+> Die DS1000-Re-Run-Messung damit: Ternary-Bonsai 0.10 (9×`empty`, 1×`fenced`), gpt-oss 0.20
+> (10×`fenced`), Bonsai 27B@Q1_0 0.30 (6×`empty`, 4×`fenced`), Bonsai 8B 0.60 (10×`bare`).
+> 8B-Diff zu Morgenlauf (0.0→0.6) über `bare`-Pfad; Details Sektion 7 der Auswertungsdatei.
+
 ### Filename Schema:
 
 | File | Pattern | Example |
@@ -995,6 +1087,9 @@ Changes need ONLY be made in `src/model_manager.py` – no more searching for ha
 | `CAT_WEIGHTS`            | `{"Coding": 0.35, "Math": 0.25, "Agentic": 0.25, "Knowledge": 0.15}` | Category weighting |
 | `OVERALL_WEIGHTS`        | `{"Coding": {"HumanEval+": 0.25, "MBPP+": 0.25, "DS1000": 0.25, "CoderEval": 0.25}, ...}` | Benchmark weighting per category |
 | `TOOL_EVAL_SCENARIO_IDS` | TC-01..TC-69               | Agentic scenarios                |
+| `AGENTIC_SAFETY_SCENARIO_IDS` | 13 Category-K TCs (TC-31..36, 41..43, 57..60) | **NEU 02.08. (P4):** Adversarial-Safety-Selektion bei `--agentic-mode safety` |
+| `GPTOSS_REASONING_EFFORT` | `medium` | **NEU 02.08.:** zentrale Quelle für gpt-oss Reasoning-Level – steuert `patch_reasoning_effort.py` (Engine-Config) UND den System-Prompt des `gptoss_reasoning`-Blueprints synchron |
+| `GPTOSS_REASONING_BUDGET` | `4096` | **NEU 02.08.:** Thinking-Token-Budget für gpt-oss (zentrale Quelle, ebenfalls ggf. per `--effort/--budget` overridebar) |
 | `EXCLUDE_KEYWORDS`       | whisper, vision, ocr, transcription, translat, audit, audio, embed, vl, flux, **german, rag** | Excluded modalities |
 | `REASONING_KEYWORDS`     | ["r1", "thinking", "qwq", "cot", "reasoning", "phi-4-reasoning", …] | Keyword-Whitelist für Reasoning-Detektion (letzte Priorität in der Hybrid-Klassifikation, siehe §2.6) |
 | `_ARCH_REASONING_MAP`   | `{"qwen3":"thinking", "deepseek2":"thinking", "gpt-oss":"instruct", …}` | **NEU 24.07.:** Architektur→Reasoning-Zuordnung in `src/assemble_blueprint.py`. Überschreibt Keyword-Heuristik. Siehe §2.6 |
@@ -1072,7 +1167,7 @@ class ModelData:
 
 ## 17. Tests (NEW in v10, after review)
 
-**Status 24.07.2026 (v13.0.5):** **572 passing, 9 skipped, 0 failing** (548 → 572, +24 in Teil 1+2). 9 skipped tests are obsolete `_get_lmeval_params` if-else-cascade tests (replaced by Variante C+ in v13).
+**Status 02.08.2026 (v13.0.10):** **693 passing, 0 failing** (572 → 693, +121: Anteil in mehreren Monaten). 9 skipped tests are obsolete `_get_lmeval_params` if-else-cascade tests (replaced by Variante C+ in v13).
 
 Test files in `tests/`:
 
@@ -1087,9 +1182,11 @@ Test files in `tests/`:
 | `test_custom_benchmark_io.py` | – | `exec_sandboxed` I/O |
 | `test_dependencies.py` | – | Required Python packages |
 | `test_model_manager.py` | 76 | `parse_selection`, `check_api_available`, `get_current_loaded_model`, `get_available_models`, `load_model_via_lms`, **`unload_all_models` (Bug 1 fix, 18.07.)**, **`_ensure_lmstudio_running` (Bug 2 fix, 18.07.)**, `wait_for_model_ready`, **`_validate_model_key` (18.07.)** |
+| `test_parallel_ab.py` | 2 | **NEW 02.08.:** `build_prompts(seed=...)` reproduzierbar (impliziter Seed 42; expliziter Seed identisch) |
+| `test_patch_reasoning_effort.py` | – | **NEW 31.07.:** `tools/patch_reasoning_effort.py` (Defaults aus `GPTOSS_REASONING_EFFORT_BUDGET`) |
 | `test_prio2.py` | – | Prio 2 (Variant C+ category defaults) |
 | `test_prio2_terminal.py` | 25 | Prio 0/2/3 terminal findings (incl. **Bug 6.4 fix, 18.07.**: `_unwrap_solution_for_insert` synthetic def for Granite) |
-| `test_run_benchmarks.py` | 51 | Launcher & resolve functions (9 obsolete tests skipped, 18.07.) |
+| `test_run_benchmarks.py` | ~63 | Launcher & resolve functions. **NEW 02.08.:** `TestRunSpec` (12 Fälle: Laden, Listen→CSV, Unbekannt-Warn, Bool/Int, Fatal-Fehler, `_apply_run_spec` Precedence) + `test_parse_args_cli_flags_win_over_run_spec` |
 | `test_registry_tool.py` | **35** | **NEW 18.07.:** VRAM formula (`_max_ctx_from_vram`), KV-bytes table, match cascade in `cmd_configs`, `_infer_num_parallel` rules |
 | `test_assemble_blueprint.py` | **43** | **NEW 18.07.:** `normalize_model_name`, `classify_capabilities`, `extract_params`, format helpers, `read_lms_configs` cache (5s TTL) |
 
@@ -1209,6 +1306,14 @@ pytest tests/ -v
 
 | Date   | File                                         | Change                                                                           |
 |--------|-----------------------------------------------|----------------------------------------------------------------------------------|
+| 02.08. | `src/custom_benchmark.py` (+`csv_writer.py`, `type_defs.py`) | **P1 Struktur-Gate (v13.0.10):** `classify_output()` → `output_status` (`empty`/`json_ok`/`json_missing_code`/`json_invalid`/`fenced`/`bare`) + `entry_point_found` (Regex-Triage) + `extracted_code`. Neue CSV-Spalten in `TASK_FIELDS`, `--keep-response` für Volltext. Reine Telemetrie, keine Score-Änderung |
+| 02.08. | `src/benchmark_config.py` + `src/run_benchmarks.py` | **P4 Agentic-Safety (v13.0.10):** `AGENTIC_SAFETY_SCENARIO_IDS` (13 Category-K TC-31..36/41..43/57..60), `run_agentic(mode, seed)` + `--agentic-mode {random,safety}`, deterministisch via `random.Random(seed)` |
+| 02.08. | `src/run_benchmarks.py` + `src/tools/parallel_ab.py` (+Tests) | **P3 YAML-Run-Spec (v13.0.10):** `--run-spec/--config run.yaml`, SUPPRESS-Probe-Parser (CLI>YAML>Defaults), `build_prompts(seed)` + `--seed`. Beispiel: `run.example.yaml` |
+| 02.08. | `src/benchmark_config.py`, `src/assemble_blueprint.py`, `src/tools/patch_reasoning_effort.py` | **gpt-oss Reason-Logik zentralisiert:** `GPTOSS_REASONING_EFFORT="medium"` / `GPTOSS_REASONING_BUDGET=4096` – steuern Engine-Config UND `gptoss_reasoning`-Blueprint synchron |
+| 02.08. | `src/benchmark_config.py` | **Bonsai-Temperature-Overrides:** `bonsai-27b` temp=0.7/top_p=0.95/top_k=20, `bonsai-8b` temp=0.6 (Herstellermk.; ohne Override liefen sie greedy `temp=0.0` → schlechte DS1000-Scores) |
+| 02.08. | `doc-git/model_registry.yaml` | **Registry-Sync:** +53 Modelle (via `registry_tool.py sync`: 53 assembled, 191 validated) – u.a. Bonsai-8B/27B@Q1_0, Qwen3.5, GLM-4.7-Flash-ReAP |
+| 02.08. | gesamt                         | **DS1000-Re-Run mit Struktur-Gate (4 Modelle, seed=2026):** Ternary-Bonsai 0.10, gpt-oss 0.20, Bonsai 27B@Q1_0 0.30, Bonsai 8B 0.60. Details: Sektion 7 der Auswertungsdatei |
+| 01.08. | `src/run_benchmarks.py`                     | **IFEval peg-native-Fix (GGUF-EOS-Fallback):** `_get_model_eos_string()` liest EOS aus GGUF-Header (cached) → `eos_string` nur für Tasks ohne YAML `until` (z.B. IFEval). Behebt HTTP 500 „peg-native format" (llama#20260). stderr-Kurzfassung |
 | 01.08. | `src/custom_benchmark.py`                     | **BUGFIX Stop-String:** `STOP_TOKENS_CODING` `"\n```"` → `"\n```\n"` (Z. 192). `\n```` matchte die Codeblock-Öffnung von DeepSeek-R1-Distill → 0% DS1000/CoderEval ("No code generated"). Verifiziert: DS1000 35%, CoderEval 67% (seed 42, SS20) statt 0%. Details §15 + thinking-config_en.md |
 | 01.08. | `src/consolidate_results.py`                  | **SampleSize-Angabe + Tabellen-Formatierung:** MD-Header zeigt `SampleSize=5,20 (DS1000), …` statt `mixed` (`_describe_sample_sizes`, `_collect_pipeline_sample_sizes`, `_extract_csv_sizes`). Tabellen content-driven: längster Modellname bestimmt Breite, `|` fluchten vertikal, Dezimalpunkte ausgerichtet (`_render_complete_table`, `_align_decimal_cells`, `_write_tbl`) |
 | 01.08. | `src/run_benchmarks.py`                       | **Single-Instance-Lock:** `.benchmark.lock` (PID+Startzeit) verhindert parallele Launcher (31.07.: 3 Läufe → RAM-Exhaustion). Stale Locks werden überschrieben |
@@ -1375,7 +1480,7 @@ pytest tests/ -v
 
 ---
 
-*Created: 28.06.2026 | Updated: 01.08.2026*
+*Created: 28.06.2026 | Updated: 02.08.2026*
 *Based on: v13.0.5 – Pipeline-Validierung, Hybrid-Klassifikation (GGUF+Architektur-Map), vereinfachter Workflow*
 *24.07.: registry_tool.py validate (7 Checks), _word_boundary_match(), Pre-Run-Checks in run_benchmarks.py*
 *24.07.: _ARCH_REASONING_MAP, classify_reasoning() Priority-Chain, _detect_reasoning_from_template() Regex*
@@ -1385,4 +1490,5 @@ pytest tests/ -v
 *29.07.: Benchmark-Lauf 3 Modelle × 4 Pipelines × SampleSize 5 + Server-Log-Analyse*
 *30.07.: v13.0.6 (src/-Migration, CLI-Menü, quants-Normalisierung) + v13.0.7 (Coding-Textbausteine, Template-Injection, Name-Normalisierung)*
 *31.07.: Registry-getriebenes enable_thinking, Streaming-Thinking-Fixes, registry_tool rm, Single-Instance-Lock, A/B-Slots, gpt-oss→thinking, Qwen3-Instruct-Fix, Registry-Bereinigung*
-*01.08.: STOP_TOKENS_CODING-Fix (\n```\n) – DeepSeek DS1000 35%/CoderEval 67%; consolidate_results SampleSize+Tabellen-Formatierung*
+*01.08.: STOP_TOKENS_CODING-Fix (\n```\n) – DeepSeek DS1000 35%/CoderEval 67%; consolidate_results SampleSize+Tabellen-Formatierung; IFEval-GGUF-EOS-Fallback*
+*02.08.: v13.0.10 – P1 Struktur-Gate (classify_output/CSV-Spalten), P4 Agentic-Safety (--agentic-mode safety), P3 YAML-Run-Spec (--run-spec, SUPPRESS-Probe-Parser), gpt-oss Reason-Logik zentral (GPTOSS_*), Bonsai-Overrides, Registry-Sync +53*

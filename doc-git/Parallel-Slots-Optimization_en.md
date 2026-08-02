@@ -190,6 +190,16 @@ MoE models have `numParallelSessions=4`, Dense models `=1`.
 **Note:** The automatic configuration does not account for benchmark special cases.
 Per model, `num_parallel` can be overridden in the registry (`model_registry.yaml`).
 
+## Reproducible Prompt Selection (parallel_ab, since 02.08.)
+
+`tools/parallel_ab.py` wacht anfangs an Handler: `build_prompts(sample_size, benchmark,
+seed=None)` zieht die Prompts deterministisch. Ohne `seed` greift `RANDOM_SEED = 42`; ein
+explizites `--seed` (CLI) macht die Prompt-Auswahl reproduzierbar gegenüber älteren Läufen.
+
+```
+python src/tools/parallel_ab.py --model <key> --benchmark ds1000 --sample-size 20 --slots 1,2,4 --seed 42
+```
+
 ## Appendix: Fix for PowerShell Logging
 
 The batch script `run_missing_benchmarks.ps1` showed barely any log output,

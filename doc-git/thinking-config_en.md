@@ -43,6 +43,14 @@ The system uses a **3-level strategy** for controlling thinking mode:
 
 ### Reasoning-Effort Parameter for GPT-OSS models
 
+> **SINCE 02.08. (v13.0.10):** zentrale Quelle in `benchmark_config.py`:
+> `GPTOSS_REASONING_EFFORT = "medium"`, `GPTOSS_REASONING_BUDGET = 4096`.
+> Sie steuern **synchron** beide Ebenen: (1) LM-Studio-Engine-Config
+> (`patch_reasoning_effort.py` schreibt `reasoningEffort`/`budgetTokens`, per
+> `--effort/--budget` overridebar) und (2) den System-Prompt des
+> `gptoss_reasoning`-Blueprints (`assemble_blueprint.py`, "Reasoning: ").
+> Quellen-Angabe s.u. bleibt gültig.
+
 Fuer *gpt-oss-Modelle* wird `reasoning.effort` verwendet (nicht `chat_template_kwargs`):
 
 | Effekt     | Bedeutung                                        |
@@ -80,7 +88,7 @@ The following overrides only override deviating category defaults:
                                                       Catch-all für alle Qwen3.6-Derivate           |
 | gemma          |   False       |      –     | + System prompt override                            |
 | deepseek       |  *True*       |    2048    | Only default with Thinking=on                       |
-| gpt-oss        |   False       |    4096    | stop: <\|return\|>, <\|call\|>, reasoning_effort=low |
+| gpt-oss        |   False       |    4096    | stop: <\|return\|>, <\|call\|>, reasoning_effort zentral (GPTOSS_REASONING_EFFORT, Default medium) |
 | apriel         |   False       |    4096    |                                                     |
 | nemotron       |   False       |    4096    |                                                     |
 | falcon3        |   False       |      –     |                                                     |
