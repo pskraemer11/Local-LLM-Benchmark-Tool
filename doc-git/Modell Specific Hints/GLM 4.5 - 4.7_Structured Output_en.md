@@ -5,6 +5,23 @@
 > Fetch the complete documentation index at: https://docs.z.ai/llms.txt
 > Use this file to discover all available pages before exploring further.
 
+# Thinking (Deep Thinking) & Structured Output
+
+Powerful thinking behavior matters for local LM Studio .gguf usage of GLM 4.5 - 4.7:
+
+* **Thinking mode** per model (Quelle: https://docs.z.ai/guides/capabilities/thinking):
+  * GLM-4.7 and GLM-4.5V use **forced thinking** (always reason before answering).
+  * GLM-4.6 / GLM-4.5 use **auto / hybrid thinking** (the model decides, `enable_thinking` toggles).
+* **Response markers** in the GGUF chat templates are ` thinking` (start) and ` response` (end).
+* In LM Studio the block `llm.prediction.reasoning.parsing` MUST be set to
+  `{"enabled": true, "startString": " thinking", "endString": " response"}` so the reasoning
+  text is stripped from the final `content`. With `enabled: false` the raw ` thinking…response`
+  block leaks into the assistant message, which breaks JSON mode (`response_format: json_object`)
+  because the `content` is no longer valid JSON.
+* `enabled: false` was previously injected into all GLM configs by the
+  gpt-oss-20b-`patch_reasoning_effort.py` tool by mistake (fixed locally 2026-08-03).
+  Working reference: `mradermacher` GLM-4.7-Flash-REAP i1 config keeps parsing enabled:true.
+
 # Structured Output
 
 Structured output (JSON mode) ensures that AI returns JSON data conforming to predefined formats, providing reliable guarantees for programmatic processing of AI outputs.

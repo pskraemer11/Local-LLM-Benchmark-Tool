@@ -1267,13 +1267,14 @@ zai-org/glm-4.6v-flash:
   pub_url: https://z.ai/blog/glm-4.6v
   arch: dense
   k_cache: q8_0
-  v_cache: iq4_nl
+  v_cache: q5_1
   offload: 1.0
   num_parallel: 1
-  notes: 'Architektur: dense | Vision | Tool-Use'
+  notes: 'Architektur: dense | Vision | Tool-Use | GLM-4.6 hybrid thinking (auto)'
   file_size_bytes: 10053623788
-  context_length: 98304
-  reasoning: instruct
+  context_length: 131072
+  max_context_length: 131072
+  reasoning: thinking
   blueprint: default_chat
   capabilities: vision, text
   useUnifiedKvCache: true
@@ -1284,16 +1285,17 @@ unsloth/glm-4.7-flash:
   hf_url: https://huggingface.co/unsloth/glm-4.7-flash
   pub_url: https://z.ai/blog/glm-4.7
   arch: moe
-  k_cache: q8_0
+  k_cache: q5_1
   v_cache: iq4_nl
   offload: 1.0
   num_parallel: 4
-  notes: 'Architektur: moe | Tool-Use'
+  notes: 'Architektur: moe | Tool-Use | GLM-4.7 forced thinking'
   file_size_bytes: 13288618336
-  context_length: 8192
+  context_length: 32536
+  max_context_length: 202752
   n_layers: 47
   hidden_dim: 2048
-  reasoning: instruct
+  reasoning: thinking
   blueprint: coding_agent
   capabilities: coding, text
   useUnifiedKvCache: true
@@ -1304,13 +1306,14 @@ unsloth/glm-4.7-flash-reap-23b-a3b:
   hf_url: https://huggingface.co/unsloth/glm-4.7-flash-reap-23b-a3b
   pub_url: https://z.ai/blog/glm-4.7
   arch: moe
-  k_cache: q8_0
+  k_cache: q5_1
   v_cache: iq4_nl
   offload: 1.0
   num_parallel: 4
-  notes: 'Architektur: moe'
+  notes: 'Architektur: moe | REAP streaming-usage | GLM-4.7 forced thinking'
   file_size_bytes: 13328455392
-  context_length: 8192
+  context_length: 32536
+  max_context_length: 202752
   n_layers: 47
   hidden_dim: 2048
   reasoning: thinking
