@@ -1,0 +1,77 @@
+{
+  "$schema": "https://docs.devin.ai/deepwiki/wiki.schema.json",
+  "repo_notes": [
+    {
+      "content": "Local benchmark suite for LLMs (German project, English code). Goal: realistic scores on local hardware with ~16 GB VRAM (RTX 5070 Ti) - finds the Pareto frontier of parameter count, GGUF quantization and KV-cache/context settings. Since v13.0.6 all Python modules live in src/ (run_benchmarks.py, registry_tool.py, assemble_blueprint.py, benchmark_config.py, model_manager.py, consolidate_results.py ...); the code base root and src/ are canonical - do NOT document root-level scripts/files (they are archived legacy).",
+      "author": "pskraemer11"
+    },
+    {
+      "content": "Configuration is data-driven and lives in doc-git/: model_registry.yaml (canonical per-model data: quants, arch, template, context, offload, blueprint, reasoning), Blueprint-Definitions in blueprint_definitions.yaml, chat templates in doc-git/Jinja-Chat-Templates/. registry_tool.py commands sync/compare/validate/rm are the main entrypoints; assemble_blueprint.py classifies registry models into blueprint categories and assembles system prompts.",
+      "author": "pskraemer11"
+    },
+    {
+      "content": "Key workflow (documented in doc-git/HowTo-Install-and-Configure-New-LLM_en.md): lms ls -> sync_model_configs.ps1 or registry_tool.py sync -> registry_tool.py sync internally runs classify+assemble+validate. New models are auto-detected; BLACKLIST models (embedding/ocr/vision/whisper/etc.) are skipped automatically.",
+      "author": "pskraemer11"
+    },
+    {
+      "content": "v13.0.10 features to document: YAML run-spec (--run-spec run.yaml, SUPPRESS probe parser, CLI>YAML>defaults precedence), seed flag, agentic-safety mode (--agentic-mode safety), structure gate (output_status, entry_point_found, extracted_code), gpt-oss reasoning centralization (GPTOSS_REASONING_EFFORT/GPTOSS_REASONING_BUDGET drive engine config AND gptoss_reasoning blueprint synchronously), Bonsai temperature overrides.",
+      "author": "pskraemer11"
+    },
+    {
+      "content": "Testing: unit/integration tests live under tests/ or test/ dirs (invocation: python -m pytest); run the full registry + benchmark pipeline via src/registry_tool.py validate before committing registry changes.",
+      "author": "pskraemer11"
+    }
+  ],
+  "pages": [
+    {
+      "title": "Overview",
+      "purpose": "Project purpose: realistic local LLM benchmarking under 16 GB VRAM constraints (RTX 5070 Ti), Pareto frontier of parameter count / quantization / KV-cache. Summarize the 4 pipelines (Custom, EvalPlus, LM-Eval, Agentic) and the benchmarks (DS1000, CoderEval, HumanEval+, MBPP+, ARC, HellaSwag, TruthfulQA, MATH-500, Tool-Eval).",
+      "parent": null
+    },
+    {
+      "title": "Getting Started & Installation",
+      "purpose": "Clone (github.com/pskraemer11/Local-LLM-Benchmark-Tool), prerequisites (LM Studio >=1.4.1 with REST/OpenAI API on localhost:1234, lms CLI, Python 3.13+), pip installs incl. lm-eval/env dependencies, first run of a small benchmark on a local model.",
+      "parent": "Overview"
+    },
+    {
+      "title": "Source Layout (src/)",
+      "purpose": "Directory structure after the v13.0.6 src/-migration: describe every Python module in src/ and its responsibility (launcher, registry tool, blueprint assembly, config, model manager, result consolidation, csv writer, benchmark runners, utils). Explicitly state that root-level scripts are archived legacy and must not be documented.",
+      "parent": "Overview"
+    },
+    {
+      "title": "Model Registry & Registration",
+      "purpose": "doc-git/model_registry.yaml schema and fields (quants, arch, template, context length, offload, num_parallel, reasoning, blueprint). registry_tool.py commands sync, validate, rm, configs and the HowIs/auto-add path via sync_model_configs.ps1. Explain BLACKLIST (embedding/ocr/vision) handling and that config JSONs live under user-concrete-model-default-config.",
+      "parent": "Getting Started & Installation"
+    },
+    {
+      "title": "Blueprints & System Prompts",
+      "purpose": "Blueprint system: blueprint definitions (reasoning_assistant, coding_agent, etc.), how assemble_blueprint.py classifies a model (Legacy/LLM reasoning families, arch info from GGUF headers) and injects system prompts into LM Studio configs. Document source of prompt templates.",
+      "parent": "Overview"
+    },
+    {
+      "title": "Benchmark Pipelines",
+      "purpose": "The 4 execution pipelines: Custom (Automatted sandbox exec with extracted code + tests), EvalPlus (differential testing, HumanEval+, MBPP+), LM-Stack/API (ARC, HellaSwag, TruthfulQA, MATH-500 via generate_until), Agentic (tool-eval-bench). List the corresponding src/ modules and how they are launched.",
+      "parent": "Overview"
+    },
+    {
+      "title": "YAML Run-Spec & CLI",
+      "purpose": "The YAML run-spec (src/benchmark_run_stats.yaml) and main CLI: run-benchmark args, run.yaml, seed flag for reproducibility, SUPPRESS probe parser (CLI flags > YAML > defaults), single-instance lock. Show example invocation.",
+      "parent": "Benchmark Pipelines"
+    },
+    {
+      "title": "Reasoning & Thinking Mode",
+      "purpose": "How reasoning models (thinking mode) are handled: thinking/reasoning fields in registry, enable_thinking flag, gpt-oss reasoning effort/budget centralization, reasoning patterns. Including agentic-safety mode.",
+      "parent": "Benchmark Pipelines"
+    },
+    {
+      "title": "VRAM & Hardware Optimization",
+      "purpose": "The VRAM math: USABLE_VRAM_GB, num_parallel slot computation, enableUnifiedKvCache decision, k/v cache quantization, offratio. 16 GB target and what happens if exceeded. Reference the document section and registry fields.",
+      "parent": "Overview"
+    },
+    {
+      "title": "Testing & CI",
+      "purpose": "Unit test coverage for the core modules (registry_tool, benchmark config, assemble_blueprint), test commands, and integration tests for the pipelines. How to run the test suite before committing.",
+      "parent": "Overview"
+    }
+  ]
+}

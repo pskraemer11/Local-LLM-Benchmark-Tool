@@ -1,3 +1,5 @@
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/pskraemer11/Local-LLM-Benchmark-Tool)
+
 # LLM Benchmark Suite
 
 > **Version:** v13.0.5 – Pipeline-Validierung, Hybrid-Klassifikation  
