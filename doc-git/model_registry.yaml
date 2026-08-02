@@ -306,31 +306,6 @@ ibm-granite/granite-4.0-h-tiny:
   hidden_dim: 1536
   max_context_length: 1048576
 
-ibm-granite/granite-4.1-8b":
-  publisher: ibm-granite
-  hf_url: "https://huggingface.co/ibm-granite/granite-4.1-8b-GGUF"
-  pub_url: https://www.ibm.com/granite
-  quants: Q6_K
-  arch: "dense"
-  template: "granite-4.1-30b_template.jinja"
-  k_cache: "q5_1"
-  v_cache: "q4_nl"
-  offload: 1.0
-  notes: "Architektur: Granite-4.1, Dense 8B, Core components: GQA, RoPE, MLP with\
-    \ SwiGLU, RMSNorm, shared input/output embeddings | Code-, Math- & Multilingual-Faehigkeiten"
-  reasoning: instruct
-  capabilities: coding, text
-  blueprint: coding_agent
-  truncation: full
-  custom_template: true
-  context_length: 98304
-  num_parallel: 1
-  useUnifiedKvCache: false
-  file_size_bytes: 9345610400
-  n_layers: 40
-  hidden_dim: 4096
-  max_context_length: 131072
-
 ibm-granite/granite-4.1-30b:
   publisher: ibm-granite
   hf_url: "https://huggingface.co/ibm-granite/granite-4.1-30b-GGUF"

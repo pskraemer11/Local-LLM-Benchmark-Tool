@@ -278,11 +278,6 @@ GPTOSS_REASONING_BUDGET = 4096
 # Nur hier eintragen, wenn die Hersteller-Empfehlung substantiell vom
 # Kategorie-Default abweicht (z.B. Phi-4 empfiehlt do_sample=True fuer ALLES).
 MODEL_TEMP_OVERRIDES = {
-    "phi-4-reasoning": {
-        "temperature": 0.8,
-        "top_p": 0.95,
-        "top_k": 50,
-    },
     "gpt-oss": {
         "temperature": 1.0,
         "top_p": 1.0,
@@ -314,10 +309,6 @@ MODEL_TEMP_OVERRIDES = {
     },
     "nemotron": {
         "temperature": 0.7,
-        "top_p": 0.95,
-    },
-    "apriel": {
-        "temperature": 0.6,
         "top_p": 0.95,
     },
     "deepseek-r1-distill": {
