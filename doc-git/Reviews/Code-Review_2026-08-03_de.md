@@ -5,6 +5,10 @@
 > **Scope:** 10 Haupt-Skripte (10.966 LOC) + Tests (704 gruen) + YAML-Registry (70 Eintraege) + Live-Check gegen `lms ls` (76 Modelle) + Server-Logs 2026-07/08 + Terminalausgabe Run 03.08.2026.
 > **Vorgaenger-Reviews:** `doc-git/Reviews/Code-Review_2026-08-02_de.md` (Umsetzungslog), `Code-Review_2026-07-28_de.md`, `Code-Review_2026-07-27_de.md` (8.5/10)
 
+> ✅ **UMSETZUNG ABGESCHLOSSEN – Commit `3a0af33f` (03.08.2026, Branch `main`):**
+> Alle Befunde F1–F5 umgesetzt (siehe §3 und Changelog in `Architecture, Flow & ChangeLog_en.md`).
+> Suite: **713 passing, 0 failing**. Die Inventur-Tabelle oben spiegelt den Zustand zum Review-Zeitpunkt (Stand vor Umsetzung).
+
 ---
 
 ## 1. Inventur & Stand (03.08.2026)

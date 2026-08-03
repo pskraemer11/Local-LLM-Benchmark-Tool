@@ -39,6 +39,9 @@ Internally it calls `python src/registry_tool.py sync` (+ `assemble_blueprint.py
 > (since the v13.0.6 migration; variable `$SRC` = `<root>\src`). The universal fallback is
 > `python src/registry_tool.py sync`. 
 
+> ℹ **CWD-unabhängig (03.08., F4):** Alle Einstiegspunkte haben einen sys.path-Bootstrap –
+> `python -m src.registry_tool sync` funktioniert aus jedem Verzeichnis.
+
 or Manual:
 `doc-git/model_registry.yaml` – insert entry (alphabetical position):
 ```yaml

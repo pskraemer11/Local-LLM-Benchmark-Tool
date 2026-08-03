@@ -1,7 +1,7 @@
-# Architecture & Flow – Status 02.08.2026 (v13.0.10)
+# Architecture & Flow – Status 03.08.2026 (v13.0.10)
 
-> **Version Convention:** See [`../VERSION`](../VERSION) – Single Source of Truth for project version. The existing `_en.md` filename is legacy (last updated 02.08.2026) – planned migration to `_v13.md` in a future major version.
-> **Review Reference:** See `doc-git/Reviews/Code-Review_2026-08-02_de.md` for the P1/P3/P4 review (Struktur-Gate, Agentic-Safety, Run-Spec) that informed the 02.08. changes. Earlier: `Doku-intern/Code-Review-2026-07-18.md`.
+> **Version Convention:** See [`../VERSION`](../VERSION) – Single Source of Truth for project version. The existing `_en.md` filename is legacy (last updated 03.08.2026) – planned migration to `_v13.md` in a future major version.
+> **Review Reference:** See `doc-git/Reviews/Code-Review_2026-08-03_de.md` for the F1–F5 review that informed the 03.08. changes (MTP-Drafter-Filter, Granite-Templates, Docstrings/main()-Zerlegung, CWD-unabhängige Einstiegspunkte, Codestral-Structured-Output). Earlier: `doc-git/Reviews/Code-Review_2026-08-02_de.md` (P1/P3/P4: Struktur-Gate, Agentic-Safety, Run-Spec), `Doku-intern/Code-Review-2026-07-18.md`.
 
 ## 1. Overview
 
@@ -172,7 +172,7 @@ main()
 ├── stdout.reconfigure(encoding='utf-8')
 ├── os.environ["PYTHONIOENCODING"] = "utf-8"     # Global for subprocesses
 ├── Parse arguments (--model, --benchmarks, --sample-size)
-├── get_available_models()                        # lms ls --json -> deduplicated by model_family
+├── get_available_models()                        # lms ls --json -> deduplicated by model_family; filtert MTP-Drafter/mmproj-Support-Dateien (03.08., F1)
 ├── resolve_models()                              # exact match before substring
 ├── resolve_benchmarks()
 │
@@ -607,7 +607,7 @@ the model stays loaded – useful for many small benchmarks, but risky for model
 | Command | Origin | Function |
 |---------|--------|----------|
 | `compare` | Previously embedded Python in `sync_model_configs.ps1` | Compare Registry vs LMS vs JSON configs |
-| `add` | Previously embedded Python in `sync_model_configs.ps1` | Add new LMS models to registry (canonical Key = `publisher/model-name`), np via `_infer_num_parallel()`, **reads n_layers/hidden_dim automatically from GGUF header**. **24.07.:** Interaktive Prompt-Frage bei fehlendem GGUF (`[i]nstruct/[t]hinking/[n]one`) |
+| `add` | Previously embedded Python in `sync_model_configs.ps1` | Add new LMS models to registry (canonical Key = `publisher/model-name`), np via `_infer_num_parallel()`, **reads n_layers/hidden_dim automatically from GGUF header**. **24.07.:** Interaktive Prompt-Frage bei fehlendem GGUF (`[i]nstruct/[t]hinking/[n]one`). **03.08. (F1):** `_is_support_file()`-Prüfung zentralisiert in `benchmark_config.py` – MTP-Drafter (`mtp-*`-Dateien, `MTP/`-Ordner, `-assistant`-Architektur) und `mmproj*` werden übersprungen (auch in `_resolve_model_path_multi`) |
 | `configs` | Previously embedded Python in `sync_model_configs.ps1` | Write `load.fields` (offloadRatio, numParallelSessions, useUnifiedKvCache) to JSON configs. **useUnifiedKvCache decision via VRAM formula** (see below) |
 | `fix-np` | **NEW 17.07.** | Re-set `num_parallel` for ALL entries based on architecture + model key (`_infer_num_parallel()`) |
 | `fix-ctx` | **NEW 17.07.** | Re-calculate `context_length` for ALL entries based on current np/KV-quant values |
@@ -626,6 +626,9 @@ the model stays loaded – useful for many small benchmarks, but risky for model
 ```bash
 python src/registry_tool.py sync
 ```
+**03.08. (F4):** Alle Einstiegspunkte sind jetzt CWD-unabhängig – alternativ ab Projekt-Root auch
+`python -m src.registry_tool sync` (sys.path-Bootstrap in `run_benchmarks.py`, `custom_benchmark.py`,
+`consolidate_results.py`, `registry_tool.py`).
 Dieser Befehl ruft automatisch auf:
 1. `add` – Neue Modelle aus LMS
 2. `fill-arch` – n_layers/hidden_dim/reasoning aus GGUF
@@ -791,6 +794,7 @@ Median and P90 replace Mean/Max as more robust metrics against outliers.
 - `_unwrap_solution_for_insert()`: removes `def` header for `[insert]` in function body
 - Regex: `except(?: |:)` instead of `except ` (bare `except:` not detected)
 - **Structured output (v30):** `response_format` with JSON schema guarantees valid JSON. `extract_code()` first parses JSON, then regex. Eliminates ~12% parsing errors (empty responses, markdown extraction).
+- **Structured output exclusions (03.08., F5):** `_can_use_structured_output()` (custom_benchmark.py) schaltet `response_format` ab für Mamba-Modelle (keine Grammar-Unterstützung), Reasoning/Thinking-Modi (Struktur-Kollision mit `<think>`-Streaming) und **Codestral-22B** (Grammar-Channel-Errors im Server-Log 03.08.). Fallback: Regex-Extraktion.
 
 **Harness fail:** The DS1000 harness actually executes the generated code in a Python sandbox. A "harness error" means the code crashed with a runtime error (SyntaxError, NameError etc.). Small models (Granite Tiny, Nerdsking) often have syntax problems with insertion tasks.
 
@@ -917,6 +921,11 @@ Entry-Point-Triage prüft per Regex `^def <entry_point>(` nur im **Direkt-Tests-
 
 ```
 consolidate_results.py
+├── main() – schlank (03.08., F3): ruft nur noch die benannten Teilfunktionen
+│   ├── _parse_args()            # CLI-Parsing
+│   ├── _read_all_data()         # Lauf-/Model-Filter, Lese-/Bootstrap-Aufrufe
+│   ├── _write_csv()             # konsolidiertes CSV
+│   └── _write_markdown()        # Konsolidierte MD + Vergleichstabellen (~190 Z.)
 ├── find_latest_csv(pattern)
 ├── read_evalplus(model_key)
 ├── read_lmeval_per_model(model_key)
@@ -1167,28 +1176,28 @@ class ModelData:
 
 ## 17. Tests (NEW in v10, after review)
 
-**Status 02.08.2026 (v13.0.10):** **693 passing, 0 failing** (572 → 693, +121: Anteil in mehreren Monaten). 9 skipped tests are obsolete `_get_lmeval_params` if-else-cascade tests (replaced by Variante C+ in v13).
+**Status 03.08.2026 (v13.0.10):** **713 passing, 0 failing** (704 → 713, +9 aus Review 03.08.: 2× MTP-Drafter/mmproj-Filter in `test_model_manager.py`, 7× `TestCanUseStructuredOutput` in `test_prio2.py`). 9 skipped tests are obsolete `_get_lmeval_params` if-else-cascade tests (replaced by Variante C+ in v13).
 
 Test files in `tests/`:
 
 | File | Tests | Tested functions |
 |------|-------:|------------------|
-| `test_scores.py` | 10 | `compute_category_scores()`, `_percentile()`, `_threshold_filtered()`, `_b5_named()` |
-| `test_csv.py` | 5 | `read_custom_csv()`, `auto_delimiter_detection()`, CSV parsing with fixtures |
-| `test_csv_writer.py` | – | `src/csv_writer.py` unified schema |
-| `test_consolidate.py` | – | `src/consolidate_results.py` |
-| `test_consolidate_results.py` | – | `src/consolidate_results.py` extended (incl. `TestGetQuant`) |
-| `test_custom_benchmark.py` | – | `src/custom_benchmark.py` |
-| `test_custom_benchmark_io.py` | – | `exec_sandboxed` I/O |
-| `test_dependencies.py` | – | Required Python packages |
-| `test_model_manager.py` | 76 | `parse_selection`, `check_api_available`, `get_current_loaded_model`, `get_available_models`, `load_model_via_lms`, **`unload_all_models` (Bug 1 fix, 18.07.)**, **`_ensure_lmstudio_running` (Bug 2 fix, 18.07.)**, `wait_for_model_ready`, **`_validate_model_key` (18.07.)** |
-| `test_parallel_ab.py` | 2 | **NEW 02.08.:** `build_prompts(seed=...)` reproduzierbar (impliziter Seed 42; expliziter Seed identisch) |
-| `test_patch_reasoning_effort.py` | – | **NEW 31.07.:** `tools/patch_reasoning_effort.py` (Defaults aus `GPTOSS_REASONING_EFFORT_BUDGET`) |
-| `test_prio2.py` | – | Prio 2 (Variant C+ category defaults) |
+| `test_scores.py` | 9 | `compute_category_scores()`, `_percentile()`, `_threshold_filtered()`, `_b5_named()` |
+| `test_csv.py` | 6 | `read_custom_csv()`, `auto_delimiter_detection()`, CSV parsing with fixtures |
+| `test_csv_writer.py` | 55 | `src/csv_writer.py` unified schema (incl. Struktur-Gate-Spalten, `--keep-response`) |
+| `test_consolidate.py` | 99 | `src/consolidate_results.py` (percentiles, bootstrap CI, paired bootstrap, quant mapping) |
+| `test_consolidate_results.py` | 59 | `src/consolidate_results.py` extended (incl. `TestGetQuant`, `TestTryFloat`, `TestFindNewestByMtime`) |
+| `test_custom_benchmark.py` | 86 | `src/custom_benchmark.py` (evaluate_code, extract_code, `_can_use_structured_output`, structure gate) |
+| `test_custom_benchmark_io.py` | 28 | `exec_sandboxed` I/O, `_extract_reasoning_delta`, code-only prompts |
+| `test_dependencies.py` | 7 | Required Python packages |
+| `test_model_manager.py` | 78 | `parse_selection`, `check_api_available`, `get_current_loaded_model`, `get_available_models` (incl. **MTP-Drafter/mmproj-Filter, 03.08. F1**), `load_model_via_lms`, **`unload_all_models` (Bug 1 fix, 18.07.)**, **`_ensure_lmstudio_running` (Bug 2 fix, 18.07.)**, `wait_for_model_ready`, **`_validate_model_key` (18.07.)** |
+| `test_parallel_ab.py` | 14 | **NEW 02.08.:** `build_prompts(seed=...)` reproduzierbar, ABBA-Sequenz, Body-Bau, Lock, Report |
+| `test_patch_reasoning_effort.py` | 9 | **NEW 31.07.:** `tools/patch_reasoning_effort.py` (Defaults aus `GPTOSS_REASONING_EFFORT_BUDGET`) |
+| `test_prio2.py` | 42 | Prio 2 (Variant C+ category defaults, `_can_use_structured_output`; **+7 `TestCanUseStructuredOutput` 03.08. F5:** normal/disabled/thinking/reasoning/mamba/codestral/none) |
 | `test_prio2_terminal.py` | 25 | Prio 0/2/3 terminal findings (incl. **Bug 6.4 fix, 18.07.**: `_unwrap_solution_for_insert` synthetic def for Granite) |
-| `test_run_benchmarks.py` | ~63 | Launcher & resolve functions. **NEW 02.08.:** `TestRunSpec` (12 Fälle: Laden, Listen→CSV, Unbekannt-Warn, Bool/Int, Fatal-Fehler, `_apply_run_spec` Precedence) + `test_parse_args_cli_flags_win_over_run_spec` |
-| `test_registry_tool.py` | **35** | **NEW 18.07.:** VRAM formula (`_max_ctx_from_vram`), KV-bytes table, match cascade in `cmd_configs`, `_infer_num_parallel` rules |
-| `test_assemble_blueprint.py` | **43** | **NEW 18.07.:** `normalize_model_name`, `classify_capabilities`, `extract_params`, format helpers, `read_lms_configs` cache (5s TTL) |
+| `test_run_benchmarks.py` | 83 | Launcher & resolve functions. **NEW 02.08.:** `TestRunSpec` (12 Fälle: Laden, Listen→CSV, Unbekannt-Warn, Bool/Int, Fatal-Fehler, `_apply_run_spec` Precedence) + `test_parse_args_cli_flags_win_over_run_spec` |
+| `test_registry_tool.py` | 64 | VRAM formula (`_max_ctx_from_vram`), KV-bytes table, match cascade in `cmd_configs`, `_infer_num_parallel` rules, `_is_support_file` (mtp-*/mmproj/MTP-Ordner, F1) |
+| `test_assemble_blueprint.py` | 51 | `normalize_model_name`, `classify_capabilities`, `extract_params`, format helpers, `read_lms_configs` cache (5s TTL) |
 
 **Execution:**
 ```
@@ -1306,6 +1315,13 @@ pytest tests/ -v
 
 | Date   | File                                         | Change                                                                           |
 |--------|-----------------------------------------------|----------------------------------------------------------------------------------|
+| 03.08. | `src/benchmark_config.py` + `src/model_manager.py` + `src/registry_tool.py` | **F1 MTP-Drafter-Filter (Review 03.08.):** `is_support_file()` zentralisiert in `benchmark_config.py`; `get_available_models()` filtert MTP-Drafter (`mtp-*`, `MTP/`-Ordner, `-assistant`-Architektur) und `mmproj*` – die Dauerwarnung beim Laufstart ist beseitigt, legitime MTP-Modelle (z.B. `qwen3.6-27b-mtp`) bleiben sichtbar |
+| 03.08. | `src/tools/inject_chat_templates.py` | **F2 Granite-Templates:** Chat-Templates für 5 Granite-Modelle injiziert (12 Config-JSONs); `registry_tool.py validate` = 0 Probleme |
+| 03.08. | `src/custom_benchmark.py` + `src/consolidate_results.py` | **F3 Doku/main()-Zerlegung:** alle NO-DOC-Funktionen dokumentiert; `main()` in benannte Teilfunktionen zerlegt (custom: `_parse_args`, `_verify_environment`, `_resolve_benchmarks`, `_resolve_models`, `_run_model_loop`, `_print_summary`; consolidate: `_parse_args`, `_read_all_data`, `_write_csv`, `_write_markdown`) |
+| 03.08. | `src/run_benchmarks.py`, `src/custom_benchmark.py`, `src/consolidate_results.py`, `src/registry_tool.py` | **F4 CWD-unabhängige Einstiegspunkte:** sys.path-Bootstrap vor allen src-Imports – `python -m src.*` funktioniert aus jedem Verzeichnis |
+| 03.08. | `src/custom_benchmark.py` + `doc-git/model_registry.yaml` | **F5 Codestral-Structured-Output-Schutz:** `_can_use_structured_output()` schließt `codestral` aus (Grammar-Channel-Errors, Server-Log 03.08.); Registry-Notiz für Grammar-400er; +7 Tests `TestCanUseStructuredOutput` |
+| 03.08. | `tests/` | **+9 Tests (Review 03.08., F1/F5):** `test_model_manager.py` 76→78 (MTP-Drafter/mmproj-Filter), `test_prio2.py` 35→42 (`TestCanUseStructuredOutput`). Suite: **713 passing, 0 failing** |
+| 03.08. | `doc-git/Reviews/` | **Review 2026-08-03:** Code-Review F1–F5 umgesetzt (siehe `Code-Review_2026-08-03_de.md`); 8 veraltete `_de.md`-Reviews entfernt |
 | 02.08. | `src/custom_benchmark.py` (+`csv_writer.py`, `type_defs.py`) | **P1 Struktur-Gate (v13.0.10):** `classify_output()` → `output_status` (`empty`/`json_ok`/`json_missing_code`/`json_invalid`/`fenced`/`bare`) + `entry_point_found` (Regex-Triage) + `extracted_code`. Neue CSV-Spalten in `TASK_FIELDS`, `--keep-response` für Volltext. Reine Telemetrie, keine Score-Änderung |
 | 02.08. | `src/benchmark_config.py` + `src/run_benchmarks.py` | **P4 Agentic-Safety (v13.0.10):** `AGENTIC_SAFETY_SCENARIO_IDS` (13 Category-K TC-31..36/41..43/57..60), `run_agentic(mode, seed)` + `--agentic-mode {random,safety}`, deterministisch via `random.Random(seed)` |
 | 02.08. | `src/run_benchmarks.py` + `src/tools/parallel_ab.py` (+Tests) | **P3 YAML-Run-Spec (v13.0.10):** `--run-spec/--config run.yaml`, SUPPRESS-Probe-Parser (CLI>YAML>Defaults), `build_prompts(seed)` + `--seed`. Beispiel: `run.example.yaml` |
