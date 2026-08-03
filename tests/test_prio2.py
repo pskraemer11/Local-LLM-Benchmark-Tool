@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 import pytest
 
 from benchmark_config import QUANT_MAP, GPTOSS_REASONING_EFFORT, GPTOSS_REASONING_BUDGET, get_model_config, get_quant
-from custom_benchmark import _uses_qwen_template, strip_thinking_tokens
+from custom_benchmark import _uses_qwen_template, strip_thinking_tokens, _can_use_structured_output
 from csv_writer import _truncate_response
 
 # Synthetische Registry für get_quant-Fallback-Tests: unabhängig von der
@@ -277,3 +277,36 @@ class TestUsesQwenTemplate:
 
     def test_none(self):
         assert _uses_qwen_template(None) is False
+
+
+class TestCanUseStructuredOutput:
+    """_can_use_structured_output: Codestral-22B-Schutz (F5) + bekannte Ausschluesse."""
+
+    def test_normal_model(self):
+        with patch("custom_benchmark._model_supports_reasoning", return_value=False):
+            assert _can_use_structured_output("openai/gpt-oss-20b") is True
+
+    def test_globally_disabled(self):
+        with patch("custom_benchmark.HAS_STRUCTURED_OUTPUT", False):
+            assert _can_use_structured_output("openai/gpt-oss-20b") is False
+
+    def test_thinking_mode(self):
+        with patch("custom_benchmark.IS_THINKING_MODE", True):
+            assert _can_use_structured_output("openai/gpt-oss-20b") is False
+
+    def test_reasoning_model(self):
+        with patch("custom_benchmark._model_supports_reasoning", return_value=True):
+            assert _can_use_structured_output("openai/gpt-oss-20b") is False
+
+    def test_mamba(self):
+        with patch("custom_benchmark._model_supports_reasoning", return_value=False):
+            assert _can_use_structured_output("gabriellarson/mamba-codestral-7b-v0.1") is False
+
+    def test_codestral_22b_grammar(self):
+        # F5: Codestral-22B Grammar-400er ("Unexpected empty grammar stack
+        # after accepting piece", Server-Log 03.08.2026).
+        with patch("custom_benchmark._model_supports_reasoning", return_value=False):
+            assert _can_use_structured_output("mistralai/codestral-22b-v0.1") is False
+
+    def test_none(self):
+        assert _can_use_structured_output(None) is True

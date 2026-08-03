@@ -17,6 +17,7 @@ Bei neuen Modellen: registry_tool.py gen-quant-map --write ausfuehren.
 """
 
 from __future__ import annotations
+import os
 import sys
 from typing import Any, Optional
 
@@ -460,6 +461,36 @@ def get_model_config(model_identifier: str, category: str = "coding", is_thinkin
 # Wird noch von custom_benchmark.py importiert (MODEL_CONFIG = THINKING_CONFIG).
 # Neu: Nutze get_model_config() statt direktem Dict-Zugriff.
 THINKING_CONFIG = BENCHMARK_CATEGORY_DEFAULTS
+
+
+def is_support_file(
+    path: str | os.PathLike[str],
+    architecture: str = "",
+) -> bool:
+    """True for auxiliary GGUF files that are NOT standalone benchmark models.
+
+    - ``mmproj*``: vision projector files
+    - ``mtp-*`` or ``*/MTP/*``: MTP draft models (speculative-decoding add-ons,
+      e.g. unsloth's ``mtp-gemma-4-12B-it-Q8_0.gguf``). Legitimate standalone
+      MTP models (``qwen3.6-27b-mtp``, ``...-MTP-...`` in the name) are NOT
+      affected — only the ``mtp-`` filename prefix or an ``MTP`` path segment.
+    - architecture ending in ``-assistant`` (e.g. ``gemma4-assistant``): MTP
+      drafter architecture reported by LM Studio / GGUF header.
+
+    Zentralisiert hier, damit registry_tool.py (add/resolve), model_manager.py
+    (get_available_models) und run_benchmarks.py dieselbe Filter-Logik nutzen
+    (Code-Review 2026-08-03 §F1).
+    """
+    name = os.path.basename(str(path)).lower()
+    if "mmproj" in name:
+        return True
+    if name.startswith("mtp-"):
+        return True
+    parts = str(path).replace("\\", "/").split("/")
+    if any(seg.lower() == "mtp" for seg in parts):
+        return True
+    arch = architecture.lower().strip()
+    return arch.endswith("-assistant")
 
 # Code-Review 2026-07-18 §5.1: Centralised VRAM constants. Previously
 # scattered across registry_tool.py (`_USABLE_VRAM_GB = 15.3`) and

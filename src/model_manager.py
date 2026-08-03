@@ -44,7 +44,7 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
-from benchmark_config import PIPELINE_TIMEOUTS
+from benchmark_config import PIPELINE_TIMEOUTS, is_support_file
 from type_defs import AvailableModelInfo, LoadedModelInfo
 from utils.terminal import ok, warn, error, info
 
@@ -282,6 +282,15 @@ def get_available_models(exclude_keywords: Optional[list[str]] = None, registry_
                 if isinstance(item, dict):
                     base_key = item.get("modelKey", "")
                     if not base_key:
+                        continue
+                    # Code-Review 2026-08-03 §F1: MTP-Drafter/mmproj-Zusatzdateien
+                    # aus der Modellliste filtern (gleiche Logik wie registry_tool
+                    # `_is_support_file`). Legitime MTP-Modelle (qwen3.6-27b-mtp,
+                    # Ternary-Bonsai-27B-MTP) bleiben unberührt.
+                    if is_support_file(
+                        item.get("path", "") or item.get("indexedModelIdentifier", ""),
+                        item.get("architecture", ""),
+                    ):
                         continue
                     quant = item.get("quantization", {}) or {}
                     quant_name = quant.get("name", "") if isinstance(quant, dict) else ""

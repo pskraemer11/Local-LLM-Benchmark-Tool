@@ -34,7 +34,7 @@ mistralai/codestral-22b-v0.1:
   k_cache: q5_1
   v_cache: iq4_nl
   offload: 1.0
-  notes: 'Architektur: Llama Dense | 22B Parameter'
+  notes: 'Architektur: Llama Dense | 22B Parameter | Kein Structured Output (Grammar-400er: "Failed to initialize samplers: Unexpected empty grammar stack after accepting piece (29515)", Server-Log 2026-08-03) – mit --no-structured-output oder ohne response_format benutzen'
   reasoning: instruct
   capabilities: coding, text
   blueprint: coding_agent

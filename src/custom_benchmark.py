@@ -49,6 +49,15 @@ Sources: DS1000, CoderEval
 
 from __future__ import annotations
 
+import os as _os
+import sys as _sys
+
+# Make `src` importable regardless of the working directory
+# (python -m src.custom_benchmark from the repo root puts only the CWD
+# on sys.path, not `src/`). Fix for Code-Review_2026-08-03.md F4.
+_SRC_DIR = _os.path.dirname(_os.path.abspath(__file__))
+_sys.path.insert(0, _SRC_DIR)
+
 import ast
 import csv
 import csv_writer as csv_writer
@@ -142,6 +151,7 @@ TIMEOUT_EXEC = 30
 IS_QWEN_PROMPT_MODE = False
 IS_THINKING_MODE = False
 HAS_STRUCTURED_OUTPUT = True
+KEEP_RESPONSE = False
 
 STRUCTURED_OUTPUT_SCHEMA = {
     "type": "json_schema",
@@ -159,6 +169,17 @@ STRUCTURED_OUTPUT_SCHEMA = {
 }
 
 def _can_use_structured_output(model_identifier: str | None) -> bool:
+    """Whether the JSON-schema response format can be requested for a model.
+
+    Disabled when structured output is globally off (--no-structured-output),
+    when thinking mode is enabled, when the registry marks the model as
+    reasoning (thinking), or for Mamba architectures which reject
+    constrained decoding. Also disabled for Codestral-22B whose grammar
+    generation fails server-side ("Failed to initialize samplers:
+    Unexpected empty grammar stack after accepting piece", Server-Log
+    03.08.2026, Code-Review_2026-08-03.md F5). Falls back to regex-based
+    extraction otherwise.
+    """
     if not HAS_STRUCTURED_OUTPUT:
         return False
     if IS_THINKING_MODE:
@@ -166,6 +187,8 @@ def _can_use_structured_output(model_identifier: str | None) -> bool:
     if model_identifier and _model_supports_reasoning(model_identifier) is True:
         return False
     if model_identifier and "mamba" in model_identifier.lower():
+        return False
+    if model_identifier and "codestral" in model_identifier.lower():
         return False
     return True
 
@@ -211,6 +234,12 @@ BENCHMARKS = [
 # Siehe BENCHMARK_CATEGORY_DEFAULTS + MODEL_TEMP_OVERRIDES.
 
 def parse_tests_field(tests_field: Any) -> list[str]:
+    """Normalize the heterogeneous ``tests`` field of a benchmark task.
+
+    Accepts an actual list, a JSON-ish string (e.g. "['assert ...']" or
+    "[]"), or a plain string. Returns a list of test code strings; a
+    plain string is wrapped in a single-element list as last resort.
+    """
     if isinstance(tests_field, list):
         return tests_field
     if isinstance(tests_field, str):
@@ -228,6 +257,14 @@ def parse_tests_field(tests_field: Any) -> list[str]:
 
 
 def subsample_tasks(tasks: list[dict[str, Any]], task_type: str, sample_size: int = SAMPLE_SIZE) -> list[dict[str, Any]]:
+    """Stratified random subsampling that keeps ``_group`` balance.
+
+    When tasks carry a ``_group`` field, the sample size is distributed
+    across the groups (ceil per group) so no library/domain is dropped;
+    the result is trimmed to ``sample_size`` if over-selected. Without
+    groups, a plain random sample is drawn. Returns the input unchanged
+    when there is nothing to subsample.
+    """
     if not tasks:
         return tasks
     if sample_size is None or sample_size >= len(tasks):
@@ -278,6 +315,11 @@ def _filter_broken_code_tasks(tasks: list[dict]) -> list[dict]:
 
 class Monitor:
     def __init__(self) -> None:
+        """Initialize rolling resource-history buffers and NVML if available.
+
+        Tries pynvml for GPU/VRAM readings; when unavailable, GPU metrics
+        stay empty and a warning is issued. CPU/RAM come from psutil.
+        """
         self.cpu_percent = []
         self.gpu_percent = []
         self.ram_usage_gb = []
@@ -297,6 +339,7 @@ class Monitor:
             warn("GPU/VRAM monitoring via NVML not available")
 
     def _read_gpu(self) -> tuple[Optional[float], Optional[float]]:
+        """Return (gpu_util_percent, vram_used_gb) via NVML, or (None, None)."""
         if not self._is_nvml_ok:
             return None, None
         try:
@@ -307,11 +350,13 @@ class Monitor:
             return None, None
 
     def _read_cpu_ram(self, interval: float = 0.3) -> tuple[float, float]:
+        """Return (cpu_percent, ram_used_gb) sampled over ``interval`` seconds."""
         cpu = psutil.cpu_percent(interval=interval)
         ram = psutil.virtual_memory().used / (1024 ** 3)
         return cpu, ram
 
     def update(self) -> None:
+        """Append one CPU/RAM/GPU/VRAM sample, trimming the rolling history."""
         cpu, ram = self._read_cpu_ram()
         self.cpu_percent.append(cpu)
         self.ram_usage_gb.append(ram)
@@ -324,6 +369,7 @@ class Monitor:
                 del lst[:-MONITOR_HISTORY_MAX]
 
     def get_snapshot(self) -> dict[str, float]:
+        """Take a fresh sample and return the latest per-resource values."""
         self.update()
         return {
             "cpu": self.cpu_percent[-1] if self.cpu_percent else 0,
@@ -333,11 +379,13 @@ class Monitor:
         }
 
     def start_sampling(self) -> None:
+        """Start a daemon thread that tracks peak CPU/RAM/GPU/VRAM values."""
         self._peak = {"cpu": 0, "ram": 0, "gpu": 0, "vram": 0}
         self._is_sampling = True
         import threading as _thr
 
         def _sample_loop() -> None:
+            """Background loop: sample CPU/RAM (and GPU/VRAM) peaks until stopped."""
             while self._is_sampling:
                 cpu = psutil.cpu_percent(interval=MONITOR_SAMPLE_INTERVAL_S)
                 ram = psutil.virtual_memory().used / (1024 ** 3)
@@ -362,6 +410,7 @@ class Monitor:
         self._sampler.start()
 
     def stop_sampling(self) -> dict[str, float]:
+        """Stop the sampler thread and return the recorded peak values."""
         self._is_sampling = False
         if hasattr(self, "_sampler"):
             self._sampler.join(timeout=TIMEOUT_SAMPLER_JOIN)
@@ -371,6 +420,12 @@ class Monitor:
 
 
 def collect_system_metrics() -> SystemMetrics:
+    """Collect a one-shot snapshot of CPU/RAM (psutil) and GPU (nvidia-smi).
+
+    GPU values come from ``nvidia-smi --query-gpu=...``; the VRAM in-use
+    figure is additionally parsed from ``lms ps`` when nvidia-smi fails
+    or reports nothing. Missing values are None.
+    """
     cpu_percent = psutil.cpu_percent(interval=0.5)
     mem = psutil.virtual_memory()
     ram_percent = mem.percent
@@ -441,23 +496,27 @@ def collect_system_metrics() -> SystemMetrics:
 
 class MetricsCollector:
     def __init__(self, sample_interval: int = 10) -> None:
+        """Create a collector that samples system metrics every ``sample_interval`` seconds."""
         self.samples = []
         self._start_time = None
         self._last_sample_time = 0
         self._sample_interval = sample_interval
 
     def start(self) -> None:
+        """Begin a collection window and record the initial baseline sample."""
         self._start_time = time.time()
         self._last_sample_time = self._start_time
         self.samples = [(0.0, collect_system_metrics())]
 
     def sample(self) -> None:
+        """Record one (elapsed, metrics) sample if the collector is running."""
         if self._start_time is None:
             return
         elapsed = time.time() - self._start_time
         self.samples.append((elapsed, collect_system_metrics()))
 
     def maybe_sample(self) -> None:
+        """Sample now if at least ``sample_interval`` seconds have elapsed."""
         if self._start_time is None:
             return
         now = time.time()
@@ -466,25 +525,31 @@ class MetricsCollector:
             self.sample()
 
     def stop(self) -> None:
+        """Take the final sample and close the collection window."""
         self.sample()
         self._start_time = None
 
     def _values(self, key: str) -> list[float]:
+        """All non-None values of a metric key across the samples."""
         return [s[1].get(key) for s in self.samples if s[1].get(key) is not None]
 
     def avg(self, key: str) -> Optional[float]:
+        """Average of a metric key over the samples (None if empty)."""
         vals = self._values(key)
         return sum(vals) / len(vals) if vals else None
 
     def max(self, key: str) -> Optional[float]:
+        """Maximum of a metric key over the samples (None if empty)."""
         vals = self._values(key)
         return max(vals) if vals else None
 
     def min(self, key: str) -> Optional[float]:
+        """Minimum of a metric key over the samples (None if empty)."""
         vals = self._values(key)
         return min(vals) if vals else None
 
     def get_summary(self) -> MetricsSummary:
+        """Aggregate avg/max per metric key into a MetricsSummary dict."""
         result = {}
         for k in ("cpu_percent", "gpu_util", "ram_percent", "ram_used_gb", "gpu_mem_used_gb", "gpu_temp", "vram_gb"):
             result[f"{k}_avg"] = self.avg(k)
@@ -493,6 +558,7 @@ class MetricsCollector:
 
 
 def load_jsonl(filepath: str) -> list[dict[str, Any]]:
+    """Load a JSONL file into a list of dicts, skipping blank lines."""
     with open(filepath, "r", encoding="utf-8") as f:
         return [json.loads(line) for line in f if line.strip()]
 
@@ -515,14 +581,17 @@ def _stream_chat_completion(url: str, headers: dict[str, str], body: dict[str, A
         cancel_event = threading.Event()
 
         def _set_result(key: str, value: Any) -> None:
+            """Thread-safe write to the shared result dict."""
             with result_lock:
                 result[key] = value
 
         def _result(key: str) -> Any:
+            """Thread-safe read from the shared result dict."""
             with result_lock:
                 return result.get(key)
 
         def _worker() -> None:
+            """Stream SSE deltas into the shared result dict in a background thread."""
             sess = None
             try:
                 sess = requests.Session()
@@ -783,6 +852,15 @@ def _uses_qwen_template(model_identifier: Optional[str]) -> bool:
 
 
 def generate_answer(cfg: GenerationConfig) -> tuple[Optional[str], float, int, int, float, int, bool, Optional[str], Optional[str]]:
+    """Send one chat-completions request (streaming first, then fallback).
+
+    Builds the request body from ``cfg``, including thinking control via
+    ``chat_template_kwargs`` for Qwen-based templates. Tries the streaming
+    path first; on failure it warns and falls back to a non-streaming
+    request. Returns a 9-tuple
+    (content, elapsed, t_in, t_out, tps, thinking_tokens, truncated,
+    error_type, error_detail) — content is None on error.
+    """
     messages = cfg.messages
     if messages is None:
         messages = []
@@ -961,6 +1039,13 @@ def extract_code(text: Optional[str], is_structured: bool = False) -> str:
 
 
 def _repair_indentation(code: str, max_iter: int = 10) -> str:
+    """Re-indent malformed LLM output so it parses as a Python block.
+
+    Detects block headers (def/class/if/...) and normalizes the following
+    lines to 4-space indent levels, handling dedents for else/elif/
+    except/finally and comment-only bodies (pass insertion). Used for
+    bare-statement and Granite-style outputs extracted by extract_code().
+    """
     _BLOCK_HEADER = re.compile(
         r"^(?:def |class |if |elif |else:|for |while |with |try:|except(?: |:)|finally:)"
     )
@@ -1359,6 +1444,14 @@ def _unwrap_solution_for_insert(solution: str, setup_code: str) -> str:
 
 
 def _try_ds1000_harness(generated_code: str, setup_code: str) -> Optional[tuple[float, str]]:
+    """Run the official DS1000 harness (test_execution) against the code.
+
+    Only usable when setup_code contains ``test_execution``; returns None
+    to signal "not applicable". The solution is unwrapped for [insert]
+    positions and matplotlib incompatibilities patched before execution.
+    Returns (score, detail); on failure the unpatched original code is
+    retried once before giving up.
+    """
     if not setup_code or "test_execution" not in setup_code:
         return None
     if DS1000_DIR not in sys.path:
@@ -1433,6 +1526,17 @@ def _patch_matplotlib_compat(code: str) -> str:
 
 
 def evaluate_code(generated_code: str, entry_point: str, tests_field: Any, reference_code: str = "", setup_code: str = "") -> tuple[float, str]:
+    """Score generated code through one of four evaluation modes.
+
+    1. Entry-point triage (CoderEval): fail early when the requested
+       function is missing.
+    2. DS1000 harness when setup_code defines test_execution.
+    3. Namespace comparison: run reference and generated code in the
+       sandbox and compare state keys not provided by setup_code.
+    4. Reference-as-tests or direct test execution in the sandbox.
+
+    Returns (score 0.0-1.0, human-readable detail).
+    """
     if not generated_code:
         return 0.0, "No code generated"
 
@@ -1532,12 +1636,20 @@ BENCHMARK_CATEGORY_MAP = {
 
 
 def get_benchmark_category(benchmark_name: str) -> str:
+    """Map a benchmark name to its pipeline category (default: "coding")."""
     return BENCHMARK_CATEGORY_MAP.get(benchmark_name, "coding")
 
 
 def run_task(task: dict[str, Any], task_type: str, model_identifier: Optional[str] = None, api_model: Optional[str] = None,
              model_config: Optional[ModelConfig] = None, benchmark_category: str = "coding",
              native_model_identifier: Optional[str] = None) -> TaskResult:
+    """Run a single benchmark task end-to-end and return the TaskResult.
+
+    Builds the generation parameters from the merged model config,
+    applies Qwen system-message embedding when required, dispatches to
+    the codereval or data_science prompt+eval pipeline, and returns a
+    zero-filled error result for unknown task types.
+    """
     prompt = task["prompt"]
     if model_config is None:
         model_config = _get_model_config(model_identifier, benchmark_category=benchmark_category, is_thinking_enabled=IS_THINKING_MODE)
@@ -1603,6 +1715,7 @@ _THINKING_CODE_ONLY_SUFFIX = (
 
 
 def _make_codereval_prompt(prompt: str, entry_point: str, code_only: bool = False) -> str:
+    """Build the CoderEval instruction: function completion with code-only suffix."""
     full = "Complete the following Python function. Output only the function code, no additional text.\n\n" + prompt
     if entry_point:
         full += f"\n\nCreate the function `{entry_point}`."
@@ -1612,6 +1725,7 @@ def _make_codereval_prompt(prompt: str, entry_point: str, code_only: bool = Fals
 
 
 def _make_datascience_prompt(prompt: str, entry_point: str, code_only: bool = False) -> str:
+    """Build the DS1000-style instruction: complete the code with code-only suffix."""
     full = "Complete the following Python code. Only output the code, no additional text.\n\n" + prompt
     if entry_point:
         full += f"\n\nCreate the function `{entry_point}`."
@@ -1621,6 +1735,12 @@ def _make_datascience_prompt(prompt: str, entry_point: str, code_only: bool = Fa
 
 
 def _extract_setup_code(task: dict[str, Any], prompt: str, reference_code: str) -> str:
+    """Assemble the setup/execution context for a data-science task.
+
+    Starts from the task's code_context, appends <code> blocks found
+    before the SOLUTION marker in the prompt, and prepends the
+    matplotlib Agg preamble when the task uses plotting libraries.
+    """
     setup_code = task.get("code_context", "")
     for marker in ("# SOLUTION START", "BEGIN SOLUTION\n<code>"):
         idx = prompt.find(marker)
@@ -1648,6 +1768,12 @@ def _extract_setup_code(task: dict[str, Any], prompt: str, reference_code: str) 
 
 def _call_and_evaluate(full_prompt: str, generation_parameters: dict[str, Any], model_identifier: Optional[str],
                        entry_point: str, tests_field: list, reference_code: str, setup_code: str) -> TaskResult:
+    """Generate an answer, extract code, classify output and evaluate it.
+
+    Wires generate_answer -> extract_code/classify_output -> evaluate_code
+    into a complete TaskResult dict, or an error result when generation
+    returned nothing.
+    """
     gcfg = GenerationConfig(
         prompt=full_prompt, **generation_parameters,
         response_format=STRUCTURED_OUTPUT_SCHEMA if _can_use_structured_output(model_identifier) else None
@@ -1690,6 +1816,7 @@ def _call_and_evaluate(full_prompt: str, generation_parameters: dict[str, Any], 
 
 
 def get_task_type(benchmark_file: str) -> str:
+    """Map a benchmark JSONL filename to its task type ("data_science" | "codereval")."""
     mapping = {
         "data_science.jsonl": "data_science",
         "codereval_selfcontained.jsonl": "codereval",
@@ -1698,6 +1825,14 @@ def get_task_type(benchmark_file: str) -> str:
 
 
 def benchmark_model(model_info: Any, tasks: list[dict[str, Any]], task_type: str, benchmark_name: str, monitor: Monitor, is_quiet_mode: bool = False) -> tuple[list[dict[str, Any]], Optional[float], float, float, dict[str, Any]]:
+    """Run all tasks of one benchmark against one model.
+
+    Iterates the tasks with retries on API errors (Channel-Error markers
+    are printed for the launcher), records resource peaks via the monitor
+    thread and MetricsCollector, prints per-task progress, and returns
+    (task_results, avg_score, avg_latency, avg_tps, collector_summary).
+    "Average score: XX%" is always printed so the launcher can parse it.
+    """
     is_dict = isinstance(model_info, dict)
     display_name = model_info["display"] if is_dict else model_info
     model_identifier = model_info["key"] if is_dict else model_info
@@ -1714,6 +1849,7 @@ def benchmark_model(model_info: Any, tasks: list[dict[str, Any]], task_type: str
     collector.start()
     results = []
     def _safe(text: str) -> str:
+        """Sanitize a string for safe output (lossy UTF-8 round-trip)."""
         return str(text).encode('utf-8', errors='replace').decode('utf-8')
     for i, task in enumerate(tasks, 1):
         collector.maybe_sample()
@@ -1817,6 +1953,7 @@ def benchmark_model(model_info: Any, tasks: list[dict[str, Any]], task_type: str
     # instead of MetricsCollector (only every 10s over entire run including idle)
     _ram_total_gb = psutil.virtual_memory().total / (1073741824)
     def _peak_avg_max(key: str, min_val: float = 0) -> tuple[Optional[float], Optional[float]]:
+        """Average and max of a per-task resource metric above ``min_val``."""
         vals = [r.get(key) for r in results if r.get(key) is not None and r[key] > min_val]
         if not vals:
             return None, None
@@ -1859,6 +1996,11 @@ def _safe_float(value: Any) -> Optional[float]:
 
 
 def parse_resource_avgs(task_results: list[dict[str, Any]]) -> tuple[Optional[float], Optional[float], Optional[float], Optional[float]]:
+    """Average CPU/RAM/GPU/VRAM "during" values across task results.
+
+    Non-numeric or missing values are ignored (via _safe_float); returns
+    (cpu, ram, gpu, vram) with None for metrics without samples.
+    """
     cpu, ram, gpu, vram = [], [], [], []
     for t in task_results:
         for buf, key in ((cpu, "cpu_during"), (ram, "ram_during"),
@@ -1876,6 +2018,11 @@ def parse_resource_avgs(task_results: list[dict[str, Any]]) -> tuple[Optional[fl
 
 
 def select_benchmark() -> list[dict[str, Any]]:
+    """Interactive benchmark picker (interactive mode only).
+
+    Prompts until a valid choice is entered; "a" returns all benchmarks,
+    "q" exits. Selection syntax is parsed by parse_selection().
+    """
     print("\n" + "=" * 60)
     print("  Benchmark selection")
     print("=" * 60)
@@ -1899,6 +2046,11 @@ def select_benchmark() -> list[dict[str, Any]]:
 
 
 def select_models(available_models: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Interactive model picker (interactive mode only).
+
+    Lists the pre-filtered available models and returns the chosen ones
+    ("a" = all). Exits when no models are available.
+    """
     # Code-Review 2026-07-18 §4.1: EXCLUDE_KEYWORDS filtering is already
     # applied by get_available_models(); doing it again here is
     # redundant and drift-prone.
@@ -1926,7 +2078,12 @@ def select_models(available_models: list[dict[str, Any]]) -> list[dict[str, Any]
         print("  Invalid input.")
 
 
-def main() -> None:
+def _parse_args() -> tuple[Any, int]:
+    """Parse CLI arguments, apply module-global flags, seed RNG, print banner.
+
+    Returns (args, seed). The globals IS_QWEN_PROMPT_MODE, IS_THINKING_MODE,
+    HAS_STRUCTURED_OUTPUT and KEEP_RESPONSE are set from the parsed flags.
+    """
     try:
         import sys as _sys
         _sys.stdout.reconfigure(encoding='utf-8')
@@ -1956,16 +2113,9 @@ def main() -> None:
     _parser.add_argument("--keep-response", action="store_true",
                          help="Write full LLM response to per-task CSVs (default: truncated to 200 chars)")
     _args, _ = _parser.parse_known_args()
-    sample_size = _args.sample_size
-    non_interactive = _args.non_interactive
-    model_identifier_override = _args.model_key
-    api_model_override = _args.api_model
-    benchmark_override = _args.benchmark
-    qwen_prompt_mode = _args.qwen_prompt
-    thinking_mode = _args.thinking
-    global IS_QWEN_PROMPT_MODE, IS_THINKING_MODE, HAS_STRUCTURED_OUTPUT
-    IS_QWEN_PROMPT_MODE = qwen_prompt_mode
-    IS_THINKING_MODE = thinking_mode
+    global IS_QWEN_PROMPT_MODE, IS_THINKING_MODE, HAS_STRUCTURED_OUTPUT, KEEP_RESPONSE
+    IS_QWEN_PROMPT_MODE = _args.qwen_prompt
+    IS_THINKING_MODE = _args.thinking
     HAS_STRUCTURED_OUTPUT = not _args.no_structured_output
     KEEP_RESPONSE = _args.keep_response
     if _args.seed is not None:
@@ -1979,10 +2129,15 @@ def main() -> None:
     print("=" * 60)
     print("  LM Studio Benchmark Tool v13")
     print("  DS1000 + CoderEval")
-    print(f"  Subsampling: {sample_size} tasks per benchmark")
+    print(f"  Subsampling: {_args.sample_size} tasks per benchmark")
     print("=" * 60)
     print(f"  Python: {sys.version.split()[0]} ({sys.executable})")
     print()
+    return _args, _seed
+
+
+def _verify_environment() -> Monitor:
+    """Create the resource Monitor and verify API reachability + DS1000 deps."""
     monitor = Monitor()
     if not is_api_available():
         error(f"LM Studio API not reachable: {API_BASE}")
@@ -2002,35 +2157,44 @@ def main() -> None:
         print("       Install missing packages with:")
         print(f"       pip install {' '.join(missing)}")
         print()
+    return monitor
 
 
-    if non_interactive:
-        benchmarks = BENCHMARKS
-        if benchmark_override:
-            benchmarks = [b for b in benchmarks if b["name"].lower() == benchmark_override.lower()]
-            if not benchmarks:
-                error(f"Benchmark '{benchmark_override}' not found. Possible: {', '.join(b['name'] for b in BENCHMARKS)}")
-                sys.exit(1)
-        available = get_available_models(exclude_keywords=EXCLUDE_KEYWORDS)
-        if model_identifier_override:
-            models = [m for m in available if m["key"] == model_identifier_override]
-            if not models:
-                error(f"Model '{model_identifier_override}' not found.")
-                sys.exit(1)
-        else:
-            models = available
-    else:
-        warn("Interactive mode is no longer supported - use run_benchmarks.py")
-        info("custom_benchmark.py only implements DS1000 + CoderEval. For HumanEval+/MBPP+/ARC/HellaSwag/TruthfulQA/IFEval/MATH-500 use run_benchmarks.py.")
-        info("Start with: python run_benchmarks.py --benchmarks DS1000,CoderEval")
-        benchmarks = select_benchmark()
-        models = select_models(get_available_models())
-        # Check whether a model is already loaded (from previous run)
-        loaded = get_current_loaded_model()
-        if not loaded:
-            error("No model loaded. Please load a model first via run_benchmarks.py.")
+def _resolve_benchmarks(args: Any) -> list[dict[str, Any]]:
+    """Resolve the benchmark list for non-interactive mode (with --benchmark override)."""
+    benchmarks = BENCHMARKS
+    if args.benchmark:
+        benchmarks = [b for b in benchmarks if b["name"].lower() == args.benchmark.lower()]
+        if not benchmarks:
+            error(f"Benchmark '{args.benchmark}' not found. Possible: {', '.join(b['name'] for b in BENCHMARKS)}")
             sys.exit(1)
+    return benchmarks
 
+
+def _resolve_models(args: Any) -> list[dict[str, Any]]:
+    """Resolve the model list for non-interactive mode (with --model-key override)."""
+    available = get_available_models(exclude_keywords=EXCLUDE_KEYWORDS)
+    if args.model_key:
+        models = [m for m in available if m["key"] == args.model_key]
+        if not models:
+            error(f"Model '{args.model_key}' not found.")
+            sys.exit(1)
+    else:
+        models = available
+    return models
+
+
+def _run_model_loop(models: list[dict[str, Any]], benchmarks: list[dict[str, Any]],
+                    monitor: Monitor, args: Any) -> list[dict[str, Any]]:
+    """Run every model against every benchmark; return the summary rows.
+
+    Skips models without a registry reasoning entry, filters broken DS1000
+    tasks, subsamples per group, writes per-task and per-model CSVs via
+    csv_writer, and collects per-model metric summaries.
+    """
+    sample_size = args.sample_size
+    non_interactive = args.non_interactive
+    api_model_override = args.api_model
     summary = []
     for midx, model_info in enumerate(models, 1):
         model_identifier = model_info["key"]
@@ -2135,30 +2299,60 @@ def main() -> None:
                 model_key=model_info.get("key", ""),
                 sample_size=sample_size,
             )
+    return summary
 
+
+def _print_summary(summary: list[dict[str, Any]]) -> None:
+    """Print the interactive-mode SUMMARY table and write summary_*.csv."""
+    print("\n" + "=" * 60)
+    print("  SUMMARY")
+    print("=" * 60)
+    if summary:
+        hdr = "{:<25} {:<20} {:<6} {:<8} {:<8} {:<8}".format(
+            "Model", "Benchmark", "Tasks", "Score", "Latency", "tok/s")
+        print("  " + hdr)
+        print("  " + "-" * len(hdr))
+        for r in summary:
+            print("  {:<25} {:<20} {:<6} {:<8} {:<8} {:<8}".format(
+                r["Model"][:24], r["Benchmark"][:19], r["Tasks"],
+                r["Score"], r["Latency"], r["tok/s"]))
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    sp = os.path.join(RESULTS_DIR, f"summary_{ts}.csv")
+    if summary:
+        with open(sp, "w", newline="", encoding="utf-8-sig") as f:
+            w = csv.DictWriter(f, fieldnames=summary[0].keys())
+            w.writeheader()
+            w.writerows(summary)
+        info(f"Summary: {sp}")
+
+
+def main() -> None:
+    """CLI entry point for the Custom pipeline (DS1000 + CoderEval).
+
+    Orchestrates: argument parsing -> environment check -> model/benchmark
+    selection -> benchmark run loop -> optional interactive SUMMARY.
+    """
+    args, _seed = _parse_args()
+    monitor = _verify_environment()
+    if args.non_interactive:
+        benchmarks = _resolve_benchmarks(args)
+        models = _resolve_models(args)
+    else:
+        warn("Interactive mode is no longer supported - use run_benchmarks.py")
+        info("custom_benchmark.py only implements DS1000 + CoderEval. For HumanEval+/MBPP+/ARC/HellaSwag/TruthfulQA/IFEval/MATH-500 use run_benchmarks.py.")
+        info("Start with: python run_benchmarks.py --benchmarks DS1000,CoderEval")
+        benchmarks = select_benchmark()
+        models = select_models(get_available_models())
+        # Check whether a model is already loaded (from previous run)
+        loaded = get_current_loaded_model()
+        if not loaded:
+            error("No model loaded. Please load a model first via run_benchmarks.py.")
+            sys.exit(1)
+    summary = _run_model_loop(models, benchmarks, monitor, args)
     # In non-interactive mode: skip redundant SUMMARY
     # (run_benchmarks.py generates its own summaries)
-    if not non_interactive:
-        print("\n" + "=" * 60)
-        print("  SUMMARY")
-        print("=" * 60)
-        if summary:
-            hdr = "{:<25} {:<20} {:<6} {:<8} {:<8} {:<8}".format(
-                "Model", "Benchmark", "Tasks", "Score", "Latency", "tok/s")
-            print("  " + hdr)
-            print("  " + "-" * len(hdr))
-            for r in summary:
-                print("  {:<25} {:<20} {:<6} {:<8} {:<8} {:<8}".format(
-                    r["Model"][:24], r["Benchmark"][:19], r["Tasks"],
-                    r["Score"], r["Latency"], r["tok/s"]))
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        sp = os.path.join(RESULTS_DIR, f"summary_{ts}.csv")
-        if summary:
-            with open(sp, "w", newline="", encoding="utf-8-sig") as f:
-                w = csv.DictWriter(f, fieldnames=summary[0].keys())
-                w.writeheader()
-                w.writerows(summary)
-            info(f"Summary: {sp}")
+    if not args.non_interactive:
+        _print_summary(summary)
     info("Benchmark complete.")
 
 

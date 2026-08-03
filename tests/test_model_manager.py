@@ -349,6 +349,57 @@ class TestGetAvailableModels:
         assert models[0]["display"] == "My Model"
         assert models[0]["quant"] == ""
 
+    def test_filters_mtp_drafter_support_file(self, mocker):
+        """Code-Review 2026-08-03 §F1: MTP-Drafter (mtp-* Pfad oder
+        *-assistant Architektur) wird aus der Modellliste gefiltert,
+        legitime MTP-Modelle bleiben unberührt."""
+        result = MagicMock()
+        result.returncode = 0
+        result.stdout = json.dumps([
+            # MTP-Drafter: mtp- Präfix + -assistant Architektur
+            {"modelKey": "gemma-4-12b-it-qat@q8_0",
+             "displayName": "Mtp Gemma 4 12B Instruct",
+             "selectedVariant": "gemma-4-12b-it-qat@q8_0",
+             "variants": [],
+             "path": "unsloth/gemma-4-12B-it-qat-GGUF/mtp-gemma-4-12B-it-Q8_0.gguf",
+             "architecture": "gemma4-assistant"},
+            # Legitimes MTP-Modell (Architektur ohne -assistant, kein mtp- Präfix)
+            {"modelKey": "qwen3.6-27b-mtp",
+             "displayName": "Qwen3.6 27B UD",
+             "selectedVariant": "qwen3.6-27b-mtp",
+             "variants": [],
+             "path": "unsloth/Qwen3.6-27B-MTP-GGUF/Qwen3.6-27B-UD-IQ3_XXS.gguf",
+             "architecture": "qwen35"},
+            # Normales Modell ohne path/architecture (Alt-Format Kompatibilität)
+            {"modelKey": "good_model",
+             "displayName": "Good",
+             "selectedVariant": "good_model",
+             "variants": []},
+        ])
+        mocker.patch("subprocess.run", return_value=result)
+        models = get_available_models()
+        keys = [m["key"] for m in models]
+        assert "gemma-4-12b-it-qat@q8_0" not in keys
+        assert "qwen3.6-27b-mtp" in keys
+        assert "good_model" in keys
+        assert len(models) == 2
+
+    def test_filters_mmproj_vision_projector(self, mocker):
+        """Code-Review 2026-08-03 §F1: mmproj-Dateien sind Zusatzdateien."""
+        result = MagicMock()
+        result.returncode = 0
+        result.stdout = json.dumps([{
+            "modelKey": "glm-4.6v@q6_k",
+            "displayName": "Glm 4.6v Flash",
+            "selectedVariant": "glm-4.6v@q6_k",
+            "variants": [],
+            "path": "zai-org/GLM-4.6v-GGUF/mmproj-glm-4.6v-f16.gguf",
+            "architecture": "glm4",
+        }])
+        mocker.patch("subprocess.run", return_value=result)
+        models = get_available_models()
+        assert models == []
+
 
 # ─────────────────────────────────────────────────────────────────────
 # load_model_via_lms

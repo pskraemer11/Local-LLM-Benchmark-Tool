@@ -49,6 +49,15 @@ Features:
 
 from __future__ import annotations
 
+import os as _os
+import sys as _sys
+
+# Make `src` importable regardless of the working directory
+# (python -m src.run_benchmarks from the repo root puts only the CWD
+# on sys.path, not `src/`). Fix for Code-Review_2026-08-03.md F4.
+_SRC_DIR = _os.path.dirname(_os.path.abspath(__file__))
+_sys.path.insert(0, _SRC_DIR)
+
 import argparse
 import atexit
 import csv_writer as csv_writer

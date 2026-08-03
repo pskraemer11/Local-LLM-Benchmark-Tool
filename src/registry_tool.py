@@ -40,10 +40,15 @@ from pathlib import Path
 from collections import OrderedDict
 from typing import Any, Callable
 
+_SRC_DIR = Path(__file__).resolve().parent
+# Make `src` importable regardless of how the tool is invoked
+# (python -m src.registry_tool from the repo root puts only the CWD
+# on sys.path, not `src/`). Fix for Code-Review_2026-08-03.md F4.
+sys.path.insert(0, str(_SRC_DIR))
+
 from utils.terminal import ok, warn, error
 from type_defs import RegistryEntry
 
-_SRC_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = _SRC_DIR.parent
 REGISTRY_PATH = PROJECT_ROOT / "doc-git" / "model_registry.yaml"
 CONFIG_ROOT = Path.home() / ".lmstudio" / ".internal" / "user-concrete-model-default-config"
@@ -55,7 +60,6 @@ y.preserve_quotes = True
 y.indent(mapping=2, sequence=4, offset=2)
 
 # ── assemble_blueprint helpers ─────────────────────────────────────
-sys.path.insert(0, str(_SRC_DIR))
 from assemble_blueprint import (
     normalize_model_name, normalize_for_config, find_config_for_registry_key,
     find_all_configs_for_registry_key, find_registry_key_for_config,
@@ -65,6 +69,7 @@ from assemble_blueprint import (
 )
 from benchmark_config import (
     BLACKLIST,
+    is_support_file,
     USABLE_VRAM_GB as _USABLE_VRAM_GB,
     USE_UNIFIED_KV_CACHE_THRESHOLD_GB as _USE_UNIFIED_KV_CACHE_THRESHOLD_GB,
     LEGACY_MODEL_GB_THRESHOLD_GB as _LEGACY_MODEL_GB_THRESHOLD_GB,
@@ -276,30 +281,9 @@ def _norm(s: str) -> str:
     return " ".join(s.split())
 
 
-def _is_support_file(
-    path: str | os.PathLike[str],
-    architecture: str = "",
-) -> bool:
-    """True for auxiliary GGUF files that are NOT standalone benchmark models.
-
-    - ``mmproj*``: vision projector files
-    - ``mtp-*`` or ``*/MTP/*``: MTP draft models (speculative-decoding add-ons,
-      e.g. unsloth's ``mtp-gemma-4-12B-it-Q8_0.gguf``). Legitimate standalone
-      MTP models (``qwen3.6-27b-mtp``, ``...-MTP-...`` in the name) are NOT
-      affected — only the ``mtp-`` filename prefix or an ``MTP`` path segment.
-    - architecture ending in ``-assistant`` (e.g. ``gemma4-assistant``): MTP
-      drafter architecture reported by LM Studio / GGUF header.
-    """
-    name = os.path.basename(str(path)).lower()
-    if "mmproj" in name:
-        return True
-    if name.startswith("mtp-"):
-        return True
-    parts = str(path).replace("\\", "/").split("/")
-    if any(seg.lower() == "mtp" for seg in parts):
-        return True
-    arch = architecture.lower().strip()
-    return arch.endswith("-assistant")
+# Zentralisiert in benchmark_config.py (Code-Review 2026-08-03 §F1):
+# wird identisch von model_manager.get_available_models() genutzt.
+_is_support_file = is_support_file
 
 
 def _significant_words(s: str) -> set[str]:
