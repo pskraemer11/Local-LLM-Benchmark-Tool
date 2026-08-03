@@ -48,16 +48,17 @@ NON_REASONING_MODELS = [
 ]
 
 # Architecture → default reasoning type (priority after GGUF/existing)
+# Qwen3: fast alle Instruct (non-thinking). Exception: explizites "thinking" im Namen.
+# Qwen3.6 (qwen35): Dual-Mode (Thinking + Non-Thinking per Prompt steuerbar).
+# Default für Qwen3.6 ist Non-Thinking (Instruct), da enable_thinking=False Default.
 _ARCH_REASONING_MAP = {
-    "qwen3": "thinking",
-    "qwen35": "thinking",
-    "qwen35moe": "thinking",
-    "qwen3moe": "thinking",
+    "qwen35moe": "instruct",        # Qwen3.6 MoE → dual, Default Non-Thinking
+    "qwen35": "instruct",           # Qwen3.6 → dual, Default Non-Thinking
+    "qwen3moe": "instruct",         # Qwen3 MoE (Coder/Instruct) → Instruct
+    "qwen3": "instruct",            # Qwen3 (Instruct/Coder) → Instruct
     "deepseek2": "thinking",
     "kimi-linear": "thinking",
-    # gpt-oss (Harmony-Template: analysis/commentary/final-Kanaele) ist ein
-    # Reasoning-Modell – siehe Code-Review 2026-07-27 (registry: thinking)
-    "gpt-oss": "thinking",
+    "gpt-oss": "thinking",          # gpt-oss (Harmony-Template: analysis/commentary/final-Kanaele) ist Reasoning-Modell
     "nomic-bert": "none",
     "flux": "none",
 }
@@ -227,14 +228,19 @@ def classify_reasoning(
         arch_lower = arch.lower()
         for arch_key, reasoning_type in _ARCH_REASONING_MAP.items():
             if arch_key in arch_lower:
-                # Qwen3-Familie: -Instruct-Varianten sind Non-Thinking-only
-                # (HF-Karte Qwen3-30B-A3B-Instruct-2507); Qwen3.6 dual-mode.
-                # Der Modellname entscheidet über die konkrete Variante.
+                # Qwen3 / Qwen3.6 Klassifikation über Modellnamen:
+                # - Qwen3 (qwen3, qwen3moe): Default Instruct. Nur explizites "thinking" im Namen → thinking.
+                # - Qwen3.6 (qwen35, qwen35moe): Dual-Mode (Thinking per Prompt schaltbar).
+                #   Default Non-Thinking (enable_thinking=False Default). "thinking" im Namen → thinking.
+                # - Special case: "qwen3-30b-a3b-thinking-2507..." → thinking
                 if arch_key.startswith("qwen"):
                     if "thinking" in name_lower:
                         return "thinking"
-                    if "instruct" in name_lower:
+                    # "instruct" im Namen ist Default, aber zur Sicherheit:
+                    if "instruct" in name_lower or "coder" in name_lower:
                         return "instruct"
+                    # Qwen3.6 Default = Instruct (Non-Thinking Default)
+                    return "instruct"
                 return reasoning_type
 
     for kw in NON_REASONING_MODELS:
