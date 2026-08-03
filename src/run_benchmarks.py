@@ -1371,8 +1371,9 @@ def run_agentic(model_info: AvailableModelInfo, limit: int = 5, mode: str = "ran
     print(f"      Scenarios: {len(selected)}/{len(all_ids)} {label} selected")
 
     t0 = time.time()
+    agentic_runner = os.path.join(SRC_DIR, "tools", "tool_eval_bench_runner.py")
     cmd = [
-        sys.executable, "-m", "tool_eval_bench",
+        sys.executable, agentic_runner,
         "--base-url", API_BASE,
         "--scenarios", *selected,
         "--json-file", json_path,

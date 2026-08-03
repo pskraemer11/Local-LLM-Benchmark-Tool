@@ -32,7 +32,6 @@ from type_defs import ModelConfig
 # Source: lms ls --json + LM Studio configs + GGUF cache
 # Conflicts resolved: Steckbrief > Config > GGUF-Cache > Filename
 QUANT_MAP = {
-    "ai21labs_ai21-jamba2-mini": "IQ2_XXS",  # ai21labs_ai21-jamba2-mini
     "bonsai-27b": "Q1_0",  # bonsai-27b
     "bonsai-8b-requantized": "Q2_K",  # bonsai-8b-requantized
     "datagemma-rig-27b-it": "Q3_K_S",  # datagemma-rig-27b-it
