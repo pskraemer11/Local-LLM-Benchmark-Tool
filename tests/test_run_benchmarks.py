@@ -317,8 +317,11 @@ class TestLmevalParams:
 
     # Region: Model-Overrides (MODEL_TEMP_OVERRIDES) ---------------------
     def test_phi4_reasoning_override(self):
-        params = _get_evaluation_parameters("unsloth/phi-4-reasoning", "coding")
-        assert params["temperature"] == 0.8        # phi-4-reasoning override
+        # Phi-4 (Instruct, unsloth/phi-4): Hersteller-Empfehlung do_sample=True
+        # fuer ALLES → temp 0.8 statt Kategorie-Default 0.0.
+        # (phi-4-reasoning existiert nicht mehr installiert → Test nutzt Instruct-Version)
+        params = _get_evaluation_parameters("unsloth/phi-4", "coding")
+        assert params["temperature"] == 0.8        # phi-4 override
         assert params["top_k"] == 50
 
     def test_gpt_oss_override_temperature(self):

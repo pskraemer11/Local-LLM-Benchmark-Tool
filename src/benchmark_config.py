@@ -277,6 +277,15 @@ GPTOSS_REASONING_BUDGET = 4096
 # Nur hier eintragen, wenn die Hersteller-Empfehlung substantiell vom
 # Kategorie-Default abweicht (z.B. Phi-4 empfiehlt do_sample=True fuer ALLES).
 MODEL_TEMP_OVERRIDES = {
+    # Phi-4 (Instruct, unsloth): Hersteller empfiehlt do_sample=True fuer ALLES
+    # (siehe auch Kommentar in Bonsai-27B: greedy=0.0 verfaelscht Scores).
+    # "phi-4-reasoning" wurde entfernt (Modell nicht mehr installiert) →
+    # Override gilt jetzt fuer die installierte Instruct-Version unsloth/phi-4.
+    "phi-4": {
+        "temperature": 0.8,
+        "top_p": 0.95,
+        "top_k": 50,
+    },
     "gpt-oss": {
         "temperature": 1.0,
         "top_p": 1.0,
