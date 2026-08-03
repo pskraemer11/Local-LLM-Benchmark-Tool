@@ -283,7 +283,7 @@ unsloth/gemma-4-26b-a4b-it@iq3_s:
 ibm-granite/granite-4.0-h-tiny:
   publisher: "ibm-granite"
   hf_url: "https://huggingface.co/ibm-granite/granite-4.0-h-tiny-GGUF"
-  pub_url: https://www.ibm.com/granite
+  pub_url: https://www.ibm.com/granite/docs/models/granite4-1
   quants: Q8_0
   arch: "moe"
   template: "granite-4.0-h-tiny_template.jinja"
@@ -309,7 +309,7 @@ ibm-granite/granite-4.0-h-tiny:
 ibm-granite/granite-4.1-30b:
   publisher: ibm-granite
   hf_url: "https://huggingface.co/ibm-granite/granite-4.1-30b-GGUF"
-  pub_url: https://www.ibm.com/granite
+  pub_url: https://www.ibm.com/granite/docs/models/granite4-1
   quants: Q3_K_S
   arch: "dense"
   template: "granite-4.1-30b_template.jinja"
@@ -817,7 +817,7 @@ bartowski/mistralai_magistral-small-2509:
 lmstudio-community/deepseek-r1-distill-qwen-14b:
   publisher: "lmstudio-community"
   hf_url: "https://huggingface.co/lmstudio-community/DeepSeek-R1-Distill-Qwen-14B-GGUF"
-  pub_url: https://qwen.ai
+  pub_url: https://github.com/deepseek-ai/DeepSeek-V3
   quants: Q6_K
   arch: "dense"
   k_cache: "q8_0"
@@ -1414,6 +1414,7 @@ prism-ml/bonsai-27b:
 ibm-granite/granite-4.1-8b:
   publisher: ibm-granite
   hf_url: https://huggingface.co/ibm-granite/granite-4.1-8b
+  pub_url: https://www.ibm.com/granite/docs/models/granite4-1
   arch: dense
   k_cache: q8_0
   v_cache: iq4_nl
@@ -1505,3 +1506,20 @@ unsloth/ernie-4.5-21b-a3b-pt:
   capabilities: coding, text
   blueprint: coding_agent
   truncation: minimal
+
+unsloth/gemma-4-12b-it-qat@q4_k_xl:
+  publisher: unsloth
+  hf_url: https://huggingface.co/unsloth/gemma-4-12b-it-qat@q4_k_xl
+  arch: dense
+  k_cache: q8_0
+  v_cache: iq4_nl
+  offload: 1
+  num_parallel: 1
+  notes: 'Architektur: dense | Vision | MTP-fähig: Drafter mtp-gemma-4-12B-it-Q8_0.gguf (MTP/ Ordner) als Zusatzmodul, nicht einzeln testbar'
+  file_size_bytes: 6716356800
+  context_length: 262144
+  n_layers: 48
+  hidden_dim: 3840
+  reasoning: thinking
+  capabilities: vision, coding, audio, text
+  blueprint: gemma_reasoning
