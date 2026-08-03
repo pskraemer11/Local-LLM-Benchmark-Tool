@@ -184,10 +184,10 @@ class TestClassifyReasoningQwen3:
         r = classify_reasoning("qwen3-30b-a3b-thinking-2507", arch="Qwen3 MoE")
         assert r == "thinking"
 
-    def test_qwen3_6_dual_mode_defaults_instruct(self):
-        # Qwen3.6 is dual-mode (Thinking per Prompt schaltbar), Default Non-Thinking
+    def test_qwen3_6_dual_mode_defaults_thinking(self):
+        # Qwen3.6 is dual-mode (Thinking per Prompt schaltbar), Default Thinking
         r = classify_reasoning("qwen3.6-27b", arch="Qwen3.5 Dense")
-        assert r == "instruct"
+        assert r == "thinking"
 
     def test_existing_reasoning_has_priority(self):
         r = classify_reasoning("qwen3-30b-a3b-instruct-2507",

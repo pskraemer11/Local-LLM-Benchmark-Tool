@@ -1558,7 +1558,7 @@ def cmd_validate() -> dict[str, Any]:
         if not reasoning or not arch_raw:
             continue
         detected = None
-        arch_lower = arch_raw.lower()
+        arch_lower = arch_raw.lower().replace(".", "")  # normalize: "Qwen3.5" → "qwen35"
         for arch_key, rtype in _ARCH_REASONING_MAP.items():
             if arch_key in arch_lower:
                 detected = rtype
