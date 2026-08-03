@@ -276,6 +276,32 @@ def _norm(s: str) -> str:
     return " ".join(s.split())
 
 
+def _is_support_file(
+    path: str | os.PathLike[str],
+    architecture: str = "",
+) -> bool:
+    """True for auxiliary GGUF files that are NOT standalone benchmark models.
+
+    - ``mmproj*``: vision projector files
+    - ``mtp-*`` or ``*/MTP/*``: MTP draft models (speculative-decoding add-ons,
+      e.g. unsloth's ``mtp-gemma-4-12B-it-Q8_0.gguf``). Legitimate standalone
+      MTP models (``qwen3.6-27b-mtp``, ``...-MTP-...`` in the name) are NOT
+      affected — only the ``mtp-`` filename prefix or an ``MTP`` path segment.
+    - architecture ending in ``-assistant`` (e.g. ``gemma4-assistant``): MTP
+      drafter architecture reported by LM Studio / GGUF header.
+    """
+    name = os.path.basename(str(path)).lower()
+    if "mmproj" in name:
+        return True
+    if name.startswith("mtp-"):
+        return True
+    parts = str(path).replace("\\", "/").split("/")
+    if any(seg.lower() == "mtp" for seg in parts):
+        return True
+    arch = architecture.lower().strip()
+    return arch.endswith("-assistant")
+
+
 def _significant_words(s: str) -> set[str]:
     """Split *s* into lower-case words, keep only ≥3-char tokens."""
     return {w for w in _norm(s).split() if len(w) >= 3}
@@ -298,7 +324,7 @@ def _resolve_model_path_multi(key: str) -> str:
 
     # 2) Substring match
     for g in _get_all_ggufs():
-        if "mmproj" in g.name.lower():
+        if _is_support_file(g):
             continue
         if sn in _norm(str(g.relative_to(MODELS_CACHE))):
             return str(g)
@@ -309,7 +335,7 @@ def _resolve_model_path_multi(key: str) -> str:
         return ""
     best: tuple[int, str] = (0, "")
     for g in _get_all_ggufs():
-        if "mmproj" in g.name.lower():
+        if _is_support_file(g):
             continue
         gw = _significant_words(str(g.relative_to(MODELS_CACHE)))
         match = len(sw & gw)
@@ -365,7 +391,7 @@ def _resolve_exact(reg_key: str, lms_path_map: dict[str, str]) -> str:
                 return mp
     sn = _norm(reg_key.split("/", 1)[1] if "/" in reg_key else reg_key)
     for g in _get_all_ggufs():
-        if "mmproj" in g.name.lower():
+        if _is_support_file(g):
             continue
         if sn in _norm(str(g.relative_to(MODELS_CACHE))):
             return str(g)
@@ -620,6 +646,10 @@ def cmd_add(models: list[dict[str, Any]], interactive: bool = False) -> dict[str
             continue
         if any(kw in mk.lower() for kw in BLACKLIST):
             skipped.append((mk, "blacklisted"))
+            continue
+        rp = m.get("path", "")
+        if rp and _is_support_file(rp, str(m.get("architecture") or "")):
+            skipped.append((mk, "Zusatzdatei (MTP-Drafter/mmproj) - kein eigenständiges Modell"))
             continue
         model_path = ""
         rp = m.get("path", "")

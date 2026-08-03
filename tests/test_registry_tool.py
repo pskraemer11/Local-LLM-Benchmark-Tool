@@ -716,3 +716,91 @@ class TestCmdRm:
         assert not cfg_file.exists()
         assert not backup.exists()
         assert rt.load_registry(reg_path) == {}
+
+
+# ─────────────────────────────────────────────────────────────────────
+# MTP-Drafter / mmproj: Zusatzdateien ≠ eigenständige Modelle
+# ─────────────────────────────────────────────────────────────────────
+
+class TestIsSupportFile:
+    """_is_support_file(): mtp-* und mmproj* sind Zusatzdateien,
+    legitime MTP-Modelle (qwen3.6-27b-mtp, ...-MTP-...) nicht."""
+
+    def test_mtp_drafter_prefix_detected(self):
+        assert rt._is_support_file("unsloth/gemma-4-12B-it-qat-GGUF/mtp-gemma-4-12B-it-Q8_0.gguf")
+
+    def test_mtp_drafter_subfolder_detected(self):
+        assert rt._is_support_file("unsloth/gemma-4-12B-it-qat-GGUF/MTP/mtp-gemma-4-12B-it.gguf")
+
+    def test_mmproj_detected(self):
+        assert rt._is_support_file("unsloth/gemma-4-12B-it-qat-GGUF/mmproj-F32.gguf")
+
+    def test_standalone_mtp_model_not_detected(self):
+        # Eigenständige MTP-Modelle sind KEINE Zusatzdateien
+        assert not rt._is_support_file("unsloth/Qwen3.6-27B-MTP-GGUF/Qwen3.6-27B-UD-IQ3_XXS.gguf")
+
+    def test_standalone_mtp_model_with_dash_not_detected(self):
+        assert not rt._is_support_file(
+            "vinpix/Ternary-Bonsai-27B-Stock-MTP-GGUF/Ternary-Bonsai-27B-MTP-Q2_K.gguf")
+
+    def test_normal_model_not_detected(self):
+        assert not rt._is_support_file("unsloth/gemma-4-12B-it-qat-GGUF/gemma-4-12B-it-qat-UD-Q4_K_XL.gguf")
+        assert not rt._is_support_file("openai/gpt-oss-20b/Qwen.gguf")
+
+    def test_mtp_directory_name_is_not_detected(self):
+        # "mtp" als Teil eines Ordnernamens (nicht exakt 'MTP' als Segment)
+        assert not rt._is_support_file("unsloth/Qwen3.6-27B-MTP-GGUF/model.gguf")
+
+    def test_assistant_architecture_detected(self):
+        # MTP-Drafter haben eigene Architektur-Klasse (gemma4-assistant)
+        assert rt._is_support_file("unsloth/gemma-4-12B-it-qat-GGUF/model.gguf",
+                                   architecture="gemma4-assistant")
+
+    def test_plain_architecture_not_detected(self):
+        # Normale Modelle (gemma4, qwen3moe, ...) sind keine Zusatzdateien
+        assert not rt._is_support_file("unsloth/gemma-4-12B-it-qat-GGUF/model.gguf",
+                                       architecture="gemma4")
+        assert not rt._is_support_file("unsloth/qwen3.6-27b-mtp/model.gguf",
+                                       architecture="qwen35")
+
+
+class TestCmdAddSkipsSupportFiles:
+    """cmd_add(): MTP-Drafter und mmproj werden nicht in die Registry aufgenommen."""
+
+    def test_add_skips_mtp_drafter(self, tmp_path, monkeypatch):
+        reg_path = tmp_path / "registry.yaml"
+        reg_path.write_text("{}\n", encoding="utf-8")
+        monkeypatch.setattr(rt, "REGISTRY_PATH", reg_path)
+        monkeypatch.setattr(rt, "MODELS_CACHE", tmp_path / "models")
+
+        models = [
+            {"key": "gemma-4-12b-it-qat@q4_k_xl", "publisher": "unsloth",
+             "path": "unsloth/gemma-4-12B-it-qat-GGUF/gemma-4-12B-it-qat-UD-Q4_K_XL.gguf",
+             "architecture": "gemma4",
+             "size_bytes": 6716356800},
+            {"key": "gemma-4-12b-it-qat@q8_0", "publisher": "unsloth",
+             "path": "unsloth/gemma-4-12B-it-qat-GGUF/mtp-gemma-4-12B-it-Q8_0.gguf",
+             "architecture": "gemma4-assistant",
+             "size_bytes": 674650176},
+        ]
+        result = rt.cmd_add(models)
+        reg = rt.load_registry(reg_path)
+        assert "unsloth/gemma-4-12b-it-qat@q4_k_xl" in reg
+        assert "unsloth/gemma-4-12b-it-qat@q8_0" not in reg
+        assert any("MTP-Drafter" in msg for _, msg in result["skipped"])
+
+    def test_add_keeps_standalone_mtp_model(self, tmp_path, monkeypatch):
+        reg_path = tmp_path / "registry.yaml"
+        reg_path.write_text("{}\n", encoding="utf-8")
+        monkeypatch.setattr(rt, "REGISTRY_PATH", reg_path)
+        monkeypatch.setattr(rt, "MODELS_CACHE", tmp_path / "models")
+
+        models = [
+            {"key": "qwen3.6-27b-mtp", "publisher": "unsloth",
+             "path": "unsloth/Qwen3.6-27B-MTP-GGUF/Qwen3.6-27B-UD-IQ3_XXS.gguf",
+             "size_bytes": 12203615360},
+        ]
+        result = rt.cmd_add(models)
+        reg = rt.load_registry(reg_path)
+        assert "unsloth/qwen3.6-27b-mtp" in reg
+        assert result["added"] == ["unsloth/qwen3.6-27b-mtp"]

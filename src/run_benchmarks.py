@@ -190,7 +190,8 @@ def _resolve_model_gguf_path(model_identifier: str) -> Optional[str]:
     suffix = model_identifier.split("/", 1)[1] if "/" in model_identifier else model_identifier
     suffix_norm = suffix.replace("_", "").replace("-", "").replace("@", "").lower()
     for g in sorted(glob.glob(os.path.join(models_root, "**", "*.gguf"), recursive=True)):
-        if "mmproj" in os.path.basename(g).lower():
+        g_base = os.path.basename(g).lower()
+        if "mmproj" in g_base or g_base.startswith("mtp-"):
             continue
         g_norm = os.path.basename(g).replace("_", "").replace("-", "").lower()
         if suffix_norm and suffix_norm in g_norm:
