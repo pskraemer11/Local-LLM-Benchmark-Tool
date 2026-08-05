@@ -165,11 +165,11 @@ def get_quant(model_identifier: str) -> str:
 
 
 # Registry cache for get_quant() step 5 (avoids re-parsing YAML on every call)
-_QUANT_REGISTRY_CACHE: dict = {}
+_QUANT_REGISTRY_CACHE: dict[str, Any] = {}
 _QUANT_REGISTRY_LOADED = False
 
 
-def _load_quant_registry() -> dict:
+def _load_quant_registry() -> dict[str, Any]:
     """Load and cache model_registry.yaml for get_quant() fallback."""
     global _QUANT_REGISTRY_CACHE, _QUANT_REGISTRY_LOADED
     if _QUANT_REGISTRY_LOADED:
@@ -271,7 +271,7 @@ GPTOSS_REASONING_BUDGET = 4096
 # Werden per Substring-Match auf den Model-Key gemerged.
 # Nur hier eintragen, wenn die Hersteller-Empfehlung substantiell vom
 # Kategorie-Default abweicht (z.B. Phi-4 empfiehlt do_sample=True fuer ALLES).
-MODEL_TEMP_OVERRIDES = {
+MODEL_TEMP_OVERRIDES: dict[str, dict[str, Any]] = {
     # Phi-4 (Instruct, unsloth): Hersteller empfiehlt do_sample=True fuer ALLES
     # (siehe auch Kommentar in Bonsai-27B: greedy=0.0 verfaelscht Scores).
     # "phi-4-reasoning" wurde entfernt (Modell nicht mehr installiert) →
@@ -395,14 +395,14 @@ def _registry_reasoning(model_identifier: str) -> Optional[str]:
         key_base = _re.sub(r"@.*$", "", key_stripped)
         if base != key_base:
             continue
-        reasoning = entry["reasoning"]
+        reasoning: str = entry["reasoning"]
         if inp_pub is not None and "/" in key and key.split("/")[0] == inp_pub:
             pub_match = reasoning
         elif inp_pub is None and fallback_match is None:
             fallback_match = reasoning
     if pub_match is not None:
-        return pub_match
-    return fallback_match
+        return str(pub_match)
+    return str(fallback_match) if fallback_match is not None else None
 
 
 def _word_boundary_match(pattern: str, text: str) -> bool:

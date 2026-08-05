@@ -48,7 +48,7 @@ import os
 import re
 import sys
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 # Set locale for user-readable number formatting in console output.
 # CSV output uses explicit f-string formatting with '.' as decimal separator
@@ -208,14 +208,14 @@ def _truncate_response(response: str, max_chars: int = 200) -> str:
     return f"{response[:max_chars]}\n[…truncated, {len(response)} chars total]"
 
 
-def _fmt_float(value, default: str = "0.0") -> str:
+def _fmt_float(value: object, default: str = "0.0") -> str:
     """Format a float with one decimal; None/strings fall back to default."""
     if value is None or not isinstance(value, (int, float)):
         return default
     return f"{value:.1f}"
 
 
-def _write_csv(path: str, fieldnames: list[str], rows: list[dict], delimiter: str = ";") -> str:
+def _write_csv(path: str, fieldnames: list[str], rows: list[dict[str, Any]], delimiter: str = ";") -> str:
     with open(path, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=fieldnames, delimiter=delimiter, extrasaction="ignore")
         w.writeheader()
@@ -226,7 +226,7 @@ def _write_csv(path: str, fieldnames: list[str], rows: list[dict], delimiter: st
 
 # ── Public write functions ───────────────────────────────────────
 
-def write_per_task_csv(results: list[dict], benchmark_name: str, model_display: str,
+def write_per_task_csv(results: list[dict[str, Any]], benchmark_name: str, model_display: str,
                        model_key: str = "", sample_size: int = 5, pipeline: str = "custom",
                        seed: str = "", exclude_benchmarks: str = "",
                        no_structured_output: str = "", no_unload_between: str = "",
@@ -297,7 +297,7 @@ def write_per_task_csv(results: list[dict], benchmark_name: str, model_display: 
     return path
 
 
-def write_per_model_csv(entries: list[dict], model_display: str, model_key: str = "",
+def write_per_model_csv(entries: list[dict[str, Any]], model_display: str, model_key: str = "",
                         pipeline: str = "custom", sample_size: int = 5,
                         seed: str = "", exclude_benchmarks: str = "",
                         no_structured_output: str = "", no_unload_between: str = "",
@@ -342,7 +342,7 @@ def write_per_model_csv(entries: list[dict], model_display: str, model_key: str 
     return path
 
 
-def write_accumulative_summary(results: list[dict], model_info: dict,
+def write_accumulative_summary(results: list[dict[str, Any]], model_info: dict[str, Any],
                                sample_size: int = 5,
                                seed: str = "", exclude_benchmarks: str = "",
                                no_structured_output: str = "", no_unload_between: str = "",
@@ -391,7 +391,7 @@ def write_accumulative_summary(results: list[dict], model_info: dict,
     return path
 
 
-def write_konsolidiert_aktuell(results: list[dict], sample_size: int = 5,
+def write_konsolidiert_aktuell(results: list[dict[str, Any]], sample_size: int = 5,
                                seed: str = "", exclude_benchmarks: str = "",
                                no_structured_output: str = "", no_unload_between: str = "",
                                base_dir: Optional[str] = None) -> str:
@@ -430,7 +430,7 @@ COMPARE_FIELDS = [
 ]
 
 
-def write_quant_comparison(results: list, base_dir: str) -> str:
+def write_quant_comparison(results: list[dict[str, Any]], base_dir: str) -> str:
     """Write paired-bootstrap comparison results to CSV + MD.
 
     Args:
