@@ -16,8 +16,13 @@ Bei neuen Modellen: QUANT_MAP manuell in dieser Datei ergaenzen.
 """
 
 from __future__ import annotations
+import json
 import os
+import re
 import sys
+import threading
+import time
+from pathlib import Path
 from typing import Any, Optional
 
 from utils.terminal import warn
@@ -227,11 +232,12 @@ BLACKLIST = [
 EXCLUDE_KEYWORDS = BLACKLIST
 
 
-# ── Benchmark-Kategorie-Defaults (Variante C+, 2026-07-15) ──
-# Jede Benchmark-Kategorie bekommt pauschal eine Temperatur/Parametrisierung.
-# Das ersetzt die fruehere Per-Modell-Konfiguration (THINKING_CONFIG).
-# Modelle mit abweichenden Hersteller-Empfehlungen werden via MODEL_TEMP_OVERRIDES
-# uebersteuert (additives Merge).
+# ── Benchmark-Kategorie-Defaults (Fallback, seit 2026-08-05) ──
+# Seit 2026-08-05 sind die LM Studio JSON-Configs die EINZIGE Quelle fuer
+# Generations-Parameter (siehe get_model_config + _lms_generation_config).
+# Die Kategorie-Defaults gelten nur noch, wenn fuer ein Modell KEINE
+# JSON-Config existiert. MODEL_TEMP_OVERRIDES und der Knowledge-Floor
+# wurden entfernt (Punkte 3+4, Transparenz-Refactor 05.08.2026).
 BENCHMARK_CATEGORY_DEFAULTS = {
     "coding": {
         "temperature": 0.0,
@@ -267,96 +273,195 @@ BENCHMARK_CATEGORY_DEFAULTS = {
 GPTOSS_REASONING_EFFORT = "medium"
 GPTOSS_REASONING_BUDGET = 4096
 
-# Modell-spezifische Overrides (flach, keine Kategorie-Differenzierung).
-# Werden per Substring-Match auf den Model-Key gemerged.
-# Nur hier eintragen, wenn die Hersteller-Empfehlung substantiell vom
-# Kategorie-Default abweicht (z.B. Phi-4 empfiehlt do_sample=True fuer ALLES).
-MODEL_TEMP_OVERRIDES: dict[str, dict[str, Any]] = {
-    # Phi-4 (Instruct, unsloth): Hersteller empfiehlt do_sample=True fuer ALLES
-    # (siehe auch Kommentar in Bonsai-27B: greedy=0.0 verfaelscht Scores).
-    # "phi-4-reasoning" wurde entfernt (Modell nicht mehr installiert) →
-    # Override gilt jetzt fuer die installierte Instruct-Version unsloth/phi-4.
-    "phi-4": {
-        "temperature": 0.8,
-        "top_p": 0.95,
-        "top_k": 50,
-    },
-    "gpt-oss": {
-        "temperature": 1.0,
-        "top_p": 1.0,
-        "top_k": 0,
-        "stop": ["<|return|>", "<|call|>"],
-    },
-    # PrismML Bonsai – Hersteller-Empfehlung (Modellkarten):
-    #   - Bonsai-27B (Ternary): temp 0.7 / top-p 0.95 / top-k 20 (Thinking-Mode)
-    #   - Bonsai-8B:            temp 0.6 (Range 0.5-0.7)
-    # Ohne Override wuerden sie mit Kategorie-Default temp 0.0 (greedy) laufen → Ursache
-    # der schlechten Scores (2026-08-02 DS1000-Testlauf).
-    "bonsai-27b": {
-        "temperature": 0.7,
-        "top_p": 0.95,
-        "top_k": 20,
-    },
-    "bonsai-8b": {
-        "temperature": 0.6,
-        "top_p": 0.95,
-        "top_k": 40,
-    },
-    "magistral": {
-        "temperature": 0.7,
-        "top_p": 0.95,
-    },
-    "ministral": {
-        "temperature": 0.7,
-        "top_p": 0.95,
-    },
-    "nemotron": {
-        "temperature": 0.7,
-        "top_p": 0.95,
-    },
-    "deepseek-r1-distill": {
-        "temperature": 0.0,
-        "top_p": 1.0,
-        "min_p": None,
-    },
-    "deepseek-coder": {
-        "temperature": 0.6,
-        "top_p": 0.95,
-        "min_p": 0.02,
-    },
-    # Kimi Linear REAP – enable_thinking=True führt zu "Content-only format" Fehler
-    "kimi": {
-        "enable_thinking": False,
-    },
-    # ALLE Qwen3.6-Modelle (und Derivate): Dual-Mode, GGUF-Default thinking=ON.
-    # Kein enable_thinking-Override mehr (seit 2026-08-04): die Registry
-    # (reasoning: thinking) bestimmt → enable_thinking=True. Frueher (19.07.–
-    # 03.08.) wurde False erzwungen, weil das Modell das komplette Token-Budget
-    # (6000+ Tokens/Task) verbrauchte — als Modell-Natur ist es Thinking.
-    "qwen3.6": {
-    },
-    # Qwen3.5 braucht no_system_msg. enable_thinking=False passt zur installierten
-    # Variante qwen3.5-9b (Registry: instruct). Die GGUF-Variante Qwen3.5-9B-GGUF
-    # ist in der Registry thinking — falls sie installiert wird, greift die Registry.
-    "qwen3.5": {
-        "temperature": 0.2,
-        "top_p": 0.9,
-        "top_k": 20,
-        "no_system_msg": True,
-        "enable_thinking": False,
-    },
-    # LFM (z.B. LFM2-24B-A2B-REAP, LFM2.5-8B): kein Override nötig → Kategorie-Defaults greifen
-    "lfm": {
-    },
-    # Gemma-4: temp=0.7 als Absicherung (thinking models brauchen >= 0.7).
-    # Die Registry setzt bereits reasoning: thinking → enable_thinking=True,
-    # was obige Temperature-Floor-Logik aktiviert. Dieser Override greift
-    # zusätzlich als fallback, falls die Registry-Version alt ist.
-    "gemma": {
-        "temperature": 0.7,
-        "top_p": 0.95,
-    },
+# ── LM Studio JSON-Configs: einzige Quelle fuer Generations-Parameter ──
+# Die LMS-GUI speichert ihre Einstellungen pro Modell als JSON-Config unter
+# ~/.lmstudio/.internal/user-concrete-model-default-config/. Diese Configs
+# sind seit 2026-08-05 massgeblich (Single-Source-of-Truth, Punkte 3+4).
+# Ausgelesen werden operation.fields:
+#   llm.prediction.temperature / topPSampling / topKSampling / minPSampling
+#   llm.prediction.reasoning.enableThinking / budgetTokens / parsing
+#   ext.virtualModel.customField.openai.gptOss20b.reasoningEffort
+LMS_CONFIG_ROOT = Path.home() / ".lmstudio" / ".internal" / "user-concrete-model-default-config"
+
+_LMS_INDEX_CACHE: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+_LMS_JSON_CACHE: dict[str, tuple[float, Optional[dict[str, Any]]]] = {}
+_LMS_TTL_S = 5.0  # Re-scan File-System hoechstens alle 5 Sekunden
+
+# operation.field key -> ModelConfig-Key
+_LMS_OP_KEY_MAP = {
+    "llm.prediction.temperature": "temperature",
+    "llm.prediction.topPSampling": "top_p",
+    "llm.prediction.topKSampling": "top_k",
+    "llm.prediction.minPSampling": "min_p",
+    "ext.virtualModel.customField.openai.gptOss20b.reasoningEffort": "reasoning_effort",
 }
+
+
+def _normalize_lms_model_name(name: str) -> str:
+    """Normalize a model/config name for matching (mirror of assemble_blueprint)."""
+    s = str(name).lower()
+    s = re.sub(r"\.gguf$", "", s)
+    s = re.sub(r"-(gguf|mxfp4)$", "", s)
+    s = re.sub(r"[-_](gguf|mxfp4)[-_]", "-", s)
+    s = re.sub(r"^[^/]+/", "", s)  # Publisher-Prefix entfernen
+    s = s.replace(".", "-").replace("_", "-")
+    while "--" in s:
+        s = s.replace("--", "-")
+    return s
+
+
+def _lms_index() -> list[dict[str, Any]]:
+    """Scan the LMS config root (TTL-cached) for config files."""
+    key = str(LMS_CONFIG_ROOT)
+    now = time.time()
+    cached = _LMS_INDEX_CACHE.get(key)
+    if cached is not None and now - cached[0] < _LMS_TTL_S:
+        return cached[1]
+    entries: list[dict[str, Any]] = []
+    if LMS_CONFIG_ROOT.exists():
+        for publisher_dir in sorted(LMS_CONFIG_ROOT.iterdir()):
+            if not publisher_dir.is_dir():
+                continue
+            publisher = publisher_dir.name
+            for item in sorted(publisher_dir.iterdir()):
+                if item.is_file() and item.suffix.lower() == ".json":
+                    json_path = item
+                    model_dir_name = item.stem
+                elif item.is_dir():
+                    json_files = sorted(item.glob("*.json"))
+                    if not json_files:
+                        continue
+                    json_path = json_files[0]
+                    model_dir_name = item.name
+                else:
+                    continue
+                entries.append({
+                    "publisher": publisher,
+                    "dir_name": model_dir_name,
+                    "file_stem": json_path.stem,
+                    "json_path": json_path,
+                })
+    _LMS_INDEX_CACHE[key] = (now, entries)
+    return entries
+
+
+def _load_lms_json(json_path: Path) -> Optional[dict[str, Any]]:
+    """Read one LMS config JSON (TTL-cached, tolerant encoding)."""
+    key = str(json_path)
+    now = time.time()
+    cached = _LMS_JSON_CACHE.get(key)
+    if cached is not None and now - cached[0] < _LMS_TTL_S:
+        return cached[1]
+    data: Optional[dict[str, Any]] = None
+    for enc in ("utf-8", "utf-8-sig"):
+        try:
+            with open(json_path, "r", encoding=enc) as f:
+                loaded = json.load(f)
+            if isinstance(loaded, dict):
+                data = loaded
+            break
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+            continue
+    _LMS_JSON_CACHE[key] = (now, data)
+    return data
+
+
+def _lms_field_value(fields: list[dict[str, Any]], key: str) -> Any:
+    for f in fields or []:
+        if f.get("key") == key:
+            return f.get("value")
+    return None
+
+
+def _unwrap_lms_value(value: Any) -> Any:
+    """Unwrap LMS {checked, value}-Objekte; 0 bzw. unchecked => None (disabled).
+
+    Plaine Skalare (z.B. temperature=0.0) bleiben unveraendert.
+    """
+    if isinstance(value, dict) and "checked" in value:
+        if value.get("checked") is not True:
+            return None
+        inner = value.get("value")
+        return None if inner == 0 else inner
+    return value
+
+
+def _lms_generation_config(model_identifier: str) -> Optional[dict[str, Any]]:
+    """Generations-Parameter aus der LMS-JSON-Config des Modells.
+
+    Matching wie registry_tool (3 Phasen, publisher-bewusst). Rueckgabe
+    eines flachen dicts (temperature/top_p/top_k/min_p/enable_thinking/
+    reasoning_effort) oder None, wenn keine Config zum Modell passt.
+    """
+    if not model_identifier:
+        return None
+    key = _normalize_lms_model_name(model_identifier)
+    if not key:
+        return None
+    inp_pub = model_identifier.split("/")[0].lower() if "/" in model_identifier else None
+
+    def _matches(candidate: str) -> bool:
+        if candidate == key:
+            return True
+        if candidate.startswith(key + "-"):
+            return True
+        if candidate.endswith("-" + key):
+            return True
+        if key.endswith("-" + candidate):
+            return True
+        return False
+
+    pub_matches: list[dict[str, Any]] = []
+    fallback_matches: list[dict[str, Any]] = []
+    for entry in _lms_index():
+        norm_dir = _normalize_lms_model_name(entry["dir_name"])
+        norm_file = _normalize_lms_model_name(entry["file_stem"])
+        if _matches(norm_dir) or _matches(norm_file):
+            if inp_pub is not None and entry["publisher"].lower() == inp_pub:
+                pub_matches.append(entry)
+            elif inp_pub is None:
+                fallback_matches.append(entry)
+    # Mehrere Kandidaten (Quant-Varianten): erste Config mit Parametern gewinnt
+    for entry in pub_matches + fallback_matches:
+        out = _lms_params_from_entry(entry)
+        if out:
+            return out
+    return None
+
+
+def _lms_params_from_entry(entry: dict[str, Any]) -> Optional[dict[str, Any]]:
+    """Extract generation params from one matched LMS config file."""
+    data = _load_lms_json(entry["json_path"])
+    if not isinstance(data, dict):
+        return None
+    fields = (data.get("operation") or {}).get("fields") or []
+    out: dict[str, Any] = {}
+    for f in fields:
+        if not isinstance(f, dict):
+            continue
+        target = _LMS_OP_KEY_MAP.get(f.get("key"))
+        if target is not None:
+            v = _unwrap_lms_value(f.get("value"))
+            if v is not None:
+                out[target] = v
+
+    # Thinking-Toggle: enableThinking > budgetTokens (value>0) > parsing.enabled
+    thinking = _lms_field_value(fields, "llm.prediction.reasoning.enableThinking")
+    budget = _lms_field_value(fields, "llm.prediction.reasoning.budgetTokens")
+    parsing = _lms_field_value(fields, "llm.prediction.reasoning.parsing")
+    if isinstance(thinking, bool):
+        out["enable_thinking"] = thinking
+    elif isinstance(budget, dict):
+        if budget.get("checked") is False:
+            out["enable_thinking"] = False
+        elif budget.get("checked") is True and isinstance(budget.get("value"), (int, float)) and budget["value"] > 0:
+            out["enable_thinking"] = True
+        elif isinstance(parsing, dict) and isinstance(parsing.get("enabled"), bool):
+            out["enable_thinking"] = parsing["enabled"]
+    elif isinstance(parsing, dict) and isinstance(parsing.get("enabled"), bool):
+        out["enable_thinking"] = parsing["enabled"]
+
+    return out if out else None
 
 # Reasoning-Muster fuer enable_thinking-Override via --thinking-Flag
 REASONING_PATTERNS = {
@@ -364,45 +469,6 @@ REASONING_PATTERNS = {
     "nemotron", "apriel", "magistral", "gpt-oss", "reasoning", "think",
     "r1", "rnj", "qwq", "cascade", "cot",
 }
-
-
-def _registry_reasoning(model_identifier: str) -> Optional[str]:
-    """Look up `reasoning` field in model_registry.yaml.
-
-    Returns "thinking", "instruct" or None (no entry / unknown).
-    Matching mirrors get_quant(): publisher prefix and @quant suffix are
-    stripped. Publisher-prefixed input only matches an entry with the same
-    publisher; bare names fall back to the first registry match. Unlike
-    get_quant() there is no cross-publisher fallback: a model without a
-    `reasoning` field must not inherit the verdict of another publisher's
-    same-named model.
-    """
-    if not model_identifier:
-        return None
-    import re as _re
-    stripped = _re.sub(r"^[a-z0-9_-]+[/\\]", "", model_identifier)
-    base = _re.sub(r"@.*$", "", stripped).lower()
-    if not base:
-        return None
-    inp_pub = model_identifier.split("/")[0] if "/" in model_identifier else None
-    data = _load_quant_registry()
-    pub_match = None
-    fallback_match = None
-    for key, entry in data.items():
-        if not isinstance(entry, dict) or "reasoning" not in entry:
-            continue
-        key_stripped = _re.sub(r"^[a-z0-9_-]+[/\\]", "", key).lower()
-        key_base = _re.sub(r"@.*$", "", key_stripped)
-        if base != key_base:
-            continue
-        reasoning: str = entry["reasoning"]
-        if inp_pub is not None and "/" in key and key.split("/")[0] == inp_pub:
-            pub_match = reasoning
-        elif inp_pub is None and fallback_match is None:
-            fallback_match = reasoning
-    if pub_match is not None:
-        return str(pub_match)
-    return str(fallback_match) if fallback_match is not None else None
 
 
 def _word_boundary_match(pattern: str, text: str) -> bool:
@@ -427,41 +493,27 @@ def _word_boundary_match(pattern: str, text: str) -> bool:
 
 
 def get_model_config(model_identifier: str, category: str = "coding", is_thinking_enabled: bool = False) -> ModelConfig:
-    """Merge category defaults + model override + thinking flag.
+    """Generations-Parameter: LMS-JSON-Config ist die EINZIGE Quelle (seit 2026-08-05).
 
-    Priority (lower = higher):
-      1. BENCHMARK_CATEGORY_DEFAULTS[category]  (Basis)
-      2. MODEL_TEMP_OVERRIDES[pattern]           (additiver Merge)
-      3. Registry `reasoning: thinking`          (thinking an, falls 2. kein enable_thinking setzt)
-      4. thinking=True + REASONING_PATTERNS      (force enable_thinking)
+    Priority:
+      1. LM Studio JSON-Config (operation.fields) – entspricht der GUI,
+         kein Python-Override mehr (MODEL_TEMP_OVERRIDES und Knowledge-Floor entfernt)
+      2. BENCHMARK_CATEGORY_DEFAULTS[category] nur als Fallback ohne JSON-Config
+      3. --thinking CLI-Flag: force enable_thinking fuer Reasoning-Modelle
+    Das Ergebnis enthaelt `_source` ("lms-json" | "category-default") zur Anzeige.
     """
-    key_lower = model_identifier.lower() if model_identifier else ""
     cat = category if category in BENCHMARK_CATEGORY_DEFAULTS else "coding"
-    config = dict(BENCHMARK_CATEGORY_DEFAULTS[cat])
-    # Apply model override (boundary-aware substring matching).
-    # Sort by key length descending so specific (longer) patterns match first,
-    # preventing shadowing (e.g. "deepseek-r1-distill" before "deepseek-coder").
-    thinking_overridden = False
-    for pattern, override in sorted(MODEL_TEMP_OVERRIDES.items(), key=lambda kv: len(kv[0]), reverse=True):
-        if _word_boundary_match(pattern, key_lower):
-            config.update(override)
-            thinking_overridden = "enable_thinking" in override
-            break
-    # Registry-Fall: Thinking-Modelle (reasoning: thinking) denken standardmaessig.
-    # Explizite MODEL_TEMP_OVERRIDES-Eintraege gewinnen (z.B. kimi/qwen3.6/gemma
-    # mit enable_thinking=False als experimenteller Workaround).
-    if not thinking_overridden and _registry_reasoning(model_identifier) == "thinking":
-        config["enable_thinking"] = True
+    config: dict[str, Any] = dict(BENCHMARK_CATEGORY_DEFAULTS[cat])
+    source = "category-default"
+    lms = _lms_generation_config(model_identifier)
+    if lms:
+        config.update(lms)
+        source = "lms-json"
+    key_lower = model_identifier.lower() if model_identifier else ""
     # Thinking-Flag: force enable_thinking=True fuer Reasoning-Modelle
     if is_thinking_enabled and any(_word_boundary_match(p, key_lower) for p in REASONING_PATTERNS):
         config["enable_thinking"] = True
-    # Temperature floor for thinking models and knowledge benchmarks.
-    # Thinking models need temp >= 0.7 for diverse reasoning chains;
-    # knowledge benchmarks (HellaSwag, TruthfulQA, ARC) benefit from
-    # non-zero temperature even for dense models.
-    if config.get("enable_thinking") or cat == "knowledge":
-        if config.get("temperature", 0.0) < 0.7:
-            config["temperature"] = 0.7
+    config["_source"] = source
     return config
 
 

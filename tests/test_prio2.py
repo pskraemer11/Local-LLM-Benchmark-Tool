@@ -8,6 +8,7 @@
 import os
 import sys
 import math
+import json
 from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
@@ -209,40 +210,98 @@ class TestLookupVramFuzzyFix:
         assert default != custom
 
 
-class TestGetModelConfigRegistryThinking:
-    """Registry `reasoning: thinking` aktiviert enable_thinking in get_model_config."""
+class TestGetModelConfigLmsSource:
+    """LMS-JSON-Config ist die einzige Quelle fuer Generations-Parameter (Punkte 3+4).
 
-    def test_registry_thinking_forces_enable_thinking(self):
-        with patch("benchmark_config._load_quant_registry", return_value=FAKE_QUANT_REG):
+    Seit 2026-08-05: MODEL_TEMP_OVERRIDES, Registry-Thinking und der
+    Knowledge-Temperature-Floor sind entfernt. Die GUI-Einstellungen aus
+    ~/.lmstudio/.internal/user-concrete-model-default-config gewinnen;
+    BENCHMARK_CATEGORY_DEFAULTS gilt nur als Fallback ohne JSON-Config.
+    """
+
+    @staticmethod
+    def _write_lms_config(root, publisher, model_dir, fields):
+        d = root / publisher / model_dir
+        d.mkdir(parents=True, exist_ok=True)
+        data = {
+            "operation": {"fields": [{"key": k, "value": v} for k, v in fields.items()]},
+            "load": {"fields": []},
+        }
+        (d / "model.gguf.json").write_text(json.dumps(data), encoding="utf-8")
+        return d
+
+    def test_no_config_falls_back_to_category_default(self, tmp_path):
+        with patch("benchmark_config.LMS_CONFIG_ROOT", tmp_path / "empty"):
+            cfg = get_model_config("plain-7b-model", category="coding")
+        assert cfg["temperature"] == 0.0
+        assert cfg["_source"] == "category-default"
+
+    def test_lms_config_wins_over_category_default(self, tmp_path):
+        self._write_lms_config(tmp_path, "pub1", "fake-model-7b",
+                               {"llm.prediction.temperature": 0.5,
+                                "llm.prediction.topPSampling": 0.9})
+        with patch("benchmark_config.LMS_CONFIG_ROOT", tmp_path):
+            cfg = get_model_config("pub1/fake-model-7b", category="coding")
+        assert cfg["temperature"] == 0.5
+        assert cfg["top_p"] == 0.9
+        assert cfg["_source"] == "lms-json"
+
+    def test_lms_config_matches_dir_with_gguf_suffix(self, tmp_path):
+        self._write_lms_config(tmp_path, "pub1", "fake-model-7b-GGUF",
+                               {"llm.prediction.temperature": 0.5})
+        with patch("benchmark_config.LMS_CONFIG_ROOT", tmp_path):
+            cfg = get_model_config("pub1/fake-model-7b", category="coding")
+        assert cfg["temperature"] == 0.5
+
+    def test_enable_thinking_from_config(self, tmp_path):
+        self._write_lms_config(tmp_path, "pub1", "fake-model-7b",
+                               {"llm.prediction.reasoning.enableThinking": True})
+        with patch("benchmark_config.LMS_CONFIG_ROOT", tmp_path):
+            cfg = get_model_config("pub1/fake-model-7b")
+        assert cfg["enable_thinking"] is True
+
+    def test_budget_tokens_enables_thinking(self, tmp_path):
+        self._write_lms_config(tmp_path, "pub1", "fake-model-7b",
+                               {"llm.prediction.reasoning.budgetTokens":
+                                {"checked": True, "value": 2048}})
+        with patch("benchmark_config.LMS_CONFIG_ROOT", tmp_path):
+            cfg = get_model_config("pub1/fake-model-7b")
+        assert cfg["enable_thinking"] is True
+
+    def test_budget_zero_uses_parsing_verdict(self, tmp_path):
+        self._write_lms_config(tmp_path, "pub1", "fake-model-7b",
+                               {"llm.prediction.reasoning.budgetTokens":
+                                {"checked": True, "value": 0},
+                                "llm.prediction.reasoning.parsing":
+                                {"enabled": False, "startString": "<think>", "endString": "</think>"}})
+        with patch("benchmark_config.LMS_CONFIG_ROOT", tmp_path):
+            cfg = get_model_config("pub1/fake-model-7b")
+        assert cfg["enable_thinking"] is False
+
+    def test_checked_wrapper_unwrapped(self, tmp_path):
+        self._write_lms_config(tmp_path, "pub1", "fake-model-7b",
+                               {"llm.prediction.topPSampling": {"checked": True, "value": 1}})
+        with patch("benchmark_config.LMS_CONFIG_ROOT", tmp_path):
+            cfg = get_model_config("pub1/fake-model-7b")
+        assert cfg["top_p"] == 1
+
+    def test_knowledge_temperature_floor_removed(self, tmp_path):
+        # Frueher hob der Knowledge-Floor temp < 0.7 auf 0.7 an. Seit dem
+        # Transparenz-Refactor gewinnt der GUI-Wert unangetastet.
+        self._write_lms_config(tmp_path, "pub1", "fake-model-7b",
+                               {"llm.prediction.temperature": 0.2})
+        with patch("benchmark_config.LMS_CONFIG_ROOT", tmp_path):
+            cfg = get_model_config("pub1/fake-model-7b", category="knowledge")
+        assert cfg["temperature"] == 0.2
+
+    def test_registry_no_longer_affects_thinking(self, tmp_path):
+        # Registry ist nur noch Uebersicht: reasoning: thinking setzt
+        # enable_thinking NICHT mehr in get_model_config (JSON-Config wins).
+        with patch("benchmark_config._load_quant_registry", return_value=FAKE_QUANT_REG), \
+             patch("benchmark_config.LMS_CONFIG_ROOT", tmp_path / "empty"):
             cfg = get_model_config("lmstudio-community/deepseek-r1-distill-qwen-14b")
-        assert cfg["enable_thinking"] is True
-
-    def test_registry_thinking_with_quant_suffix(self):
-        with patch("benchmark_config._load_quant_registry", return_value=FAKE_QUANT_REG):
-            cfg = get_model_config("lmstudio-community/deepseek-r1-distill-qwen-14b@Q4_K_M")
-        assert cfg["enable_thinking"] is True
-
-    def test_registry_thinking_bare_name_fallback(self):
-        with patch("benchmark_config._load_quant_registry", return_value=FAKE_QUANT_REG):
-            cfg = get_model_config("deepseek-r1-distill-qwen-14b")
-        assert cfg["enable_thinking"] is True
-
-    def test_no_registry_entry_keeps_default(self):
-        with patch("benchmark_config._load_quant_registry", return_value=FAKE_QUANT_REG):
-            cfg = get_model_config("lmstudio-community/gpt-oss-20b")
         assert cfg["enable_thinking"] is False
-
-    def test_registry_instruct_keeps_default(self):
-        with patch("benchmark_config._load_quant_registry", return_value=FAKE_QUANT_REG):
-            cfg = get_model_config("moonshotai/kimi-k2-instruct")
-        assert cfg["enable_thinking"] is False
-
-    def test_explicit_override_wins_over_registry(self):
-        """MODEL_TEMP_OVERRIDES enable_thinking=False gewinnt gegen Registry thinking."""
-        reg = {"lmstudio-community/qwen3.5-8b": {"reasoning": "thinking"}}
-        with patch("benchmark_config._load_quant_registry", return_value=reg):
-            cfg = get_model_config("lmstudio-community/qwen3.5-8b")
-        assert cfg["enable_thinking"] is False
+        assert cfg["_source"] == "category-default"
 
 
 class TestGptOssReasoningConstants:

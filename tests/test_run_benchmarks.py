@@ -254,14 +254,28 @@ class TestResolveBenchmarks:
 # ======================================================================
 
 class TestLmevalParams:
-    """Tests fuer _get_evaluation_parameters() (Variante C+, p6).
+    """Tests fuer _get_evaluation_parameters() (Single-Source-of-Truth, Punkte 3+4).
 
-    Ersetzt die 9 obsoleten Tests des alten if/else-Cascade (vor v13).
-    Prueft die neue Variante-C+-Logik:
-    - BENCHMARK_CATEGORY_DEFAULTS als Basis
-    - MODEL_TEMP_OVERRIDES als additives Merge
-    - --thinking / REASONING_PATTERNS als enable_thinking-Override
+    Seit 2026-08-05: LMS-JSON-Config ist die einzige Quelle. MODEL_TEMP_OVERRIDES
+    und der Knowledge-Floor sind entfernt. Diese Tests patchen LMS_CONFIG_ROOT
+    auf ein leeres Verzeichnis, damit sie maschinenunabhaengig bleiben.
     """
+
+    @pytest.fixture(autouse=True)
+    def _no_lms_configs(self, tmp_path, monkeypatch):
+        import benchmark_config as bc
+        monkeypatch.setattr(bc, "LMS_CONFIG_ROOT", tmp_path / "no-lms-configs")
+
+    @staticmethod
+    def _write_lms_config(root, publisher, model_dir, fields):
+        d = root / publisher / model_dir
+        d.mkdir(parents=True, exist_ok=True)
+        data = {
+            "operation": {"fields": [{"key": k, "value": v} for k, v in fields.items()]},
+            "load": {"fields": []},
+        }
+        (d / "model.gguf.json").write_text(json.dumps(data), encoding="utf-8")
+        return d
 
     # Region: Shape-Check - Required Keys ----------------------------------
     def test_returns_required_keys(self):
@@ -277,7 +291,7 @@ class TestLmevalParams:
         params = _get_evaluation_parameters("plain-7b-model", "coding")
         assert "extra_body" not in params
 
-    # Region: Category-Defaults (BENCHMARK_CATEGORY_DEFAULTS) -------------
+    # Region: Category-Defaults (Fallback ohne JSON-Config) ----------------
     def test_coding_default_is_deterministic(self):
         params = _get_evaluation_parameters("plain-7b-model", "coding")
         assert params["temperature"] == 0.0        # coding = deterministisch
@@ -298,13 +312,17 @@ class TestLmevalParams:
         assert params["temperature"] == 0.3        # leicht stochastisch fuer tool-use
         assert params["max_tokens"] == 4096
 
-    def test_stops_renamed_to_until_in_lmeval_format(self):
-        # BENCHMARK_CATEGORY_DEFAULTS hat kein `stop`, aber ein Override mit `stop`
-        # soll zu `until` werden (lm_eval-CLI-Konvention).
-        params = _get_evaluation_parameters("unsloth/gpt-oss-20b", "math")
-        if "until" in params or "stop" in params:
-            # gpt-oss-Override hat `stop` -> lm_eval versteht beides
-            assert any(k in params for k in ("until", "stop"))
+    def test_no_model_overrides_anymore(self):
+        # MODEL_TEMP_OVERRIDES sind entfernt: ohne JSON-Config gelten die
+        # Kategorie-Defaults, egal welcher Modellname.
+        for model in ("unsloth/phi-4", "unsloth/gpt-oss-20b", "vinpix/bonsai-8b-llama.cpp",
+                      "qwen3.5-72b-instruct", "deepseek-coder-v2-lite-instruct", "gemma-3-12b"):
+            params = _get_evaluation_parameters(model, "coding")
+            assert params["temperature"] == 0.0
+            assert "top_k" not in params
+            assert "min_p" not in params
+            assert "until" not in params
+            assert "stop" not in params
 
     def test_enable_thinking_false_emits_chat_template_kwargs(self):
         # Wenn enable_thinking=False, wird chat_template_kwargs mit enable_thinking=False gesetzt
@@ -315,70 +333,37 @@ class TestLmevalParams:
             # Kein reasoning="off" mehr (Native API entfernt)
             assert "reasoning" not in params or params.get("reasoning") != "off"
 
-    # Region: Model-Overrides (MODEL_TEMP_OVERRIDES) ---------------------
-    def test_phi4_reasoning_override(self):
-        # Phi-4 (Instruct, unsloth/phi-4): Hersteller-Empfehlung do_sample=True
-        # fuer ALLES → temp 0.8 statt Kategorie-Default 0.0.
-        # (phi-4-reasoning existiert nicht mehr installiert → Test nutzt Instruct-Version)
-        params = _get_evaluation_parameters("unsloth/phi-4", "coding")
-        assert params["temperature"] == 0.8        # phi-4 override
-        assert params["top_k"] == 50
-
-    def test_gpt_oss_override_temperature(self):
-        params = _get_evaluation_parameters("unsloth/gpt-oss-20b", "math")
-        assert params["temperature"] == 1.0        # gpt-oss override
-        assert params["top_k"] == 0               # top_k=0 fuer Harmony
-
-    def test_bonsai_27b_override_manufacturer_recommendation(self):
-        # PrismML-Bonsai-Modellkarten: temp 0.7 / top-p 0.95 / top-k 20 (Thinking-Mode).
-        # Vor dem Override ging der Kategorie-Default (coding: temp 0.0 greedy) durch.
-        params = _get_evaluation_parameters("vinpix/ternary-bonsai-27b-stock-mtp", "coding")
-        assert params["temperature"] == 0.7
-        assert params["top_p"] == 0.95
-        assert params["top_k"] == 20
-
-    def test_bonsai_27b_q1_0_variant_gets_override(self):
-        # @quant-Suffix muss den Bonsai-27B-Override trotzdem treffen.
-        params = _get_evaluation_parameters("prism-ml/bonsai-27b@Q1_0", "coding")
-        assert params["temperature"] == 0.7
-        assert params["top_k"] == 20
-
-    def test_bonsai_8b_override_manufacturer_recommendation(self):
-        # Bonsai-8B-Range: temp 0.5-0.7; wir verwenden 0.6.
-        # Registry: reasoning=thinking → enable_thinking=True → Temp-Floor 0.7.
-        params = _get_evaluation_parameters("vinpix/bonsai-8b-llama.cpp", "coding")
-        assert params["temperature"] == 0.7
-        assert params["top_k"] == 40
-
-    def test_qwen3_5_override_includes_top_k(self):
-        params = _get_evaluation_parameters("qwen3.5-72b-instruct", "coding")
-        assert params["temperature"] == 0.2
-        assert params["top_p"] == 0.9
-        assert params["top_k"] == 20
-
-    def test_qwen3_6_emits_chat_template_kwargs(self):
-        # Qwen3.6 denkt im GGUF-Default mit. Override erzwingt enable_thinking=False.
-        # Folge: chat_template_kwargs wird fuer OpenAI-kompatibles API gesetzt.
-        params = _get_evaluation_parameters("qwen3.6-30b-a3b-instruct", "coding")
-        chat_template_kwargs = params.get("chat_template_kwargs", {})
-        assert chat_template_kwargs.get("enable_thinking") is False
-        # Kein reasoning="off" mehr (Native API entfernt)
-        assert "reasoning" not in params or params.get("reasoning") != "off"
-
-    def test_gemma_override_wins_against_math_thinking_default(self):
-        # math category default hat enable_thinking=True, gemma override setzt es auf False.
-        params = _get_evaluation_parameters("gemma-3-12b", "math")
-        chat_template_kwargs = params.get("chat_template_kwargs", {})
-        assert chat_template_kwargs.get("enable_thinking") is False
-
-    def test_deepseek_overrides_include_min_p(self):
-        # MODEL_TEMP_OVERRIDES iteriert in Insertion-Order. `deepseek` (temp=0.6,
-        # min_p=0.02) kommt vor `deepseek-r1-distill` (temp=0.0, min_p=None).
-        # Daher gewinnt das generische `deepseek`-Pattern zuerst, sobald der
-        # Model-Key `deepseek` als Substring enthaelt.
-        params = _get_evaluation_parameters("deepseek-coder-v2-lite-instruct", "coding")
-        assert params["temperature"] == 0.6        # `deepseek`-Override
+    # Region: LMS-JSON-Config als einzige Quelle ---------------------------
+    def test_lms_config_temperature_wins(self, tmp_path):
+        self._write_lms_config(tmp_path, "pub1", "fake-model-7b",
+                               {"llm.prediction.temperature": 0.6,
+                                "llm.prediction.minPSampling": 0.02})
+        import benchmark_config as bc
+        with patch.object(bc, "LMS_CONFIG_ROOT", tmp_path):
+            params = _get_evaluation_parameters("pub1/fake-model-7b", "coding")
+        assert params["temperature"] == 0.6
         assert params["min_p"] == 0.02
+
+    def test_lms_config_no_benchmark_variation(self, tmp_path):
+        # Gleiche Config -> gleiche Temperatur in JEDER Kategorie (kein
+        # Knowledge-Floor, keine Category-Overrides mehr; der GUI-Wert ist
+        # fuer alle Benchmarks verbindlich).
+        self._write_lms_config(tmp_path, "pub1", "fake-model-7b",
+                               {"llm.prediction.temperature": 0.6})
+        import benchmark_config as bc
+        with patch.object(bc, "LMS_CONFIG_ROOT", tmp_path):
+            for bench in ("arc", "ifeval", "ds1000", "math-500"):
+                params = _get_evaluation_parameters("pub1/fake-model-7b", bench)
+                assert params["temperature"] == 0.6, bench
+
+    def test_lms_thinking_enabled_emits_chat_template_kwargs(self, tmp_path):
+        self._write_lms_config(tmp_path, "pub1", "fake-model-7b",
+                               {"llm.prediction.reasoning.enableThinking": True})
+        import benchmark_config as bc
+        with patch.object(bc, "LMS_CONFIG_ROOT", tmp_path):
+            params = _get_evaluation_parameters("pub1/fake-model-7b", "coding")
+        chat_template_kwargs = params.get("chat_template_kwargs", {})
+        assert chat_template_kwargs.get("enable_thinking") is True
 
     # Region: --thinking Flag + REASONING_PATTERNS ---------------------
     def test_thinking_flag_with_reasoning_pattern_enables_thinking(self, monkeypatch):
@@ -430,12 +415,13 @@ class TestBuildLmevalCmd:
             args_json = json.loads(cmd[idx + 1])
             assert args_json["eos_string"] == "<|endoftext|>"
 
-    def test_gptoss_default_has_until_no_eos_string(self):
-        # Default gpt-oss branch returns until=[...] so no eos_string.
+    def test_gptoss_default_has_eos_string_without_override(self):
+        # MODEL_TEMP_OVERRIDES sind entfernt: ohne JSON-Config liefert der
+        # gpt-oss-Zweig kein `until` mehr -> eos_string-Fallback greift.
         cmd = _build_lmeval_cmd("gpt-oss-20b", "gpt-oss-20b", "task1", 5, "/tmp/out")
         idx = cmd.index("--model_args")
         args_json = json.loads(cmd[idx + 1])
-        assert "eos_string" not in args_json
+        assert args_json["eos_string"] == "<|endoftext|>"
 
     def test_non_gptoss_no_eos_string(self):
         cmd = _build_lmeval_cmd("plain-7b", "plain-7b", "task1", 5, "/tmp/out")

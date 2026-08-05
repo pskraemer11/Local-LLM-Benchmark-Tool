@@ -13,6 +13,7 @@ class ModelConfig(TypedDict):
     stop: NotRequired[list[str]]
     reasoning_effort: NotRequired[str]
     no_system_msg: NotRequired[bool]
+    _source: NotRequired[str]
 
 
 class AvailableModelInfo(TypedDict):

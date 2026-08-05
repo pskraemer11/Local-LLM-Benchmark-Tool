@@ -1443,6 +1443,15 @@ def _unwrap_solution_for_insert(solution: str, setup_code: str) -> str:
     return indent + ("\n" + indent).join(sol_lines)
 
 
+def _eval_log(msg: str) -> None:
+    """Per-Task-Evaluierungs-Details nach stderr (Punkt 2a).
+
+    stdout bleibt fuer Fortschrittsbalken + Zusammenfassung frei; die
+    Details stehen im Subprozess-stderr bzw. in der Per-Task-CSV.
+    """
+    print(f"    [EVAL] {msg}", file=sys.stderr)
+
+
 def _try_ds1000_harness(generated_code: str, setup_code: str) -> Optional[tuple[float, str]]:
     """Run the official DS1000 harness (test_execution) against the code.
 
@@ -1473,7 +1482,7 @@ def _try_ds1000_harness(generated_code: str, setup_code: str) -> Optional[tuple[
         test_program += "test_string(code)\n"
     result = check_correctness(test_program, timeout=_TIMEOUT_DS1000)
     if result["passed"]:
-        print("    [EVAL] DS1000-Harness: PASSED")
+        _eval_log("DS1000-Harness: PASSED")
         return 1.0, "OK (DS1000-Harness)"
     # Fallback: if unwrapping did not help, try with original
     if patched_code != generated_code:
@@ -1484,11 +1493,11 @@ def _try_ds1000_harness(generated_code: str, setup_code: str) -> Optional[tuple[
         )
         result2 = check_correctness(test_program2, timeout=_TIMEOUT_DS1000)
         if result2["passed"]:
-            print("    [EVAL] DS1000-Harness: PASSED (original)")
+            _eval_log("DS1000-Harness: PASSED (original)")
             return 1.0, "OK (DS1000-Harness)"
-        print(f"    [EVAL] DS1000-Harness: FAILED -> {result['result']}")
+        _eval_log(f"DS1000-Harness: FAILED -> {result['result']}")
         return 0.0, f"Harness error: {result['result']}"
-    print(f"    [EVAL] DS1000-Harness: FAILED -> {result['result']}")
+    _eval_log(f"DS1000-Harness: FAILED -> {result['result']}")
     return 0.0, f"Harness error: {result['result']}"
 
 
@@ -1550,11 +1559,11 @@ def evaluate_code(generated_code: str, entry_point: str, tests_field: Any, refer
 
     # --- DS1000-Harness (test_execution from code_context) ---
     if not tests and setup_code and "test_execution" in setup_code:
-        print("    [EVAL] Trying DS1000-Harness ...")
+        _eval_log("Trying DS1000-Harness ...")
         result = _try_ds1000_harness(generated_code, setup_code)
         if result is not None:
             return result
-        print("    [EVAL] Harness not usable -> falling back to namespace comparison")
+        _eval_log("Harness not usable -> falling back to namespace comparison")
 
     # --- Namespace comparison (Reference vs Generated) ---
     if not tests and reference_code and setup_code:
@@ -1578,7 +1587,7 @@ def evaluate_code(generated_code: str, entry_point: str, tests_field: Any, refer
         gen_only = {k: v for k, v in gen_state.items() if k not in setup_keys}
 
         if not ref_only:
-            print("    [EVAL] Namespace comparison: no comparable outputs -> 1.0")
+            _eval_log("Namespace comparison: no comparable outputs -> 1.0")
             return 1.0, "OK (Namespace: no outputs)"
 
         matched = 0
@@ -1587,7 +1596,7 @@ def evaluate_code(generated_code: str, entry_point: str, tests_field: Any, refer
             if gen_val == ref_val:
                 matched += 1
         score = matched / len(ref_only)
-        print(f"    [EVAL] Namespace comparison: {matched}/{len(ref_only)} correct")
+        _eval_log(f"Namespace comparison: {matched}/{len(ref_only)} correct")
         return score, f"Namespace: {matched}/{len(ref_only)}"
 
     if not tests and reference_code:
@@ -1618,7 +1627,7 @@ def evaluate_code(generated_code: str, entry_point: str, tests_field: Any, refer
 
     passed = res.get("passed", 0)
     total = res.get("total", 0)
-    print(f"    [EVAL] Direct tests: {passed}/{total} passed")
+    _eval_log(f"Direct tests: {passed}/{total} passed")
     return passed / total if total > 0 else 1.0, f"Tests: {passed}/{total}"
 
 
@@ -1823,6 +1832,37 @@ def get_task_type(benchmark_file: str) -> str:
     return mapping.get(benchmark_file, "unknown")
 
 
+class _TaskProgress:
+    """Thread-safe single-line progress bar (Punkt 2a).
+
+    Ersetzt die frueheren Per-Task-Ausgaben ([i/n] preview, Score-Zeilen):
+    Auf dem Bildschirm laeuft nur dieser Balken, Details gehen in die CSV.
+    """
+
+    def __init__(self, total: int, enabled: bool = True):
+        self.total = total
+        self.enabled = enabled
+        self.done = 0
+        self._lock = threading.Lock()
+        self._last_len = 0
+
+    def step(self) -> None:
+        with self._lock:
+            self.done += 1
+            if not self.enabled:
+                return
+            done, total = self.done, self.total
+            bar_w = min(total, 50)
+            filled = int(bar_w * done / total) if total > 0 else 0
+            bar = "#" * filled + "." * (bar_w - filled)
+            line = f"  Progress: [{bar}] {done}/{total}"
+            pad = " " * max(0, self._last_len - len(line))
+            print(f"\r{line}{pad}", end="", flush=True)
+            self._last_len = len(line)
+            if done >= total:
+                print()
+
+
 def benchmark_model(model_info: Any, tasks: list[dict[str, Any]], task_type: str, benchmark_name: str, monitor: Monitor, is_quiet_mode: bool = False, num_parallel: int = 1) -> tuple[list[dict[str, Any]], Optional[float], float, float, dict[str, Any]]:
     """Run all tasks of one benchmark against one model.
 
@@ -1850,6 +1890,15 @@ def benchmark_model(model_info: Any, tasks: list[dict[str, Any]], task_type: str
     print(f"  Tasks:     {len(tasks)}")
     if num_parallel > 1:
         print(f"  Parallel:  {num_parallel} Worker (LM Studio Multi-Slot)")
+    # Effektive Generations-Parameter anzeigen (Punkt 1): Quelle ist die
+    # LMS-JSON-Config ("lms-json") bzw. der Kategorie-Fallback.
+    _cfg_src = model_config.get("_source", "?")
+    print(f"  Config:    temp={model_config.get('temperature')}, "
+          f"top_p={model_config.get('top_p')}, "
+          f"top_k={model_config.get('top_k')}, "
+          f"min_p={model_config.get('min_p')}, "
+          f"max_tokens={model_config.get('max_tokens')}, "
+          f"thinking={model_config.get('enable_thinking')} (Quelle: {_cfg_src})")
     collector = MetricsCollector()
     collector.start()
     results = []
@@ -1858,6 +1907,9 @@ def benchmark_model(model_info: Any, tasks: list[dict[str, Any]], task_type: str
         return str(text).encode('utf-8', errors='replace').decode('utf-8')
     n_tasks = len(tasks)
     native_identifier = api_model or model_info.get("model_identifier", model_identifier)
+    # Fortschrittsbalken statt Per-Task-Ausgabe (Punkt 2a): Details gehoeren
+    # in die CSV (write_per_task_csv); auf dem Bildschirm reicht der Balken.
+    _progress = _TaskProgress(total=n_tasks, enabled=not is_quiet_mode)
 
     def _run_single(task: dict[str, Any], i: int) -> dict[str, Any]:
         """Run one task with retries; returns the raw result dict.
@@ -1865,47 +1917,52 @@ def benchmark_model(model_info: Any, tasks: list[dict[str, Any]], task_type: str
         May execute in a worker thread (num_parallel > 1), so it must not
         touch monitor/collector state.
         """
-        preview = task["prompt"][:70].replace("\n", " ")
-        print(f"\n  [{i}/{n_tasks}] {preview}...")
-        result = None
-        for attempt in range(1, MAX_RETRIES + 1):
-            try:
-                result = run_task(task, task_type, model_identifier=model_identifier, api_model=api_model, model_config=model_config,
-                                  native_model_identifier=native_identifier)
-                if result is not None and result.get("error_type") is None:
-                    break
-                if result is not None and result.get("error_type"):
-                    err_detail = str(result.get('error_detail', '?'))
-                    # Detect LM Studio Channel-Error (structured-output + lazy-grammar
-                    # conflict, see Server-Log 12.07.2026 L58671/L94468). Print a
-                    # marker the launcher can detect to trigger a retry with
-                    # --no-structured-output.
-                    if "Cannot combine structured output" in err_detail or "Channel Error" in err_detail:
-                        print(f"  [CHANNEL-ERROR] {err_detail}")
+        try:
+            result = None
+            for attempt in range(1, MAX_RETRIES + 1):
+                try:
+                    result = run_task(task, task_type, model_identifier=model_identifier, api_model=api_model, model_config=model_config,
+                                      native_model_identifier=native_identifier)
+                    if result is not None and result.get("error_type") is None:
+                        break
+                    if result is not None and result.get("error_type"):
+                        err_detail = str(result.get('error_detail', '?'))
+                        # Detect LM Studio Channel-Error (structured-output + lazy-grammar
+                        # conflict, see Server-Log 12.07.2026 L58671/L94468). Print a
+                        # marker the launcher can detect to trigger a retry with
+                        # --no-structured-output.
+                        if "Cannot combine structured output" in err_detail or "Channel Error" in err_detail:
+                            print(f"  [CHANNEL-ERROR] {err_detail}")
+                        if attempt < MAX_RETRIES:
+                            warn(f"API error (Attempt {attempt}/{MAX_RETRIES}): {err_detail}")
+                            time.sleep(2 ** attempt)
+                except (requests.exceptions.RequestException, ConnectionError, TimeoutError) as e:
                     if attempt < MAX_RETRIES:
-                        warn(f"API error (Attempt {attempt}/{MAX_RETRIES}): {err_detail}")
+                        warn(f"Exception (Attempt {attempt}/{MAX_RETRIES}): {e}")
                         time.sleep(2 ** attempt)
-            except (requests.exceptions.RequestException, ConnectionError, TimeoutError) as e:
-                if attempt < MAX_RETRIES:
-                    warn(f"Exception (Attempt {attempt}/{MAX_RETRIES}): {e}")
-                    time.sleep(2 ** attempt)
-                else:
-                    error(f"Task failed ({type(e).__name__}: {e})")
-                    result = {
-                        "score": 0.0,
-                        "score_detail": f"Error: {e}",
-                        "latency": 0.0,
-                        "tokens_in": 0, "tokens_out": 0, "tokens_per_sec": 0,
-                        "thinking_tokens": 0,
-                        "truncated": False,
-                        "thinking_anteil": 0,
-                        "output_status": "empty", "entry_point_found": None,
-                        "response": None,
-                    }
-        return result
+                    else:
+                        error(f"Task failed ({type(e).__name__}: {e})")
+                        result = {
+                            "score": 0.0,
+                            "score_detail": f"Error: {e}",
+                            "latency": 0.0,
+                            "tokens_in": 0, "tokens_out": 0, "tokens_per_sec": 0,
+                            "thinking_tokens": 0,
+                            "truncated": False,
+                            "thinking_anteil": 0,
+                            "output_status": "empty", "entry_point_found": None,
+                            "response": None,
+                        }
+            return result
+        finally:
+            _progress.step()
 
     def _finalize(result: dict[str, Any], i: int, peak: dict[str, float], before: dict[str, float], after: dict[str, float]) -> None:
-        """Attach index/prompt/resource metrics to one result and print its line."""
+        """Attach index/prompt/resource metrics to one result (CSV-Details, Punkt 2a).
+
+        Per-Task-Ausgabe auf dem Bildschirm ist entfernt; die Details (Score,
+        Latenz, Ressourcen) landen in der Per-Task-CSV (write_per_task_csv).
+        """
         result["task_index"] = i
         result["task_prompt"] = tasks[i - 1]["prompt"]
         for k in ("cpu", "ram", "gpu", "vram"):
@@ -1915,27 +1972,6 @@ def benchmark_model(model_info: Any, tasks: list[dict[str, Any]], task_type: str
         tok_out = result.get("tokens_out", 0)
         think_tok = result.get("thinking_tokens", 0)
         result["thinking_anteil"] = (think_tok / tok_out * 100) if tok_out > 0 else 0
-        trunc_mark = " | TRUNCATED" if result.get("truncated") else ""
-        if result["score"] is not None:
-            detail_str = result.get("score_detail", "")
-            if detail_str:
-                detail_str = f" ({detail_str})"
-            print(f"  Score: {result['score']:.0%}{detail_str} | "
-                  f"Latenz: {result['latency']:.1f}s | "
-                  f"{result['tokens_per_sec']:.1f} tok/s | "
-                  f"\u2248{result.get('thinking_anteil', 0):.0f}% Thinking | "
-                  f"CPU: {peak.get('cpu', after['cpu']):.0f}% | "
-                  f"RAM: {peak.get('ram', after['ram']):.1f} GB | "
-                  f"GPU: {peak.get('gpu', after['gpu']):.0f}% | "
-                  f"VRAM: {peak.get('vram', after['vram']):.1f} GB{trunc_mark}")
-        else:
-            print(f"  Latenz: {result['latency']:.1f}s | "
-                  f"{result['tokens_per_sec']:.1f} tok/s | "
-                  f"\u2248{result.get('thinking_anteil', 0):.0f}% Thinking | "
-                  f"CPU: {peak.get('cpu', after['cpu']):.0f}% | "
-                  f"RAM: {peak.get('ram', after['ram']):.1f} GB | "
-                  f"GPU: {peak.get('gpu', after['gpu']):.0f}% | "
-                  f"VRAM: {peak.get('vram', after['vram']):.1f} GB{trunc_mark}")
         results.append(result)
 
     if num_parallel > 1:

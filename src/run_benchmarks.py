@@ -758,27 +758,51 @@ def select_benchmarks_interactive() -> Optional[list[dict[str, Any]]]:
 # parallel benchmarking is added, wrap mutations with a threading.Lock.
 IS_THINKING_ENABLED = False
 
-def _get_evaluation_parameters(model_identifier: str, bench_name: str = "") -> dict[str, Any]:
-    """Returns LM-Eval parameters via category-based config (Variante C+).
-    
-    Derives benchmark category from bench_name, then calls
-    get_model_config() which merges BENCHMARK_CATEGORY_DEFAULTS[category]
-    + MODEL_TEMP_OVERRIDES[model] + thinking flag.
-    
-    Returned keys are split by the caller into --model_args (constructor) and
-    --generation_parameters (generation kwargs). See run_lmeval() for the split logic.
-    """
-    # Derive category from benchmark name
-    bench_name_lower = bench_name.lower()
+def _derive_category(bench_name: str) -> str:
+    """Map a benchmark name to its config category ("coding", "math", ...)."""
+    bench_name_lower = (bench_name or "").lower()
     categories = {"coding": {"ds1000", "codereval", "humaneval", "mbpp"},
                   "math": {"math-500", "math"},
                   "knowledge": {"arc", "hellaswag", "truthfulqa"},
                   "agentic": {"ifeval", "agentic"}}
-    category = "coding"
     for cat, keywords in categories.items():
         if any(kw in bench_name_lower for kw in keywords):
-            category = cat
-            break
+            return cat
+    return "coding"
+
+
+def _evaluation_summary(model_identifier: str, category: str) -> str:
+    """Human-readable summary of the effective generation config (Punkt 1).
+
+    Shows temp/top_p/top_k/min_p/max_tokens/thinking and the source
+    ("lms-json" = LM Studio GUI Config, "category-default" = Fallback).
+    """
+    cfg = get_model_config(model_identifier, category=category, is_thinking_enabled=IS_THINKING_ENABLED)
+    parts = [f"temp={cfg.get('temperature')}", f"top_p={cfg.get('top_p')}",
+             f"max_tokens={cfg.get('max_tokens')}", f"thinking={cfg.get('enable_thinking')}"]
+    if cfg.get("top_k") is not None:
+        parts.append(f"top_k={cfg['top_k']}")
+    if cfg.get("min_p") is not None:
+        parts.append(f"min_p={cfg['min_p']}")
+    if cfg.get("reasoning_effort") is not None:
+        parts.append(f"reasoning_effort={cfg['reasoning_effort']}")
+    src = cfg.get("_source", "?")
+    return f"[CFG] {', '.join(parts)} (Quelle: {src})"
+
+
+def _get_evaluation_parameters(model_identifier: str, bench_name: str = "") -> dict[str, Any]:
+    """Returns LM-Eval parameters from the LM Studio JSON config (Punkt 3+4).
+
+    Derives benchmark category from bench_name, then calls get_model_config()
+    which reads the LMS JSON-Config (einzige Quelle, GUI-entsprechend). Ohne
+    JSON-Config gelten BENCHMARK_CATEGORY_DEFAULTS als Fallback.
+    MODEL_TEMP_OVERRIDES / Registry-Thinking / Knowledge-Floor sind entfernt.
+
+    Returned keys are split by the caller into --model_args (constructor) and
+    --generation_parameters (generation kwargs). See run_lmeval() for the split logic.
+    """
+    # Derive category from benchmark name
+    category = _derive_category(bench_name)
 
     # Get merged config
     config = get_model_config(model_identifier, category=category, is_thinking_enabled=IS_THINKING_ENABLED)
@@ -1019,7 +1043,6 @@ def run_evalplus(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_siz
     model_identifier = model_info["key"]
     model_display = model_info["display"]
     dataset = bench["dataset"]
-    gptoss = _is_gptoss_model(model_identifier)
     print(f"\n  >>> EvalPlus: {bench['name']} / {model_display}")
     root_dir = os.path.join(RESULTS_DIR, f"evalplus_{model_identifier.replace('/', '_')}")
     os.makedirs(root_dir, exist_ok=True)
@@ -1043,20 +1066,24 @@ def run_evalplus(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_siz
 
     # Sentinel name required by evalplus; the actual model ID is sent
     # via the OpenAI-compatible request (Code-Review 2026-07-18 §5.3).
+    # Temperatur kommt seit 2026-08-05 aus der LMS-JSON-Config (einzige
+    # Quelle, Punkte 3+4) statt hardcoded 0.0/0.7.
     evaluation_parameters = _get_evaluation_parameters(model_identifier, bench_name=dataset)
     max_tokens = evaluation_parameters.get("max_tokens", 4096)
+    gen_temp = float(evaluation_parameters.get("temperature", 0.0))
+    print(f"  {_evaluation_summary(model_identifier, _derive_category(dataset))}")
     model_obj = make_model(
         model=EVALPLUS_SENTINEL_MODEL,
         backend="openai",
         dataset=dataset,
         base_url=API_BASE,
-        temperature=0.0 if not gptoss else 0.7,
+        temperature=gen_temp,
         instruction_prefix="Please provide a self-contained Python script that solves the following problem in a markdown code block:",
         response_prefix="Below is a Python script with a self-contained function that solves the problem and passes corresponding tests:",
         max_new_tokens=max_tokens,
     )
 
-    temp_str = "1.0" if gptoss else "0.0"
+    temp_str = f"{gen_temp:g}"
     out_dir = os.path.join(root_dir, dataset)
     os.makedirs(out_dir, exist_ok=True)
 
@@ -1077,35 +1104,28 @@ def run_evalplus(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_siz
     from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FUTimeout
     import io
     from contextlib import redirect_stdout
-    progress_dots = [0]
     _total_tasks = len(filtered_tasks)
+    # Progress live via StringIO-Polling (Punkt 2b): evalplus schreibt die
+    # Samples-Datei inkrementell, aber der Datei-Polling-Ansatz zeigte den
+    # Balken erst nach Abschluss. Stattdessen zaehlen wir die per-Task-Zeilen
+    # ("Codegen: <task_id> @ ...") direkt im redirect-Puffer.
+    codegen_buf = io.StringIO()
     def _codegen_wrapper() -> None:
-        buf = io.StringIO()
-        with redirect_stdout(buf):
+        with redirect_stdout(codegen_buf):
             evalplus_codegen(
                 target_path=samples_path,
                 model=model_obj,  # noqa: F821 – closure variable from enclosing scope
                 dataset=filtered_tasks,
-                greedy=not gptoss,
+                greedy=gen_temp == 0.0,
                 n_samples=1,
                 resume=False,
             )
-        progress_dots[0] = _total_tasks
-        print(f"  [{'.' * _total_tasks}] {_total_tasks}/{_total_tasks}")
     def _codegen_progress() -> None:
         import sys as _sys
         dots_printed = [0]
         while dots_printed[0] < _total_tasks:
             time.sleep(2)
-            import glob as _g
-            if os.path.exists(samples_path):
-                try:
-                    with open(samples_path, "r", encoding="utf-8") as f:
-                        done = sum(1 for _ in f)
-                except (OSError, UnicodeDecodeError):
-                    done = dots_printed[0]
-            else:
-                done = 0
+            done = codegen_buf.getvalue().count("Codegen: ")
             if done > dots_printed[0]:
                 print(f"  [{'.' * done}{' ' * (_total_tasks - done)}] {done}/{_total_tasks}", end="\r")
                 _sys.stdout.flush()
@@ -1116,6 +1136,10 @@ def run_evalplus(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_siz
     progress_thread.start()
     try:
         future.result(timeout=eval_timeout)
+        # Finaler Zustand auch dann rendern, wenn der Thread noch schlief
+        done = codegen_buf.getvalue().count("Codegen: ")
+        if done >= _total_tasks:
+            print(f"  [{'.' * _total_tasks}] {_total_tasks}/{_total_tasks}")
         print(f"  [OK] codegen finished ({len(filtered_tasks)} tasks)")
     except _FUTimeout:
         print(f"  [ERROR] codegen timed out after {eval_timeout:.0f}s")
@@ -1235,6 +1259,7 @@ def run_lmeval(model_info: AvailableModelInfo, bench: BenchmarkDef, limit: int =
                        "until", "chat_template_kwargs", "reasoning", "reasoning_effort", "max_thinking_tokens"}
     generation_parameters = {k: v for k, v in evaluation_parameters.items()
                   if k in generation_parameters_keys and v is not None}
+    print(f"  {_evaluation_summary(model_identifier, _derive_category(bench['name']))}")
     model_args = json.dumps(model_settings, ensure_ascii=False)
     cmd = [
         sys.executable, "-m", "lm_eval",

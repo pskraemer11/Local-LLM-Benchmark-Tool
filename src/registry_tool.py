@@ -1544,16 +1544,12 @@ def cmd_validate() -> dict[str, Any]:
     errors: dict[str, list[str]] = {
         "template_missing_file": [],
         "template_missing_config": [],
-        "override_overlap": [],
         "missing_reasoning": [],
         "missing_capabilities": [],
         "missing_blueprint": [],
         "registry_no_config": [],
-        "orphan_override": [],
         "reasoning_arch_mismatch": [],
     }
-
-    from benchmark_config import MODEL_TEMP_OVERRIDES
 
     # ── Check 1: template: references existent .jinja file ─────────
     for model_key, entry in reg.items():
@@ -1599,16 +1595,6 @@ def cmd_validate() -> dict[str, Any]:
                 f"aber promptTemplate in Config fehlt/leer ({json_path})"
             )
 
-    # ── Check 3: Overlapping MODEL_TEMP_OVERRIDES substrings ──────
-    override_keys = list(MODEL_TEMP_OVERRIDES.keys())
-    for i, a in enumerate(override_keys):
-        for b in override_keys[i + 1:]:
-            if a in b or b in a:
-                errors["override_overlap"].append(
-                    f"'{a}' <-> '{b}': '{a}' ist substring von '{b}' "
-                    f"(oder umgekehrt) – Reihenfolge im Dict entscheidet!"
-                )
-
     # ── Check 4: reasoning/capabilities/blueprint fields ───────────
     for model_key, entry in reg.items():
         if not isinstance(entry, dict):
@@ -1632,17 +1618,6 @@ def cmd_validate() -> dict[str, Any]:
             rk = normalize_model_name(model_key)
             errors["registry_no_config"].append(
                 f"{model_key}: keine passende Config-JSON gefunden (normalized: {rk})"
-            )
-
-    # ── Check 6: MODEL_TEMP_OVERRIDES keys matchen Registry-Modell ─
-    # Use RAW registry keys (not normalized) to avoid '.' -> '-' conversion
-    from benchmark_config import _word_boundary_match
-    reg_raw_names = {k.lower() for k in reg if isinstance(reg.get(k), dict)}
-    for pattern in MODEL_TEMP_OVERRIDES:
-        matches_any = any(_word_boundary_match(pattern, rn) for rn in reg_raw_names)
-        if not matches_any:
-            errors["orphan_override"].append(
-                f"'{pattern}': kein Registry-Modell mit diesem Substring"
             )
 
     # ── Check 7: reasoning stimmt mit Architektur-Map überein ──────
