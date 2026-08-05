@@ -55,12 +55,12 @@ jobs:
 
       - name: Verify Python imports compile
         run: |
-          python -m py_compile run_benchmarks.py
-          python -m py_compile custom_benchmark.py
-          python -m py_compile model_manager.py
-          python -m py_compile csv_writer.py
-          python -m py_compile consolidate_results.py
-          python -m py_compile benchmark_config.py
+          python -m py_compile src/run_benchmarks.py
+          python -m py_compile src/custom_benchmark.py
+          python -m py_compile src/model_manager.py
+          python -m py_compile src/csv_writer.py
+          python -m py_compile src/consolidate_results.py
+          python -m py_compile src/benchmark_config.py
 
       - name: Run tests
         run: |
