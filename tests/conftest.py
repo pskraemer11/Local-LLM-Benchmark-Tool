@@ -45,7 +45,6 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-import responses
 
 
 # Make repo root + src/ importable for all tests
@@ -190,6 +189,7 @@ class LMSHttpMocker:
                 "total_tokens": prompt_tokens + completion_tokens,
             },
         }
+        import responses
         self._mock.add(
             responses.POST,
             url,
@@ -209,6 +209,7 @@ class LMSHttpMocker:
             "object": "list",
             "data": [{"id": m, "object": "model"} for m in models],
         }
+        import responses
         self._mock.add(responses.GET, url, json=body, status=200)
         return self
 
@@ -218,6 +219,7 @@ class LMSHttpMocker:
         status: int = 500,
     ) -> "LMSHttpMocker":
         """Mock a chat completion error response."""
+        import responses
         self._mock.add(
             responses.POST,
             "http://127.0.0.1:1234/v1/chat/completions",
