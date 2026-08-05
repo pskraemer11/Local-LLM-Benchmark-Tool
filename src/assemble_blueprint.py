@@ -478,7 +478,7 @@ def truncation_from_context(ctx_len: int) -> str:
         return "full"
     if ctx_len >= 32000:
         return "full"
-    if ctx_len >= 8192:
+    if ctx_len >= 16384:
         return "medium"
     return "minimal"
 

@@ -259,5 +259,5 @@ for lo, hi in [(0, 9), (9, 10), (10, 11), (11, 12), (12, 13), (13, 14), (14, 99)
         if lo >= limit:
             cur_base = ctx
             break
-    cur_scaled = max(8192, int(cur_base * 1.0)) if dm else 0  # Dense np=1
+    cur_scaled = max(16384, int(cur_base * 1.0)) if dm else 0  # Dense np=1
     print(f"   {f'{lo}–{hi} GB':>12s} {dm:>12_d} {mm:>12_d} {cur_base:>12_d}")

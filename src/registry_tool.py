@@ -1043,7 +1043,7 @@ def _default_ctx_from_size(size_bytes: int, np: int = 1,
     kv_ref = 1.5
     kv_actual = _KV_BYTES.get(k_cache, 2.0) + _KV_BYTES.get(v_cache, 2.0)
     scale = (kv_ref / kv_actual) / np
-    return max(8192, int(base_ctx * scale))
+    return max(16384, int(base_ctx * scale))
 
 
 # _USABLE_VRAM_GB is now imported from benchmark_config at the top of

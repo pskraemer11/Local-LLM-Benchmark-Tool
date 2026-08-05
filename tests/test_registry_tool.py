@@ -153,7 +153,7 @@ class TestMatchCascade:
         sub = fake_config / "publisher"
         json_path = self._make_config(
             sub, sub / "m.json",
-            **{"llm.load.contextLength": 8192}
+            **{"llm.load.contextLength": 16384}
         )
         registry = {
             "publisher/m": {
@@ -171,7 +171,7 @@ class TestMatchCascade:
                           return_value=[{
                               "dir_name": "m",
                               "publisher": "publisher",
-                              "context_length": 8192,
+                              "context_length": 16384,
                               "offload": 1.0,
                               "num_parallel": 1,
                               "use_unified_kv": True,
@@ -387,7 +387,7 @@ class TestCmdConfigsIntegration:
                           return_value=[{
                               "dir_name": "unmatched",
                               "publisher": "pub",
-                              "context_length": 8192,
+                              "context_length": 16384,
                               "offload": 1.0,
                               "num_parallel": 1,
                               "use_unified_kv": False,
@@ -583,7 +583,7 @@ class TestFixNp:
 # ─────────────────────────────────────────────────────────────────────
 
 def _make_mini_gguf(block_count: int, embedding_length: int, chat_template: str | None,
-                     context_length: int = 8192) -> bytes:
+                     context_length: int = 16384) -> bytes:
     """Synthetischer GGUF-Header: block_count/embedding_length/context_length VOR chat_template."""
     import struct
 
@@ -618,13 +618,13 @@ class TestReadGgufArchReasoning:
         assert nl == 48
         assert hd == 5120
         assert is_reasoning is True
-        assert ctx == 8192
+        assert ctx == 16384
 
     def test_no_template_yields_false(self, tmp_path):
         p = tmp_path / "model.gguf"
         p.write_bytes(_make_mini_gguf(48, 5120, None))
         nl, hd, is_reasoning, ctx = rt._read_gguf_arch(str(p))
-        assert (nl, hd, is_reasoning, ctx) == (48, 5120, False, 8192)
+        assert (nl, hd, is_reasoning, ctx) == (48, 5120, False, 16384)
 
     def test_corrupt_file_yields_none(self, tmp_path):
         p = tmp_path / "broken.gguf"

@@ -276,9 +276,9 @@ class TestTruncationFromContext:
         assert truncation_from_context(131072) == "full"
 
     def test_medium_context(self):
-        # 8K-32K → medium
-        assert truncation_from_context(8192) == "medium"
+        # 16K-32K → medium
         assert truncation_from_context(16384) == "medium"
+        assert truncation_from_context(24000) == "medium"
 
     def test_small_context_is_minimal(self):
         assert truncation_from_context(4096) == "minimal"
