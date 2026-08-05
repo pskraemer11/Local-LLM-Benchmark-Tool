@@ -802,7 +802,7 @@ class TestWriteQuantComparison:
 
     def test_p_value_significance_stars(self, tmp_path):
         # Test all p-value ranges
-        path = write_quant_comparison(
+        write_quant_comparison(
             [
                 _make_quant_result(benchmark="very_high", p_value=0.0001),
                 _make_quant_result(benchmark="high",      p_value=0.005),

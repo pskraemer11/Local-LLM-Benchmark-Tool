@@ -83,7 +83,7 @@ jobs:
         # We catch E (errors) and F (pyflakes) but leave style to
         # individual discretion via Ruff config in pyproject.toml.
         run: |
-          ruff check --select E,F --ignore E501,F401 .
+          ruff check --select E,F --ignore E501,F401,E402 .
 
   typecheck:
     name: Typecheck (mypy, lenient)

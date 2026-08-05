@@ -110,7 +110,7 @@ class TestPatchMatplotlibCompat:
         # Find the actual pattern
         import custom_benchmark as cb
         import inspect as _i
-        src = _i.getsource(cb._patch_matplotlib_compat)
+        _i.getsource(cb._patch_matplotlib_compat)
         # Just verify it exists and doesn't crash on simple code
         result = _patch_matplotlib_compat("x = 1")
         assert isinstance(result, str)
@@ -248,7 +248,7 @@ class TestStripThinkingTokens:
         # The legacy stripper recognizes only  content and
         # channel>thought<\/channel|>. Sections of plain text outside those
         # tags are preserved.
-        open_tag = "<|channel>thought"  # noqa: tag containing '<|'
+        open_tag = "<|channel>thought"  # tag containing '<|'
         text = f"before {open_tag}\nmy reasoning here\n<channel|> after"
         cleaned, count = strip_thinking_tokens(text)
         assert "my reasoning here" not in cleaned

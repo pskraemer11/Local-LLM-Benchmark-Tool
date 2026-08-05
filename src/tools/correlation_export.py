@@ -70,8 +70,6 @@ def read_full_configs(config_root: Path) -> list[dict]:
                 if data is None:
                     continue
                 try:
-                    # ── operation fields ──
-                    op_fields = data.get("operation", {}).get("fields", [])
                     # ── load fields ──
                     ld_fields = data.get("load", {}).get("fields", [])
                     ctx = _read_config_value(ld_fields, "llm.load.contextLength")

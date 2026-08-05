@@ -22,7 +22,13 @@ Computes weighted category scores + efficiency.
 from __future__ import annotations
 
 import argparse
-import csv, itertools, json, os, sys, re, random
+import csv
+import itertools
+import json
+import os
+import sys
+import re
+import random
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -54,7 +60,7 @@ def _get_model_info() -> Dict[str, Any]:
     global _MODEL_INFO_CACHE
     if _MODEL_INFO_CACHE is not None:
         return _MODEL_INFO_CACHE
-    info = {}
+    model_info = {}
     try:
         from model_manager import get_available_models
         models = get_available_models()
@@ -63,7 +69,7 @@ def _get_model_info() -> Dict[str, Any]:
             display = m["display"]
             if "@" in display:
                 display = display.split("@")[0]
-            info[unique_key] = {
+            model_info[unique_key] = {
                 "displayName": display,
                 "vram_gb": m.get("vram_gb", ""),
                 "params": m.get("params", "?") or "?",
@@ -72,8 +78,8 @@ def _get_model_info() -> Dict[str, Any]:
             }
     except Exception:
         print("[WARN] _get_model_info: could not query available models", file=sys.stderr)
-    _MODEL_INFO_CACHE = info
-    return info
+    _MODEL_INFO_CACHE = model_info
+    return model_info
 
 
 def _get_installed_model_keys() -> set:
@@ -154,13 +160,13 @@ def _get_display_name(model_key: str) -> str:
         variant = variant.lower()  # consistent lowercase
     else:
         base_key = model_key
-    info = _get_model_info()
-    if model_key in info:
-        dn = info[model_key].get("displayName")
+    model_info = _get_model_info()
+    if model_key in model_info:
+        dn = model_info[model_key].get("displayName")
         if dn:
             return f"{dn}@{variant}" if variant else dn
     # Search by stored modelKey field (variant-aware)
-    for mk, meta in info.items():
+    for mk, meta in model_info.items():
         if meta.get("modelKey") == model_key:
             dn = meta.get("displayName")
             if dn:
@@ -168,7 +174,7 @@ def _get_display_name(model_key: str) -> str:
     # Fuzzy: strip publisher prefix
     import re as _re
     mk_norm = _re.sub(r"^[a-z0-9_-]+/", "", model_key.lower())
-    for mk, meta in info.items():
+    for mk, meta in model_info.items():
         mk_stripped = _re.sub(r"^[a-z0-9_-]+/", "", mk.lower())
         if mk_norm == mk_stripped:
             dn = meta.get("displayName")
@@ -193,13 +199,13 @@ def _lookup_vram(model_key: str) -> Optional[Dict[str, Any]]:
     quant_from_map = get_quant(model_key) or None
 
     # Step 2: Get VRAM + quant from lms ls --json (dynamic – only installed models)
-    info = _get_model_info()
+    model_info = _get_model_info()
     lms_match = None
-    if model_key in info:
-        lms_match = info[model_key]
+    if model_key in model_info:
+        lms_match = model_info[model_key]
     elif not lms_match:
         # Search by stored modelKey field (variant-aware)
-        for mk, meta in info.items():
+        for mk, meta in model_info.items():
             if meta.get("modelKey") == model_key:
                 lms_match = meta
                 break
@@ -217,13 +223,12 @@ def _lookup_vram(model_key: str) -> Optional[Dict[str, Any]]:
         PUB_PREFIXES += r"jetbrains|unsloth|modelgraft|fb|meta|deepseek|"
         PUB_PREFIXES += r"cerebras|moonshotai|zai-org|baidu|alibaba)[/\\]"
         dk_stripped = _re.sub(PUB_PREFIXES, "", model_key.lower(), count=1)
-        dk_norm = _re.sub(r"[-_./\\@]", "", dk_stripped)
         # Also strip trailing @quant for length comparison
         dk_base = _re.sub(r"@.*$", "", dk_stripped)
         dk_base_norm = _re.sub(r"[-_./\\@]", "", dk_base)
         best_match = None
         best_score = 0.0
-        for mk in info:
+        for mk in model_info:
             mk_stripped = _re.sub(PUB_PREFIXES, "", mk.lower(), count=1)
             mk_base = _re.sub(r"@.*$", "", mk_stripped)
             mk_base_norm = _re.sub(r"[-_./\\@]", "", mk_base)
@@ -231,7 +236,7 @@ def _lookup_vram(model_key: str) -> Optional[Dict[str, Any]]:
                 continue
             # Exact match (normalized)
             if dk_base_norm == mk_base_norm:
-                best_match = info[mk]
+                best_match = model_info[mk]
                 best_score = 1.0
                 break
             # Substring match with length-ratio guard to prevent the
@@ -241,7 +246,7 @@ def _lookup_vram(model_key: str) -> Optional[Dict[str, Any]]:
                 ratio = len(shorter) / len(longer) if longer else 0.0
                 if ratio >= 0.85 and ratio > best_score:
                     best_score = ratio
-                    best_match = info[mk]
+                    best_match = model_info[mk]
         lms_match = best_match
 
     # Step 3: Merge – QUANT_MAP wins for quant, lms wins for vram_gb
@@ -1201,7 +1206,8 @@ def read_data(model_keys: Optional[List[str]] = None, min_sample_size: int = 0,
                 if ds_score is not None:
                     bench_scores["DS1000"] = ds_score
                     tok_speeds["DS1000"] = ds_tps
-                    if ds_lat: latencies.append(ds_lat)
+                    if ds_lat:
+                        latencies.append(ds_lat)
                 break
         else:
             ds_score = ds_tps = None
@@ -1216,7 +1222,8 @@ def read_data(model_keys: Optional[List[str]] = None, min_sample_size: int = 0,
                 if ce_score is not None:
                     bench_scores["CoderEval"] = ce_score
                     tok_speeds["CoderEval"] = ce_tps
-                    if ce_lat: latencies.append(ce_lat)
+                    if ce_lat:
+                        latencies.append(ce_lat)
                 break
         else:
             ce_score = ce_tps = None
@@ -1239,10 +1246,8 @@ def read_data(model_keys: Optional[List[str]] = None, min_sample_size: int = 0,
         if ep:
             bench_scores["HumanEval+_plus"] = ep.get("humaneval_plus", 0)
             bench_scores["MBPP+_plus"] = ep.get("mbpp_plus", 0)
-            he_base = ep.get("humaneval_base", 0)
-            mb_base = ep.get("mbpp_base", 0)
         else:
-            he_base = mb_base = None
+            pass
 
         # LM-Eval per model
         lmev = read_lmeval_per_model(model_key)
@@ -1727,7 +1732,7 @@ def _write_markdown(rows: List[Dict[str, Any]], args: Any,
     str_rows.sort(key=lambda x: x["Model"])
 
     with open(md_path, "w", encoding="utf-8") as f:
-        f.write(f"# Consolidated Results – Dense Run (15+ Models)\n")
+        f.write("# Consolidated Results – Dense Run (15+ Models)\n")
         if args.sample_size:
             ss_display = str(args.sample_size)
             ss_note = " (DS1000/CoderEval CSVs only)"

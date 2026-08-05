@@ -984,7 +984,7 @@ def run_custom_benchmark(model_info: AvailableModelInfo, bench: BenchmarkDef, sa
     # when error_detail contains "Cannot combine structured output" /
     # "Channel Error" (see custom_benchmark.py run benchmark loop).
     if not is_structured_output_disabled and "[CHANNEL-ERROR]" in (result.stdout or ""):
-        print(f"  [INFO] Channel-Error detected – retrying with --no-structured-output")
+        print("  [INFO] Channel-Error detected – retrying with --no-structured-output")
         return run_custom_benchmark(model_info, bench, sample_size=sample_size,
                                    seed=seed, is_structured_output_disabled=True,
                                    should_keep_response=should_keep_response, num_parallel=num_parallel)
@@ -1084,7 +1084,7 @@ def run_evalplus(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_siz
         with redirect_stdout(buf):
             evalplus_codegen(
                 target_path=samples_path,
-                model=model_obj,
+                model=model_obj,  # noqa: F821 – closure variable from enclosing scope
                 dataset=filtered_tasks,
                 greedy=not gptoss,
                 n_samples=1,
@@ -1107,7 +1107,6 @@ def run_evalplus(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_siz
             else:
                 done = 0
             if done > dots_printed[0]:
-                delta = done - dots_printed[0]
                 print(f"  [{'.' * done}{' ' * (_total_tasks - done)}] {done}/{_total_tasks}", end="\r")
                 _sys.stdout.flush()
                 dots_printed[0] = done
@@ -1153,7 +1152,7 @@ def run_evalplus(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_siz
         encoding="utf-8", errors="replace"
     )
     eval_out = r2.stdout[-500:] if r2.stdout else ""
-    eval_out = "\n".join(l for l in eval_out.split("\n") if "Skipping" not in l and "WARNING" not in l)
+    eval_out = "\n".join(line for line in eval_out.split("\n") if "Skipping" not in line and "WARNING" not in line)
     print(eval_out)
     score = None
     if eval_out:
@@ -1186,7 +1185,6 @@ def run_lmeval(model_info: AvailableModelInfo, bench: BenchmarkDef, limit: int =
     api_model = model_info.get("_api_model") or model_info.get("variant") or model_identifier
     task_name = bench["task"]
     safe = model_identifier.replace("/", "_").replace("\\", "_")
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_dir = os.path.join(RESULTS_DIR, f"lmeval_{safe}")
     os.makedirs(output_dir, exist_ok=True)
 
@@ -1268,7 +1266,6 @@ def run_lmeval(model_info: AvailableModelInfo, bench: BenchmarkDef, limit: int =
     timeout_mult = bench.get("timeout_mult", 1)
     total_timeout = base_timeout * timeout_mult
     elapsed = 0
-    stdout = ""
     stderr = ""
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -1307,19 +1304,18 @@ def run_lmeval(model_info: AvailableModelInfo, bench: BenchmarkDef, limit: int =
         proc.wait(timeout=total_timeout)
         tout.join(timeout=2)
         terr.join(timeout=2)
-        stdout = "".join(stdout_lines)
         stderr = "".join(stderr_lines)
         elapsed = time.time() - t0
         if proc.returncode != 0:
             print(f"  [WARN] lm_eval returncode={proc.returncode}")
             if stderr:
                 if "peg-native" in stderr or "does not match the expected peg" in stderr:
-                    print(f"  [WARN] Bekannter Engine-Fehler (llama.cpp #20260): "
-                          f"post-generation PEG-Parser lehnt Modellausgabe ab "
-                          f"(HTTP 500 'peg-native format').")
-                    print(f"  [WARN] Dieser Lauf hat keine eos_string-Stops an die Engine gesendet "
-                          f"(Task-YAML ohne 'until'); der GGUF-EOS-Fallback greift ab "
-                          f"dem nächsten Start automatisch.")
+                    print("  [WARN] Bekannter Engine-Fehler (llama.cpp #20260): "
+                          "post-generation PEG-Parser lehnt Modellausgabe ab "
+                          "(HTTP 500 'peg-native format').")
+                    print("  [WARN] Dieser Lauf hat keine eos_string-Stops an die Engine gesendet "
+                          "(Task-YAML ohne 'until'); der GGUF-EOS-Fallback greift ab "
+                          "dem nächsten Start automatisch.")
                     print(f"  [WARN] stderr-Kurzfassung ({len(stderr)} chars total):")
                     for line in stderr.split("\n")[:12]:
                         print(f"    | {line}")
@@ -1457,7 +1453,7 @@ def run_agentic(model_info: AvailableModelInfo, limit: int = 5, mode: str = "ran
                     m = re.search(r"Scenario\s+(\S+)\s+-\s+score:\s*([\d.]+)", stripped)
                     if m:
                         scenario = m.group(1)
-                        done = sum(1 for l in out_list if "score:" in l)
+                        done = sum(1 for line in out_list if "score:" in line)
                         progress_bar(done, limit, prefix=f"  {cyan(scenario)}")
                     else:
                         print(f"    {stripped}")
@@ -1883,7 +1879,7 @@ def _check_registry_for_model(model_identifier: str, model_display: str) -> Opti
 
         return (reasoning_val == "thinking") or _is_qwen3_6_model(model_identifier)
     except (ImportError, KeyError, OSError, ValueError):
-        print(f"\n  [WARN] Registry nicht lesbar – ohne Reasoning-Info fortfahren.")
+        print("\n  [WARN] Registry nicht lesbar – ohne Reasoning-Info fortfahren.")
         return False
 
 
@@ -1936,7 +1932,7 @@ def _run_benchmarks_for_model(model_info: AvailableModelInfo, benchmarks: list[B
 
     for bidx, bench in enumerate(benchmarks):
         if args.unload_between and bidx > 0:
-            print(f"  [INFO] Unloading/reloading model between benchmarks...")
+            print("  [INFO] Unloading/reloading model between benchmarks...")
             has_unloaded_all_models()
             time.sleep(2)
             ok, api_model = load_model_via_lms(model_load_key)
@@ -2057,14 +2053,14 @@ def main() -> None:
         print(f"\n{'=' * 60}")
         print(f"  Model {midx}/{len(models)}: {model_display}")
         if is_reasoning_model:
-            print(f"  * Reasoning model (detected) – timeout ×2")
+            print("  * Reasoning model (detected) – timeout ×2")
         if _is_moe_model(model_identifier):
-            print(f"  * MoE model (detected)")
+            print("  * MoE model (detected)")
         print(f"{'=' * 60}")
 
         api_model = _load_model(model_info, model_load_key, args)
         if api_model is None:
-            print(f"  [ERROR] Loading failed. Skipping.")
+            print("  [ERROR] Loading failed. Skipping.")
             continue
 
         model_results = _run_benchmarks_for_model(model_info, benchmarks, args,

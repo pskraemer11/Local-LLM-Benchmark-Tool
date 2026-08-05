@@ -154,7 +154,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 if buffer:
                     self.wfile.write(buffer)
                     self.wfile.flush()
-        except Exception as e:
+        except Exception:
             error_chunk = {
                 "id": f"chatcmpl-{uuid.uuid4().hex[:20]}",
                 "object": "chat.completion.chunk",
@@ -196,7 +196,7 @@ def main() -> None:
     print(f"[lmeval_proxy] Listening on {args.bind}:{args.port}")
     print(f"[lmeval_proxy] Upstream: {args.upstream}")
     print(f"[lmeval_proxy] Set base_url=http://{args.bind}:{args.port}/v1 in lm_eval config")
-    print(f"[lmeval_proxy] Press Ctrl+C to stop")
+    print("[lmeval_proxy] Press Ctrl+C to stop")
 
     try:
         server.serve_forever()

@@ -223,7 +223,6 @@ def classify_reasoning(
       5. Default: "instruct"
     """
     name_lower = model_name.lower()
-    notes_lower = notes.lower() if notes else ""
 
     if existing_reasoning is not None:
         return existing_reasoning
@@ -1004,7 +1003,7 @@ def validate_prompts() -> None:
     # Read blueprint module content for expected patterns
     yaml_ruamel = YAML()
     with open(BLUEPRINT_PATH, "r", encoding="utf-8") as f:
-        bp_defs = yaml_ruamel.load(f)
+        yaml_ruamel.load(f)
 
     for info in lms_configs:
         prompt = info.get("system_prompt", "")
@@ -1048,11 +1047,11 @@ def validate_prompts() -> None:
     # Summary statistics
     prompt_lengths = [len(info["system_prompt"]) for info in lms_configs if info["system_prompt"]]
     if prompt_lengths:
-        print(f"\nPrompt length stats:")
+        print("\nPrompt length stats:")
         print(f"  Min: {min(prompt_lengths)} chars | Max: {max(prompt_lengths)} chars")
         print(f"  Avg: {sum(prompt_lengths)//len(prompt_lengths)} chars")
-        short = [l for l in prompt_lengths if l < 50]
-        long = [l for l in prompt_lengths if l > 2000]
+        short = [pl for pl in prompt_lengths if pl < 50]
+        long = [pl for pl in prompt_lengths if pl > 2000]
         if short:
             print(f"  WARN: {len(short)} prompts < 50 chars")
         if long:

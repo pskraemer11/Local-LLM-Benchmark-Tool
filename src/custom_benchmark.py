@@ -1667,7 +1667,6 @@ def run_task(task: dict[str, Any], task_type: str, model_identifier: Optional[st
     }
 
     no_system_msg = model_config.get("no_system_msg", False)
-    max_tokens_task = model_config.get("max_tokens", MAX_TOKENS_GENERAL)
     code_only = bool(model_config.get("enable_thinking"))
 
     # Qwen3.5 compatibility: embed system message in user prompt
@@ -1794,8 +1793,8 @@ def _call_and_evaluate(full_prompt: str, generation_parameters: dict[str, Any], 
             code = m.group(1).strip()
         else:
             code = "\n".join(
-                l for l in response.strip().split("\n")
-                if _is_bare_statement(l.strip())
+                line for line in response.strip().split("\n")
+                if _is_bare_statement(line.strip())
             )
     struct = classify_output(code, response or "", is_structured, entry_point)
     score, detail = evaluate_code(code, entry_point, tests_field, reference_code, setup_code=setup_code)
@@ -2324,7 +2323,6 @@ def _run_model_loop(models: list[dict[str, Any]], benchmarks: list[dict[str, Any
             })
 
         if model_results:
-            bench_names = "+".join(sorted(set(r["benchmark_name"] for r in model_results)))
             csv_writer.write_per_model_csv(
                 model_results, model_display,
                 model_key=model_info.get("key", ""),

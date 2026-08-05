@@ -45,6 +45,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+import responses
 
 
 # Make repo root + src/ importable for all tests

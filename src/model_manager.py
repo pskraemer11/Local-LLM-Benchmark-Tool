@@ -611,7 +611,7 @@ def is_model_ready(timeout: int = TIMEOUT_MODEL_READY) -> bool:
                 if resp.status == 200:
                     print(" ready")
                     return True
-        except (HTTPError, URLError, OSError) as e:
+        except (HTTPError, URLError, OSError):
             # "No models loaded" (HTTP 400), 503, connection refused → keep waiting
             pass
         except (RuntimeError, ValueError, TimeoutError) as e:

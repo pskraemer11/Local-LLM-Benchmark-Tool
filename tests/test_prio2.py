@@ -126,7 +126,6 @@ class TestBootstrapCIPerfAndCorrectness:
         import random
         scores = [0.5, 0.6, 0.7, 0.8, 0.5, 0.6, 0.7, 0.8, 0.5, 0.6] * 5
         a = scores[:30]
-        b = [x - 0.05 for x in a]
         # Force pure-Python path
         import numpy as np
         np.random.seed(42)

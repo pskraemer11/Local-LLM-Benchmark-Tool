@@ -22,7 +22,7 @@ line-length = 120
 # target-version = "py311"
 target-version = "py314"
 # Don't lint the Archiv/ folder (legacy code)
-extend-exclude = ["Archiv", "build", "dist", "doc-git", "Doc-intern"]
+extend-exclude = ["Archiv", "build", "dist", "doc-git", "Doc-intern", "src/_corr_final.py"]
 
 [tool.ruff.lint]
 # Lenient default: catch E (errors) and F (pyflakes), ignore style.

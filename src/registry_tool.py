@@ -35,10 +35,19 @@ Commands:
 
 from __future__ import annotations
 
-import csv, json, os, re, shutil, struct, sys, subprocess, tempfile, concurrent.futures
+import csv
+import json
+import os
+import re
+import shutil
+import struct
+import sys
+import subprocess
+import tempfile
+import concurrent.futures
 from pathlib import Path
 from collections import OrderedDict
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 _SRC_DIR = Path(__file__).resolve().parent
 # Make `src` importable regardless of how the tool is invoked
@@ -131,7 +140,7 @@ def _run_lms_ls() -> list[dict[str, Any]]:
     except Exception as e:
         print(f"[WARN] Server-Start fehlgeschlagen: {e}")
 
-    print(f"[WARN] lms ls auch nach Server-Start fehlgeschlagen")
+    print("[WARN] lms ls auch nach Server-Start fehlgeschlagen")
     return []
 
 
@@ -536,8 +545,6 @@ def cmd_compare() -> dict[str, Any]:
 
     registry_key_map = {normalize_model_name(k): k for k, v in reg.items() if isinstance(v, dict)}
     lm = {normalize_model_name(m.get("modelKey", "")): m for m in lms}
-    ck = {normalize_model_name(c["dir_name"]) for c in cfgs}
-
     new_models: list[dict] = []
     for lk, lm2 in sorted(lm.items()):
         if not any(lk == r for r in registry_key_map):
@@ -548,7 +555,7 @@ def cmd_compare() -> dict[str, Any]:
         if not isinstance(re_, dict) or re_.get("blueprint") == "none":
             continue
         rk2 = normalize_model_name(rn)
-        if not any(rk2 in l or l in rk2 for l in lm):
+        if not any(rk2 in lm_key or lm_key in rk2 for lm_key in lm):
             missing.append(rn)
 
     orphan: set[str] = set()
@@ -733,7 +740,7 @@ def cmd_add(models: list[dict[str, Any]], interactive: bool = False) -> dict[str
         if "reasoning" not in entry and interactive:
             print(f"\n  Modell: {mk}")
             print(f"  Architektur: {classification}")
-            print(f"  Keine GGUF-Datei gefunden – Reasoning-Typ kann nicht automatisch erkannt werden.")
+            print("  Keine GGUF-Datei gefunden – Reasoning-Typ kann nicht automatisch erkannt werden.")
             ans = input("  Reasoning-Typ? [i]nstruct / [t]hinking / [n]one / (d=instruct): ").strip().lower()
             if ans in ("t", "thinking"):
                 entry["reasoning"] = "thinking"
@@ -828,22 +835,11 @@ def cmd_configs() -> dict[str, Any]:
             # native_ctx from GGUF header (registry max_context_length)
             native_ctx = entry.get("max_context_length") or 262144  # fallback: 256k
 
-            # current_ctx from JSON config (llm.load.contextLength)
-            current_ctx = None
-            for field in fields:
-                if isinstance(field, dict) and field.get("key") == "llm.load.contextLength":
-                    current_ctx = field.get("value")
-                    break
-
             np_new, ukv_new, ctx_new = _compute_np_ukv(
                 model_gb, kv_per_slot_gb, native_ctx,
                 vram_available=_USABLE_VRAM_GB,
                 min_ctx=_MIN_CONTEXT_LENGTH,
             )
-
-            # Only update if values changed
-            old_np = entry.get("num_parallel")
-            old_ukv = entry.get("useUnifiedKvCache")
 
             set_field("llm.load.numParallelSessions", np_new)
             set_field("llm.load.useUnifiedKvCache", ukv_new)
@@ -856,7 +852,7 @@ def cmd_configs() -> dict[str, Any]:
                 json.dump(data, f, indent=2, ensure_ascii=False)
             updated += 1
         except (OSError, ValueError, KeyError, TypeError) as e:
-            print(f"  [WARN] cmd_configs Fehler fuer {label}: {e}", file=sys.stderr)
+            print(f"  [WARN] cmd_configs Fehler fuer {match}: {e}", file=sys.stderr)
             errors += 1
 
     result = {"updated": updated, "skipped": skipped, "blacklisted": blacklisted, "errors": errors}
