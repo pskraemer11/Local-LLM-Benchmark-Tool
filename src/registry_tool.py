@@ -1677,20 +1677,18 @@ def cmd_validate() -> dict[str, Any]:
                 f"{match}: Config contextLength={cfg_ctx} != Registry context_length={reg_ctx} "
                 f"({cfg['json_path']})"
             )
-        # Check if config contextLength is below reasonable minimum (8192)
-        # Models with native max < 8192 are rare; this catches legacy 4k/2k configs
-        _MIN_REASONABLE_CTX = 8192
-        if isinstance(cfg_ctx, int) and cfg_ctx < _MIN_REASONABLE_CTX:
-            errors["config_context_too_small"].append(
-                f"{match}: Config contextLength={cfg_ctx} < {_MIN_REASONABLE_CTX} "
-                f"(below reasonable minimum, {cfg['json_path']})"
-            )
-        # Also warn if config exceeds model's native max_context_length
+        # Only check: config must not exceed model's native max_context_length
         max_ctx = entry.get("max_context_length")
         if isinstance(cfg_ctx, int) and isinstance(max_ctx, int) and cfg_ctx > max_ctx:
             errors["config_context_too_small"].append(
                 f"{match}: Config contextLength={cfg_ctx} > max_context_length={max_ctx} "
                 f"(exceeds model native limit, {cfg['json_path']})"
+            )
+        # Also check for invalid zero/negative values
+        if isinstance(cfg_ctx, int) and cfg_ctx <= 0:
+            errors["config_context_too_small"].append(
+                f"{match}: Config contextLength={cfg_ctx} <= 0 "
+                f"(invalid, {cfg['json_path']})"
             )
 
         # np/UKV/offload: Registry-Werte nur warnen, wenn sie von der Config abweichen
