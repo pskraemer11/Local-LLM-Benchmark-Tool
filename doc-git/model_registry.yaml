@@ -12,7 +12,7 @@ essentialai/rnj-1:
   blueprint: reasoning_assistant
   truncation: full
   num_parallel: 4
-  context_length: 262144
+  context_length: 32768
   file_size_bytes: 8839561735
   useUnifiedKvCache: false
   n_layers: 32
@@ -85,7 +85,7 @@ unsloth/phi-4:
   truncation: medium
   num_parallel: 1
   useUnifiedKvCache: false
-  context_length: 98304
+  context_length: 16384
   file_size_bytes: 10412707392
   n_layers: 40
   hidden_dim: 5120
@@ -174,7 +174,7 @@ tiiuae/falcon3-10b-instruct:
   offload: 1.0
   num_parallel: 4
   useUnifiedKvCache: false
-  context_length: 98304
+  context_length: 32768
   file_size_bytes: 10955241088
   n_layers: 40
   hidden_dim: 3072
@@ -367,7 +367,7 @@ jetbrains/mellum2-12b-a2.5b-instruct:
   truncation: full
   num_parallel: 4
   useUnifiedKvCache: false
-  context_length: 241979
+  context_length: 131072
   file_size_bytes: 8071293600
   n_layers: 28
   hidden_dim: 2304
@@ -457,7 +457,7 @@ nerdsking/nerdsking-python-coder-7b-i:
   truncation: full
   offload: 1.0
   num_parallel: 4
-  context_length: 131072
+  context_length: 32768
   file_size_bytes: 8098525344
   useUnifiedKvCache: false
   n_layers: 28
@@ -942,30 +942,6 @@ vinpix/ternary-bonsai-27b-stock-mtp@q2_k:
   blueprint: reasoning_assistant
   truncation: full
   max_context_length: 262144
-
-prism-ml/bonsai-27b@q1_0:
-  publisher: prism-ml
-  hf_url: https://huggingface.co/prism-ml/bonsai-27b
-  pub_url: https://huggingface.co/vinpix
-  arch: dense
-  quants: q1_0
-  k_cache: q8_0
-  v_cache: q8_0
-  offload: 1.0
-  num_parallel: 1
-  useUnifiedKvCache: false
-  notes: 'Architektur: 1.5-bit quant (ternary PrimsML/Bonsai, requantised for llam.cpp)
-    | Text, Vision, Agentic Tool Use'
-  file_size_bytes: 4734598240
-  context_length: 262144
-  n_layers: 64
-  hidden_dim: 5120
-  reasoning: thinking
-  capabilities: vision, agentic, text
-  blueprint: reasoning_assistant
-  truncation: full
-  max_context_length: 262144
-
 internlm/internlm2_5-20b-chat:
   publisher: internlm
   hf_url: https://huggingface.co/internlm/internlm2_5-20b-chat
@@ -978,7 +954,7 @@ internlm/internlm2_5-20b-chat:
   num_parallel: 4
   notes: 'Architektur: ?'
   file_size_bytes: 11984469376
-  context_length: 65536
+  context_length: 32768
   n_layers: 48
   hidden_dim: 6144
   reasoning: instruct
@@ -1090,28 +1066,6 @@ quietimpostor/nemotron-3-nano-reap-21b-a3b:
   blueprint: coding_agent
   truncation: full
   useUnifiedKvCache: false
-
-intel/qwen3-8b-q4km-autoround-inc-v1:
-  publisher: Intel
-  hf_url: https://huggingface.co/intel/qwen3-8b-q4km-autoround-inc-v1
-  arch: dense
-  quants: Q4_K_M
-  k_cache: q8_0
-  v_cache: iq4_nl
-  offload: 1.0
-  num_parallel: 4
-  notes: 'Architektur: Qwen3 Dense'
-  file_size_bytes: 5027783424
-  context_length: 262144
-  n_layers: 36
-  hidden_dim: 4096
-  reasoning: thinking
-  max_context_length: 40960
-  capabilities: coding, vision, text
-  blueprint: reasoning_coding
-  truncation: full
-  useUnifiedKvCache: false
-
 intel/qwen3-30b-a3b-instruct-2507-q2ks-mixed-autoround:
   publisher: Intel
   hf_url: https://huggingface.co/intel/qwen3-30b-a3b-instruct-2507-q2ks-mixed-autoround
@@ -1227,7 +1181,7 @@ jetbrains/mellum2-12b-a2.5b-thinking_moe:
   num_parallel: 4
   notes: 'Architektur: ?'
   file_size_bytes: 7029536832
-  context_length: 262144
+  context_length: 131072
   n_layers: 28
   hidden_dim: 2304
   reasoning: instruct
@@ -1348,7 +1302,7 @@ vinpix/bonsai-8b-llama.cpp:
   num_parallel: 4
   notes: 'Architektur: dense'
   file_size_bytes: 2985154240
-  context_length: 262144
+  context_length: 65536
   n_layers: 36
   hidden_dim: 4096
   reasoning: thinking
@@ -1414,27 +1368,6 @@ mradermacher/gemma-4-19b-a4b-it-reap-i1:
   blueprint: gemma_reasoning
   truncation: full
   max_context_length: 262144
-
-prism-ml/bonsai-27b:
-  publisher: prism-ml
-  hf_url: https://huggingface.co/prism-ml/bonsai-27b
-  arch: dense
-  k_cache: q8_0
-  v_cache: iq4_nl
-  offload: 1.0
-  num_parallel: 4
-  notes: 'Architektur: dense | Vision'
-  file_size_bytes: 4734598240
-  context_length: 262144
-  n_layers: 64
-  hidden_dim: 5120
-  reasoning: thinking
-  useUnifiedKvCache: false
-  capabilities: vision, text
-  blueprint: reasoning_assistant
-  truncation: full
-  max_context_length: 262144
-
 ibm-granite/granite-4.1-8b:
   publisher: ibm-granite
   hf_url: https://huggingface.co/ibm-granite/granite-4.1-8b
@@ -1446,7 +1379,7 @@ ibm-granite/granite-4.1-8b:
   num_parallel: 4
   notes: 'Architektur: dense'
   file_size_bytes: 7216476832
-  context_length: 262144
+  context_length: 131072
   n_layers: 40
   hidden_dim: 4096
   reasoning: instruct
