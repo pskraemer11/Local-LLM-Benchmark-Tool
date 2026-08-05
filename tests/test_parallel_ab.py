@@ -2,6 +2,8 @@ import json
 import os
 import sys
 
+import pytest
+
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 
 from tools.parallel_ab import (
@@ -43,6 +45,13 @@ class TestBuildBody:
         assert body["messages"][0]["role"] == "user"
 
 
+_DS1000_EXISTS = os.path.isfile(
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                 "simple_evals", "data_science.jsonl")
+)
+
+
+@pytest.mark.skipif(not _DS1000_EXISTS, reason="simple_evals/data_science.jsonl not in repo")
 class TestBuildPrompts:
     def test_returns_expected_sample_size(self):
         prompts = build_prompts(5, "ds1000")

@@ -47,7 +47,7 @@ jobs:
           # Runtime dependencies (as documented in README.md)
           pip install "lm-eval[api,math]" evalplus nvidia-ml-py3 psutil ruamel.yaml
           # Test dependencies
-          pip install pytest pytest-cov
+          pip install pytest pytest-cov pytest-mock
           # Additional IFEval + MATH-500 dependencies (Prio 0 fix)
           pip install langdetect immutabledict "antlr4-python3-runtime==4.11" nltk
           # Linting + typechecking
