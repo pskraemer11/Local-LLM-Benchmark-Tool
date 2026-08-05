@@ -820,7 +820,7 @@ def _get_evaluation_parameters(model_identifier: str, bench_name: str = "") -> d
     return generation_parameters
 
 
-def _build_lmeval_cmd(model_identifier: str, api_model: str, subset_task: str, per_limit: int, output_dir: str, bench_name: str = "") -> list[str]:
+def _build_lmeval_cmd(model_identifier: str, api_model: str, subset_task: str, per_limit: int, output_dir: str, bench_name: str = "", num_parallel: int = 1) -> list[str]:
     """Like run_lmeval(), but returns the cmd list instead of executing it.
     
     Used by run_agentic() for per-scenario lm_eval invocations.
@@ -831,7 +831,7 @@ def _build_lmeval_cmd(model_identifier: str, api_model: str, subset_task: str, p
     model_settings = {
         "base_url": f"{API_BASE}/chat/completions",
         "model": api_model,
-        "num_concurrent": 1,
+        "num_concurrent": num_parallel,
     }
     # eos_string only for GPT-OSS; other models use YAML until sequences or generation_parameters
     # (except tasks without until, e.g. IFEval: GGUF-EOS fallback, see run_lmeval)
@@ -1177,7 +1177,7 @@ def run_evalplus(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_siz
 # For MMLU-Pro there is a separate modified function (see below),
 # which stratifies the benchmark across 14 subset tasks.
 # Returns: dict with pipeline="lmeval", score (0-1).
-def run_lmeval(model_info: AvailableModelInfo, bench: BenchmarkDef, limit: int = 5, is_reasoning_model: bool = False) -> Optional[PipelineResult]:
+def run_lmeval(model_info: AvailableModelInfo, bench: BenchmarkDef, limit: int = 5, is_reasoning_model: bool = False, num_parallel: int = 1) -> Optional[PipelineResult]:
     model_identifier = model_info["key"]
     model_display = model_info["display"]
     gptoss = _is_gptoss_model(model_identifier)
@@ -1214,7 +1214,7 @@ def run_lmeval(model_info: AvailableModelInfo, bench: BenchmarkDef, limit: int =
     model_settings = {
         "base_url": lm_base_url,
         "model": api_model,
-        "num_concurrent": 1,
+        "num_concurrent": num_parallel,
     }
     # Only set eos_string for models that explicitly need a fixed EOS token.
     # GPT-OSS uses <|endoftext|> as its primary stop; other chat models rely on
@@ -1950,6 +1950,11 @@ def _run_benchmarks_for_model(model_info: AvailableModelInfo, benchmarks: list[B
         agentic_names = {b["name"] for b in AGENTIC_BENCHMARKS}
 
         try:
+            np = _resolve_num_parallel(model_load_key, args.sample_size,
+                                      getattr(args, "num_parallel", None))
+            if np > 1:
+                print(f"  [PARALLEL] num_parallel={np} (SS={args.sample_size})")
+
             if bname in agentic_names:
                 result = run_agentic(model_info, limit=args.sample_size,
                                      mode=getattr(args, "agentic_mode", "random"),
@@ -1960,12 +1965,8 @@ def _run_benchmarks_for_model(model_info: AvailableModelInfo, benchmarks: list[B
             elif bname in lmeval_names:
                 per_limit = max(bench.get("min_limit", 0), args.sample_size)
                 result = run_lmeval(model_info, bench, limit=per_limit,
-                                    is_reasoning_model=is_reasoning_model)
+                                    is_reasoning_model=is_reasoning_model, num_parallel=np)
             else:
-                np = _resolve_num_parallel(model_load_key, args.sample_size,
-                                          getattr(args, "num_parallel", None))
-                if np > 1:
-                    print(f"  [PARALLEL] num_parallel={np} (SS={args.sample_size})")
                 result = run_custom_benchmark(model_info, bench, sample_size=args.sample_size,
                                               seed=args.seed, is_structured_output_disabled=args.no_structured_output,
                                               should_keep_response=args.keep_response,
