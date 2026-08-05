@@ -45,7 +45,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           # Runtime dependencies (as documented in README.md)
-          pip install "lm-eval[api,math]" evalplus nvidia-ml-py3 psutil
+          pip install "lm-eval[api,math]" evalplus nvidia-ml-py3 psutil ruamel.yaml
           # Test dependencies
           pip install pytest pytest-cov
           # Additional IFEval + MATH-500 dependencies (Prio 0 fix)
@@ -102,10 +102,9 @@ jobs:
         run: |
           mypy --ignore-missing-imports \
                --no-strict-optional \
-               --no-strict \
                --follow-imports=silent \
-               benchmark_config.py \
-               csv_writer.py 2>&1 | head -100
+               src/benchmark_config.py \
+               src/csv_writer.py 2>&1 | head -100
 
   summary:
     name: CI Summary
