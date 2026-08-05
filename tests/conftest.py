@@ -46,6 +46,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
+# Ensure pytest-mock plugin is loaded (provides `mocker` fixture)
+pytest_plugins = ["pytest_mock"]
+
 
 # Make repo root + src/ importable for all tests
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

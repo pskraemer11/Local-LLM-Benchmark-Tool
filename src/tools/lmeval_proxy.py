@@ -19,7 +19,7 @@ import os
 import sys
 import time
 import uuid
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.request import Request, urlopen
 from urllib.parse import urlparse
 
@@ -192,7 +192,11 @@ def main() -> None:
     args = parser.parse_args()
 
     ProxyHandler.upstream = args.upstream
-    server = HTTPServer((args.bind, args.port), ProxyHandler)
+    # ThreadingHTTPServer (Fix 05.08.): HTTPServer verarbeitet nur EINEN
+    # Request gleichzeitig -> lm_eval num_concurrent>1 wurde serialisiert,
+    # dadurch lief trotz np=4 nur 1 Slot (Server-Log-Beweis 05.08.: alle
+    # Requests auf Slot 3). Threading-Server erlaubt paralleles Durchreichen.
+    server = ThreadingHTTPServer((args.bind, args.port), ProxyHandler)
     print(f"[lmeval_proxy] Listening on {args.bind}:{args.port}")
     print(f"[lmeval_proxy] Upstream: {args.upstream}")
     print(f"[lmeval_proxy] Set base_url=http://{args.bind}:{args.port}/v1 in lm_eval config")

@@ -12,6 +12,7 @@ ergebnisse/
 logs/
 runs/
 data/
+!tests/data/
 human_eval_plus/
 
 # Drittanbieter-Code (nicht veraendert)

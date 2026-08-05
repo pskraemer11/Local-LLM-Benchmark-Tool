@@ -50,7 +50,7 @@ from model_manager import (has_unloaded_all_models, is_model_ready,
                            load_model_via_lms)  # noqa: E402
 
 LOCK_PATH = os.path.join(PROJECT_ROOT, "ergebnisse", ".benchmark.lock")
-DS1000_FILE = os.path.join(PROJECT_ROOT, "simple_evals", "data_science.jsonl")
+DS1000_FILE = os.path.join(PROJECT_ROOT, "tests", "data", "data_science.jsonl")
 OUT_DIR = os.path.join(PROJECT_ROOT, "ergebnisse")
 
 MAX_TOKENS_DS1000 = 4096

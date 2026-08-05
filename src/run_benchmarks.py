@@ -1035,7 +1035,7 @@ def run_custom_benchmark(model_info: AvailableModelInfo, bench: BenchmarkDef, sa
 #   3. evalplus.evaluate -> differential testing with plus_input
 # Uses evalplus-native datasets (humanEval, mbpp).
 # Returns: dict with pipeline="evalplus", score pass@1 (0-1).
-def run_evalplus(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_size: int = 5, seed: Optional[int] = None, is_reasoning_model: bool = False) -> Optional[PipelineResult]:
+def run_evalplus(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_size: int = 5, seed: Optional[int] = None, is_reasoning_model: bool = False, num_parallel: int = 1) -> Optional[PipelineResult]:
     # Some models (e.g. DeepSeek Coder) generate regex patterns like "\d+"
     # instead of r"\d+", causing SyntaxWarning spam from Python 3.12+.
     warnings.filterwarnings("ignore", category=SyntaxWarning)
@@ -1104,22 +1104,62 @@ def run_evalplus(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_siz
     from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FUTimeout
     import io
     from contextlib import redirect_stdout
+    from evalplus.codegen import sanitize as _evalplus_sanitize
     _total_tasks = len(filtered_tasks)
     # Progress live via StringIO-Polling (Punkt 2b): evalplus schreibt die
     # Samples-Datei inkrementell, aber der Datei-Polling-Ansatz zeigte den
     # Balken erst nach Abschluss. Stattdessen zaehlen wir die per-Task-Zeilen
     # ("Codegen: <task_id> @ ...") direkt im redirect-Puffer.
     codegen_buf = io.StringIO()
+
+    # Parallel codegen (Fix 05.08.): evalplus' codegen() iteriert SEQUENZIELL
+    # ueber die Tasks (ein HTTP-Request pro Task) - dadurch wird bei
+    # num_parallel > 1 trotz n_slots=4 nur 1 Slot belegt (Server-Log-Beweis:
+    # alle Requests auf Slot 3). Wir replizieren die per-Task-Logik
+    # (n_samples=1, resume=False, identisches JSONL-Format) in einem
+    # ThreadPoolExecutor mit max_workers=num_parallel, damit LM Studio
+    # mehrere Slots parallel nutzt.
+    raw_target_path = samples_path.replace(".jsonl", ".raw.jsonl")
+    _write_lock = threading.Lock()
+
+    def _gen_one_task(task_id: str, task: dict) -> None:
+        prompt = task["prompt"].strip() + "\n"
+        outputs = model_obj.codegen(
+            prompt,
+            do_sample=gen_temp != 0.0,
+            num_samples=1,
+        )
+        assert outputs, f"No outputs from model for {task_id}"
+        impl = outputs[0]
+        solution = prompt + impl if model_obj.is_direct_completion() else impl
+        sanitized_solution = _evalplus_sanitize(solution, entrypoint=task["entry_point"])
+        print(f"Codegen: {task_id} @ {model_obj}")
+        with _write_lock:
+            with open(samples_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps({"task_id": task_id, "solution": sanitized_solution}) + "\n")
+            with open(raw_target_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps({"task_id": task_id, "solution": solution}) + "\n")
+
     def _codegen_wrapper() -> None:
         with redirect_stdout(codegen_buf):
-            evalplus_codegen(
-                target_path=samples_path,
-                model=model_obj,  # noqa: F821 – closure variable from enclosing scope
-                dataset=filtered_tasks,
-                greedy=gen_temp == 0.0,
-                n_samples=1,
-                resume=False,
-            )
+            if num_parallel > 1:
+                with ThreadPoolExecutor(max_workers=num_parallel,
+                                        thread_name_prefix="evalplus") as pool:
+                    futures = [
+                        pool.submit(_gen_one_task, tid, task)
+                        for tid, task in filtered_tasks.items()
+                    ]
+                    for fut in futures:
+                        fut.result()
+            else:
+                evalplus_codegen(
+                    target_path=samples_path,
+                    model=model_obj,  # noqa: F821 – closure variable from enclosing scope
+                    dataset=filtered_tasks,
+                    greedy=gen_temp == 0.0,
+                    n_samples=1,
+                    resume=False,
+                )
     def _codegen_progress() -> None:
         import sys as _sys
         dots_printed = [0]
@@ -1986,7 +2026,8 @@ def _run_benchmarks_for_model(model_info: AvailableModelInfo, benchmarks: list[B
                                      seed=args.seed)
             elif bname in ep_names:
                 result = run_evalplus(model_info, bench, sample_size=args.sample_size,
-                                      seed=args.seed, is_reasoning_model=is_reasoning_model)
+                                      seed=args.seed, is_reasoning_model=is_reasoning_model,
+                                      num_parallel=np)
             elif bname in lmeval_names:
                 per_limit = max(bench.get("min_limit", 0), args.sample_size)
                 result = run_lmeval(model_info, bench, limit=per_limit,

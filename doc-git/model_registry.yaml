@@ -942,6 +942,7 @@ vinpix/ternary-bonsai-27b-stock-mtp@q2_k:
   blueprint: reasoning_assistant
   truncation: full
   max_context_length: 262144
+
 internlm/internlm2_5-20b-chat:
   publisher: internlm
   hf_url: https://huggingface.co/internlm/internlm2_5-20b-chat
@@ -1026,6 +1027,7 @@ google/gemma-4-12b-it-qat:
   blueprint: gemma_reasoning
   truncation: full
   max_context_length: 262144
+
 google/gemma-4-26b-a4b-it-qat:
   publisher: google
   hf_url: https://huggingface.co/google/gemma-4-26B-A4B-it-qat-q4_0-gguf
@@ -1066,6 +1068,7 @@ quietimpostor/nemotron-3-nano-reap-21b-a3b:
   blueprint: coding_agent
   truncation: full
   useUnifiedKvCache: false
+
 intel/qwen3-30b-a3b-instruct-2507-q2ks-mixed-autoround:
   publisher: Intel
   hf_url: https://huggingface.co/intel/qwen3-30b-a3b-instruct-2507-q2ks-mixed-autoround
@@ -1227,7 +1230,7 @@ zai-org/glm-4.6v-flash:
   reasoning: thinking
   blueprint: reasoning_assistant
   capabilities: vision, text
-  useUnifiedKvCache: true
+  useUnifiedKvCache: false
   truncation: full
 
 unsloth/glm-4.7-flash:
@@ -1326,7 +1329,7 @@ noctrex/ernie-4.5-21b-a3b-pt_moe:
   n_layers: 28
   hidden_dim: 2560
   reasoning: instruct
-  useUnifiedKvCache: false
+  useUnifiedKvCache: true
   capabilities: coding, text
   blueprint: coding_agent
   truncation: full
@@ -1363,11 +1366,12 @@ mradermacher/gemma-4-19b-a4b-it-reap-i1:
   n_layers: 30
   hidden_dim: 2816
   reasoning: thinking
-  useUnifiedKvCache: false
+  useUnifiedKvCache: true
   capabilities: coding, vision, text
   blueprint: gemma_reasoning
   truncation: full
   max_context_length: 262144
+
 ibm-granite/granite-4.1-8b:
   publisher: ibm-granite
   hf_url: https://huggingface.co/ibm-granite/granite-4.1-8b
@@ -1403,7 +1407,7 @@ mradermacher/gemma-4-26b-a4b-it-i1:
   n_layers: 30
   hidden_dim: 2816
   reasoning: thinking
-  useUnifiedKvCache: false
+  useUnifiedKvCache: true
   capabilities: coding, vision, text
   blueprint: gemma_reasoning
   truncation: full
@@ -1423,7 +1427,7 @@ bartowski/google_gemma-4-26b-a4b-it:
   n_layers: 30
   hidden_dim: 2816
   reasoning: thinking
-  useUnifiedKvCache: false
+  useUnifiedKvCache: true
   capabilities: vision, coding, text
   blueprint: gemma_reasoning
   truncation: full
@@ -1443,7 +1447,7 @@ unsloth/gemma-4-26b-a4b-it:
   n_layers: 30
   hidden_dim: 2816
   reasoning: thinking
-  useUnifiedKvCache: false
+  useUnifiedKvCache: true
   capabilities: vision, coding, text
   blueprint: gemma_reasoning
   truncation: full
@@ -1463,7 +1467,7 @@ unsloth/ernie-4.5-21b-a3b-pt:
   n_layers: 28
   hidden_dim: 2560
   reasoning: instruct
-  useUnifiedKvCache: false
+  useUnifiedKvCache: true
   capabilities: coding, text
   blueprint: coding_agent
   truncation: full
