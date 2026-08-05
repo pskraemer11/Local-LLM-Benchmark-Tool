@@ -30,6 +30,7 @@ from assemble_blueprint import (
     format_publishers,
     format_capabilities,
     truncation_from_context,
+    find_registry_key_for_config,
 )
 
 
@@ -346,3 +347,59 @@ class TestReadLmsConfigsCaching:
         # Second call also returns empty (cached)
         result2 = read_lms_configs(cfg_dir)
         assert result2 == []
+
+
+# ─────────────────────────────────────────────────────────────────────
+# find_registry_key_for_config
+# ─────────────────────────────────────────────────────────────────────
+
+class TestFindRegistryKeyForConfig:
+    """Registry key lookup for a config name (multi-level matching)."""
+
+    @staticmethod
+    def _sorted(keys: list[str]) -> list[tuple[str, str]]:
+        return sorted(
+            [(normalize_model_name(k), k) for k in keys],
+            key=lambda x: -len(x[0]),
+        )
+
+    def _norm(self, raw: str) -> str:
+        return normalize_model_name(raw)
+
+    def test_exact_match(self):
+        reg = self._sorted(["unsloth/phi-4"])
+        assert find_registry_key_for_config(self._norm("unsloth/phi-4"), reg) == "unsloth/phi-4"
+
+    def test_config_prefix_match(self):
+        # Level 2: config starts with registry key + hyphen
+        reg = self._sorted(["unsloth/phi-4"])
+        assert find_registry_key_for_config(self._norm("unsloth/phi-4-q5_0"), reg) == "unsloth/phi-4"
+
+    def test_registry_prefix_match(self):
+        # Level 3: registry key ends with hyphen + config
+        reg = self._sorted(["mradermacher/qwen3-coder-reap-25b-a3b-i1"])
+        assert find_registry_key_for_config(self._norm("mradermacher/i1"), reg) == "mradermacher/qwen3-coder-reap-25b-a3b-i1"
+
+    def test_broad_match_strips_quant(self):
+        # Level 4: config matches registry key after stripping @quant suffix
+        reg = self._sorted(["unsloth/ernie-4.5-21b-a3b-pt@iq4_nl"])
+        assert find_registry_key_for_config(self._norm("unsloth/ernie-4.5-21b-a3b-pt"), reg) == "unsloth/ernie-4.5-21b-a3b-pt@iq4_nl"
+
+    def test_exact_match_beats_broad_match(self):
+        # Level 1 wins: exact key (without @quant) beats broad match of suffixed key
+        reg = self._sorted(["unsloth/ernie-4.5-21b-a3b-pt@iq4_nl", "unsloth/ernie-4.5-21b-a3b-pt"])
+        result = find_registry_key_for_config(self._norm("unsloth/ernie-4.5-21b-a3b-pt"), reg)
+        assert result == "unsloth/ernie-4.5-21b-a3b-pt"
+
+    def test_no_match_returns_none(self):
+        reg = self._sorted(["unsloth/phi-4"])
+        assert find_registry_key_for_config(self._norm("meta-llama/llama-3-8b"), reg) is None
+
+    def test_broad_match_does_not_crash_with_value_tuples(self):
+        # Regression: rnk was passed to normalize_for_config instead of rn2,
+        # crashing with CommentedMap values in the tuple.
+        reg = sorted(
+            [(normalize_model_name(k), v) for k, v in {"unsloth/ernie-4.5-21b-a3b-pt@iq4_nl": {"context_length": 45371}}.items()],
+            key=lambda x: -len(x[0]),
+        )
+        assert find_registry_key_for_config(self._norm("unsloth/ernie-4.5-21b-a3b-pt"), reg) == {"context_length": 45371}

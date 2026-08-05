@@ -201,7 +201,7 @@ def find_registry_key_for_config(
             return rnk
     # Broad match: strip quant from registry keys and retry
     for rn2, rnk in registry_sorted:
-        rn2_clean = normalize_for_config(rnk)
+        rn2_clean = normalize_for_config(rn2)
         if config_norm == rn2_clean:
             return rnk
     return None
@@ -1113,9 +1113,15 @@ if __name__ == "__main__":
 
     command = sys.argv[1]
 
+    # Bootstrap: Blueprint-YAML ist die Quelle der Wahrheit. Sie wird nur
+    # generiert, wenn sie (noch) nicht existiert - nie aus dem Python-Code
+    # überschrieben. Manuelle Anpassungen an der YAML bleiben erhalten.
+    if not BLUEPRINT_PATH.exists():
+        print("[BOOTSTRAP] blueprint_definitions.yaml fehlt - initial aus Code-Defaults erzeugen ...")
+        create_blueprint_definitions()
+
     if command in ("classify", "all"):
         classify_registry()
-        create_blueprint_definitions()
 
     if command in ("assemble", "all"):
         assemble_prompts(preview_only=False)

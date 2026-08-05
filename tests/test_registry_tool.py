@@ -148,8 +148,8 @@ class TestMatchCascade:
             json.dump(data, f)
         return json_path
 
-    def test_no_arch_data_falls_back_to_legacy_threshold(self, fake_config):
-        # Model with no n_layers/hidden_dim, model_gb >= 9 → UKV on
+    def test_no_arch_data_falls_back_to_legacy_threshold(self, fake_config, capsys):
+        # Model with no n_layers/hidden_dim, model_gb >= 9 → UKV on (Empfehlung)
         sub = fake_config / "publisher"
         json_path = self._make_config(
             sub, sub / "m.json",
@@ -177,16 +177,18 @@ class TestMatchCascade:
                               "use_unified_kv": True,
                               "json_path": json_path,
                           }]):
-            rt.cmd_configs()
-        # Re-read the JSON
+            result = rt.cmd_suggest()
+        out = capsys.readouterr().out
+        # Dry-run: JSON wurde NICHT verändert (kein UKV-Feld geschrieben)
         with open(json_path, "r", encoding="utf-8") as f:
             data = json.load(f)
         fields = {f["key"]: f["value"] for f in data["load"]["fields"]}
-        # Legacy threshold: model_gb (10) >= 9.0 → UKV ON
-        assert fields.get("llm.load.useUnifiedKvCache") is True
+        assert "llm.load.useUnifiedKvCache" not in fields
+        assert result["shown"] == 1
+        assert "useUnifiedKvCache" in out
 
-    def test_arch_data_uses_precise_formula(self, fake_config):
-        # Model with arch data, np=1, small context → UKV OFF
+    def test_arch_data_uses_precise_formula(self, fake_config, capsys):
+        # Model with arch data, np=1, small context → UKV OFF (Empfehlung)
         sub = fake_config / "publisher"
         json_path = self._make_config(
             sub, sub / "m.json",
@@ -218,14 +220,18 @@ class TestMatchCascade:
                               "use_unified_kv": False,
                               "json_path": json_path,
                           }]):
-            rt.cmd_configs()
+            result = rt.cmd_suggest()
+        out = capsys.readouterr().out
         with open(json_path, "r", encoding="utf-8") as f:
             data = json.load(f)
         fields = {f["key"]: f["value"] for f in data["load"]["fields"]}
-        assert fields.get("llm.load.useUnifiedKvCache") is False
+        # Dry-run: kein UKV-Feld geschrieben
+        assert "llm.load.useUnifiedKvCache" not in fields
+        assert result["shown"] == 1
+        assert "useUnifiedKvCache" in out
 
-    def test_benchmark_context_limit_override(self, fake_config):
-        # contextLength is no longer overwritten by cmd_configs;
+    def test_benchmark_context_limit_override(self, fake_config, capsys):
+        # contextLength is never touched by cmd_suggest (dry-run):
         # the user's manually set value is preserved.
         sub = fake_config / "publisher"
         json_path = self._make_config(
@@ -256,15 +262,18 @@ class TestMatchCascade:
                               "use_unified_kv": False,
                               "json_path": json_path,
                           }]):
-            rt.cmd_configs()
+            result = rt.cmd_suggest()
+        capsys.readouterr()
         with open(json_path, "r", encoding="utf-8") as f:
             data = json.load(f)
         fields = {f["key"]: f["value"] for f in data["load"]["fields"]}
         # contextLength was NOT overwritten — user's value (16384) preserved
         assert fields.get("llm.load.contextLength") == 16384
+        assert len(fields) == 1
+        assert result["shown"] == 1
 
-    def test_context_capped_at_native(self, fake_config):
-        # contextLength is no longer overwritten by cmd_configs;
+    def test_context_capped_at_native(self, fake_config, capsys):
+        # contextLength is never touched by cmd_suggest (dry-run):
         # the user's manually set value is preserved.
         sub = fake_config / "publisher"
         json_path = self._make_config(
@@ -295,12 +304,15 @@ class TestMatchCascade:
                               "use_unified_kv": False,
                               "json_path": json_path,
                           }]):
-            rt.cmd_configs()
+            result = rt.cmd_suggest()
+        capsys.readouterr()
         with open(json_path, "r", encoding="utf-8") as f:
             data = json.load(f)
         fields = {f["key"]: f["value"] for f in data["load"]["fields"]}
         # contextLength was NOT overwritten — user's value (16384) preserved
         assert fields.get("llm.load.contextLength") == 16384
+        assert len(fields) == 1
+        assert result["shown"] == 1
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -365,11 +377,11 @@ class TestInferNumParallel:
 
 
 # ─────────────────────────────────────────────────────────────────────
-# Integration: cmd_configs end-to-end
+# Integration: cmd_suggest end-to-end
 # ─────────────────────────────────────────────────────────────────────
 
-class TestCmdConfigsIntegration:
-    """End-to-end cmd_configs() with mocked registry + LMS configs."""
+class TestCmdSuggestIntegration:
+    """End-to-end cmd_suggest() with mocked registry + LMS configs."""
 
     def test_skips_models_with_no_match(self, tmp_path):
         # A JSON config that doesn't match any registry entry is skipped
@@ -394,11 +406,13 @@ class TestCmdConfigsIntegration:
                               "json_path": json_path,
                           }]):
             # Should not raise, should not modify the file
-            rt.cmd_configs()
+            result = rt.cmd_suggest()
         with open(json_path, "r", encoding="utf-8") as f:
             data = json.load(f)
         # JSON should be unchanged (no new fields added)
         assert data["load"]["fields"] == []
+        assert result["skipped"] == 1
+        assert result["shown"] == 0
 
 
 # ─────────────────────────────────────────────────────────────────────

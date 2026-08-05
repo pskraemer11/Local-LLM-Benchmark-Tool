@@ -5,8 +5,7 @@ Consolidated tool for model_registry.yaml and LM Studio JSON config maintenance.
 Commands:
   compare       Compare registry vs LMS vs JSON configs (report only)
   add           Add LMS models to registry from piped JSON (lms ls --json | python registry_tool.py add)
-  configs       Write load.fields (contextLength, offloadRatio, numParallelSessions,
-                useUnifiedKvCache) into JSON configs (VRAM-aware formula)
+  suggest       Dry-run: VRAM-based np/UKV/context recommendation (writes NOTHING)
   sync-ctx      Sync context_length from JSON configs into registry (only missing)
   sync-from-configs
                 Sync offload, num_parallel, useUnifiedKvCache from JSON configs
@@ -28,9 +27,15 @@ Commands:
                 python registry_tool.py rm <model-key> [--delete-files] [--yes]
   validate      Check model_registry.yaml consistency: template files exist,
                 Config JSON promptTemplate matches YAML, override overlap,
-                required fields present, etc.
-  sync          Full sync: add → fill-arch → fill-reasoning → configs → sync-ctx →
-                sync-from-configs → fill-ctx → fmt
+                required fields present, registry-vs-config drift, etc.
+  sync          Full sync: add → fill-arch → fill-reasoning → sync-from-configs → fmt
+
+Prinzip (seit 05.08.2026): JSON-Configs sind die Quelle für Laufzeit-Parameter
+(context_length, numParallelSessions, useUnifiedKvCache, offloadRatio) - gesetzt
+über die LMS GUI. Die Registry ist die Sicht. GGUF-Header liefern Architektur-
+Daten (n_layers, hidden_dim, max_context_length). blueprint_definitions.yaml ist
+die Quelle für Systemprompts (wird von assemble_blueprint.py NICHT mehr aus dem
+Code regeneriert). Dieser Code überschreibt keine JSON-Configs mehr.
 """
 
 from __future__ import annotations
@@ -73,8 +78,6 @@ from assemble_blueprint import (
     normalize_model_name, normalize_for_config, find_config_for_registry_key,
     find_all_configs_for_registry_key, find_registry_key_for_config,
     read_lms_configs, _ARCH_REASONING_MAP,
-    classify_registry, create_blueprint_definitions,
-    assemble_prompts, validate_prompts,
 )
 from benchmark_config import (
     BLACKLIST,
@@ -762,14 +765,20 @@ def cmd_add(models: list[dict[str, Any]], interactive: bool = False) -> dict[str
 
 # ── configs command ────────────────────────────────────────────────
 
-def cmd_configs() -> dict[str, Any]:
+def cmd_suggest() -> dict[str, Any]:
+    """Dry-run: compute VRAM-based np/UKV/offload recommendation, write NOTHING.
+
+    The JSON configs are the source of truth (set via LM Studio GUI); this
+    command only shows what the VRAM formula would recommend, so the user can
+    decide manually. max_context_length stays in the registry (from GGUF).
+    """
     reg = load_registry()
     cfgs = read_lms_configs(CONFIG_ROOT)
     registry_key_map = {normalize_model_name(k): k for k, v in reg.items() if isinstance(v, dict)}
     # Sort by descending normalized key length: more specific keys match first
     registry_key_sorted = sorted(registry_key_map.items(), key=lambda x: -len(x[0]))
 
-    updated = skipped = blacklisted = errors = 0
+    shown = skipped = blacklisted = errors = 0
     for cfg in cfgs:
         cn = normalize_model_name(cfg["dir_name"])
         match = None
@@ -797,27 +806,7 @@ def cmd_configs() -> dict[str, Any]:
             blacklisted += 1
             continue
         entry = reg[match]
-        json_path = cfg["json_path"]
         try:
-            with open(json_path, "r", encoding="utf-8-sig") as f:
-                data = json.load(f)
-            load_section = data.setdefault("load", {})
-            fields = load_section.get("fields")
-            if fields is None:
-                fields = []
-                load_section["fields"] = fields
-            fidx = {f.get("key"): i for i, f in enumerate(fields) if isinstance(f, dict)}
-
-            def set_field(key, value):
-                if key in fidx:
-                    fields[fidx[key]]["value"] = value
-                else:
-                    fields.append({"key": key, "value": value})
-                    fidx[key] = len(fields) - 1
-
-            if "offload" in entry:
-                set_field("llm.load.llama.acceleration.offloadRatio", entry["offload"])
-
             # ── Priority-based np/UKV computation (05.08.2026) ──
             # Priority: np=4/UKV=F → np=4/UKV=T → np=2/UKV=T → np=1/UKV=T → np=1/UKV=F
             fs = entry.get("file_size_bytes", 0)
@@ -841,21 +830,20 @@ def cmd_configs() -> dict[str, Any]:
                 min_ctx=_MIN_CONTEXT_LENGTH,
             )
 
-            set_field("llm.load.numParallelSessions", np_new)
-            set_field("llm.load.useUnifiedKvCache", ukv_new)
-
-            # Also update registry entry in-memory for sync-from-configs
-            entry["num_parallel"] = np_new
-            entry["useUnifiedKvCache"] = ukv_new
-
-            with open(json_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-            updated += 1
+            offload = entry.get("offload")
+            print(f"  [SUGGEST] {match}")
+            if offload is not None:
+                print(f"    offload      : {offload} (aus Registry)")
+            print(f"    num_parallel : {np_new} (Empfehlung, VRAM={_USABLE_VRAM_GB} GB)")
+            print(f"    useUnifiedKvCache: {ukv_new} (Empfehlung)")
+            print(f"    context      : {ctx_new} (Empfehlung, min={_MIN_CONTEXT_LENGTH})")
+            print(f"    native ctx   : {native_ctx} (aus GGUF, nicht in Config)")
+            shown += 1
         except (OSError, ValueError, KeyError, TypeError) as e:
-            print(f"  [WARN] cmd_configs Fehler fuer {match}: {e}", file=sys.stderr)
+            print(f"  [WARN] cmd_suggest Fehler fuer {match}: {e}", file=sys.stderr)
             errors += 1
 
-    result = {"updated": updated, "skipped": skipped, "blacklisted": blacklisted, "errors": errors}
+    result = {"shown": shown, "skipped": skipped, "blacklisted": blacklisted, "errors": errors}
     print(json.dumps(result, ensure_ascii=False))
     return result
 
@@ -1549,6 +1537,9 @@ def cmd_validate() -> dict[str, Any]:
         "missing_blueprint": [],
         "registry_no_config": [],
         "reasoning_arch_mismatch": [],
+        "config_context_drift": [],
+        "config_np_ukv_drift": [],
+        "config_context_too_small": [],
     }
 
     # ── Check 1: template: references existent .jinja file ─────────
@@ -1640,6 +1631,76 @@ def cmd_validate() -> dict[str, Any]:
                 f"'{arch_raw}' erwartet '{detected}'"
             )
 
+    # ── Check 8: JSON-Config vs. Registry (Drift) ──────────────────
+    # Die JSON-Configs sind die Quelle (LMS GUI). Registry weicht ab?
+    # context_length: nur WARNEN wenn Config < Registry-Erwartung oder
+    # Context > native max_context_length (dann ist Config inkonsistent).
+    registry_key_map = {normalize_model_name(k): k for k, v in reg.items() if isinstance(v, dict)}
+    registry_key_sorted = sorted(registry_key_map.items(), key=lambda x: -len(x[0]))
+
+    for cfg in cfgs:
+        cn = normalize_model_name(cfg["dir_name"])
+        match = None
+        for rn2, rnk in registry_key_sorted:
+            if cn == rn2:
+                match = rnk
+                break
+        if not match:
+            for rn2, rnk in registry_key_sorted:
+                if cn.startswith(rn2 + '-'):
+                    match = rnk
+                    break
+        if not match:
+            for rn2, rnk in registry_key_sorted:
+                if rn2.endswith('-' + cn):
+                    match = rnk
+                    break
+        if not match:
+            continue
+        entry = reg[match]
+        json_path = Path(cfg["json_path"])
+        try:
+            data = json.loads(json_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        load_fields = {f.get("key"): f.get("value") for f in data.get("load", {}).get("fields", []) if isinstance(f, dict)}
+
+        cfg_ctx = load_fields.get("llm.load.contextLength")
+        cfg_np = load_fields.get("llm.load.numParallelSessions")
+        cfg_ukv = load_fields.get("llm.load.useUnifiedKvCache")
+        cfg_offload = load_fields.get("llm.load.llama.acceleration.offloadRatio")
+
+        # context_length: Config-Wert kleiner als Registry-Erwartung → Altlast?
+        reg_ctx = entry.get("context_length")
+        if isinstance(cfg_ctx, int) and isinstance(reg_ctx, int) and cfg_ctx != reg_ctx:
+            errors["config_context_drift"].append(
+                f"{match}: Config contextLength={cfg_ctx} != Registry context_length={reg_ctx} "
+                f"({cfg['json_path']})"
+            )
+        if isinstance(cfg_ctx, int) and cfg_ctx < _MIN_CONTEXT_LENGTH:
+            errors["config_context_too_small"].append(
+                f"{match}: Config contextLength={cfg_ctx} < MIN_CONTEXT_LENGTH "
+                f"({_MIN_CONTEXT_LENGTH}) - vermutlich Altlast der alten Formel ({cfg['json_path']})"
+            )
+
+        # np/UKV/offload: Registry-Werte nur warnen, wenn sie von der Config abweichen
+        # (die Config ist die Quelle - Registry sollte der Config folgen)
+        if isinstance(cfg_np, int) and entry.get("num_parallel") is not None \
+                and int(entry["num_parallel"]) != cfg_np:
+            errors["config_np_ukv_drift"].append(
+                f"{match}: Registry num_parallel={entry['num_parallel']} != Config {cfg_np}"
+            )
+        if isinstance(cfg_ukv, bool) and entry.get("useUnifiedKvCache") is not None \
+                and bool(entry["useUnifiedKvCache"]) != cfg_ukv:
+            errors["config_np_ukv_drift"].append(
+                f"{match}: Registry useUnifiedKvCache={entry['useUnifiedKvCache']} != Config {cfg_ukv}"
+            )
+        if isinstance(cfg_offload, (int, float)) and entry.get("offload") is not None \
+                and float(entry["offload"]) != float(cfg_offload):
+            errors["config_np_ukv_drift"].append(
+                f"{match}: Registry offload={entry['offload']} != Config {cfg_offload}"
+            )
+
     # ── Report ─────────────────────────────────────────────────────
     total = sum(len(v) for v in errors.values())
     print(f"\n{'=' * 60}")
@@ -1661,7 +1722,12 @@ def cmd_validate() -> dict[str, Any]:
 # ── sync command (full) ────────────────────────────────────────────
 
 def cmd_sync() -> None:
-    """Full sync: add → fill-arch → configs → sync-ctx → sync-from-configs → fill-ctx → fmt"""
+    """Full sync: add → fill-arch → fill-reasoning → sync-from-configs → fmt.
+
+    Nur Registry-Pflege aus unveränderlichen Quellen (GGUF-Header, JSON-Configs).
+    Es wird NIE in JSON-Configs geschrieben (die GUI ist die Quelle) und die
+    Blueprint-YAML wird nicht regeneriert (sie ist die Quelle für assemble).
+    """
     lms = _run_lms_ls()
     reg = load_registry()
     registry_key_map = {normalize_model_name(k): k for k, v in reg.items() if isinstance(v, dict)}
@@ -1688,32 +1754,16 @@ def cmd_sync() -> None:
     print("[fill-reasoning] Fehlende reasoning-Felder aus GGUF-Headern ergänzen ...")
     cmd_fill_reasoning()
 
-    print("[configs] load.fields in JSON-Configs schreiben (inkl. useUnifiedKvCache über VRAM-Formel) ...")
-    cmd_configs()
-
-    print("[sync-ctx] context_length aus JSON-Configs in Registry (nur fehlende) ...")
-    cmd_sync_ctx()
-
     print("[sync-from-configs] offload, num_parallel, useUnifiedKvCache from JSON configs into Registry (skipping context_length) ...")
     cmd_sync_from_configs()
-
-    print("[fill-ctx] Default context_length für fehlende Einträge ...")
-    cmd_fill_ctx()
 
     print("[fmt] Blank lines normalisieren ...")
     cmd_fmt()
 
-    print("[classify] reasoning/capabilities/blueprint/truncation aus Registry ...")
-    classify_registry()
-    create_blueprint_definitions()
-
-    print("[assemble] Prompt in JSON-Configs schreiben ...")
-    assemble_prompts(preview_only=False)
-
-    print("[validate] Prompt-Syntax-Prüfung ...")
-    validate_prompts()
-
     print("[OK] Sync abgeschlossen")
+    print("Hinweis: Blueprint-YAML ist die Quelle (wird nicht regeneriert).")
+    print("  Für Prompts:  python assemble_blueprint.py all")
+    print("  Für Empfehlungen (Dry-run, schreibt nichts): python registry_tool.py suggest")
 
 
 # ── CLI dispatch ──────────────────────────────────────────────────
@@ -1734,7 +1784,7 @@ def _run_menu_cmd(cmd: str) -> None:
     dispatch: dict[str, Callable[[], Any]] = {
         "sync": cmd_sync,
         "validate": cmd_validate,
-        "configs": cmd_configs,
+        "suggest": cmd_suggest,
         "compare": cmd_compare,
         "fmt": cmd_fmt,
         "fix-np": cmd_fix_np,
@@ -1777,9 +1827,9 @@ def _run_menu_cmd(cmd: str) -> None:
 def _interactive_menu() -> None:
     """Show interactive command selection menu when no args given."""
     cmds = [
-        ("sync",      "Full sync: add → fill-arch → fill-reasoning → configs → sync → fmt → classify → assemble → validate"),
-        ("validate",  "Check model_registry.yaml consistency"),
-        ("configs",   "Write offloadRatio, numParallelSessions, useUnifiedKvCache into JSON configs (VRAM-aware)"),
+        ("sync",      "Full sync: add → fill-arch → fill-reasoning → sync-from-configs → fmt"),
+        ("validate",  "Check model_registry.yaml consistency (inkl. Config-Abweichungen)"),
+        ("suggest",   "Dry-run: VRAM-basierte np/UKV/ctx-Empfehlung (schreibt NICHTS)"),
         ("compare",   "Compare registry vs LMS vs JSON configs"),
         ("add",       "Add LMS models to registry (pipe JSON or provide file)"),
         ("fmt",       "Normalize blank lines in registry YAML"),
@@ -1845,8 +1895,8 @@ def main() -> None:
         if not isinstance(models, list):
             models = [models]
         cmd_add(models, interactive=True)
-    elif cmd == "configs":
-        cmd_configs()
+    elif cmd == "suggest":
+        cmd_suggest()
     elif cmd == "sync-ctx":
         cmd_sync_ctx()
     elif cmd == "sync-from-configs":
