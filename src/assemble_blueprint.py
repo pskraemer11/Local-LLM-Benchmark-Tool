@@ -98,6 +98,7 @@ def normalize_for_config(name: str) -> str:
     Like normalize_model_name but also strips:
     - Quantization suffixes (@q4_0, @iq4_nl, etc.)
     - Variant suffixes (-ud, -quat, -imatrix)
+    - Quant/format suffixes in directory names (-mxfp4, -gguf, -q4_0, -q8_0, etc.)
     """
     s = normalize_model_name(name)
     # Strip @quant suffix (e.g. @iq4_nl, @q4_k_s, @q5_0)
@@ -109,6 +110,19 @@ def normalize_for_config(name: str) -> str:
         if s.endswith(suffix):
             s = s[:-len(suffix)]
             break
+    # Strip common quant/format suffixes in directory names
+    for suffix in ("-mxfp4", "-gguf", "-mxpr4", "-q4-0", "-q4-k", "-q5-0", "-q5-k", "-q6-k", "-q8-0", "-q2-k", "-q3-k", "-q1-0"):
+        if s.endswith(suffix):
+            s = s[:-len(suffix)]
+            break
+    # Strip -gguf-* patterns (e.g., -gguf-mxfp4-moe, -gguf-q4-k-m)
+    if "-gguf" in s:
+        idx = s.find("-gguf")
+        s = s[:idx]
+    # Strip -mxfp4-* patterns (e.g., -mxfp4-moe) -> preserve trailing hyphen
+    if "-mxfp4-" in s:
+        idx = s.find("-mxfp4-")
+        s = s[:idx] + "-" + s[idx+len("-mxfp4-"):]
     return s
 
 

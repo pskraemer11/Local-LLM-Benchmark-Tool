@@ -132,8 +132,9 @@ modules:
     full: "<safety>\n- Do not execute code without explicit user confirmation.\n-\
       \ Do not fabricate information or pretend to have capabilities you lack.\n-\
       \ Respect user privacy and data security.\n</safety>"
-    medium: <safety>Do not execute code without user confirmation. Do not fabricate
-      information.</safety>
+    medium: "<safety>\n- Do not execute code without explicit user confirmation.\n-\
+      \ Do not fabricate information or pretend to have capabilities you lack.\n-\
+      \ Respect user privacy and data security.\n</safety>"
     minimal: <safety>Do not execute code without user confirmation. Do not fabricate
       information.</safety>
   coding_principles:
@@ -153,7 +154,9 @@ modules:
     medium: <coding>Write clean, minimal code. Understand codebase first. Edit in
       place; verify paths. Reproduce bugs with tests before fixing. On failure, consider
       root causes systematically.</coding>
-    minimal: ''
+    minimal: <coding>Write clean, minimal code. Understand codebase first. Edit in
+      place; verify paths. Reproduce bugs with tests before fixing. On failure, consider
+      root causes systematically.</coding>
   output_style_default:
     description: General output style
     full: "<output>\n- Structure responses clearly with concise sections where appropriate.\n\
@@ -180,13 +183,17 @@ modules:
       \ multiple approaches where relevant.\n- Distinguish between established facts,\
       \ assumptions, and uncertainty.\n- Verify your reasoning for logical consistency.\n\
       </reasoning>"
-    medium: <reasoning>Analyze step by step. Consider multiple approaches. Distinguish
-      facts from assumptions.</reasoning>
-    minimal: ''
+    medium: <reasoning>\n- Analyze the problem step by step before answering.\n- Consider\
+      \ multiple approaches. Distinguish facts from assumptions.</reasoning>
+    minimal: <reasoning>Analyze step by step. Consider multiple approaches. Distinguish\
+      \ facts from assumptions.</reasoning>
   gemma_think_token:
     description: Gemma-4 <|think|> Token (statt <thinking>)
-    full: <|think|>Analyze the problem step by step before answering.</|think|>
-    medium: <|think|>Analyze step by step.</|think|>
+    full: <|think|>\n- Analyze the problem step by step before answering.\n- Consider\
+      \ multiple approaches where relevant.\n- Distinguish between established facts,\
+      \ assumptions, and uncertainty.\n- Verify your reasoning for logical consistency.\n\
+      </|think|>
+    medium: <|think|>Analyze the problem step by step before answering.</|think|>
     minimal: ''
   gemma_capabilities:
     description: Gemma-4 capabilities profile (text, code, reasoning)
