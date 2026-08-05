@@ -73,6 +73,7 @@ from benchmark_config import (
     USABLE_VRAM_GB as _USABLE_VRAM_GB,
     USE_UNIFIED_KV_CACHE_THRESHOLD_GB as _USE_UNIFIED_KV_CACHE_THRESHOLD_GB,
     LEGACY_MODEL_GB_THRESHOLD_GB as _LEGACY_MODEL_GB_THRESHOLD_GB,
+    MIN_CONTEXT_LENGTH as _MIN_CONTEXT_LENGTH,
 )
 
 
@@ -610,6 +611,50 @@ def _infer_num_parallel(classification: str) -> int:
     return 4 if classification in ("moe", "mtp") else 1
 
 
+def _compute_np_ukv(model_gb: float, kv_per_slot_gb: float, native_ctx: int,
+                     vram_available: float = _USABLE_VRAM_GB,
+                     min_ctx: int = _MIN_CONTEXT_LENGTH) -> tuple[int, bool, int]:
+    """Compute optimal num_parallel and useUnifiedKvCache based on VRAM budget.
+
+    Priority (user-defined, 05.08.2026):
+      1. np=4, UKV=False  →  max GPU parallelism
+      2. np=4, UKV=True   →  save VRAM (np does not scale KV)
+      3. np=2, UKV=True   →  reduce KV overhead further
+      4. np=1, UKV=True   →  minimum parallelism
+      5. np=1, UKV=False  →  last resort (reduce ctx)
+
+    Args:
+        model_gb: Model file size in GB.
+        kv_per_slot_gb: KV-cache cost per slot (nl × hd × 2 × kv_bytes / 1e9).
+        native_ctx: Native max context length from GGUF header.
+        vram_available: Usable VRAM in GB (default: 15.3).
+        min_ctx: Minimum acceptable context length (default: 32768).
+
+    Returns:
+        (num_parallel, use_unified_kv_cache, context_length)
+    """
+    if kv_per_slot_gb <= 0:
+        # No arch data → fallback: np=4, UKV based on model size, native ctx
+        is_ukv = model_gb >= _LEGACY_MODEL_GB_THRESHOLD_GB
+        return 4, is_ukv, native_ctx
+
+    # Estimate max ctx from VRAM (for models without max_context_length in registry)
+    # Use np=1, UKV=True as baseline for max possible ctx
+    max_possible_ctx = int(vram_available / (kv_per_slot_gb / 1e9)) if kv_per_slot_gb > 0 else native_ctx
+    effective_native_ctx = min(native_ctx, max_possible_ctx)
+
+    for np_val, ukv in [(4, False), (4, True), (2, True), (1, True), (1, False)]:
+        np_factor = 1 if ukv else np_val
+        # Max ctx for this np/UKV combination
+        max_ctx_for_config = int(vram_available / (kv_per_slot_gb * np_factor / 1e9))
+        ctx = min(effective_native_ctx, max_ctx_for_config)
+        if ctx >= min_ctx:
+            return np_val, ukv, ctx
+
+    # Fallback: np=1, UKV=False, ctx=min_ctx
+    return 1, False, min_ctx
+
+
 # ── add command ────────────────────────────────────────────────────
 
 def cmd_add(models: list[dict[str, Any]], interactive: bool = False) -> dict[str, Any]:
@@ -675,10 +720,12 @@ def cmd_add(models: list[dict[str, Any]], interactive: bool = False) -> dict[str
         if model_path:
             full_path = str(MODELS_CACHE / model_path)
             if os.path.isfile(full_path):
-                nl, hd, is_reasoning = _read_gguf_arch(full_path)
+                nl, hd, is_reasoning, ctx = _read_gguf_arch(full_path)
                 if nl and hd:
                     entry["n_layers"] = int(nl)
                     entry["hidden_dim"] = int(hd)
+                if ctx is not None:
+                    entry["max_context_length"] = int(ctx)
                 if is_reasoning is not None:
                     entry["reasoning"] = "thinking" if is_reasoning else "instruct"
 
@@ -763,31 +810,47 @@ def cmd_configs() -> dict[str, Any]:
 
             if "offload" in entry:
                 set_field("llm.load.llama.acceleration.offloadRatio", entry["offload"])
-            if "num_parallel" in entry:
-                set_field("llm.load.numParallelSessions", entry["num_parallel"])
 
-            # useUnifiedKvCache decision (uses ctx, but does NOT overwrite contextLength)
+            # ── Priority-based np/UKV computation (05.08.2026) ──
+            # Priority: np=4/UKV=F → np=4/UKV=T → np=2/UKV=T → np=1/UKV=T → np=1/UKV=F
             fs = entry.get("file_size_bytes", 0)
-            np_val = entry.get("num_parallel", 1)
             nl = entry.get("n_layers")
             hd = entry.get("hidden_dim")
-            ctx = entry.get("context_length") or 16384
             kc = entry.get("k_cache", "q8_0")
             vc = entry.get("v_cache", "iq4_nl")
             kv_bytes = _KV_BYTES.get(kc, 1.0) + _KV_BYTES.get(vc, 0.5)
             model_gb = fs / 1_000_000_000 if fs else 0
 
+            kv_per_slot_gb = 0.0
             if nl and hd and model_gb > 0:
-                kv_gb = nl * hd * 2 * kv_bytes * ctx / 1_000_000_000
-                total_gb = model_gb + kv_gb * np_val
-                is_ukv_enabled = bool(total_gb >= _USE_UNIFIED_KV_CACHE_THRESHOLD_GB)
-            elif model_gb > 0:
-                is_ukv_enabled = bool(model_gb >= _LEGACY_MODEL_GB_THRESHOLD_GB)
-            else:
-                is_ukv_enabled = None
+                kv_per_slot_gb = nl * hd * 2 * kv_bytes / 1e9
 
-            if is_ukv_enabled is not None:
-                set_field("llm.load.useUnifiedKvCache", is_ukv_enabled)
+            # native_ctx from GGUF header (registry max_context_length)
+            native_ctx = entry.get("max_context_length") or 262144  # fallback: 256k
+
+            # current_ctx from JSON config (llm.load.contextLength)
+            current_ctx = None
+            for field in fields:
+                if isinstance(field, dict) and field.get("key") == "llm.load.contextLength":
+                    current_ctx = field.get("value")
+                    break
+
+            np_new, ukv_new, ctx_new = _compute_np_ukv(
+                model_gb, kv_per_slot_gb, native_ctx,
+                vram_available=_USABLE_VRAM_GB,
+                min_ctx=_MIN_CONTEXT_LENGTH,
+            )
+
+            # Only update if values changed
+            old_np = entry.get("num_parallel")
+            old_ukv = entry.get("useUnifiedKvCache")
+
+            set_field("llm.load.numParallelSessions", np_new)
+            set_field("llm.load.useUnifiedKvCache", ukv_new)
+
+            # Also update registry entry in-memory for sync-from-configs
+            entry["num_parallel"] = np_new
+            entry["useUnifiedKvCache"] = ukv_new
 
             with open(json_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
@@ -1126,10 +1189,10 @@ def cmd_migrate_keys() -> None:
 
 # ── fill-arch command ──────────────────────────────────────────────
 
-def _read_gguf_arch(model_path: str) -> tuple[Optional[int], Optional[int], Optional[bool]]:
-    """Read n_layers (block_count), hidden_dim (embedding_length) and reasoning-support from a GGUF file header.
+def _read_gguf_arch(model_path: str) -> tuple[Optional[int], Optional[int], Optional[bool], Optional[int]]:
+    """Read n_layers (block_count), hidden_dim (embedding_length), reasoning-support and context_length from a GGUF file header.
 
-    Returns (block_count, embedding_length, is_reasoning) where is_reasoning
+    Returns (block_count, embedding_length, is_reasoning, context_length) where is_reasoning
     is True/False if the chat_template was readable, or None if the GGUF
     header could not be parsed.
     """
@@ -1162,9 +1225,9 @@ def _read_gguf_arch(model_path: str) -> tuple[Optional[int], Optional[int], Opti
     try:
         with open(model_path, "rb") as f:
             if f.read(4) != b"GGUF":
-                return None, None, None
+                return None, None, None, None
             f.read(4 + 8 + 8)  # version, tensor_count, metadata_count
-            block_count = embedding_length = None
+            block_count = embedding_length = context_length = None
             chat_template = None
             for _ in range(10_000):
                 raw = f.read(8)
@@ -1203,19 +1266,19 @@ def _read_gguf_arch(model_path: str) -> tuple[Optional[int], Optional[int], Opti
                     block_count = int(val)
                 elif key.endswith(".embedding_length"):
                     embedding_length = int(val)
+                elif key.endswith(".context_length"):
+                    context_length = int(val)
                 elif key == "tokenizer.chat_template":
                     chat_template = str(val)
-                # Erst abbrechen, wenn ALLE drei Werte gelesen sind: tokenizer.chat_template
-                # steht im GGUF-Header meist NACH block_count/embedding_length. Der fruehe
-                # Abbruch hier hat die Reasoning-Erkennung de facto deaktiviert
-                # (is_reasoning war fast immer False).
-                if block_count is not None and embedding_length is not None and chat_template is not None:
+                # Erst abbrechen, wenn ALLE vier Werte gelesen sind: tokenizer.chat_template
+                # steht im GGUF-Header meist NACH block_count/embedding_length/context_length.
+                if block_count is not None and embedding_length is not None and context_length is not None and chat_template is not None:
                     break
         is_reasoning = _detect_reasoning_from_template(chat_template) if chat_template else False
-        return block_count, embedding_length, is_reasoning
+        return block_count, embedding_length, is_reasoning, context_length
     except (OSError, ValueError, struct.error):
         # GGUF header parse failures (corrupt file, unsupported version, etc.)
-        return None, None, None
+        return None, None, None, None
 
 
 _REASONING_TOKEN_RE = re.compile(
@@ -1311,17 +1374,17 @@ def cmd_fill_arch() -> None:
     print(f"  -> {len(unique)} einzigartige Modelle (von {len(lms_models)} GGUF-Dateien)")
 
     print("[3] GGUF-Header parallel parsen ...")
-    gguf_arch: dict[str, tuple[int, int, bool | None]] = {}
+    gguf_arch: dict[str, tuple[int, int, bool | None, int | None]] = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
         fut_to_base = {pool.submit(_read_gguf_arch, p): b for b, p in unique.items()}
         for i, fut in enumerate(concurrent.futures.as_completed(fut_to_base), 1):
             base = fut_to_base[fut]
-            nl, hd, is_reasoning = fut.result()
+            nl, hd, is_reasoning, ctx = fut.result()
             if nl and hd:
-                gguf_arch[base] = (nl, hd, is_reasoning)
+                gguf_arch[base] = (nl, hd, is_reasoning, ctx)
             if i % 10 == 0:
                 print(f"     ({i}/{len(unique)})")
-    print(f"  -> {len(gguf_arch)} mit n_layers/hidden_dim")
+    print(f"  -> {len(gguf_arch)} mit n_layers/hidden_dim/context_length")
 
     total = len([k for k, v in reg.items() if isinstance(v, dict)])
     updated = skipped_has = skipped_no = 0
@@ -1331,9 +1394,9 @@ def cmd_fill_arch() -> None:
     for key, entry in reg.items():
         if not isinstance(entry, dict):
             continue
-        if entry.get("n_layers") and entry.get("hidden_dim"):
-            skipped_has += 1
-        else:
+
+        # Always try to fill max_context_length (even if n_layers/hidden_dim already set)
+        if entry.get("max_context_length") is None:
             normalized_key = normalize_model_name(key)
             found = gguf_arch.get(normalized_key)
             if not found:
@@ -1344,13 +1407,33 @@ def cmd_fill_arch() -> None:
                     if normalized_key in gk or gk in normalized_key:
                         found = gv
                         break
-            if found:
-                entry["n_layers"] = int(found[0])
-                entry["hidden_dim"] = int(found[1])
-                updated += 1
-            else:
-                skipped_no += 1
-                continue
+            if found and found[3] is not None:
+                entry["max_context_length"] = int(found[3])
+                reasoning_updated += 1  # reuse counter
+
+        if entry.get("n_layers") and entry.get("hidden_dim"):
+            skipped_has += 1
+            continue
+
+        normalized_key = normalize_model_name(key)
+        found = gguf_arch.get(normalized_key)
+        if not found:
+            base = normalized_key.split("@")[0]
+            found = gguf_arch.get(base)
+        if not found:
+            for gk, gv in gguf_arch.items():
+                if normalized_key in gk or gk in normalized_key:
+                    found = gv
+                    break
+        if found:
+            entry["n_layers"] = int(found[0])
+            entry["hidden_dim"] = int(found[1])
+            if found[3] is not None and entry.get("max_context_length") is None:
+                entry["max_context_length"] = int(found[3])
+            updated += 1
+        else:
+            skipped_no += 1
+            continue
 
         # Update reasoning field from GGUF header (skips if already explicitly set)
         if entry.get("reasoning") is None:
@@ -1369,6 +1452,9 @@ def cmd_fill_arch() -> None:
                 reasoning_updated += 1
 
     print(f"[OK] fill-arch: {updated} n_layers/hidden_dim gesetzt, {reasoning_updated} reasoning gesetzt, {skipped_has} bereits vorhanden, {skipped_no} kein GGUF-Match ({len(gguf_arch)} GGUF-Dateien ausgewertet)")
+
+    if updated or reasoning_updated:
+        save_registry(reg)
 
 
 # ── fill-reasoning command ──────────────────────────────────────────
@@ -1411,7 +1497,7 @@ def cmd_fill_reasoning() -> None:
         fut_to_base = {pool.submit(_read_gguf_arch, p): b for b, p in unique.items()}
         for i, fut in enumerate(concurrent.futures.as_completed(fut_to_base), 1):
             base = fut_to_base[fut]
-            _, _, is_reasoning = fut.result()
+            _, _, is_reasoning, _ = fut.result()
             if is_reasoning is not None:
                 gguf_reasoning[base] = is_reasoning
             if i % 10 == 0:

@@ -582,8 +582,9 @@ class TestFixNp:
 # GGUF-Reasoning-Erkennung (_read_gguf_arch / _detect_reasoning_from_template)
 # ─────────────────────────────────────────────────────────────────────
 
-def _make_mini_gguf(block_count: int, embedding_length: int, chat_template: str | None) -> bytes:
-    """Synthetischer GGUF-Header: block_count/embedding_length VOR chat_template."""
+def _make_mini_gguf(block_count: int, embedding_length: int, chat_template: str | None,
+                     context_length: int = 8192) -> bytes:
+    """Synthetischer GGUF-Header: block_count/embedding_length/context_length VOR chat_template."""
     import struct
 
     buf = bytearray(b"GGUF")
@@ -592,6 +593,7 @@ def _make_mini_gguf(block_count: int, embedding_length: int, chat_template: str 
     for key, vtype, payload in [
         ("qwen2.block_count", 4, struct.pack("<I", block_count)),
         ("qwen2.embedding_length", 4, struct.pack("<I", embedding_length)),
+        ("qwen2.context_length", 4, struct.pack("<I", context_length)),
     ]:
         kb = key.encode("utf-8")
         kvs.append((kb, vtype, payload))
@@ -612,21 +614,22 @@ class TestReadGgufArchReasoning:
     def test_reasoning_detected_when_template_after_arch(self, tmp_path):
         p = tmp_path / "model.gguf"
         p.write_bytes(_make_mini_gguf(48, 5120, "{% if enable_thinking %}<think>{% endif %}"))
-        nl, hd, is_reasoning = rt._read_gguf_arch(str(p))
+        nl, hd, is_reasoning, ctx = rt._read_gguf_arch(str(p))
         assert nl == 48
         assert hd == 5120
         assert is_reasoning is True
+        assert ctx == 8192
 
     def test_no_template_yields_false(self, tmp_path):
         p = tmp_path / "model.gguf"
         p.write_bytes(_make_mini_gguf(48, 5120, None))
-        nl, hd, is_reasoning = rt._read_gguf_arch(str(p))
-        assert (nl, hd, is_reasoning) == (48, 5120, False)
+        nl, hd, is_reasoning, ctx = rt._read_gguf_arch(str(p))
+        assert (nl, hd, is_reasoning, ctx) == (48, 5120, False, 8192)
 
     def test_corrupt_file_yields_none(self, tmp_path):
         p = tmp_path / "broken.gguf"
         p.write_bytes(b"not a gguf file")
-        assert rt._read_gguf_arch(str(p)) == (None, None, None)
+        assert rt._read_gguf_arch(str(p)) == (None, None, None, None)
 
 
 class TestDetectReasoningFromTemplate:

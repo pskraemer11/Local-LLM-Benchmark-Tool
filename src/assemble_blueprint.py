@@ -25,12 +25,14 @@ import sys
 from pathlib import Path
 from datetime import datetime
 
+from utils.terminal import ok, warn, error
+from benchmark_config import BLACKLIST, GPTOSS_REASONING_EFFORT
+
 # === Pfade ===
 _SRC_DIR = Path(__file__).parent
 PROJECT_ROOT = _SRC_DIR.parent
 sys.path.insert(0, str(_SRC_DIR))
-from utils.terminal import ok, warn, error
-from benchmark_config import BLACKLIST, GPTOSS_REASONING_EFFORT
+
 REGISTRY_PATH = PROJECT_ROOT / "doc-git" / "model_registry.yaml"
 BLUEPRINT_PATH = PROJECT_ROOT / "doc-git" / "blueprint_definitions.yaml"
 CONFIG_ROOT = Path.home() / ".lmstudio" / ".internal" / "user-concrete-model-default-config"
@@ -85,7 +87,7 @@ def normalize_model_name(name: str) -> str:
 
 _VARIANT_SUFFIXES = (
     "-ud",          # Unsloth distilled
-    "-quat",        # Quantization-aware training variant
+    "-qat",         # Quantization-aware training variant: wird "qat" geschrieben, nicht "quat"!
     "-imatrix",     # Importance-matrix quant
 )
 
@@ -423,7 +425,7 @@ def format_capabilities(caps: Any) -> str:
             "coding": "coding",
             "vision": "visual design",
             "audio": "audio processing",
-            "agentic": "agentic tools",
+            "agentic": "agentic tool use",
         }
         human = [labels.get(c, c) for c in caps]
         return ", ".join(human)
@@ -680,7 +682,7 @@ def create_blueprint_definitions() -> None:
             "description": "Coding-spezialisierter Assistent",
             "role": "You are an expert software engineer with strong coding skills.",
             "role_template": "You are {name}, a {arch} model{params_label} by {publisher}, specialized in {capabilities}{type_label}.",
-            "modules": ["safety_block", "coding_principles", "output_style_technical"],
+            "modules": ["coding_principles", "safety_block", "output_style_technical"],
         },
         "reasoning_assistant": {
             "description": "Reasoning/Thinking-Modell (instruct-mode)",
@@ -692,7 +694,7 @@ def create_blueprint_definitions() -> None:
             "description": "Reasoning-Modell mit Coding-Fokus",
             "role": "You are an expert software engineer who analyzes problems step by step.",
             "role_template": "You are {name}, a {arch} model{params_label} by {publisher}, specialized in {capabilities}{type_label}.",
-            "modules": ["thinking_instruction", "safety_block", "coding_principles", "output_style_technical"],
+            "modules": ["thinking_instruction", "coding_principles", "safety_block", "output_style_technical"],
         },
          "gemma_assistant": {
             "description": "Gemma-4 spezifisch (Standard)",
@@ -753,25 +755,25 @@ def create_blueprint_definitions() -> None:
 
     modules = {
         "safety_block": {
-            "description": "Safety-Constraints",
+            "description": "Safety constraints",
             "full": "<safety>\n- Do not execute code without explicit user confirmation.\n- Do not fabricate information or pretend to have capabilities you lack.\n- Respect user privacy and data security.\n</safety>",
             "medium": "<safety>Do not execute code without user confirmation. Do not fabricate information.</safety>",
             "minimal": "",
         },
         "coding_principles": {
-            "description": "Code-Qualitätsregeln",
+            "description": "Code quality rules",
             "full": "<coding>\n\n<code_quality>\n- Write clean, efficient code with minimal comments\n- Comment only where logic is not self-explanatory; avoid redundancy\n- Make minimal changes — no unprompted refactoring\n- Understand the codebase thoroughly before implementing\n- Break extensive new code into smaller units\n</code_quality>\n\n<file_system>\n- Verify file paths; do not assume relative to cwd\n- Edit files in place; never create renamed copies\n- Use sed for global search/replace\n</file_system>\n\n<testing>\n- For bug fixes: write a test that reproduces the issue first\n- For new features: test-driven development where appropriate\n- Consult user if testing infra is missing or costly to set up\n</testing>\n\n<troubleshooting>\n- On repeated failures: list 5-7 possible causes, assess likelihood, address systematically\n- On major obstacles: propose a new plan and seek confirmation\n</troubleshooting>\n\n</coding>",
             "medium": "<coding>Write clean, minimal code. Understand codebase first. Edit in place; verify paths. Reproduce bugs with tests before fixing. On failure, consider root causes systematically.</coding>",
             "minimal": "",
         },
         "output_style_default": {
-            "description": "Allgemeiner Output-Stil",
+            "description": "General output style",
             "full": "<output>\n- Structure responses clearly with concise sections where appropriate.\n- Prefer clarity over verbosity, precision over rhetoric.\n- Respond in the user's language.\n</output>",
             "medium": "<output>Prefer clarity over verbosity. Respond in the user's language.</output>",
             "minimal": "",
         },
         "output_style_technical": {
-            "description": "Technischer Output-Stil",
+            "description": "Technical output style",
             "full": "<output>\n- Provide concrete code examples where useful.\n- Explain design decisions briefly.\n- Include error handling and edge cases.\n- Prefer clarity over verbosity.\n</output>",
             "medium": "<output>Provide code with error handling. Prefer clarity over verbosity.</output>",
             "minimal": "",
@@ -783,7 +785,7 @@ def create_blueprint_definitions() -> None:
             "minimal": f"Reasoning: {GPTOSS_REASONING_EFFORT}",
         },
         "thinking_instruction": {
-            "description": "Chain-of-Thought Anweisung für Reasoning-Modelle",
+            "description": "Chain-of-Thought prompt for reasoning models",
             "full": "<reasoning>\n- Analyze the problem step by step before answering.\n- Consider multiple approaches where relevant.\n- Distinguish between established facts, assumptions, and uncertainty.\n- Verify your reasoning for logical consistency.\n</reasoning>",
             "medium": "<reasoning>Analyze step by step. Consider multiple approaches. Distinguish facts from assumptions.</reasoning>",
             "minimal": "",
@@ -795,7 +797,7 @@ def create_blueprint_definitions() -> None:
             "minimal": "",
         },
         "gemma_capabilities": {
-            "description": "Gemma-4 Fähigkeitsprofil (Text, Code, Reasoning)",
+            "description": "Gemma-4 capabilities profile (text, code, reasoning)",
             "full": "<capabilities>\n- Text generation and conversation\n- Code generation, completion, and debugging\n- Step-by-step reasoning and problem analysis\n- Function calling and structured tool use\n- Long context: up to 256K tokens\n- Multilingual: 140+ languages\n</capabilities>",
             "medium": "<capabilities>Text generation, coding, reasoning, function calling, long context, multilingual.</capabilities>",
             "minimal": "",

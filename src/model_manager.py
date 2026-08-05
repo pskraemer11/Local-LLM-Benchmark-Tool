@@ -300,10 +300,28 @@ def get_available_models(exclude_keywords: Optional[list[str]] = None, registry_
                         and not base_key.lower().endswith(f"@{quant_name.lower()}")
                         else base_key
                     )
+                    if not quant_name and base_key.endswith("@?"):
+                        # LM Studio kann die Quantisierung dieser GGUF-Datei
+                        # nicht parsen (z.B. TQ2_0, ternär) und setzt im
+                        # modelKey '?' als Platzhalter. Quant für die Anzeige
+                        # aus dem GGUF-Dateinamen zurückgewinnen (letztes
+                        # '-' Segment); der Load-Key bleibt LM Studios
+                        # exakter '@?'-Key (in der GUI ladbar).
+                        fn = (item.get("path") or "").replace("\\", "/").rsplit("/", 1)[-1]
+                        if fn.lower().endswith(".gguf"):
+                            stem = fn[:-5]
+                            if "-" in stem:
+                                quant_name = stem.rsplit("-", 1)[-1]
                     display = item.get("displayName", base_key)
                     if quant_name:
                         if "@" in display:
                             display = display.split("@")[0]
+                        else:
+                            # displayName enthält den Quant ggf. als
+                            # Leerzeichen-Variante ("TQ2 0") – entfernen.
+                            space_form = quant_name.replace("_", " ")
+                            if display.endswith(" " + space_form):
+                                display = display[: -len(" " + space_form)]
                         display = f"{display}@{quant_name}"
                     sz_bytes = item.get("sizeBytes", 0) or 0
                     models.append({
@@ -490,19 +508,23 @@ def _is_lmstudio_running() -> bool:
 # But we still validate the character set to fail early on bad data
 # (typos, copy-paste errors, etc.) and to provide a clearer error
 # message than the underlying subprocess errors.
-_VALID_MODEL_KEY_RE = re.compile(r"^[A-Za-z0-9._/\-@:+=#]{1,256}$")
+# '?' ist LM Studios Platzhalter für nicht parsebare Quant-Namen
+# (z.B. TQ2_0, ternär) – der modelKey ist dann z.B. "...@?".
+_VALID_MODEL_KEY_RE = re.compile(r"^[A-Za-z0-9._/\-@:+=#?]{1,256}$")
 
 
 def _validate_model_identifier(model_identifier: str) -> str:
     """Return model_identifier if it contains only safe characters; raise ValueError otherwise.
 
-    Valid characters: ASCII letters/digits, `.`, `_`, `/`, `-`, `@`, `:`, `+`, `=`, `#`.
+    Valid characters: ASCII letters/digits, `.`, `_`, `/`, `-`, `@`, `:`, `+`, `=`, `#`, `?`.
     Max length 256 (longer-than-realistic for any model name on HF).
+    '?' tritt als LM-Studio-Platzhalter in modelKeys auf, deren Quant-Name
+    nicht geparst werden kann (z.B. "ternary-bonsai-27b-stock-mtp@?").
     """
     if not isinstance(model_identifier, str) or not _VALID_MODEL_KEY_RE.match(model_identifier):
         raise ValueError(
             f"Invalid model_identifier: {model_identifier!r}. "
-            f"Allowed: alphanumeric, '.', '_', '/', '-', '@', ':', '+', '=', '#'; max 256 chars."
+            f"Allowed: alphanumeric, '.', '_', '/', '-', '@', ':', '+', '=', '#', '?'; max 256 chars."
         )
     return model_identifier
 

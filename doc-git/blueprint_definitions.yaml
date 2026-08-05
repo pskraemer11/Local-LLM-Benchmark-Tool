@@ -1,5 +1,5 @@
 version: '1.0'
-created: '2026-08-02 17:19:56'
+created: '2026-08-04 16:32:17'
 blueprints:
   default_chat:
     description: Standard Chat-Assistent
@@ -132,7 +132,8 @@ modules:
       \ Respect user privacy and data security.\n</safety>"
     medium: <safety>Do not execute code without user confirmation. Do not fabricate
       information.</safety>
-    minimal: ''
+    minimal: <safety>Do not execute code without user confirmation. Do not fabricate
+      information.</safety>
   coding_principles:
     description: Code-Qualitätsregeln
     full: "<coding>\n\n<code_quality>\n- Write clean, efficient code with minimal\
@@ -157,14 +158,14 @@ modules:
       - Prefer clarity over verbosity, precision over rhetoric.\n- Respond in the\
       \ user's language.\n</output>"
     medium: <output>Prefer clarity over verbosity. Respond in the user's language.</output>
-    minimal: ''
+    minimal: <output>Prefer clarity over verbosity. Respond in the user's language.</output>
   output_style_technical:
     description: Technischer Output-Stil
     full: "<output>\n- Provide concrete code examples where useful.\n- Explain design\
       \ decisions briefly.\n- Include error handling and edge cases.\n- Prefer clarity\
       \ over verbosity.\n</output>"
     medium: <output>Provide code with error handling. Prefer clarity over verbosity.</output>
-    minimal: ''
+    minimal: <output>Provide code with error handling. Prefer clarity over verbosity.</output>
   gptoss_reasoning_level:
     description: "GPT-OSS Reasoning-Level (OpenAI: 'The reasoning level can be set\
       \ in the system prompts, e.g. Reasoning: high')"

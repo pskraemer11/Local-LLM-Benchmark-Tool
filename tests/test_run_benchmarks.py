@@ -345,8 +345,9 @@ class TestLmevalParams:
 
     def test_bonsai_8b_override_manufacturer_recommendation(self):
         # Bonsai-8B-Range: temp 0.5-0.7; wir verwenden 0.6.
+        # Registry: reasoning=thinking → enable_thinking=True → Temp-Floor 0.7.
         params = _get_evaluation_parameters("vinpix/bonsai-8b-llama.cpp", "coding")
-        assert params["temperature"] == 0.6
+        assert params["temperature"] == 0.7
         assert params["top_k"] == 40
 
     def test_qwen3_5_override_includes_top_k(self):

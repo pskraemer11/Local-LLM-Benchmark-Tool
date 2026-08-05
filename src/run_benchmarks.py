@@ -569,6 +569,39 @@ def _get_safe_context(model_identifier: str) -> Optional[int]:
 
     return None
 
+
+def _resolve_num_parallel(model_identifier: str, sample_size: int,
+                          cli_override: Optional[int]) -> int:
+    """Determine num_parallel for a model benchmark run.
+
+    Resolution order:
+      1. Explicit CLI ``--num-parallel N`` (N > 0) → use N
+      2. SampleSize >= 20 → force 4 for all models (batching benefit)
+      3. Registry value (MoE/MTP → 4, Dense → 1)
+      4. Fallback → 1
+    """
+    # 1. Explicit CLI override
+    if cli_override is not None and cli_override > 0:
+        return cli_override
+
+    # 2. SampleSize >= 20 → force parallel for all models
+    if sample_size >= 20:
+        return 4
+
+    # 3. Registry default (MoE/MTP → 4, Dense → 1)
+    registry, rnorm = _load_registry_for_context()
+    from assemble_blueprint import normalize_model_name
+    normalized_key = normalize_model_name(model_identifier)
+    if normalized_key in rnorm:
+        entry = registry[rnorm[normalized_key]]
+        np_val = entry.get("num_parallel")
+        if np_val is not None:
+            return int(np_val)
+
+    # 4. Fallback
+    return 1
+
+
 def _model_family(model_identifier: str) -> str:
     """Extract model family (without publisher prefix) for deduplication."""
     return model_identifier.replace("\\", "/").split("/")[-1].lower()
@@ -889,14 +922,14 @@ def _ensure_model_still_loaded(model_identifier: str, model_load_key: str, bench
 
 
 # Returns: dict with pipeline="custom", score (0-1).
-def run_custom_benchmark(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_size: int = 5, seed: Optional[int] = None, is_structured_output_disabled: bool = False, should_keep_response: bool = False) -> Optional[PipelineResult]:
+def run_custom_benchmark(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_size: int = 5, seed: Optional[int] = None, is_structured_output_disabled: bool = False, should_keep_response: bool = False, num_parallel: int = 1) -> Optional[PipelineResult]:
     model_identifier = model_info["key"]
     model_display = model_info["display"]
     fp = os.path.join(DATA_DIR, bench["file"])
     if not os.path.exists(fp):
         print(f"  [WARN] Missing: {fp}")
         return None
-    print(f"\n  >>> Custom: {bench['name']} / {model_display}")
+    print(f"\n{'=' * 60}\n  >>> Custom: {bench['name']} / {model_display}")
     api_model = model_info.get("_api_model") or model_identifier
     cmd = [
         sys.executable, CUSTOM_BENCHMARK_SCRIPT,
@@ -906,13 +939,16 @@ def run_custom_benchmark(model_info: AvailableModelInfo, bench: BenchmarkDef, sa
         "--sample-size", str(sample_size),
         "--benchmark", bench["name"],
     ]
+    if num_parallel > 1:
+        cmd.extend(["--num-parallel", str(num_parallel)])
     if seed is not None:
         cmd.extend(["--seed", str(seed)])
     # Qwen3.5 compatibility: enable systemless prompt embedding
     if _is_qwen3_5_model(model_identifier):
         cmd.append("--qwen-prompt")
     # Thinking mode only when --thinking flag is set (math default now False).
-    # Gemma models have enable_thinking=False (thinking disturbs coding benchmarks).
+    # Gemma models are excluded from the --thinking flag: they get
+    # enable_thinking=True via the registry (reasoning: thinking) already.
     if IS_THINKING_ENABLED and _is_reasoning_model(model_identifier) and not _is_gemma_model(model_identifier):
         cmd.append("--thinking")
     # Pre-emptive --no-structured-output for reasoning and Mamba models
@@ -929,7 +965,14 @@ def run_custom_benchmark(model_info: AvailableModelInfo, bench: BenchmarkDef, sa
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=PIPELINE_TIMEOUTS["custom_subprocess"],
                             encoding="utf-8", errors="replace")
     elapsed = time.time() - t0
-    output = result.stdout[-2000:] if result.stdout else ""
+    # Print full subprocess output. Truncation would slice mid-line and
+    # corrupt the header (e.g. "Subsampling:" -> "pling:"), so only trim
+    # very long outputs and always keep head (banner) + tail (score).
+    full_output = result.stdout or ""
+    if len(full_output) > 12000:
+        output = full_output[:800] + "\n  ...[output truncated]...\n" + full_output[-12000:]
+    else:
+        output = full_output
     stderr_text = result.stderr or ""
     if output.strip():
         print(output)
@@ -943,7 +986,8 @@ def run_custom_benchmark(model_info: AvailableModelInfo, bench: BenchmarkDef, sa
     if not is_structured_output_disabled and "[CHANNEL-ERROR]" in (result.stdout or ""):
         print(f"  [INFO] Channel-Error detected – retrying with --no-structured-output")
         return run_custom_benchmark(model_info, bench, sample_size=sample_size,
-                                   seed=seed, is_structured_output_disabled=True)
+                                   seed=seed, is_structured_output_disabled=True,
+                                   should_keep_response=should_keep_response, num_parallel=num_parallel)
     if result.returncode != 0:
         print(f"  [ERROR] Returncode {result.returncode}")
         print(stderr_text[-500:])
@@ -1515,6 +1559,7 @@ RUN_SPEC_PARSER_DEFAULTS: dict[str, Any] = {
     "sample_size": 5, "model": None, "benchmarks": None, "seed": None,
     "thinking": False, "agentic_mode": "random", "exclude_benchmarks": None,
     "no_structured_output": False, "unload_between": False, "keep_response": False,
+    "num_parallel": None,
 }
 
 
@@ -1650,6 +1695,12 @@ _LAUNCHER_ARG_SPECS: list[tuple[tuple[str, ...], dict[str, Any]]] = [
                        "help": "Force-enable thinking for MATH-500 reasoning models (default: off)"}),
     (("--seed",), {"type": int, "default": None,
                    "help": "Random seed for reproducible task selection (passed to custom benchmarks)"}),
+    (("--num-parallel",), {"type": int, "default": None,
+                           "help": "Parallel worker threads for custom benchmarks (DS1000/CoderEval), "
+                                   "uses LM Studio multi-slot serving. "
+                                   "Auto: registry value (MoE/MTP=4, Dense=1); "
+                                   "forced to 4 for all models when SampleSize >= 20. "
+                                   "Explicit value overrides auto."}),
     (("--agentic-mode",), {"type": str, "default": "random", "choices": ["random", "safety"],
                            "help": "Agentic scenario selection: 'random' (all 69) or 'safety' (13 Category-K)"}),
     (("--exclude-benchmarks", "-x"), {"type": str, "default": None,
@@ -1915,9 +1966,14 @@ def _run_benchmarks_for_model(model_info: AvailableModelInfo, benchmarks: list[B
                 result = run_lmeval(model_info, bench, limit=per_limit,
                                     is_reasoning_model=is_reasoning_model)
             else:
+                np = _resolve_num_parallel(model_load_key, args.sample_size,
+                                          getattr(args, "num_parallel", None))
+                if np > 1:
+                    print(f"  [PARALLEL] num_parallel={np} (SS={args.sample_size})")
                 result = run_custom_benchmark(model_info, bench, sample_size=args.sample_size,
                                               seed=args.seed, is_structured_output_disabled=args.no_structured_output,
-                                              should_keep_response=args.keep_response)
+                                              should_keep_response=args.keep_response,
+                                              num_parallel=np)
 
             if result:
                 model_results.append(result)

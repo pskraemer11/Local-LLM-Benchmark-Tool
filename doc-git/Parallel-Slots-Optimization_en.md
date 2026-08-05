@@ -34,6 +34,24 @@ For **sequential batch jobs** (e.g. benchmarks, one request after another), the 
 np=4 is **2.5× faster** on MoE because batching 4 tokens utilizes the GPU better.
 LCP cache reuse is irrelevant for MoE anyway.
 
+### Measurement MoE: Granite / Mellum2 / LFM2 – np=1 vs np=4 (04.08.2026)
+
+Three MoE models benchmarked with DS1000, SampleSize=20:
+
+| Model                                  | Type       | np=1     | np=4     | Speedup | Score Δ       |
+|----------------------------------------|------------|----------|----------|---------|---------------|
+| Granite-4.0-h-tiny@Q8_0               | Dense-like | 90s      | 27s      | **3.33×** | 20% → 65%   |
+| Mellum2-12B-a2.5B-thinking_moe@Q4_K_M | Thinking   | 1530s    | 1301s    | **1.18×** | 30% → 35%   |
+| LFM2-24B-a2b_moe                      | Standard   | 80s      | 27s      | **2.96×** | 15% → 25%   |
+
+**Key findings:**
+- Granite and LFM2 show **2.9–3.3× speedup** with np=4 — significant throughput gain
+- Mellum2 (Thinking model) shows only **1.18× speedup** — generates ~99% thinking tokens,
+  so each request produces far more tokens, limiting parallel throughput
+- All three models also show **score improvement** with np=4 — batching may improve
+  inference quality through better GPU utilization
+- Server logs confirm `n_slots=4` and all slots active simultaneously
+
 ## Mechanism
 
 ### KV-Cache & Slots
@@ -140,6 +158,7 @@ With np=4 and benchmarks, a significant **progressive slowdown** was observed:
 
 1. **Dense models**: **np=1** – no LCP benefit on benchmarks, but minimal KV-Cache VRAM
 2. **MoE models**: **np=2–4**, depending on available VRAM – batching advantage remains, but watch VRAM limits
+3. **SampleSize ≥ 20**: All models forced to **np=4** automatically (see Automatic Configuration above)
 
 ### Context Length vs np
 
@@ -161,34 +180,64 @@ Example for a 16 GB VRAM GPU (approximate values, depends on model size and KV q
 | 2   | ~50 % of np=1 values                 |
 | 4   | ~25 % of np=1 values                 |
 
-## useUnifiedKvCache – VRAM Formula
+## useUnifiedKvCache & num_parallel – Priority-Based Algorithm (05.08.2026)
 
-As of 17.07.2026, `useUnifiedKvCache` (JSON field `llm.load.useUnifiedKvCache`) is no longer set via a blanket `<9 GB` heuristic, but through an **architecture-aware VRAM estimate**:
+As of 05.08.2026, `num_parallel` and `useUnifiedKvCache` are computed by `_compute_np_ukv()`
+in `registry_tool.py` using a priority-based algorithm:
 
-```
-model_gb     = file_size_bytes / 1_000_000_000
-kv_bytes     = bytes_K(k_cache) + bytes_V(v_cache)    # Default: 1.0 + 0.5 = 1.5
-kv_gb        = n_layers × hidden_dim × 2 × kv_bytes × context_length / 1e9
-total_gb     = model_gb + kv_gb × num_parallel
-```
+### Priority Order
 
-| Condition                                   | useUnifiedKvCache | Reason                             |
-|---------------------------------------------|:------------------:|------------------------------------|
-| `total_gb < 14.0`                           | `false` (OFF)      | Enough VRAM for separate caches    |
-| `total_gb ≥ 14.0`                           | `true` (ON)        | VRAM shortage, shared cache        |
-| No architecture data + `model_gb ≥ 9.0`     | `true` (ON)        | Old heuristic (fallback)           |
-| No architecture data + `model_gb < 9.0`     | `false` (OFF)      | Old heuristic (fallback)           |
-| np = 1                                      | `false` (OFF)      | Only one slot, no shared cache needed |
+| Priority | num_parallel | useUnifiedKvCache | Reason |
+|----------|-------------|-------------------|--------|
+| 1 | 4 | False | Max GPU parallelism, separate KV caches |
+| 2 | 4 | True | Save VRAM (unified KV, np does not scale) |
+| 3 | 2 | True | Reduce KV overhead further |
+| 4 | 1 | True | Minimum parallelism |
+| 5 | 1 | False | Last resort (reduce ctx) |
 
-**Source of architecture data:** `n_layers` and `hidden_dim` are automatically read from the GGUF header when adding new models (`registry_tool.py add`) using `block_count` and `embedding_length` respectively. The header reader takes ~1ms per file (unlike `GGUFReader` from the gguf package, which memory-maps the entire ~12GB file).
+### VRAM Budget
+
+- **Usable VRAM:** 15.3 GB (16 GB - 0.7 GB reserve)
+- **Min context length:** 32768 tokens
+
+### Architecture Data
+
+- **Source:** GGUF header (read by `_read_gguf_arch()`)
+- **Fields:** `n_layers` (block_count), `hidden_dim` (embedding_length), `max_context_length`
+- **Fallback:** If no GGUF data, model size heuristic is used
+
+### Key Changes from Previous Version
+
+1. **All models (MoE AND Dense) get np=4** when possible — VRAM is the limit, not architecture
+2. **Context length is NOT overwritten** in JSON configs — manual GUI settings are authoritative
+3. **GGUF header is source of truth** for `max_context_length` (not registry fallbacks)
+4. **Priority-based** instead of threshold-based (always tries np=4 first)
 
 ## Automatic Configuration
 
-The JSON configs in `user-concrete-model-default-config` have been corrected by script:
-MoE models have `numParallelSessions=4`, Dense models `=1`.
+### Model loading (JSON configs)
 
-**Note:** The automatic configuration does not account for benchmark special cases.
-Per model, `num_parallel` can be overridden in the registry (`model_registry.yaml`).
+The JSON configs in `user-concrete-model-default-config` are updated by `registry_tool.py configs`:
+- **np and UKV** are computed from VRAM budget and architecture (priority-based algorithm)
+- **Context length** is NOT modified — manual GUI settings are preserved
+
+### Benchmark sending (`run_benchmarks.py`)
+
+`num_parallel` is auto-resolved per model at runtime (`_resolve_num_parallel()`):
+
+| Priority | Condition | num_parallel |
+|----------|-----------|-------------|
+| 1 | Explicit `--num-parallel N` | N (user override) |
+| 2 | SampleSize ≥ 20 | **4 for all models** |
+| 3 | Registry value | 4 (all models, MoE and Dense) |
+| 4 | Fallback | 1 |
+
+**Rationale for SS ≥ 20 override:** At larger sample sizes, the threading overhead
+amortizes and batching provides measurable speedup (1.85× for GLM-4.7-Flash, see
+A/B doc). At SS < 5, overhead dominates — use registry default.
+
+**CLI override always wins:** `--num-parallel 1` on SS=100 forces sequential;
+`--num-parallel 4` on SS=5 forces parallel for any model.
 
 ## Reproducible Prompt Selection (parallel_ab, since 02.08.)
 

@@ -356,8 +356,10 @@ def write_accumulative_summary(results: list[dict], model_info: dict,
     model_info: dict with key, display
     """
     ts = _now_ts()
-    safe_key = model_info["key"].replace("/", "_").replace("\\", "_")
-    short = safe_key[:50] if len(safe_key) > 50 else safe_key
+    # _safe_slice ersetzt auch '?' – LM Studios Platzhalter für nicht
+    # parsebare Quant-Namen (z.B. "...@?") – '?' ist in Windows-Dateinamen
+    # illegal und würde hier sonst eine OSError werfen.
+    short = _safe_slice(model_info["key"], 50)
     d = _results_dir(base_dir)
     path = os.path.join(d, f"modell_{ts}_{short}.csv")
     iso = _now_iso()

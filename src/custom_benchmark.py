@@ -1824,7 +1824,7 @@ def get_task_type(benchmark_file: str) -> str:
     return mapping.get(benchmark_file, "unknown")
 
 
-def benchmark_model(model_info: Any, tasks: list[dict[str, Any]], task_type: str, benchmark_name: str, monitor: Monitor, is_quiet_mode: bool = False) -> tuple[list[dict[str, Any]], Optional[float], float, float, dict[str, Any]]:
+def benchmark_model(model_info: Any, tasks: list[dict[str, Any]], task_type: str, benchmark_name: str, monitor: Monitor, is_quiet_mode: bool = False, num_parallel: int = 1) -> tuple[list[dict[str, Any]], Optional[float], float, float, dict[str, Any]]:
     """Run all tasks of one benchmark against one model.
 
     Iterates the tasks with retries on API errors (Channel-Error markers
@@ -1832,6 +1832,12 @@ def benchmark_model(model_info: Any, tasks: list[dict[str, Any]], task_type: str
     thread and MetricsCollector, prints per-task progress, and returns
     (task_results, avg_score, avg_latency, avg_tps, collector_summary).
     "Average score: XX%" is always printed so the launcher can parse it.
+
+    num_parallel > 1: tasks run in a ThreadPoolExecutor so LM Studio can
+    serve them on multiple slots simultaneously (verified: MoE/MTP models
+    load with n_slots=4, see Server-Log 04.08.2026). Result order is
+    preserved; the monitor samples one peak window over the whole batch
+    (per-task peaks are meaningless with overlapping requests).
     """
     is_dict = isinstance(model_info, dict)
     display_name = model_info["display"] if is_dict else model_info
@@ -1840,28 +1846,33 @@ def benchmark_model(model_info: Any, tasks: list[dict[str, Any]], task_type: str
     api_model = model_info.get("_api_model") if is_dict else model_identifier
     benchmark_category = get_benchmark_category(benchmark_name)
     model_config = _get_model_config(model_identifier, benchmark_category=benchmark_category, is_thinking_enabled=IS_THINKING_MODE)
-    print(f"\n{'=' * 60}")
-    print(f"  Benchmark: {benchmark_name} ({benchmark_category})")
+    print(f"\n  Benchmark: {benchmark_name} ({benchmark_category})")
     print(f"  Model:     {display_name}")
     print(f"  Tasks:     {len(tasks)}")
-    print(f"{'=' * 60}")
+    if num_parallel > 1:
+        print(f"  Parallel:  {num_parallel} Worker (LM Studio Multi-Slot)")
     collector = MetricsCollector()
     collector.start()
     results = []
     def _safe(text: str) -> str:
         """Sanitize a string for safe output (lossy UTF-8 round-trip)."""
         return str(text).encode('utf-8', errors='replace').decode('utf-8')
-    for i, task in enumerate(tasks, 1):
-        collector.maybe_sample()
+    n_tasks = len(tasks)
+    native_identifier = api_model or model_info.get("model_identifier", model_identifier)
+
+    def _run_single(task: dict[str, Any], i: int) -> dict[str, Any]:
+        """Run one task with retries; returns the raw result dict.
+
+        May execute in a worker thread (num_parallel > 1), so it must not
+        touch monitor/collector state.
+        """
         preview = task["prompt"][:70].replace("\n", " ")
-        print(f"\n  [{i}/{len(tasks)}] {preview}...")
-        before = monitor.get_snapshot()
-        monitor.start_sampling()
+        print(f"\n  [{i}/{n_tasks}] {preview}...")
         result = None
         for attempt in range(1, MAX_RETRIES + 1):
             try:
                 result = run_task(task, task_type, model_identifier=model_identifier, api_model=api_model, model_config=model_config,
-                                  native_model_identifier=api_model or model_info.get("model_identifier", model_identifier))
+                                  native_model_identifier=native_identifier)
                 if result is not None and result.get("error_type") is None:
                     break
                 if result is not None and result.get("error_type"):
@@ -1892,10 +1903,12 @@ def benchmark_model(model_info: Any, tasks: list[dict[str, Any]], task_type: str
                         "output_status": "empty", "entry_point_found": None,
                         "response": None,
                     }
-        peak = monitor.stop_sampling()
-        after = monitor.get_snapshot()
+        return result
+
+    def _finalize(result: dict[str, Any], i: int, peak: dict[str, float], before: dict[str, float], after: dict[str, float]) -> None:
+        """Attach index/prompt/resource metrics to one result and print its line."""
         result["task_index"] = i
-        result["task_prompt"] = task["prompt"]
+        result["task_prompt"] = tasks[i - 1]["prompt"]
         for k in ("cpu", "ram", "gpu", "vram"):
             result[f"{k}_before"] = before[k]
             result[f"{k}_during"] = peak.get(k, after[k])
@@ -1925,6 +1938,27 @@ def benchmark_model(model_info: Any, tasks: list[dict[str, Any]], task_type: str
                   f"GPU: {peak.get('gpu', after['gpu']):.0f}% | "
                   f"VRAM: {peak.get('vram', after['vram']):.1f} GB{trunc_mark}")
         results.append(result)
+
+    if num_parallel > 1:
+        from concurrent.futures import ThreadPoolExecutor
+        before = monitor.get_snapshot()
+        monitor.start_sampling()
+        with ThreadPoolExecutor(max_workers=num_parallel, thread_name_prefix="bm-task") as pool:
+            raw_results = list(pool.map(_run_single, tasks, range(1, n_tasks + 1)))
+        peak = monitor.stop_sampling()
+        after = monitor.get_snapshot()
+        for i, result in enumerate(raw_results, 1):
+            collector.maybe_sample()
+            _finalize(result, i, peak, before, after)
+    else:
+        for i, task in enumerate(tasks, 1):
+            collector.maybe_sample()
+            before = monitor.get_snapshot()
+            monitor.start_sampling()
+            result = _run_single(task, i)
+            peak = monitor.stop_sampling()
+            after = monitor.get_snapshot()
+            _finalize(result, i, peak, before, after)
     collector.stop()
     collector_summary = collector.get_summary()
     avg_lat = sum(r["latency"] for r in results) / len(results) if results else 0
@@ -2094,6 +2128,8 @@ def _parse_args() -> tuple[Any, int]:
     _parser = _ap.ArgumentParser(description="Benchmark tool v13 (DS1000 + CoderEval)")
     _parser.add_argument("--sample-size", type=int, default=SAMPLE_SIZE,
                          help=f"Sample size per benchmark (default: {SAMPLE_SIZE})")
+    _parser.add_argument("--num-parallel", type=int, default=1,
+                         help="Parallel worker threads for LM Studio multi-slot serving (default: 1 = sequential)")
     _parser.add_argument("--non-interactive", action="store_true",
                          help="Skip interactive selection, run all benchmarks + models")
     _parser.add_argument("--model-key", type=str, default=None,
@@ -2126,11 +2162,8 @@ def _parse_args() -> tuple[Any, int]:
     random.seed(_seed)
 
     print(f"  Random-Seed: {_seed}")
-    print("=" * 60)
-    print("  LM Studio Benchmark Tool v13")
-    print("  DS1000 + CoderEval")
+    print("  LM Studio Benchmark Tool v13 (DS1000 + CoderEval)")
     print(f"  Subsampling: {_args.sample_size} tasks per benchmark")
-    print("=" * 60)
     print(f"  Python: {sys.version.split()[0]} ({sys.executable})")
     print()
     return _args, _seed
@@ -2209,9 +2242,6 @@ def _run_model_loop(models: list[dict[str, Any]], benchmarks: list[dict[str, Any
         if api_model_override:
             model_info["_api_model"] = api_model_override
         model_results = []
-        print(f"\n{'=' * 60}")
-        print(f"  Model {midx}/{len(models)}: {model_display}")
-        print(f"{'=' * 60}")
         # Model management (load/unload) is initiated ONLY by run_benchmarks.py.
         # We assume that the model is already loaded and ready.
         for bench in benchmarks:
@@ -2233,7 +2263,8 @@ def _run_model_loop(models: list[dict[str, Any]], benchmarks: list[dict[str, Any
             try:
                 res, avg_s, avg_l, avg_t, cs = benchmark_model(
                     model_info, tasks, tt, bench["name"], monitor,
-                    is_quiet_mode=non_interactive
+                    is_quiet_mode=non_interactive,
+                    num_parallel=getattr(args, "num_parallel", 1),
                 )
             except Exception as e:
                 error(f"Benchmark {bench['name']} completely failed: {e}")
