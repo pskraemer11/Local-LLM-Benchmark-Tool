@@ -1,5 +1,5 @@
 version: '1.0'
-created: '2026-08-04 16:32:17'
+created: '2026-08-05 13:00:31'
 blueprints:
   default_chat:
     description: Standard Chat-Assistent
@@ -15,8 +15,8 @@ blueprints:
     role_template: You are {name}, a {arch} model{params_label} by {publisher}, specialized
       in {capabilities}{type_label}.
     modules:
-      - safety_block
       - coding_principles
+      - safety_block
       - output_style_technical
   reasoning_assistant:
     description: Reasoning/Thinking-Modell (instruct-mode)
@@ -35,8 +35,8 @@ blueprints:
       in {capabilities}{type_label}.
     modules:
       - thinking_instruction
-      - safety_block
       - coding_principles
+      - safety_block
       - output_style_technical
   gemma_assistant:
     description: Gemma-4 spezifisch (Standard)
@@ -45,6 +45,7 @@ blueprints:
       for {capabilities}{type_label}.
     modules:
       - gemma_capabilities
+      - coding_principles
       - safety_block
       - output_style_default
     custom_template: true
@@ -56,6 +57,7 @@ blueprints:
     modules:
       - gemma_capabilities
       - gemma_think_token
+      - coding_principles
       - safety_block
       - output_style_default
     custom_template: true
@@ -126,7 +128,7 @@ blueprints:
     modules: []
 modules:
   safety_block:
-    description: Safety-Constraints
+    description: Safety constraints
     full: "<safety>\n- Do not execute code without explicit user confirmation.\n-\
       \ Do not fabricate information or pretend to have capabilities you lack.\n-\
       \ Respect user privacy and data security.\n</safety>"
@@ -135,7 +137,7 @@ modules:
     minimal: <safety>Do not execute code without user confirmation. Do not fabricate
       information.</safety>
   coding_principles:
-    description: Code-Qualitätsregeln
+    description: Code quality rules
     full: "<coding>\n\n<code_quality>\n- Write clean, efficient code with minimal\
       \ comments\n- Comment only where logic is not self-explanatory; avoid redundancy\n\
       - Make minimal changes — no unprompted refactoring\n- Understand the codebase\
@@ -153,14 +155,14 @@ modules:
       root causes systematically.</coding>
     minimal: ''
   output_style_default:
-    description: Allgemeiner Output-Stil
+    description: General output style
     full: "<output>\n- Structure responses clearly with concise sections where appropriate.\n\
       - Prefer clarity over verbosity, precision over rhetoric.\n- Respond in the\
       \ user's language.\n</output>"
     medium: <output>Prefer clarity over verbosity. Respond in the user's language.</output>
     minimal: <output>Prefer clarity over verbosity. Respond in the user's language.</output>
   output_style_technical:
-    description: Technischer Output-Stil
+    description: Technical output style
     full: "<output>\n- Provide concrete code examples where useful.\n- Explain design\
       \ decisions briefly.\n- Include error handling and edge cases.\n- Prefer clarity\
       \ over verbosity.\n</output>"
@@ -173,7 +175,7 @@ modules:
     medium: 'Reasoning: medium'
     minimal: 'Reasoning: medium'
   thinking_instruction:
-    description: Chain-of-Thought Anweisung für Reasoning-Modelle
+    description: Chain-of-Thought prompt for reasoning models
     full: "<reasoning>\n- Analyze the problem step by step before answering.\n- Consider\
       \ multiple approaches where relevant.\n- Distinguish between established facts,\
       \ assumptions, and uncertainty.\n- Verify your reasoning for logical consistency.\n\
@@ -187,7 +189,7 @@ modules:
     medium: <|think|>Analyze step by step.</|think|>
     minimal: ''
   gemma_capabilities:
-    description: Gemma-4 Fähigkeitsprofil (Text, Code, Reasoning)
+    description: Gemma-4 capabilities profile (text, code, reasoning)
     full: "<capabilities>\n- Text generation and conversation\n- Code generation,\
       \ completion, and debugging\n- Step-by-step reasoning and problem analysis\n\
       - Function calling and structured tool use\n- Long context: up to 256K tokens\n\

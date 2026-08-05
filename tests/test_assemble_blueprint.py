@@ -247,12 +247,12 @@ class TestFormatters:
         assert format_publishers([]) == "unknown"
 
     def test_capabilities_text(self):
-        # "text" maps to "test generation"
-        assert "test generation" in format_capabilities("text")
+        # "text" maps to "text generation"
+        assert "text generation" in format_capabilities("text")
 
     def test_capabilities_list(self):
         result = format_capabilities(["text", "coding"])
-        assert "test generation" in result
+        assert "text generation" in result
         assert "coding" in result
 
     def test_capabilities_vision_label(self):

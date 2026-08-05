@@ -415,12 +415,12 @@ def format_publishers(pub_val: Any) -> str:
 def format_capabilities(caps: Any) -> str:
     """Format capabilities (comma-separated string or list) into readable string."""
     if not caps:
-        return "test generation"
+        return "text generation"
     if isinstance(caps, str):
         caps = [c.strip() for c in caps.split(",")]
     if isinstance(caps, list):
         labels = {
-            "text": "test generation",
+            "text": "text generation",
             "coding": "coding",
             "vision": "visual design",
             "audio": "audio processing",
@@ -627,7 +627,9 @@ def classify_registry() -> None:
                 ctx_len = lms_info.get("context_length")
                 break
 
-        truncation = truncation_from_context(ctx_len)
+        # Truncation basiert auf der echten Modellfähigkeit (GGUF max_context_length),
+        # nicht auf der in LM Studio eingestellten Config-ctx (VRAM-bedingt).
+        truncation = truncation_from_context(entry.get("max_context_length") or ctx_len)
 
         # Add new fields (preserving insertion order)
         # Insert before 'notes' if it exists, otherwise at end
@@ -699,14 +701,14 @@ def create_blueprint_definitions() -> None:
             "description": "Gemma-4 spezifisch (Standard)",
             "role": "You are Gemma-4, a helpful AI assistant.",
             "role_template": "You are {name}, a {arch} model{params_label} by {publisher}, optimized for {capabilities}{type_label}.",
-            "modules": ["gemma_capabilities", "safety_block", "output_style_default"],
+            "modules": ["gemma_capabilities", "coding_principles", "safety_block", "output_style_default"],
             "custom_template": True,
         },
         "gemma_reasoning": {
             "description": "Gemma-4 spezifisch (Thinking via <|think|>)",
             "role": "You are Gemma-4, a helpful AI assistant.",
             "role_template": "You are {name}, a {arch} model{params_label} by {publisher}, optimized for {capabilities}{type_label}.",
-            "modules": ["gemma_capabilities", "gemma_think_token", "safety_block", "output_style_default"],
+            "modules": ["gemma_capabilities", "gemma_think_token", "coding_principles", "safety_block", "output_style_default"],
             "custom_template": True,
         },
         "gptoss_reasoning": {
@@ -757,7 +759,7 @@ def create_blueprint_definitions() -> None:
             "description": "Safety constraints",
             "full": "<safety>\n- Do not execute code without explicit user confirmation.\n- Do not fabricate information or pretend to have capabilities you lack.\n- Respect user privacy and data security.\n</safety>",
             "medium": "<safety>Do not execute code without user confirmation. Do not fabricate information.</safety>",
-            "minimal": "",
+            "minimal": "<safety>Do not execute code without user confirmation. Do not fabricate information.</safety>",
         },
         "coding_principles": {
             "description": "Code quality rules",
@@ -769,13 +771,13 @@ def create_blueprint_definitions() -> None:
             "description": "General output style",
             "full": "<output>\n- Structure responses clearly with concise sections where appropriate.\n- Prefer clarity over verbosity, precision over rhetoric.\n- Respond in the user's language.\n</output>",
             "medium": "<output>Prefer clarity over verbosity. Respond in the user's language.</output>",
-            "minimal": "",
+            "minimal": "<output>Prefer clarity over verbosity. Respond in the user's language.</output>",
         },
         "output_style_technical": {
             "description": "Technical output style",
             "full": "<output>\n- Provide concrete code examples where useful.\n- Explain design decisions briefly.\n- Include error handling and edge cases.\n- Prefer clarity over verbosity.\n</output>",
             "medium": "<output>Provide code with error handling. Prefer clarity over verbosity.</output>",
-            "minimal": "",
+            "minimal": "<output>Provide code with error handling. Prefer clarity over verbosity.</output>",
         },
         "gptoss_reasoning_level": {
             "description": "GPT-OSS Reasoning-Level (OpenAI: 'The reasoning level can be set in the system prompts, e.g. Reasoning: high')",
@@ -939,6 +941,16 @@ def assemble_prompts(preview_only: bool = False) -> None:
             if not preview_only:
                 print(f"  [NOT FOUND] {model_name}")
             continue
+
+        # Publisher-Filter: Configs anderer Publisher nicht mit diesem
+        # Registry-Entry ueberschreiben (z.B. verhindert unsloth-Entry,
+        # per Fuzzy-Match die bartowski/google/mradermacher-Configs zu
+        # treffen und mit der unsloth-Rolle zu ueberschreiben).
+        entry_pub = str(entry.get("publisher", "")).lower() if entry.get("publisher") else ""
+        if entry_pub and candidates:
+            pub_match = [c for c in candidates if str(c[0]).lower() == entry_pub]
+            if pub_match:
+                candidates = pub_match
 
         if preview_only:
             old_prompt = candidates[0][1].get("system_prompt", "")
