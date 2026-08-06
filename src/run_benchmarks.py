@@ -750,7 +750,7 @@ def select_benchmarks_interactive() -> Optional[list[dict[str, Any]]]:
         print("  Invalid input.")
 
 
-# Global: Thinking mode for MATH-500 (reasoning models)
+# Global: Thinking mode for reasoning models (all pipelines)
 # Code-Review 2026-07-18 §6.3: This is a module-level global, set once
 # in main() via args.thinking. It is NOT thread-safe (no Lock), but
 # the current launcher runs strictly single-threaded (one model at a
@@ -1753,7 +1753,7 @@ _LAUNCHER_ARG_SPECS: list[tuple[tuple[str, ...], dict[str, Any]]] = [
     (("--benchmarks", "-b"), {"type": str, "default": None,
                               "help": "Benchmark selection: number(s), name(s) or 'all'"}),
     (("--thinking",), {"action": "store_true",
-                       "help": "Force-enable thinking for MATH-500 reasoning models (default: off)"}),
+                       "help": "Force-enable thinking mode for reasoning models on all pipelines (default: off)"}),
     (("--seed",), {"type": int, "default": None,
                    "help": "Random seed for reproducible task selection (passed to custom benchmarks)"}),
     (("--num-parallel",), {"type": int, "default": None,
@@ -1835,7 +1835,7 @@ def _parse_args(argv: Optional[list[str]] = None) -> tuple[Any, str]:
     print(f"  Unified Benchmark Launcher v{_version}")
     print(f"  SampleSize: {args.sample_size}")
     if args.thinking:
-        print("  Thinking mode: ON (MATH-500, reasoning models, force-enabled via --thinking)")
+        print("  Thinking mode: ON (reasoning models, force-enabled via --thinking)")
     print("  Pipelines: Custom (DS1000/CoderEval), EvalPlus, LM-Eval (ARC/HS/TQA/IFEval/M500), Agentic (tool-eval-bench)")
     print("  CSV-Format: csv_writer (; Delimiter, utf-8)")
     print("=" * 60)
