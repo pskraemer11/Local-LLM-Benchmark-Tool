@@ -1694,10 +1694,10 @@ def _hub_model_yaml(entry: dict[str, Any], model_key: str) -> tuple[Path, dict[s
 def _write_repro_issues(reg: dict[str, RegistryEntry], errors: dict[str, list[str]], verbose: bool) -> None:
     """Write doc-git/Review-Artifacts/repro_issues.md: validate errors + hub diffs.
 
-    Repro-Artefakt für den Review: jede Registry-Entscheidung (context_length,
-    max_context_length, arch, reasoning, capabilities) wird gegen die LM Studio
-    Hub model.yaml (metadataOverrides) geprüft; Abweichungen werden als
-    'REPRO-Check' dokumentiert. Existierende Datei wird überschrieben.
+    Repro artifact for the review: every registry decision (context_length,
+    max_context_length, arch, reasoning, capabilities) is checked against the
+    LM Studio Hub model.yaml (metadataOverrides); deviations are documented as
+    'REPRO-Check'. An existing file is overwritten.
     """
     artifacts_dir = PROJECT_ROOT / "doc-git" / "Review-Artifacts"
     artifacts_dir.mkdir(parents=True, exist_ok=True)
@@ -1706,24 +1706,24 @@ def _write_repro_issues(reg: dict[str, RegistryEntry], errors: dict[str, list[st
     lines: list[str] = [
         "# Repro-Issues: model_registry.yaml vs. LM Studio Hub",
         "",
-        "Erzeugt automatisch: " + datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "Generated automatically: " + datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "",
-        "Source of Truth fuer Modell-Fakten sind die GGUF-Dateien (unveraenderlich).",
-        "Die `model_registry.yaml` ist editierbar (python-Programme/manuell) und wird",
-        "hier gegen die Hub-`model.yaml` (`metadataOverrides`) geprueft, die von LM",
-        "Studio mitgeliefert und nirgendwo im Prozess angefasst wird.",
+        "Source of truth for model facts are the GGUF files (immutable).",
+        "The `model_registry.yaml` is editable (python programs/manual) and is",
+        "checked here against the Hub `model.yaml` (`metadataOverrides`), which is",
+        "shipped by LM Studio and never touched anywhere in the process.",
         "",
-        "## Validate-Zusammenfassung",
+        "## Validate summary",
         "",
     ]
     total = sum(len(v) for v in errors.values())
-    lines.append(f"- **Gesamtprobleme (validate):** {total}")
+    lines.append(f"- **Total issues (validate):** {total}")
     for check, items in errors.items():
         lines.append(f"- `{check}`: {len(items)}")
     lines.append("")
 
-    # ── Repro-Checks: Registry vs. Hub ──────────────────────────────
-    lines.append("## Hub-Abweichungen (Registry vs. model.yaml)")
+    # ── Repro checks: registry vs. hub ─────────────────────────────
+    lines.append("## Hub deviations (Registry vs. model.yaml)")
     lines.append("")
     hub_diffs: list[str] = []
     hub_missing: list[str] = []
@@ -1735,11 +1735,11 @@ def _write_repro_issues(reg: dict[str, RegistryEntry], errors: dict[str, list[st
             if entry.get("file_size_bytes"):
                 if "@" in model_key:
                     hub_missing.append(
-                        f"- **{model_key}**: Quant-Variante ohne eigene model.yaml "
-                        f"(Basis-Modell im Hub trägt die Architektur-Infos)"
+                        f"- **{model_key}**: quant variant without its own model.yaml "
+                        f"(base model in hub carries the architecture info)"
                     )
                 else:
-                    hub_missing.append(f"- **{model_key}**: kein Hub-modell.yaml gefunden (Registry hat GGUF-Größe)")
+                    hub_missing.append(f"- **{model_key}**: no hub model.yaml found (registry has GGUF size)")
             continue
         hub_path, hub = found
         mo = hub.get("metadataOverrides") or {}
@@ -1772,27 +1772,27 @@ def _write_repro_issues(reg: dict[str, RegistryEntry], errors: dict[str, list[st
             hub_diffs.append(f"- **{model_key}** ({hub_path.parent.name}):\n" + "\n".join(f"    - {d}" for d in diffs))
 
     if hub_diffs:
-        lines.append(f"{len(hub_diffs)} Registry-Einträge weichen vom Hub ab:")
+        lines.append(f"{len(hub_diffs)} registry entries deviate from the hub:")
         lines.append("")
         lines.extend(hub_diffs)
     else:
-        lines.append("Keine Abweichungen zwischen Registry und Hub model.yaml.")
+        lines.append("No deviations between registry and hub model.yaml.")
     lines.append("")
 
     if hub_missing:
-        lines.append("## Hub-Hinweise (kein model.yaml im lokalen Hub)")
+        lines.append("## Hub notes (no model.yaml in local hub)")
         lines.append("")
         lines.append(
-            f"{len(hub_missing)} Einträge haben keine lokale Hub-model.yaml "
-            "(kein Abgleich moeglich, manuelle GGUF-Pruefung noetig):"
+            f"{len(hub_missing)} entries have no local hub model.yaml "
+            "(no comparison possible, manual GGUF check required):"
         )
         lines.append("")
         lines.extend(hub_missing)
         lines.append("")
 
     out.write_text("\n".join(lines), encoding="utf-8")
-    print(f"\n[REPRO] Artefakt geschrieben: {out}")
-    print(f"[REPRO] {len(hub_diffs)} Hub-Abweichungen, {len(hub_missing)} ohne Hub-model.yaml dokumentiert.")
+    print(f"\n[REPRO] Artifact written: {out}")
+    print(f"[REPRO] {len(hub_diffs)} hub deviations, {len(hub_missing)} without hub model.yaml documented.")
 
 
 def cmd_validate(verbose: bool = False, repro: bool = False) -> dict[str, Any]:

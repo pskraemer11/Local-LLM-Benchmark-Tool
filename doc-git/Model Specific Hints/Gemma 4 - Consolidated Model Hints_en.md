@@ -1,7 +1,7 @@
 # Gemma-4 – Consolidated Model Hints
 
 > Status: 2026-07-29
-> Sources: 8 documents from `doc-git/Modell Specific Hints/`,
+> Sources: 8 documents from `doc-git/Model Specific Hints/`,
 > `doc-git/Jinja-Chat-Templates/`, `doc-git/model_registry.yaml`, `doc-git/Architecture-and-Flow.md`
 
 ---

@@ -214,24 +214,24 @@ out = PROJECT / "doc-git" / "Review-Artifacts" / "gguf_issues.md"
 lines = [
     "# GGUF-Issues: model_registry.yaml vs. GGUF-Header",
     "",
-    "Erzeugt automatisch: " + datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    "Generated automatically: " + datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     "",
-    "Source of Truth: die GGUF-Dateien (unveraenderliche Modell-Fakten). Die",
-    "Registry wird hier gegen die GGUF-Header (n_layers, hidden_dim,",
-    "max_context_length) geprueft.",
+    "Source of truth: the GGUF files (immutable model facts). The",
+    "registry is checked here against the GGUF headers (n_layers, hidden_dim,",
+    "max_context_length).",
     "",
 ]
-lines.append(f"{len(hits)} Registry-Eintraege mit GGUF-Datei abgeglichen.")
+lines.append(f"{len(hits)} registry entries matched against GGUF files.")
 if errors:
-    lines.append(f"{len(errors)} Abweichungen:")
+    lines.append(f"{len(errors)} deviations:")
     lines.append("")
     lines.extend(errors)
 else:
-    lines.append("Keine Abweichungen zwischen Registry und GGUF-Headern.")
+    lines.append("No deviations between registry and GGUF headers.")
 lines.append("")
 out.write_text("\n".join(lines), encoding="utf-8")
-print(f"\n[GGUF] Artefakt geschrieben: {out}")
-print(f"[GGUF] {len(errors)} Abweichungen, {len(hits)} Eintraege geprueft.")
+print(f"\n[GGUF] Artifact written: {out}")
+print(f"[GGUF] {len(errors)} deviations, {len(hits)} entries checked.")
 '@
     $ggufScriptPath = Join-Path $env:TEMP "pre_review_gguf_check.py"
     Set-Content -LiteralPath $ggufScriptPath -Value $ggufScript -Encoding utf8

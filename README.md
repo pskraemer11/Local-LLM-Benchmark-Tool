@@ -8,7 +8,7 @@
 > - ISO/IEC 9126 Review (28.07.): alle 9 Skripte auf 100% Typ-Hints, Terminal-Farben, `GenerationConfig`-Dataclass  
 > - `run_task()` in 4 Helfer refactored, `run_agentic()` mit Live-Fortschritt, `main()` gesplittet  
 > - Chat-Templates: 4 neue Jinja-Overrides (Gemma-4 QAT, Phi-4 Unsloth, GPT-OSS Unsloth)  
-> - 8 Code-Reviews in `doc-git/Reviews/`, 14 Modell-Dokumente in `doc-git/Modell Specific Hints/`  
+> - 8 Code-Reviews in `doc-git/Reviews/`, 14 Modell-Dokumente in `doc-git/Model Specific Hints/`  
 > **Status:** see [`doc-git/Reviews/Code-Review_2026-07-28.md`](./doc-git/Reviews/Code-Review_2026-07-28.md) for the latest ISO/IEC 9126 quality review.
 
 Local benchmark framework for LLMs via LM Studio REST API (OpenAI-compatible). Tests coding, reasoning, knowledge, and agentic capabilities across **4 pipelines** with **9 benchmarks** (MMLU-Pro is archived).
@@ -242,7 +242,7 @@ Benchmarks/
 │   ├── Datasets-17-07-2026.md      # Dataset descriptions
 │   ├── Jinja-Chat-Templates/       # Chat template overrides (Gemma-4, Phi-4, GPT-OSS)
 │   ├── Reviews/                    # ISO/IEC 9126 Code Reviews (8 Reports)
-│   ├── Modell Specific Hints/      # Model-specific documentation (14 files)
+│   ├── Model Specific Hints/      # Model-specific documentation (14 files)
 │   └── PandasEval vs CoderEval - Evaluation Guidebook.md
 └── tests/                          # Pytest tests (520+, 14 files)
 ```

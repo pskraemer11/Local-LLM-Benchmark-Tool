@@ -61,7 +61,7 @@ EXCLUDE_KEYWORDS = BLACKLIST
 # Die Kategorie-Defaults greifen, wenn weder Tabellen-Zelle noch Thinking-Lauf
 # zutrifft. MODEL_TEMP_OVERRIDES und der Knowledge-Floor wurden entfernt
 # (Punkte 3+4, Transparenz-Refactor 05.08.2026).
-# Temperaturen: Recherche 06.08.2026 (doc-git/Temperature Recommondations.md).
+# Temperaturen: Recherche 06.08.2026 (doc-git/Temperature Recommondations_en.md).
 # Instruct-Modelle nutzen Kategorie-Defaults (coding 0.2, knowledge 0.6,
 # agentic 0.6, math 0.7); Reasoning/Thinking-Modelle (im --thinking-Lauf)
 # nutzen BENCHMARK_THINKING_DEFAULTS (pauschal 0.6/0.95).
@@ -349,7 +349,7 @@ MMLU_PRO_SUBSETS = [
 #   MODEL_CATEGORY_SAMPLING > Kategorie-Defaults > Thinking-Defaults
 # Die LMS-JSON-Temperatur wird fuer Benchmarks IGNORIERT (ein Einzelwert pro
 # Modell kann die Kategorie-Differenzierung nicht ausdruecken); sie gilt nur
-# noch fuer die GUI-Nutzung. Quellen: doc-git/Temperature Recommondations.md
+# noch fuer die GUI-Nutzung. Quellen: doc-git/Temperature Recommondations_en.md
 # (Uebersichtstabelle). Fehlende Zellen = Kategorie-Defaults. Keys sind die
 # normalisierten Modellnamen (Prefix-Match, "name"-Key bzw. "key"-Praefix).
 MODEL_CATEGORY_SAMPLING: dict[str, dict[str, tuple[float, float]]] = {
