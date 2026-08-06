@@ -28,6 +28,123 @@ if TYPE_CHECKING:
     from type_defs import ModelConfig
 from utils.terminal import warn
 
+BLACKLIST = [
+    # Embedding-Modelle (separates Projekt embedding-eval/)
+    "embed",
+    "bge-m3",
+    # < 16K native context -> zu klein fuer Coding-Benchmarks
+    "em_german",                # geändert von em_german_13b zu em_german (_leo + 13b, weil RAG-Modelle)
+    "datagemma-rig",
+    "granitelib-rag",
+    # OCR / Vision / Audio
+    "ocr",
+    "vision",
+    "flux",
+    "whisper",
+    "translat",
+    "transcription",
+    "transcribe",
+    "audit",
+    "audio",
+    "vl",           # vl = vision language (i.A.)
+    # Rest
+    "rag",
+    "f2llm",
+]
+
+EXCLUDE_KEYWORDS = BLACKLIST
+
+
+# ── Benchmark-Kategorie-Defaults (Fallback, seit 2026-08-05) ──
+# Seit 2026-08-06 gilt das Sampling-Design (MODEL_CATEGORY_SAMPLING >
+# Kategorie-Defaults; JSON-temp/top_p GUI-only, siehe get_model_config).
+# Die Kategorie-Defaults greifen, wenn weder Tabellen-Zelle noch Thinking-Lauf
+# zutrifft. MODEL_TEMP_OVERRIDES und der Knowledge-Floor wurden entfernt
+# (Punkte 3+4, Transparenz-Refactor 05.08.2026).
+# Temperaturen: Recherche 06.08.2026 (doc-git/Temperature Recommondations.md).
+# Instruct-Modelle nutzen Kategorie-Defaults (coding 0.2, knowledge 0.6,
+# agentic 0.6, math 0.7); Reasoning/Thinking-Modelle (im --thinking-Lauf)
+# nutzen BENCHMARK_THINKING_DEFAULTS (pauschal 0.6/0.95).
+BENCHMARK_CATEGORY_DEFAULTS = {
+    "coding": {
+        "temperature": 0.2,
+        "top_p": 1.0,
+        "max_tokens": 4096,
+        "enable_thinking": False,
+    },
+    "math": {
+        "temperature": 0.7,
+        "top_p": 0.95,
+        "max_tokens": 4096,
+        "enable_thinking": False,
+    },
+    "knowledge": {
+        "temperature": 0.6,
+        "top_p": 1.0,
+        "max_tokens": 4096,
+        "enable_thinking": False,
+    },
+    "agentic": {
+        "temperature": 0.6,
+        "top_p": 0.95,
+        "max_tokens": 4096,
+        "enable_thinking": False,
+    },
+}
+
+# ── Thinking-Defaults (Fallback im --thinking-Lauf) ──
+# Reasoning/Thinking-Modelle pauschal t=0.6 / top_p 0.95 fuer alle
+# Kategorien (offizielle Thinking-Werte: DeepSeek-R1, Qwen3, Qwen3.6,
+# Nemotron-Cascade, Kimi-K2; "DO NOT use greedy"). top_p 1.0-Feld:
+# flat top_p 0.95 wie in der Recherche vorgeschlagen.
+BENCHMARK_THINKING_DEFAULTS = {
+    "temperature": 0.6,
+    "top_p": 0.95,
+    "max_tokens": 4096,
+    "enable_thinking": True,
+}
+
+
+# Reasoning-Muster fuer enable_thinking-Override via --thinking-Flag
+# Ergänzt 2026-08-06: deckt die Registry-Modelle mit reasoning=thinking ab
+# (auch die, bei denen "think" nur eingebettet ist: mirothinker, ...-thinking-…).
+REASONING_PATTERNS = {
+    "acemath",
+    "deepseek",
+    "gemma",
+    "phi-4-reasoning",
+    "ministral",
+    "nemotron",
+    "apriel",
+    "magistral",
+    "gpt-oss",
+    "reasoning",
+    "think",
+    "r1",
+    "rnj",
+    "qwq",
+    "cascade",
+    "cot",
+    "phi-4",
+    "kimi",
+    "mirothinker",
+    "thinking",
+    "glm-4.7",
+    "glm-4.6v",
+    "qwen3.5",
+    "qwen3.6",
+    "qwen3-14b",
+    "qwen3-coder-reap",
+}
+
+# ── gpt-oss: Reasoning-Level / Budget (zentrale Quelle) ──
+# Steuert BOTH Ebenen, damit sie synchron bleiben:
+#   1. LM-Studio-Engine-Config (registry_tool.py patch-reasoning-effort schreibt reasoningEffort/budgetTokens)
+#   2. System-Prompt des gptoss_reasoning-Blueprints (assemble_blueprint.py)
+# OpenAI: "The reasoning level can be set in the system prompts, e.g. 'Reasoning: high'."
+GPTOSS_REASONING_EFFORT = "medium"
+GPTOSS_REASONING_BUDGET = 4096
+
 # Static quantization map - manually maintained.
 # Source: lms ls --json + LM Studio configs + GGUF cache
 # Conflicts resolved: Steckbrief > Config > GGUF-Cache > Filename
@@ -226,86 +343,8 @@ MMLU_PRO_SUBSETS = [
     "mmlu_pro_psychology",
 ]
 
-BLACKLIST = [
-    # Embedding-Modelle (separates Projekt embedding-eval/)
-    "embed",
-    "text-embedding",
-    "bge-m3",
-    "granite-embedding",
-    # < 16K native context -> zu klein fuer Coding-Benchmarks
-    "em_german_13b",
-    "datagemma-rig",
-    "granitelib-rag",
-    # OCR / Vision / Audio
-    "ocr",
-    "vision",
-    "flux",
-    "whisper",
-    "translat",
-    "transcription",
-    "transcribe",
-    "audit",
-    "audio",
-    "vl",
-    # Rest
-    "german",
-    "rag",
-    "f2llm",
-]
 
-EXCLUDE_KEYWORDS = BLACKLIST
-
-
-# ── Benchmark-Kategorie-Defaults (Fallback, seit 2026-08-05) ──
-# Seit 2026-08-06 gilt das Sampling-Design (MODEL_CATEGORY_SAMPLING >
-# Kategorie-Defaults; JSON-temp/top_p GUI-only, siehe get_model_config).
-# Die Kategorie-Defaults greifen, wenn weder Tabellen-Zelle noch Thinking-Lauf
-# zutrifft. MODEL_TEMP_OVERRIDES und der Knowledge-Floor wurden entfernt
-# (Punkte 3+4, Transparenz-Refactor 05.08.2026).
-# Temperaturen: Recherche 06.08.2026 (doc-git/Temperature Recommondations.md).
-# Instruct-Modelle nutzen Kategorie-Defaults (coding 0.2, knowledge 0.6,
-# agentic 0.6, math 0.7); Reasoning/Thinking-Modelle (im --thinking-Lauf)
-# nutzen BENCHMARK_THINKING_DEFAULTS (pauschal 0.6/0.95).
-BENCHMARK_CATEGORY_DEFAULTS = {
-    "coding": {
-        "temperature": 0.2,
-        "top_p": 1.0,
-        "max_tokens": 4096,
-        "enable_thinking": False,
-    },
-    "math": {
-        "temperature": 0.7,
-        "top_p": 0.95,
-        "max_tokens": 4096,
-        "enable_thinking": False,
-    },
-    "knowledge": {
-        "temperature": 0.6,
-        "top_p": 1.0,
-        "max_tokens": 4096,
-        "enable_thinking": False,
-    },
-    "agentic": {
-        "temperature": 0.6,
-        "top_p": 0.95,
-        "max_tokens": 4096,
-        "enable_thinking": False,
-    },
-}
-
-# ── Thinking-Defaults (Fallback im --thinking-Lauf) ──
-# Reasoning/Thinking-Modelle pauschal t=0.6 / top_p 0.95 fuer alle
-# Kategorien (offizielle Thinking-Werte: DeepSeek-R1, Qwen3, Qwen3.6,
-# Nemotron-Cascade, Kimi-K2; "DO NOT use greedy"). top_p 1.0-Feld:
-# flat top_p 0.95 wie in der Recherche vorgeschlagen.
-BENCHMARK_THINKING_DEFAULTS = {
-    "temperature": 0.6,
-    "top_p": 0.95,
-    "max_tokens": 4096,
-    "enable_thinking": True,
-}
-
-# ── Benchmark-Sampling-Tabelle (Modell x Kategorie) ──
+# ── Benchmark-Sampling-Tabelle Temperatur (Modell x Kategorie) ──
 # Hoechste Precedence fuer temperature/top_p im Benchmark (2026-08-06):
 #   MODEL_CATEGORY_SAMPLING > Kategorie-Defaults > Thinking-Defaults
 # Die LMS-JSON-Temperatur wird fuer Benchmarks IGNORIERT (ein Einzelwert pro
@@ -482,13 +521,6 @@ MODEL_CATEGORY_SAMPLING: dict[str, dict[str, tuple[float, float]]] = {
     },
 }
 
-# ── gpt-oss: Reasoning-Level / Budget (zentrale Quelle) ──
-# Steuert BOTH Ebenen, damit sie synchron bleiben:
-#   1. LM-Studio-Engine-Config (registry_tool.py patch-reasoning-effort schreibt reasoningEffort/budgetTokens)
-#   2. System-Prompt des gptoss_reasoning-Blueprints (assemble_blueprint.py)
-# OpenAI: "The reasoning level can be set in the system prompts, e.g. 'Reasoning: high'."
-GPTOSS_REASONING_EFFORT = "medium"
-GPTOSS_REASONING_BUDGET = 4096
 
 # ── LM Studio JSON-Configs: GUI-Quelle fuer Generations-Parameter ──
 # Die LMS-GUI speichert ihre Einstellungen pro Modell als JSON-Config unter
@@ -712,38 +744,6 @@ def _lms_params_from_entry(entry: dict[str, Any]) -> dict[str, Any] | None:
 
     return out if out else None
 
-
-# Reasoning-Muster fuer enable_thinking-Override via --thinking-Flag
-# Ergänzt 2026-08-06: deckt die Registry-Modelle mit reasoning=thinking ab
-# (auch die, bei denen "think" nur eingebettet ist: mirothinker, ...-thinking-…).
-REASONING_PATTERNS = {
-    "acemath",
-    "deepseek",
-    "gemma",
-    "phi-4-reasoning",
-    "ministral",
-    "nemotron",
-    "apriel",
-    "magistral",
-    "gpt-oss",
-    "reasoning",
-    "think",
-    "r1",
-    "rnj",
-    "qwq",
-    "cascade",
-    "cot",
-    "phi-4",
-    "kimi",
-    "mirothinker",
-    "thinking",
-    "glm-4.7",
-    "glm-4.6v",
-    "qwen3.5",
-    "qwen3.6",
-    "qwen3-14b",
-    "qwen3-coder-reap",
-}
 
 
 def _word_boundary_match(pattern: str, text: str) -> bool:
