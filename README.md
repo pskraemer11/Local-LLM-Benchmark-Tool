@@ -21,6 +21,8 @@ The same applies to KV-cache: either heavily quantized and/or limited context le
 
 This test suite makes it possible to find the best models and quantizations for a given piece of hardware.
 
+**Practical rule (16 GB VRAM):** Models with ≥12 GB weights require `useUnifiedKvCache=true` when running with 4 parallel slots (np=4) — otherwise they slow down dramatically.
+
 Over 50 LLM models were tested on an HP Omen gaming PC with an NVIDIA RTX 5070 Ti (see a sample of results below).
 
 ## Features
