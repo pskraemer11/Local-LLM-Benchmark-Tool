@@ -58,10 +58,12 @@ import struct
 import subprocess
 import sys
 import time
-from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 import psutil
 
@@ -71,7 +73,8 @@ _SRC_DIR = Path(__file__).resolve().parent
 # on sys.path, not `src/`). Fix for Code-Review_2026-08-03.md F4.
 sys.path.insert(0, str(_SRC_DIR))
 
-from type_defs import RegistryEntry
+if TYPE_CHECKING:
+    from type_defs import RegistryEntry
 
 PROJECT_ROOT = _SRC_DIR.parent
 REGISTRY_PATH = PROJECT_ROOT / "doc-git" / "model_registry.yaml"
@@ -113,7 +116,7 @@ from benchmark_config import (
     USABLE_VRAM_GB as _USABLE_VRAM_GB,
 )
 from benchmark_config import (
-    USE_UNIFIED_KV_CACHE_THRESHOLD_GB as _USE_UNIFIED_KV_CACHE_THRESHOLD_GB,
+    USE_UNIFIED_KV_CACHE_THRESHOLD_GB as _USE_UNIFIED_KV_CACHE_THRESHOLD_GB,  # noqa: F401 - re-export for tests
 )
 
 # ── I/O helpers ────────────────────────────────────────────────────
@@ -122,7 +125,7 @@ from benchmark_config import (
 def load_registry(path: Path | None = None) -> dict[str, RegistryEntry]:
     if path is None:
         path = REGISTRY_PATH
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         return y.load(f) or {}
 
 
@@ -144,7 +147,7 @@ def save_registry(reg: dict[str, Any], path: Path | None = None) -> None:
 
 
 def load_lms_json(path: str | Path) -> list[Any]:
-    with open(path, "r", encoding="utf-8-sig") as f:
+    with open(path, encoding="utf-8-sig") as f:
         return json.load(f)
 
 
@@ -160,7 +163,7 @@ def _run_lms_ls() -> list[dict[str, Any]]:
     except subprocess.TimeoutExpired:
         stderr = "lms ls timed out"
 
-    print(f"[INFO] lms ls fehlgeschlagen ({stderr}) – versuche Server-Start...")
+    print(f"[INFO] lms ls fehlgeschlagen ({stderr}) - versuche Server-Start...")
     try:
         from model_manager import _is_lmstudio_running
 
@@ -181,7 +184,7 @@ def _run_lms_ls() -> list[dict[str, Any]]:
 
 def _format_blank_lines(path: Path) -> None:
     """Normalize blank lines in YAML: none within entries, one between entries."""
-    with open(path, "r", encoding="utf-8", newline="") as f:
+    with open(path, encoding="utf-8", newline="") as f:
         content = f.read()
     lines = content.splitlines()
 
@@ -454,7 +457,7 @@ def cmd_fix_np() -> None:
     reg = load_registry()
     lms_models = _run_lms_ls()
     if not lms_models:
-        print("[WARN] lms ls lieferte keine Daten – Duplikat-Kollaps übersprungen, nur Phantome werden gelöscht.")
+        print("[WARN] lms ls lieferte keine Daten - Duplikat-Kollaps übersprungen, nur Phantome werden gelöscht.")
 
     # ── build lookup maps from lms ls ──
     lms_path_map: dict[str, str] = {}
@@ -550,7 +553,7 @@ def cmd_fix_np() -> None:
         groups.setdefault(gid, []).append((key, score, idx))
 
     # ── pass 2: collapse duplicates per target, keep best match ──
-    for gid, members in groups.items():
+    for members in groups.values():
         if len(members) < 2:
             continue
         members.sort(key=lambda t: (-t[1], t[2]))
@@ -687,7 +690,7 @@ def _compute_np_ukv(
 
     Args:
         model_gb: Model file size in GB.
-        kv_per_slot_gb: KV-cache cost per slot (nl × hd × 2 × kv_bytes / 1e9).
+        kv_per_slot_gb: KV-cache cost per slot (nl x hd x 2 x kv_bytes / 1e9).
         native_ctx: Native max context length from GGUF header.
         vram_available: Usable VRAM in GB (default: 15.3).
         min_ctx: Minimum acceptable context length (default: 32768).
@@ -793,7 +796,7 @@ def cmd_add(models: list[dict[str, Any]], interactive: bool = False) -> dict[str
         if "reasoning" not in entry and interactive:
             print(f"\n  Modell: {mk}")
             print(f"  Architektur: {classification}")
-            print("  Keine GGUF-Datei gefunden – Reasoning-Typ kann nicht automatisch erkannt werden.")
+            print("  Keine GGUF-Datei gefunden - Reasoning-Typ kann nicht automatisch erkannt werden.")
             ans = input("  Reasoning-Typ? [i]nstruct / [t]hinking / [n]one / (d=instruct): ").strip().lower()
             if ans in ("t", "thinking"):
                 entry["reasoning"] = "thinking"
@@ -924,7 +927,7 @@ def cmd_rm(model_key: str, delete_files: bool = False, assume_yes: bool = False)
         print(f"[ERROR] Kein Registry-Eintrag gefunden für: {model_key} (normalisiert: {target})")
         return 1
     if len(matches) > 1:
-        print(f"[ERROR] Mehrdeutig – mehrere Einträge matchen: {matches}")
+        print(f"[ERROR] Mehrdeutig - mehrere Einträge matchen: {matches}")
         return 1
     key = matches[0]
 
@@ -951,7 +954,7 @@ def cmd_rm(model_key: str, delete_files: bool = False, assume_yes: bool = False)
     if not assume_yes:
         answer = input("  Wirklich löschen? [y/N] ").strip().lower()
         if answer != "y":
-            print("[OK] Abgebrochen – nichts gelöscht.")
+            print("[OK] Abgebrochen - nichts gelöscht.")
             return 0
 
     del reg[key]
@@ -1085,7 +1088,7 @@ def _default_ctx_from_size(size_bytes: int, np: int = 1, k_cache: str = "q8_0", 
     if np == 1:
         return base_ctx
 
-    # Scale: np factor × KV-quantization correction
+    # Scale: np factor x KV-quantization correction
     # Baseline: 1.5 B/element (q8_0 + iq4_nl, the most common case)
     kv_ref = 1.5
     kv_actual = _KV_BYTES.get(k_cache, 2.0) + _KV_BYTES.get(v_cache, 2.0)
@@ -1101,7 +1104,7 @@ def _default_ctx_from_size(size_bytes: int, np: int = 1, k_cache: str = "q8_0", 
 def _max_ctx_from_vram(model_gb: float, np_val: int, nl: int, hd: int, kv_bytes: float) -> int:
     """Maximum context length that fits in usable VRAM.
 
-    Formula:  ctx = (usable_vram - model_gb) / (np × nl × hd × 2 × kv_bytes / 1e9)
+    Formula:  ctx = (usable_vram - model_gb) / (np x nl x hd x 2 x kv_bytes / 1e9)
     """
     kv_gb_per_token = np_val * nl * hd * 2 * kv_bytes / 1_000_000_000
     if kv_gb_per_token <= 0:
@@ -1650,8 +1653,154 @@ def cmd_sync_templates() -> None:
 # ── validate command ───────────────────────────────────────────────
 
 
-def cmd_validate() -> dict[str, Any]:
+def _hub_model_yaml(entry: dict[str, Any], model_key: str) -> tuple[Path, dict[str, Any]] | None:
+    """Locate LM Studio Hub model.yaml for a registry entry (publisher/name)."""
+    publisher = str(entry.get("publisher", "")).strip()
+    hub_models = Path.home() / ".lmstudio" / "hub" / "models"
+    if not publisher or not hub_models.is_dir():
+        return None
+    pub_dir = hub_models / publisher
+    if not pub_dir.is_dir():
+        return None
+    name = model_key.split("/", 1)[-1] if "/" in model_key else model_key
+    norm = name.lower().replace("_", "-")
+    reader = YAML(typ="safe")
+    candidates: list[Path] = [pub_dir / name / "model.yaml"]
+    candidates += sorted(d / "model.yaml" for d in pub_dir.iterdir() if d.is_dir() and d.name.lower().replace("_", "-") == norm)
+    seen: set[Path] = set()
+    for cand in candidates:
+        if cand in seen or not cand.is_file():
+            continue
+        seen.add(cand)
+        try:
+            with cand.open(encoding="utf-8") as f:
+                return cand, dict(reader.load(f) or {})
+        except Exception:  # noqa: S112 - kaputte Hub-model.yaml ueberspringen
+            continue
+    for d in sorted(pub_dir.iterdir()):
+        cand = d / "model.yaml"
+        if not cand.is_file():
+            continue
+        try:
+            with cand.open(encoding="utf-8") as f:
+                data = dict(reader.load(f) or {})
+            if str(data.get("model", "")).split("/", 1)[-1] == name:
+                return cand, data
+        except Exception:  # noqa: S112 - kaputte Hub-model.yaml ueberspringen
+            continue
+    return None
+
+
+def _write_repro_issues(reg: dict[str, RegistryEntry], errors: dict[str, list[str]], verbose: bool) -> None:
+    """Write doc-git/Review-Artifacts/repro_issues.md: validate errors + hub diffs.
+
+    Repro-Artefakt für den Review: jede Registry-Entscheidung (context_length,
+    max_context_length, arch, reasoning, capabilities) wird gegen die LM Studio
+    Hub model.yaml (metadataOverrides) geprüft; Abweichungen werden als
+    'REPRO-Check' dokumentiert. Existierende Datei wird überschrieben.
+    """
+    artifacts_dir = PROJECT_ROOT / "doc-git" / "Review-Artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    out = artifacts_dir / "repro_issues.md"
+
+    lines: list[str] = [
+        "# Repro-Issues: model_registry.yaml vs. LM Studio Hub",
+        "",
+        "Erzeugt automatisch: " + datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "",
+        "Source of Truth fuer Modell-Fakten sind die GGUF-Dateien (unveraenderlich).",
+        "Die `model_registry.yaml` ist editierbar (python-Programme/manuell) und wird",
+        "hier gegen die Hub-`model.yaml` (`metadataOverrides`) geprueft, die von LM",
+        "Studio mitgeliefert und nirgendwo im Prozess angefasst wird.",
+        "",
+        "## Validate-Zusammenfassung",
+        "",
+    ]
+    total = sum(len(v) for v in errors.values())
+    lines.append(f"- **Gesamtprobleme (validate):** {total}")
+    for check, items in errors.items():
+        lines.append(f"- `{check}`: {len(items)}")
+    lines.append("")
+
+    # ── Repro-Checks: Registry vs. Hub ──────────────────────────────
+    lines.append("## Hub-Abweichungen (Registry vs. model.yaml)")
+    lines.append("")
+    hub_diffs: list[str] = []
+    hub_missing: list[str] = []
+    for model_key, entry in reg.items():
+        if not isinstance(entry, dict):
+            continue
+        found = _hub_model_yaml(entry, model_key)
+        if found is None:
+            if entry.get("file_size_bytes"):
+                if "@" in model_key:
+                    hub_missing.append(
+                        f"- **{model_key}**: Quant-Variante ohne eigene model.yaml "
+                        f"(Basis-Modell im Hub trägt die Architektur-Infos)"
+                    )
+                else:
+                    hub_missing.append(f"- **{model_key}**: kein Hub-modell.yaml gefunden (Registry hat GGUF-Größe)")
+            continue
+        hub_path, hub = found
+        mo = hub.get("metadataOverrides") or {}
+        archs = mo.get("architectures") or []
+        ctxs = mo.get("contextLengths") or []
+        reason = mo.get("reasoning")
+        diffs: list[str] = []
+        if archs:
+            reg_arch = str(entry.get("arch", ""))
+            archs_l = [str(a).lower() for a in archs]
+            if reg_arch and reg_arch.lower() not in archs_l and reg_arch not in ("dense", "moe"):
+                diffs.append(f"arch: Registry='{reg_arch}' vs Hub={archs}")
+        if ctxs:
+            max_ctx = max(int(c) for c in ctxs if isinstance(c, (int, float)))
+            reg_max = entry.get("max_context_length")
+            reg_ctx = entry.get("context_length")
+            if reg_max is not None and int(reg_max) != max_ctx:
+                diffs.append(f"max_context_length: Registry={reg_max} vs Hub={max_ctx}")
+            if reg_ctx is not None and int(reg_ctx) > max_ctx:
+                diffs.append(f"context_length: Registry={reg_ctx} > Hub-Max={max_ctx}")
+        if reason is not None:
+            reg_reason = str(entry.get("reasoning", "")).lower()
+            hub_reason = str(reason).lower()
+            if reg_reason and hub_reason in ("true", "false"):
+                reg_bool = reg_reason not in ("false", "instruct", "none")
+                hub_bool = hub_reason == "true"
+                if reg_bool != hub_bool:
+                    diffs.append(f"reasoning: Registry='{reg_reason}' vs Hub={reason}")
+        if diffs:
+            hub_diffs.append(f"- **{model_key}** ({hub_path.parent.name}):\n" + "\n".join(f"    - {d}" for d in diffs))
+
+    if hub_diffs:
+        lines.append(f"{len(hub_diffs)} Registry-Einträge weichen vom Hub ab:")
+        lines.append("")
+        lines.extend(hub_diffs)
+    else:
+        lines.append("Keine Abweichungen zwischen Registry und Hub model.yaml.")
+    lines.append("")
+
+    if hub_missing:
+        lines.append("## Hub-Hinweise (kein model.yaml im lokalen Hub)")
+        lines.append("")
+        lines.append(
+            f"{len(hub_missing)} Einträge haben keine lokale Hub-model.yaml "
+            "(kein Abgleich moeglich, manuelle GGUF-Pruefung noetig):"
+        )
+        lines.append("")
+        lines.extend(hub_missing)
+        lines.append("")
+
+    out.write_text("\n".join(lines), encoding="utf-8")
+    print(f"\n[REPRO] Artefakt geschrieben: {out}")
+    print(f"[REPRO] {len(hub_diffs)} Hub-Abweichungen, {len(hub_missing)} ohne Hub-model.yaml dokumentiert.")
+
+
+def cmd_validate(verbose: bool = False, repro: bool = False) -> dict[str, Any]:
     """Validate model_registry.yaml consistency: templates, configs, overrides.
+
+    verbose: zeigt alle Einzelprobleme (statt nur die ersten 10 je Kategorie).
+    repro:   schreibt zusätzlich doc-git/Review-Artifacts/repro_issues.md mit
+             GGUF-Hub-Abweichungen (Registry vs. LM-Studio-Hub model.yaml).
 
     Returns dict with error counts per check category.
     """
@@ -1784,7 +1933,7 @@ def cmd_validate() -> dict[str, Any]:
         json_path = Path(cfg["json_path"])
         try:
             data = json.loads(json_path.read_text(encoding="utf-8"))
-        except Exception:
+        except Exception:  # noqa: S112 - fehlende/kaputte JSON-Configs ueberspringen
             continue
         load_fields = {
             f.get("key"): f.get("value") for f in data.get("load", {}).get("fields", []) if isinstance(f, dict)
@@ -1845,12 +1994,16 @@ def cmd_validate() -> dict[str, Any]:
     for check, items in errors.items():
         if items:
             print(f"\n  ❌ {check} ({len(items)}):")
-            for item in items[:10]:
+            shown = items if verbose else items[:10]
+            for item in shown:
                 print(f"     - {item}")
-            if len(items) > 10:
+            if not verbose and len(items) > 10:
                 print(f"     ... und {len(items) - 10} weitere")
         else:
             print(f"\n  ✅ {check}: 0")
+
+    if repro:
+        _write_repro_issues(reg, errors, verbose)
 
     return errors
 
@@ -1942,7 +2095,7 @@ def cmd_pipeline(mode: str = "status") -> None:
         print("[6] Validierung ...")
         validate_prompts()
 
-    print("[OK] pipeline %s abgeschlossen" % mode)
+    print(f"[OK] pipeline {mode} abgeschlossen")
 
 
 # ── patch-reasoning-effort command ─────────────────────────────────
@@ -1972,7 +2125,7 @@ def find_gptoss_configs() -> list[str]:
         if ".bak" in str(path):
             continue
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 data = json.load(f)
             if "operation" in data and "fields" in data.get("operation", {}):
                 configs.append(str(path))
@@ -1993,7 +2146,7 @@ def _pre_backup_path(path: str) -> str:
 
 def gptoss_patch_config(path: str, dry_run: bool = False) -> tuple[bool, list[str], list[str], str | None]:
     """Gpt-oss-Config patchen. Returns (changed, added_keys, updated_keys, backup_path)."""
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         data = json.load(f)
     missing = gptoss_missing_fields(data)
     present = {f.get("key"): f for f in data.get("operation", {}).get("fields", [])}
@@ -2005,7 +2158,7 @@ def gptoss_patch_config(path: str, dry_run: bool = False) -> tuple[bool, list[st
     if dry_run:
         return True, [m["key"] for m in missing], [f["key"] for f in to_overwrite], None
     backup = _pre_backup_path(path)
-    with open(path, "r", encoding="utf-8") as f_src, open(backup, "w", encoding="utf-8") as f_dst:
+    with open(path, encoding="utf-8") as f_src, open(backup, "w", encoding="utf-8") as f_dst:
         f_dst.write(f_src.read())
     data["operation"]["fields"].extend(missing)
     by_key = {f["key"]: f for f in data["operation"]["fields"]}
@@ -2021,7 +2174,7 @@ def _pre_lock_held_by_live_process() -> int | None:
     if not _PRE_LOCK_PATH.exists():
         return None
     try:
-        with open(_PRE_LOCK_PATH, "r", encoding="utf-8") as f:
+        with open(_PRE_LOCK_PATH, encoding="utf-8") as f:
             pid = int(json.load(f).get("pid", -1))
     except OSError, ValueError, KeyError:
         return None
@@ -2102,7 +2255,7 @@ def cmd_patch_reasoning_effort(
 
 def _print_menu(cmds: list[tuple[str, str]]) -> None:
     print("=" * 60)
-    print("  registry_tool.py – Interactive Menu")
+    print("  registry_tool.py - Interactive Menu")
     print("=" * 60)
     for i, (cmd, desc) in enumerate(cmds, 1):
         print(f"  {i:2d}. {cmd:20s} {desc}")
@@ -2218,7 +2371,7 @@ def main() -> None:
     elif cmd == "add":
         # Read new models JSON from file arg, stdin, or auto-detect via LMS
         if len(sys.argv) > 2:
-            with open(sys.argv[2], "r", encoding="utf-8-sig") as f:
+            with open(sys.argv[2], encoding="utf-8-sig") as f:
                 models = json.load(f)
         elif not sys.stdin.isatty():
             models = json.load(sys.stdin)
@@ -2263,7 +2416,12 @@ def main() -> None:
         assume_yes = "--yes" in sys.argv
         sys.exit(cmd_rm(sys.argv[2], delete_files=delete_files, assume_yes=assume_yes))
     elif cmd == "validate":
-        cmd_validate()
+        flags = set(sys.argv[2:])
+        errors = cmd_validate(
+            verbose="--verbose" in flags,
+            repro="--repro" in flags,
+        )
+        sys.exit(1 if any(errors.values()) else 0)
     elif cmd == "sync-templates":
         cmd_sync_templates()
     elif cmd == "pipeline":

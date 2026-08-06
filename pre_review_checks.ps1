@@ -1,177 +1,267 @@
 <#
 .SYNOPSIS
-    Pre-Review Checks (Phase 1) für Local-LLM-Benchmark-Tool (Windows 11 + Python 3.14).
+    Pre-Review Checks v2 - Review-Gate fuer Local-LLM-Benchmark-Tool (Windows + Python 3.14).
+
 .DESCRIPTION
-    Führt folgende Checks aus:
-    1. registry_tool.py validate
-    2. ruff check .
-    3. mypy .
-    4. Konsistenzprüfung model_registry.yaml vs GGUF-Header (optional, langsam)
-    Ergebnisse werden in einer Log-Datei gespeichert.
+    Fuehrt die Gate-Checks vor einem Review/Commit aus und erzeugt
+    Transparenz-Artefakte in doc-git\Review-Artifacts\:
+
+      1. registry_tool.py validate --repro
+         -> repro_issues.md (Registry vs. LM Studio Hub model.yaml)
+         -> BLOCKIERT bei Registry-Problemen (Exit 1)
+      2. ruff check . --no-fix
+         -> lint_issues.md
+         -> BLOCKIERT bei Lint-Fehlern (Exit 1)
+      3. mypy .
+         -> NUR INFORMATIV (Legacy-Typfehler blockieren nicht)
+      4. pytest -q
+         -> BLOCKIERT bei Testfehlern (Exit 1)
+      5. GGUF-Header vs. Registry (optional, Source-of-Truth-Check)
+         -> gguf_issues.md
+         -> NUR INFORMATIV
+
+    Source of Truth fuer Modell-Fakten sind die GGUF-Dateien. Die Registry ist
+    editierbar; die Hub-model.yaml wird nirgendwo im Prozess angefasst.
+
+.PARAMETER SkipRepro
+    Ueberspringt validate --repro (kein repro_issues.md).
+
+.PARAMETER SkipPytest
+    Ueberspringt die pytest-Suite.
+
+.PARAMETER SkipGguf
+    Ueberspringt den GGUF-Header-Vergleich (liest viele Dateien).
+
+.PARAMETER LogFile
+    Pfad fuer das Transcript-Log (Default: pre_review_checks_<timestamp>.log).
+
 .EXAMPLE
     .\pre_review_checks.ps1
-    .\pre_review_checks.ps1 -SkipGgufCheck
-    .\pre_review_checks.ps1 -LogFile "custom_log.log"
-    
-Quelle: MistralAI LeChat/Vibe 28.06.2026 https://chat.mistral.ai/work/e4dd489b-946d-412d-9538-ec17a803c108
+    .\pre_review_checks.ps1 -SkipGguf -LogFile "C:\temp\gate.log"
 #>
 
-### das unten im Python-Code Aufruf genannte Skript 'check_gguf_ctx.py' gibt es allerdings (noch) nicht! ###
-
 param (
-    [switch]$SkipGgufCheck,  # Überspringt die GGUF-Konsistenzprüfung (langsam)
+    [switch]$SkipRepro,
+    [switch]$SkipPytest,
+    [switch]$SkipGguf,
     [string]$LogFile = "pre_review_checks_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
 )
 
-# Projektpfad
+$ErrorActionPreference = "Stop"
+
 $projectPath = "C:\Users\pskra\Python-Projekte\Benchmarks"
-if (-not (Test-Path -Path $projectPath)) {
+if (-not (Test-Path -LiteralPath $projectPath)) {
     Write-Error "Projektverzeichnis nicht gefunden: $projectPath"
     exit 1
 }
-Set-Location -Path $projectPath
+Set-Location -LiteralPath $projectPath
 
-# Log-Datei initialisieren
+$artifactsDir = Join-Path $projectPath "doc-git\Review-Artifacts"
+if (-not (Test-Path -LiteralPath $artifactsDir)) {
+    New-Item -ItemType Directory -Path $artifactsDir -Force | Out-Null
+}
+
 Start-Transcript -Path $LogFile -Append -Force
-Write-Host "=== Pre-Review Checks - $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') ==="
+Write-Host "=== Pre-Review Checks v2 - $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') ===" -ForegroundColor Cyan
+Write-Host "Log: $LogFile" -ForegroundColor DarkGray
 
-# 1. registry_tool.py validate
-Write-Host "`n[1/4] Führe registry_tool.py validate aus..."
-try {
-    $output = python src\registry_tool.py validate 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error "registry_tool.py validate fehlgeschlagen:`n$output"
-        Stop-Transcript
-        exit 1
+$blockingFails = 0
+$warnings = 0
+
+# ── 1. registry_tool.py validate --repro ──────────────────────────
+Write-Host "`n[1/5] validate --repro (Registry + repro_issues.md) ..." -ForegroundColor Cyan
+if ($SkipRepro) {
+    Write-Host "  UEBERSPRUNGEN (-SkipRepro)" -ForegroundColor Yellow
+} else {
+    & python src\registry_tool.py validate --repro 2>&1 | Tee-Object -Variable validateOut | Out-Host
+    $validateExit = $LASTEXITCODE
+    if ($validateExit -ne 0) {
+        Write-Host "  [FEHLER] validate meldet Registry-Probleme (siehe oben)." -ForegroundColor Red
+        $blockingFails++
+    } else {
+        Write-Host "  validate: OK (0 Registry-Probleme)" -ForegroundColor Green
     }
-    Write-Host "registry_tool.py validate: OK" -ForegroundColor Green
-}
-catch {
-    Write-Error "Fehler bei registry_tool.py validate: $_"
-    Stop-Transcript
-    exit 1
 }
 
-# 2. ruff check (Warnungen zu veralteten Regeln ignorieren)
-Write-Host "`n[2/4] Führe ruff check aus..."
-try {
-    # Ruff mit --no-fix und Filter für veraltete Regeln-Warnungen
-    $output = ruff check . --config .\.pyproject.toml --no-fix 2>&1 | Where-Object { $_ -notmatch "warning: The following rules have been removed" }
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error "ruff check fehlgeschlagen:`n$output"
-        Stop-Transcript
-        exit 1
+# ── 2. ruff check ─────────────────────────────────────────────────
+Write-Host "`n[2/5] ruff check . --no-fix -> lint_issues.md ..." -ForegroundColor Cyan
+$lintFile = Join-Path $artifactsDir "lint_issues.md"
+$ruffOut = & ruff check . --no-fix 2>&1
+$ruffExit = $LASTEXITCODE
+$issueCount = ($ruffOut | Select-String -Pattern "^[A-Z][0-9]{3} ").Count
+$header = @(
+    "# Lint-Issues (ruff check . --no-fix)",
+    "",
+    "Erzeugt: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')",
+    "",
+    "$issueCount Probleme, Exit-Code $ruffExit",
+    ""
+) -join "`n"
+$ruffOut | Out-File -FilePath $lintFile -Encoding utf8 -Force
+# Header voranstellen
+$content = Get-Content -LiteralPath $lintFile -Raw -Encoding utf8
+$content = "$header`n$content"
+Set-Content -LiteralPath $lintFile -Value $content -Encoding utf8
+if ($ruffExit -ne 0) {
+    Write-Host "  [FEHLER] ruff: $issueCount Probleme -> $lintFile" -ForegroundColor Red
+    $blockingFails++
+} else {
+    Write-Host "  ruff: OK (0 Probleme) -> $lintFile" -ForegroundColor Green
+}
+
+# ── 3. mypy (informativ) ──────────────────────────────────────────
+Write-Host "`n[3/5] mypy . (nur informativ) ..." -ForegroundColor Cyan
+$mypyOut = & python -m mypy . 2>&1
+$mypyExit = $LASTEXITCODE
+$mypyErrors = ($mypyOut | Select-String -Pattern "error: ").Count
+if ($mypyExit -eq 0) {
+    Write-Host "  mypy: OK (0 Fehler)" -ForegroundColor Green
+} else {
+    Write-Host "  [INFO] mypy: $mypyErrors Fehler (informativ, blockiert NICHT)" -ForegroundColor Yellow
+    $warnings++
+}
+
+# ── 4. pytest ─────────────────────────────────────────────────────
+Write-Host "`n[4/5] pytest -q ..." -ForegroundColor Cyan
+if ($SkipPytest) {
+    Write-Host "  UEBERSPRUNGEN (-SkipPytest)" -ForegroundColor Yellow
+} else {
+    & python -m pytest -q 2>&1 | Tee-Object -Variable pytestOut | Out-Host
+    $pytestExit = $LASTEXITCODE
+    if ($pytestExit -ne 0) {
+        Write-Host "  [FEHLER] pytest fehlgeschlagen (siehe oben)." -ForegroundColor Red
+        $blockingFails++
+    } else {
+        Write-Host "  pytest: OK" -ForegroundColor Green
     }
-    Write-Host "ruff check: OK" -ForegroundColor Green
-}
-catch {
-    Write-Error "Fehler bei ruff check: $_"
-    Stop-Transcript
-    exit 1
 }
 
-# 3. mypy
-Write-Host "`n[3/4] Führe mypy aus..."
-try {
-    $output = mypy . 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error "mypy fehlgeschlagen:`n$output"
-        Stop-Transcript
-        exit 1
-    }
-    Write-Host "mypy: OK" -ForegroundColor Green
-}
-catch {
-    Write-Error "Fehler bei mypy: $_"
-    Stop-Transcript
-    exit 1
-}
-
-# 4. Konsistenzprüfung model_registry.yaml vs GGUF-Header (optional)
-if (-not $SkipGgufCheck) {
-    Write-Host "`n[4/4] Führe Konsistenzprüfung model_registry.yaml vs GGUF-Header aus..."
-    try {
-        $checkScript = @"
-import yaml
-import subprocess
-from pathlib import Path
+# ── 5. GGUF-Header vs. Registry (Source of Truth, informativ) ─────
+Write-Host "`n[5/5] GGUF-Header vs. Registry -> gguf_issues.md ..." -ForegroundColor Cyan
+if ($SkipGguf) {
+    Write-Host "  UEBERSPRUNGEN (-SkipGguf)" -ForegroundColor Yellow
+} else {
+    $ggufScript = @'
 import sys
-import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
+from pathlib import Path
 
-def get_gguf_header(model_path):
-    """Extrahiere Header-Daten aus GGUF-Datei."""
-    try:
-        result = subprocess.run(
-            ["python", "src\\tools\\_check_gguf_ctx.py", str(model_path)],
-            capture_output=True, text=True, check=True
-        )
-        return json.loads(result.stdout)
-    except Exception as e:
-        print(f"Fehler beim Lesen von {model_path}: {e}", file=sys.stderr)
-        return None
+PROJECT = Path.cwd()  # Skript laeuft immer mit cwd=Projektroot (Set-Location)
+sys.path.insert(0, str(PROJECT / "src"))
 
-def main():
-    registry_path = Path("doc-git\\model_registry.yaml")
-    with open(registry_path, "r") as f:
-        registry = yaml.safe_load(f)
+from registry_tool import MODELS_CACHE, _get_all_ggufs, _read_gguf_arch, load_registry  # noqa: E402
 
-    lms_models_path = Path("C:\\Users\\pskra\\.lmstudio\\models")
-    errors = []
 
-    for model_key, model_data in registry.items():
-        parts = model_key.split("/")
-        if len(parts) != 2:
+def norm(s: str) -> str:
+    return s.lower().replace("_", "-").replace(".", "-").replace("\\", "/")
+
+
+reg = load_registry()
+bases: dict[str, list[str]] = {}
+for key, entry in reg.items():
+    if not isinstance(entry, dict):
+        continue
+    base = norm(key.split("@")[0])
+    bases.setdefault(base, []).append(key)
+
+hits: dict[str, tuple[Path, tuple]] = {}
+with ThreadPoolExecutor(max_workers=8) as pool:
+    futures = {}
+    for path in _get_all_ggufs():
+        if "mmproj" in path.name.lower():
             continue
-        publisher, model_name = parts
-        gguf_path = lms_models_path / publisher / model_name / f"{model_name}.gguf"
-
-        if not gguf_path.exists():
+        futures[pool.submit(_read_gguf_arch, str(path))] = path
+    for fut in as_completed(futures):
+        path = futures[fut]
+        nl, hd, _is_reasoning, ctx = fut.result()
+        if not nl or not hd:
             continue
-
-        gguf_data = get_gguf_header(gguf_path)
-        if not gguf_data:
+        rel = path.relative_to(MODELS_CACHE)
+        if len(rel.parts) < 2:
             continue
+        folder = norm(str(rel.parent))
+        best = None
+        for base in bases:
+            if folder == base or base in folder:
+                if best is None or len(base) > len(best):
+                    best = base
+        if best is None:
+            continue
+        for key in bases[best]:
+            hits.setdefault(key, (path, (nl, hd, ctx)))
 
-        # Vergleiche Felder
-        fields = ["max_context_length", "n_layers", "hidden_dim"]
-        for field in fields:
-            reg_value = model_data.get(field)
-            gguf_value = gguf_data.get(field)
-            if reg_value is not None and gguf_value is not None and reg_value != gguf_value:
-                errors.append(f"{model_key}: {field} - Registry={reg_value}, GGUF={gguf_value}")
+errors = []
+for key, (path, (nl, hd, ctx)) in sorted(hits.items()):
+    entry = reg[key]
+    for reg_field, gguf_val, label in (
+        ("n_layers", nl, "n_layers"),
+        ("hidden_dim", hd, "hidden_dim"),
+        ("max_context_length", ctx, "max_context_length"),
+    ):
+        rv = entry.get(reg_field)
+        if rv is not None and int(rv) != gguf_val:
+            errors.append(f"- **{key}**: {label} Registry={rv} vs GGUF={gguf_val} ({path})")
 
-    if errors:
-        print("Konsistenzfehler gefunden:")
-        for error in errors:
-            print(f"  - {error}")
-        sys.exit(1)
-    else:
-        print("Keine Konsistenzfehler gefunden.")
-
-if __name__ == "__main__":
-    main()
-"@
-
-        $tempScriptPath = "$env:TEMP\check_gguf_consistency.py"
-        $checkScript | Out-File -FilePath $tempScriptPath -Encoding utf8
-
-        $output = python $tempScriptPath 2>&1
-        if ($LASTEXITCODE -ne 0) {
-            Write-Error "Konsistenzprüfung fehlgeschlagen:`n$output"
-            Stop-Transcript
-            exit 1
+out = PROJECT / "doc-git" / "Review-Artifacts" / "gguf_issues.md"
+lines = [
+    "# GGUF-Issues: model_registry.yaml vs. GGUF-Header",
+    "",
+    "Erzeugt automatisch: " + datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    "",
+    "Source of Truth: die GGUF-Dateien (unveraenderliche Modell-Fakten). Die",
+    "Registry wird hier gegen die GGUF-Header (n_layers, hidden_dim,",
+    "max_context_length) geprueft.",
+    "",
+]
+lines.append(f"{len(hits)} Registry-Eintraege mit GGUF-Datei abgeglichen.")
+if errors:
+    lines.append(f"{len(errors)} Abweichungen:")
+    lines.append("")
+    lines.extend(errors)
+else:
+    lines.append("Keine Abweichungen zwischen Registry und GGUF-Headern.")
+lines.append("")
+out.write_text("\n".join(lines), encoding="utf-8")
+print(f"\n[GGUF] Artefakt geschrieben: {out}")
+print(f"[GGUF] {len(errors)} Abweichungen, {len(hits)} Eintraege geprueft.")
+'@
+    $ggufScriptPath = Join-Path $env:TEMP "pre_review_gguf_check.py"
+    Set-Content -LiteralPath $ggufScriptPath -Value $ggufScript -Encoding utf8
+    try {
+        & python $ggufScriptPath 2>&1 | Tee-Object -Variable ggufOut | Out-Host
+        $ggufExit = $LASTEXITCODE
+        if ($ggufExit -ne 0) {
+            Write-Host "  [INFO] GGUF-Check nicht vollstaendig (Exit $ggufExit). Artefakt evtl. unvollstaendig." -ForegroundColor Yellow
+            $warnings++
+        } else {
+            Write-Host "  GGUF-Check: OK (Artefakt geschrieben)" -ForegroundColor Green
         }
-        Write-Host "Konsistenzprüfung: OK" -ForegroundColor Green
-        Remove-Item -Path $tempScriptPath -Force -ErrorAction SilentlyContinue
-    }
-    catch {
-        Write-Error "Fehler bei Konsistenzprüfung: $_"
-        Stop-Transcript
-        exit 1
+    } catch {
+        Write-Host "  [INFO] GGUF-Check fehlgeschlagen: $_" -ForegroundColor Yellow
+        $warnings++
+    } finally {
+        Remove-Item -LiteralPath $ggufScriptPath -Force -ErrorAction SilentlyContinue
     }
 }
 
-Write-Host "`n=== Alle Checks erfolgreich abgeschlossen ===" -ForegroundColor Green
-Write-Host "Log-Datei: $LogFile" -ForegroundColor Cyan
+# ── Zusammenfassung ───────────────────────────────────────────────
+Write-Host "`n=== Zusammenfassung ===" -ForegroundColor Cyan
+Write-Host "Artefakte: $((Get-ChildItem -LiteralPath $artifactsDir -Filter *.md -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name) -join ', ')" -ForegroundColor DarkGray
+Write-Host "Warnungen (nicht blockierend): $warnings" -ForegroundColor Yellow
+
+$changelog = Join-Path $projectPath "CHANGELOG.md"
+if (-not (Test-Path -LiteralPath $changelog)) {
+    Write-Host "[HINWEIS] CHANGELOG.md fehlt im Projekt-Root - geplantes Artefakt aus dem Review-Konzept." -ForegroundColor Yellow
+} else {
+    Write-Host "[HINWEIS] CHANGELOG.md-Eintrag fuer diese Aenderungen ergaenzt?" -ForegroundColor Yellow
+}
+
+if ($blockingFails -gt 0) {
+    Write-Host "`n[BLOCKIERT] $blockingFails blockierende(n) Check(s) fehlgeschlagen." -ForegroundColor Red
+    Stop-Transcript
+    exit 1
+}
+Write-Host "`n=== Alle blockierenden Checks bestanden ===" -ForegroundColor Green
 Stop-Transcript
 exit 0

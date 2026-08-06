@@ -63,3 +63,7 @@ prompt_inventory.csv
 *.tmp
 *.bak
 *.swp
+
+# Review-Gate-Logs (Artefakte in doc-git/Review-Artifacts/ werden committet)
+pre_review_checks_*.log
+validate_errors.log
