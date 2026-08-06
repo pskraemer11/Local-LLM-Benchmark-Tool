@@ -1240,8 +1240,9 @@ qwen/qwen3.5-9b:
   notes: 'Architektur: dense | Vision'
   file_size_bytes: 8281142495
   context_length: 32768
+  max_context_length: 262144
   useUnifiedKvCache: false
-  reasoning: instruct
+  reasoning: thinking
   capabilities: vision, coding, text
   blueprint: coding_agent
   truncation: medium

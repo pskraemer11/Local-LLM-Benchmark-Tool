@@ -1,6 +1,6 @@
 # Repro-Issues: model_registry.yaml vs. LM Studio Hub
 
-Erzeugt automatisch: 2026-08-06 21:21:13
+Erzeugt automatisch: 2026-08-06 22:45:47
 
 Source of Truth fuer Modell-Fakten sind die GGUF-Dateien (unveraenderlich).
 Die `model_registry.yaml` ist editierbar (python-Programme/manuell) und wird
@@ -23,10 +23,7 @@ Studio mitgeliefert und nirgendwo im Prozess angefasst wird.
 
 ## Hub-Abweichungen (Registry vs. model.yaml)
 
-1 Registry-Einträge weichen vom Hub ab:
-
-- **qwen/qwen3.5-9b** (qwen3.5-9b):
-    - reasoning: Registry='instruct' vs Hub=True
+Keine Abweichungen zwischen Registry und Hub model.yaml.
 
 ## Hub-Hinweise (kein model.yaml im lokalen Hub)
 

@@ -245,8 +245,9 @@ def classify_reasoning(
             if arch_key in arch_lower:
                 # Qwen3 / Qwen3.6 Klassifikation über Modellnamen:
                 # - Qwen3 (qwen3, qwen3moe): Default Instruct. Nur explizites "thinking" im Namen → thinking.
-                # - Qwen3.6 (qwen35, qwen35moe): Dual-Mode (Thinking per Prompt schaltbar).
-                #   Default Non-Thinking (enable_thinking=False Default). "thinking" im Namen → thinking.
+                # - Qwen3.6 (qwen35, qwen35moe): Dual-Mode (Thinking per Toggle schaltbar).
+                #   Default Thinking (Hub model.yaml: enableThinking defaultValue: true,
+                #   Qwen-Model-Card). "thinking" im Namen → thinking.
                 # - Special case: "qwen3-30b-a3b-thinking-2507..." → thinking
                 if arch_key.startswith("qwen"):
                     if "thinking" in name_lower:
