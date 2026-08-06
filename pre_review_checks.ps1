@@ -35,16 +35,21 @@
 .PARAMETER LogFile
     Pfad fuer das Transcript-Log (Default: pre_review_checks_<timestamp>.log).
 
+.PARAMETER NoTranscript
+    Kein Transcript-Log schreiben (fuer pre-push-Hook-Aufrufe).
+
 .EXAMPLE
     .\pre_review_checks.ps1
     .\pre_review_checks.ps1 -SkipGguf -LogFile "C:\temp\gate.log"
+    .\pre_review_checks.ps1 -NoTranscript -SkipGguf   # wie vom pre-push-Hook
 #>
 
 param (
     [switch]$SkipRepro,
     [switch]$SkipPytest,
     [switch]$SkipGguf,
-    [string]$LogFile = "pre_review_checks_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
+    [string]$LogFile = "pre_review_checks_$(Get-Date -Format 'yyyyMMdd_HHmmss').log",
+    [switch]$NoTranscript
 )
 
 $ErrorActionPreference = "Stop"
@@ -61,9 +66,11 @@ if (-not (Test-Path -LiteralPath $artifactsDir)) {
     New-Item -ItemType Directory -Path $artifactsDir -Force | Out-Null
 }
 
-Start-Transcript -Path $LogFile -Append -Force
+if (-not $NoTranscript) {
+    Start-Transcript -Path $LogFile -Append -Force
+    Write-Host "Log: $LogFile" -ForegroundColor DarkGray
+}
 Write-Host "=== Pre-Review Checks v2 - $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') ===" -ForegroundColor Cyan
-Write-Host "Log: $LogFile" -ForegroundColor DarkGray
 
 $blockingFails = 0
 $warnings = 0
@@ -259,9 +266,9 @@ if (-not (Test-Path -LiteralPath $changelog)) {
 
 if ($blockingFails -gt 0) {
     Write-Host "`n[BLOCKIERT] $blockingFails blockierende(n) Check(s) fehlgeschlagen." -ForegroundColor Red
-    Stop-Transcript
+    if (-not $NoTranscript) { Stop-Transcript }
     exit 1
 }
 Write-Host "`n=== Alle blockierenden Checks bestanden ===" -ForegroundColor Green
-Stop-Transcript
+if (-not $NoTranscript) { Stop-Transcript }
 exit 0
