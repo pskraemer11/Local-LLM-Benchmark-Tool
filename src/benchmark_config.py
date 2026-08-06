@@ -33,7 +33,7 @@ BLACKLIST = [
     "embed",
     "bge-m3",
     # < 16K native context -> zu klein fuer Coding-Benchmarks
-    "em_german",                # geändert von em_german_13b zu em_german (_leo + 13b, weil RAG-Modelle)
+    "em_german",                # deckt em_german_13b + em_german_leo_mistral ab (RAG-Modelle)
     "datagemma-rig",
     "granitelib-rag",
     # OCR / Vision / Audio
