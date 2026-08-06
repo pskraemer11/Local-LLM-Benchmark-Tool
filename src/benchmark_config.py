@@ -49,8 +49,7 @@ BLACKLIST = [
     "vl",           # vl = vision language (i.A.)
     # Rest
     "rag",
-    "f2llm-v2-1.7b",        # multilingual, embed/RAG - zu klein fuer Coding
-    "f2llm-v2-4b",          # multilingual, embed/RAG - zu klein fuer Coding
+    "f2llm",                # F2LLM-v2-Familie = reine Embedding-Modelle (Feature Extraction, kein Chat; 80M-14B)
 ]
 
 EXCLUDE_KEYWORDS = BLACKLIST
