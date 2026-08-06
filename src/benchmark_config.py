@@ -49,7 +49,8 @@ BLACKLIST = [
     "vl",           # vl = vision language (i.A.)
     # Rest
     "rag",
-    "f2llm",
+    "f2llm-v2-1.7b",        # multilingual, embed/RAG - zu klein fuer Coding
+    "f2llm-v2-4b",          # multilingual, embed/RAG - zu klein fuer Coding
 ]
 
 EXCLUDE_KEYWORDS = BLACKLIST
