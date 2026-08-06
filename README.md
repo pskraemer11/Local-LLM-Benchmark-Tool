@@ -26,22 +26,22 @@ Over 50 LLM models were tested on an HP Omen gaming PC with an NVIDIA RTX 5070 T
 ## Features
 
 - **4 independent pipelines**: Custom (DS1000, CoderEval), EvalPlus (HumanEval+, MBPP+), LM-Eval (ARC, HellaSwag, TruthfulQA, MATH-500), Agentic (tool-eval-bench)
-- **Reasoning support**: Thinking mode (`--thinking`) for MATH-500 on reasoning models
-- **Stratified subsampling**: Random but category-balanced task selection for DS1000
+- **Reasoning support**: Thinking mode (`--thinking`) for reasoning models on all pipelines
+- **Stratified subsampling**: Random but category-balanced task selection for DS1000, CoderEval, and other datasets
 - **System metrics**: CPU/GPU/RAM/VRAM/temperature per task (median + P90)
-- **Thinking token analysis**: `<think>`/`<|channel|>` extraction, percentage thinking ratio
+- **Thinking token analysis**: `thinking`/`<|channel|>` extraction, percentage thinking ratio
 - **Task retry**: 3 attempts with exponential backoff on API errors
-- **Consolidation**: Weighted leaderboard (Coding 35%, Math 25%, Agentic 25%, Knowledge 15%)
-- **Bootstrap confidence intervals**: 95% CI from per-item data (DS1000/CoderEval) via `--bootstrap`
+- **Consolidation**: Weighted leaderboard for total score (Coding 35%, Math 25%, Agentic 25%, Knowledge 15%) (if your personal interest differs, just change it)
+- **Bootstrap confidence intervals**: 95% CI from per-item data (DS1000 & CoderEval), paired comparison via `--compare`
 - **Terminal colors**: ANSI-coded output with progress bars (`utils/terminal.py`)
 - **GenerationConfig**: 16 parameters → single dataclass (`type_defs.py`)
-- **Registry tool**: `src/registry_tool.py` for model registry management, JSON config sync, architecture data extraction from GGUF headers
+- **Registry tool**: `src/registry_tool.py` for model consolidated registry management and parameter overview; JSON config sync; architecture data extraction from GGUF headers
 
 ## Prerequisites
 
-- **Hardware**: NVIDIA GPU with >=16 GB VRAM (tested: RTX 5070 Ti)
-                (less works, but not with all models tested here)
-- **Software**: LM Studio (>=1.4.1), based on llama.cpp Backends with REST / OpenAI compatible API on `localhost:1234`
+- **Hardware**: NVIDIA GPU with >=16 GB VRAM (tested: RTX 5070 Ti) - less works, but not with all models tested here. If you use Mac and unified memory you also need memory for your OS.
+- **Software**: LM Studio (>=1.4.1), based on llama.cpp Backends for GGUF model files; lms server (CLI daemon: llmster.exe); model communication controlled with REST-API and OpenAI compatible API on `localhost:1234`. 
+                Other frameworks could work via API, but need adaptation especially for registry tool.
 - **Python**: 3.13+
 - **Installed models**: GGUF quantizations in LM Studio
 
@@ -49,21 +49,22 @@ Over 50 LLM models were tested on an HP Omen gaming PC with an NVIDIA RTX 5070 T
 
 ```bash
 # Clone repository
-git clone https://github.com/pskraemer11/Local-LLM-Benchmark-Tool/llm-benchmark-suite.git
-cd llm-benchmark-suite
+git clone https://github.com/pskraemer11/Local-LLM-Benchmark-Tool.git
+cd Local-LLM-Benchmark-Tool
 
-# Python dependencies
-pip install lm-eval[api] evalplus nvidia-ml-py3 psutil
+# Python dependencies (runtime)
+pip install lm-eval[api] evalplus nvidia-ml-py3 psutil ruamel.yaml
+
+# Test dependencies (dev) - for running tests locally
+pip install pytest pytest-cov pytest-mock responses
 
 # lm-eval task dependencies (REQUIRED for IFEval and MATH-500)
 # Without these, IFEval and MATH-500 will fail with ModuleNotFoundError
-# (see Terminalausgabe Benchmark Run 12.07.2026 for details).
-#   - langdetect: required by lm_eval/tasks/ifeval/instructions.py
-#   - immutabledict: required by lm_eval/tasks/ifeval/instructions_util.py
-#   - sympy, math_verify, antlr4-python3-runtime==4.11: required by lm_eval/tasks/minerva_math/
-#   - nltk: required by lm_eval for TruthfulQA tokenization
 pip install langdetect immutabledict "antlr4-python3-runtime==4.11" lm-eval[math] nltk
 python -c "import nltk; nltk.download('punkt', quiet=True); nltk.download('punkt_tab', quiet=True)"
+
+# Lint/Typecheck (dev)
+pip install ruff mypy types-requests types-PyYAML
 
 # If no NVIDIA GPU, CPU/GPU utilization must be obtained differently
 
@@ -75,49 +76,88 @@ git clone https://github.com/xlangai/DS-1000.git ds1000_official
 ## Quick Start
 
 ```bash
-# Registry maintenance (add new models, sync configs, extract GGUF arch data)
+# Registry maintenance (add new models, sync configs, extract GGUF arch data), interactive and CLI mode
 python src/registry_tool.py sync
 
-# Interactive mode (select model + benchmarks)
-python src/run_benchmarks.py
+# Interactive and CLI mode (select model + benchmarks), see more --help
+python src/run_benchmarks.py --help
 
-# Direct run (model + all benchmarks)
-python src/run_benchmarks.py --model "qwen2.5-coder-14b-instruct" --sample-size 20
+# Direct run (model + all benchmarks + 4 slots parallel)
+python src/run_benchmarks.py --model "qwen2.5-coder-14b-instruct" --sample-size 20 --num-parallel 4
 
-# With thinking mode for reasoning models (MATH-500)
-python src/run_benchmarks.py --model "gemma-4-26b-a4b-it" --sample-size 20 --thinking
+# With thinking mode for reasoning models (auto-detected or forced via --thinking)
+python src/run_benchmarks.py --model "qwen3-30b-a3b-instruct" --sample-size 20 --thinking
 
 # Specific benchmarks
 python src/run_benchmarks.py --model "qwen2.5-coder-14b-instruct" --benchmarks DS1000,CoderEval --sample-size 10
 
-# Consolidate results (with bootstrap CI)
-python src/consolidate_results.py --bootstrap
+# Consolidate results (weighted leaderboard + bootstrap CI)
+python src/consolidate_results.py
 ```
 
 ## CLI Options (run_benchmarks)
 
 | Flag                | Description                                                                                                  |
 |---------------------|--------------------------------------------------------------------------------------------------------------|
-| `--model`           | Model key (from `lms ls --json`)                                                                             |
-| `--benchmarks`      | Comma-separated: DS1000, CoderEval, HumanEval+, MBPP+, ARC, HellaSwag, TruthfulQA, MATH-500, Agentic         |
-| `--sample-size`     | Tasks per benchmark (default: 10)                                                                            |
-| `--thinking`        | Enable thinking mode for reasoning models                                                                    |
-| `--bootstrap`       | Enable Bootstrap 95% CI for DS1000/CoderEval (consolidation only)                                            |
-| `--non-interactive` | No user prompts                                                                                              |
-| `--output-dir`      | Results directory (default: `ergebnisse/`)                                                                   |
-| `--unload-between`  | Unload model between benchmarks (default: on)                                                                |
+| `--run-spec`, `--config` | Run-Spec (run.yaml): models/benchmarks/seed/... - CLI flags override YAML                                |
+| `--model`, `-m`     | Model selection: number(s) like '20', '1,3,5', '1-5', name or 'all'                                          |
+| `--benchmarks`, `-b`| Comma-separated: DS1000, CoderEval, HumanEval+, MBPP+, ARC, HellaSwag, TruthfulQA, MATH-500, Agentic         |
+| `--sample-size`, `-s`| Tasks per benchmark (default: 5)                                                                           |
+| `--thinking`        | Force-enable thinking mode for reasoning models (default: off)                                              |
+| `--seed`            | Random seed for reproducible task selection (passed to custom benchmarks)                                   |
+| `--num-parallel`    | Parallel worker threads for custom benchmarks (DS1000/CoderEval), uses LM Studio multi-slot serving. Auto: registry value (MoE/MTP=4, Dense=1); forced to 4 for all models when SampleSize ≥ 20. Explicit value overrides auto. |
+| `--agentic-mode`    | Agentic scenario selection: 'random' (all 69) or 'safety' (13 Category-K)                                   |
+| `--exclude-benchmarks`, `-x` | Comma-separated benchmark names to exclude (e.g. 'MATH-500')                                      |
+| `--no-structured-output` | Disable structured JSON output in custom benchmarks (fallback to regex)                              |
+| `--unload-between`  | Reload model between benchmarks (default: keep loaded). Use if KV-cache/GPU memory degradation occurs.      |
+| `--keep-response`   | Write the full LLM response to per-task CSVs (default: truncated to 200 chars)                              |
 
 ## Registry Tool (src/registry_tool.py)
 
+Maintenance tool for `doc-git/model_registry.yaml` and LM Studio JSON configs.
+
+**Principle (since 05.08.2026):** JSON configs are the source for runtime parameters
+(context_length, numParallelSessions, useUnifiedKvCache, offloadRatio) — set via the
+LMS GUI. The registry is the view. GGUF headers provide architecture data
+(n_layers, hidden_dim, max_context_length). `blueprint_definitions.yaml` is the
+source for system prompts. This tool no longer overwrites JSON configs.
+
 | Command            | Description                                                                 |
 |--------------------|-----------------------------------------------------------------------------|
-| `sync`             | Full pipeline: add → fill-arch → configs → sync-from-configs → sync-ctx → fill-ctx → fmt |
-| `add`              | Add new models from LMS to registry (auto-reads GGUF arch data)             |
-| `fill-arch`        | Extract n_layers/hidden_dim from all local GGUF headers (~1ms/file)         |
-| `configs`          | Write load.fields (offload, np, useUnifiedKvCache) into JSON configs        |
-| `sync-from-configs`| Overwrite registry values from JSON configs                                 |
-| `fix-np` / `fix-ctx` | Recompute num_parallel or context_length for all entries                  |
+| `sync`             | Full pipeline: add → fill-arch → fill-reasoning → sync-from-configs → fmt    |
+| `validate`         | Consistency check: template files, Config promptTemplate vs YAML, override overlap, required fields, registry-vs-config drift |
+| `add`              | Add new models from LMS to registry (piped from `lms ls --json`)            |
+| `fill-arch`        | Extract n_layers/hidden_dim from local GGUF headers (~1ms/file)             |
+| `fill-reasoning`   | Read reasoning (thinking/instruct) from GGUF chat_template                  |
+| `fill-size`        | Look up file_size_bytes from LMS for entries missing it                     |
+| `sync-ctx`         | Sync context_length from JSON configs into registry (only missing)          |
+| `sync-from-configs`| Sync offload, num_parallel, useUnifiedKvCache from JSON configs into registry (skips context_length to preserve native model limit) |
+| `fill-ctx`         | Add default context_length to entries missing it (size-based rule or 16384 fallback) |
+| `fix-ctx`          | Recompute context_length for ALL entries (size-based formula)               |
+| `fix-np`           | Recompute num_parallel for ALL entries (architecture-based)                 |
+| `suggest`          | Dry-run: VRAM-based np/UKV/context recommendation (writes NOTHING)          |
 | `compare`          | Registry vs LMS vs JSON configs comparison report                           |
+| `fmt`              | Normalize blank lines in registry YAML                                      |
+| `migrate-keys`     | Re-key entries without publisher prefix to publisher/model-name             |
+| `rm`               | Remove registry entry (optionally `--delete-files` + `--yes`)               |
+
+## Consolidate Results (src/consolidate_results.py)
+
+Third directly callable program: builds the weighted leaderboard from per-task CSVs
+(Coding 35%, Math 25%, Agentic 25%, Knowledge 15%) and writes
+`ergebnisse/konsolidiert_*.csv` + `*.md`.
+
+```bash
+python src/consolidate_results.py                       # latest run, installed models only
+python src/consolidate_results.py --models qwen3-30b-a3b-instruct,devstral-24b  # specific models
+python src/consolidate_results.py --all-runs            # include all historical runs
+python src/consolidate_results.py --since 20260801 --until 20260806  # time window
+python src/consolidate_results.py --merge --runs 2      # merge last N runs per model
+python src/consolidate_results.py --exclude-benchmarks IFEval,Agentic
+python src/consolidate_results.py --no-installed        # skip installed-model filter
+python src/consolidate_results.py --sample-size 20      # only CSVs with SampleSize >= 20
+python src/consolidate_results.py --compare "modelA,modelB" --compare-benchmark all --seed 42  # paired bootstrap comparison
+```
 
 ## Architecture
 
@@ -161,12 +201,13 @@ see also: https://deepwiki.com/pskraemer11/Local-LLM-Benchmark-Tool
 
 ## Thinking Mode
 
-Activates `--thinking` for reasoning models on supported benchmarks:
+Activates `--thinking` for reasoning models on all pipelines (e.g. Qwen3, DeepSeek-R1-distill, QwQ):
 
 ```bash
-python src/run_benchmarks.py --model "gemma-4-26b-a4b-it" --thinking
+python src/run_benchmarks.py --model "qwen3-30b-a3b-instruct" --thinking
 ```
 
+Note: Gemma-4 models are always in thinking mode (low/medium/high) and need no `--thinking` flag.
 Implementation is in `src/run_benchmarks.py` and `src/custom_benchmark.py`.
 Reasoning model detection uses model-name keywords (r1, thinking, qwq, reasoning, cot).
 
