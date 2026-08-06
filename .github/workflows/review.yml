@@ -2,21 +2,45 @@ name: Pre-Review Checks
 on: [push]
 jobs:
   lint:
-    runs-on: Windows 11
+    runs-on: windows-2025
     steps:
       - uses: actions/checkout@v4
-      - run: pip install ruff mypy
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - run: python -m pip install --upgrade pip ruff
       - run: ruff check .
-      - run: mypy .
+
+  mypy:
+    runs-on: windows-2025
+    # Informativ: 195 Legacy-Typfehler blockieren NICHT (Entscheid 06.08.2026).
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - run: python -m pip install mypy ruamel.yaml psutil gguf
+      - run: python -m mypy .
+
   validate-registry:
-    runs-on: Windows 11
+    runs-on: windows-2025
     steps:
       - uses: actions/checkout@v4
-      - run: pip install -e .
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - run: python -m pip install ruamel.yaml psutil gguf
+      # Exit 1 bei Registry-Problemen (cmd_validate liefert jetzt echten Exit-Code).
+      # LM Studio Configs/Hub existieren auf dem Runner nicht -> nur Registry-Checks.
       - run: python .\src\registry_tool.py validate
+
   test:
-    runs-on: Windows 11
+    runs-on: windows-2025
     steps:
       - uses: actions/checkout@v4
-      - run: pip install pytest
-      - run: pytest .\tests\
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - run: python -m pip install pytest pytest-mock responses ruamel.yaml psutil gguf requests pynvml
+      - run: python -m pytest .\tests\
