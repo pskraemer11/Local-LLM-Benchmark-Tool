@@ -27,7 +27,11 @@ Stand: 2026-08-06. Legende: [ ] offen, [~] in Arbeit, [x] erledigt/geprüft.
 - [x] **12. Thinking-Help-Text auf "all pipelines"** — Commit `7a8ac4d7`: 3 Stellen in `src/run_benchmarks.py` (CLI-Help Z. 1756, Kommentar Z. 753, Summary-Print Z. 1838).
 - [x] **13. Unbegründete ResourceExhausted-Änderungen zurückgenommen** — `src/custom_benchmark.py` + `src/tools/lmeval_proxy.py` via `git checkout`; die 502/ResourceExhausted-Fehler kamen vom NVIDIA-Provider (Nemotron 3 Ultra Free), nicht vom Benchmark-Code.
 - [x] **14. Aufgeräumt (Git-Unreinheiten)** — 4 ungetrackte `logs_3098*.zip` + `src/utils/modeling_gguf_pytorch_utils.py.lnk` gelöscht; `logs/` bleibt über `.gitignore` abgedeckt.
-- [x] **15. Manual-Corrections-Tabelle + VRAM-Regel** — in `doc-git/Model-Parameters-and-Benchmarks_en.md` (05.08.): Manuelle Overrides (np/UKV/ctx) + General rule: ≥12 GB Modellgröße ⇒ UKV=true bei np=4 (16 GB GPU).
+- [x] **15. Manual-Corrections-Tabelle + VRAM-Regel** — in `doc-git/Model-Parameters-and-Benchmarks_en.md` (05.08.): Manuelle Overrides (np/UKV/ctx) + General rule: ≥12 GB Modellgröße ⇒ UKV=true bei np=4 (16 GB GPU). VRAM-Regel auch in README.md (06.08., Commit `888b22a0`).
+
+## Offen
+
+- [ ] **16. Top-Candidates-Tabelle aktualisieren** — nach dem laufenden SS=30/np=4-Lauf (seit ~05.08., Bugfixes: Parallelisierung evalplus + lmeval, aiohttp 3.14.3): Tabellenwerte in `doc-git/Model-Parameters-and-Benchmarks_en.md` aus dem neuen Konsolidierungs-ODS neu erzeugen (Scores + Effizienz ändern sich durch schnellere Laufzeiten). Vorher (06.08.) bereinigt: veralteter SS=4-Hinweis (12.07., nicht aussagekräftig) entfernt, Quellenangabe `konsolidiert_15 Modelle, SampleSize 100, seit 20260711_20260803_172150.ods` verifiziert — Tabelle stammt aus dem SS=100-Lauf 11.07.–03.08. **Danach comitten** (inkl. Manual-Corrections-Tabelle 05.08. + SS=4-Entfernung, aktuell uncommittet in `Model-Parameters-and-Benchmarks_en.md`).
 
 ## Bewusst NICHT enthalten (Entscheid 02.08., Code-Review §5)
 
