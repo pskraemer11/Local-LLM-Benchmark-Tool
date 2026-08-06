@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 Shared CSV writer – unified schema for ALL benchmark pipelines.
 
@@ -46,9 +45,8 @@ import csv
 import locale
 import os
 import re
-import sys
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 # Set locale for user-readable number formatting in console output.
 # CSV output uses explicit f-string formatting with '.' as decimal separator
@@ -231,7 +229,7 @@ def write_per_task_csv(results: list[dict[str, Any]], benchmark_name: str, model
                        seed: str = "", exclude_benchmarks: str = "",
                        no_structured_output: str = "", no_unload_between: str = "",
                        keep_response: bool = False, response_max_chars: int = 200,
-                       base_dir: Optional[str] = None) -> str:
+                       base_dir: str | None = None) -> str:
     """Writes per-task raw data (replaces save_csv in benchmark_lmstudio).
 
     The full model response (raw LLM output) is only written to the CSV
@@ -301,7 +299,7 @@ def write_per_model_csv(entries: list[dict[str, Any]], model_display: str, model
                         pipeline: str = "custom", sample_size: int = 5,
                         seed: str = "", exclude_benchmarks: str = "",
                         no_structured_output: str = "", no_unload_between: str = "",
-                        base_dir: Optional[str] = None) -> str:
+                        base_dir: str | None = None) -> str:
     """Writes aggregated model summary (replaces save_model_summary)."""
     ts = _now_ts()
     # Filename: full model key (including quant variant)
@@ -346,7 +344,7 @@ def write_accumulative_summary(results: list[dict[str, Any]], model_info: dict[s
                                sample_size: int = 5,
                                seed: str = "", exclude_benchmarks: str = "",
                                no_structured_output: str = "", no_unload_between: str = "",
-                               base_dir: Optional[str] = None) -> str:
+                               base_dir: str | None = None) -> str:
     """Accumulating model CSV – EACH call creates a NEW file with timestamp.
     
     Filename: modell_<YYYYMMDD_HHMMSS>_<model_key>.csv
@@ -394,7 +392,7 @@ def write_accumulative_summary(results: list[dict[str, Any]], model_info: dict[s
 def write_konsolidiert_aktuell(results: list[dict[str, Any]], sample_size: int = 5,
                                seed: str = "", exclude_benchmarks: str = "",
                                no_structured_output: str = "", no_unload_between: str = "",
-                               base_dir: Optional[str] = None) -> str:
+                               base_dir: str | None = None) -> str:
     """Consolidated overview (replaces inline code in run_benchmarks main)."""
     d = _results_dir(base_dir)
     path = os.path.join(d, "konsolidiert_aktuell.csv")

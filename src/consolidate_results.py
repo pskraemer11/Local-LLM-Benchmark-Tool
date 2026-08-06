@@ -26,14 +26,13 @@ import csv
 import itertools
 import json
 import os
-import sys
-import re
 import random
-from collections import Counter, defaultdict
-from dataclasses import dataclass, field
+import re
+import sys
+from dataclasses import dataclass
 from datetime import datetime
 from statistics import mean, median
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 SRC_DIR = os.path.dirname(os.path.abspath(__file__))
 # Make `src` importable regardless of the working directory
@@ -44,14 +43,19 @@ PROJECT_ROOT = os.path.dirname(SRC_DIR)
 RESULTS_DIR = os.path.join(PROJECT_ROOT, "ergebnisse")
 INSTALLED_CACHE = None
 
-from utils.terminal import ok, warn, error, info
-from benchmark_config import (MMLU_PRO_SUBSETS, LB_MEANS_BLACKLIST,
-                             CAT_WEIGHTS, OVERALL_WEIGHTS, QUANT_MAP, get_quant)
+from benchmark_config import (
+    CAT_WEIGHTS,
+    MMLU_PRO_SUBSETS,
+    OVERALL_WEIGHTS,
+    QUANT_MAP,
+    get_quant,
+)
+from utils.terminal import error, warn
 
 # --- Model info cache (from lms ls --json) ---
 _MODEL_INFO_CACHE = None
 
-def _get_model_info() -> Dict[str, Any]:
+def _get_model_info() -> dict[str, Any]:
     """Cached map model_key -> display metadata from lms ls (via get_available_models).
 
     Each entry contains displayName (without @quant suffix), vram_gb,
@@ -107,7 +111,7 @@ def _get_installed_model_keys() -> set:
     return installed
 
 
-def _normalize_model_keys(model_keys: List[str]) -> List[str]:
+def _normalize_model_keys(model_keys: list[str]) -> list[str]:
     """Normalize and deduplicate model keys.
 
     1. Lowercase the @variant part consistently
@@ -185,7 +189,7 @@ def _get_display_name(model_key: str) -> str:
     return f"{display}@{variant}" if variant else display
 
 
-def _lookup_vram(model_key: str) -> Optional[Dict[str, Any]]:
+def _lookup_vram(model_key: str) -> dict[str, Any] | None:
     """Try to find VRAM + quant for a model_key.
 
     Priority for quant: QUANT_MAP (static) > lms ls --json (dynamic)
@@ -263,14 +267,14 @@ def _lookup_vram(model_key: str) -> Optional[Dict[str, Any]]:
 # (CAT_WEIGHTS, OVERALL_WEIGHTS in benchmark_config.py)
 
 
-def _try_float(v: Any) -> Optional[float]:
+def _try_float(v: Any) -> float | None:
     """Parse a value as float, returning None for missing/non-numeric inputs."""
     try:
         return float(v)
     except (ValueError, TypeError):
         return None
 
-def _read_col(row: Dict[str, str], col: str) -> Optional[float]:
+def _read_col(row: dict[str, str], col: str) -> float | None:
     """Read and parse a numeric column value from a CSV row (None if empty/invalid)."""
     v = row.get(col, "").strip()
     if v:
@@ -279,7 +283,7 @@ def _read_col(row: Dict[str, str], col: str) -> Optional[float]:
             return fv
     return None
 
-def _percentile(values: List[float], p: float) -> float:
+def _percentile(values: list[float], p: float) -> float:
     """Linear-interpolated percentile (0-100) of a value list."""
     sorted_v = sorted(values)
     k = (len(sorted_v) - 1) * p / 100.0
@@ -289,7 +293,7 @@ def _percentile(values: List[float], p: float) -> float:
         return sorted_v[f]
     return sorted_v[f] * (c - k) + sorted_v[c] * (k - f)
 
-def bootstrap_ci(scores: List[float], n_resamples: int = 10000, alpha: float = 0.05) -> Tuple[float, float]:
+def bootstrap_ci(scores: list[float], n_resamples: int = 10000, alpha: float = 0.05) -> tuple[float, float]:
     """Bootstrap 95% confidence interval for the mean.
 
     Draws n_resamples samples with replacement from scores,
@@ -329,9 +333,9 @@ def bootstrap_ci(scores: List[float], n_resamples: int = 10000, alpha: float = 0
         hi_idx = int(n_resamples * (1 - alpha / 2))
         return (means[lo_idx], means[hi_idx])
 
-def paired_bootstrap_ci(scores_a: List[float], scores_b: List[float],
+def paired_bootstrap_ci(scores_a: list[float], scores_b: list[float],
                         n_resamples: int = 10000, alpha: float = 0.05,
-                        seed: Optional[int] = None) -> Tuple[float, float, float]:
+                        seed: int | None = None) -> tuple[float, float, float]:
     """Paired bootstrap CI for the mean difference (A - B).
 
     Both score lists must have the same length (same items, same order).
@@ -374,7 +378,7 @@ def paired_bootstrap_ci(scores_a: List[float], scores_b: List[float],
         return (mean_diff, diffs[lo_idx], diffs[hi_idx])
 
 
-def read_paired_scores(path_a: str, path_b: str) -> Tuple[List[float], List[float]]:
+def read_paired_scores(path_a: str, path_b: str) -> tuple[list[float], list[float]]:
     """Read two benchmark CSVs and return paired per-item scores.
 
     Matches rows by task_index. Both CSVs must have been generated with
@@ -403,8 +407,8 @@ def read_paired_scores(path_a: str, path_b: str) -> Tuple[List[float], List[floa
 
 
 def compare_two_quants(name_a: str, name_b: str,
-                       scores_a: List[float], scores_b: List[float],
-                       n_resamples: int = 10000, seed: int = 42) -> Dict[str, Any]:
+                       scores_a: list[float], scores_b: list[float],
+                       n_resamples: int = 10000, seed: int = 42) -> dict[str, Any]:
     """Compare two quants using paired bootstrap.
 
     Returns a dict with:
@@ -456,7 +460,7 @@ def _auto_delimiter(path: str) -> str:
         return ";"
     return ","
 
-def read_custom_csv(path: str, out_scores: Optional[List[float]] = None) -> Tuple[Optional[float], Optional[float], Optional[float], Dict[str, Any]]:
+def read_custom_csv(path: str, out_scores: list[float] | None = None) -> tuple[float | None, float | None, float | None, dict[str, Any]]:
     """Read benchmark CSV; collect per-item scores in out_scores (for Bootstrap)."""
     scores = []
     tok_speeds = []
@@ -473,7 +477,7 @@ def read_custom_csv(path: str, out_scores: Optional[List[float]] = None) -> Tupl
     # as part of the test-coverage expansion (Prio 4.16).
     try:
         delim = _auto_delimiter(path)
-    except (OSError, IOError) as e:
+    except OSError as e:
         print(f"  [WARN] {os.path.basename(path)}: {e}", file=sys.stderr)
         return None, None, None, {}
     try:
@@ -543,7 +547,7 @@ def read_custom_csv(path: str, out_scores: Optional[List[float]] = None) -> Tupl
     return mean(scores), mean(tok_speeds) if tok_speeds else None, total_latency, metrics
 
 
-def _ts_filter(ts: str, since: Optional[str], until: Optional[str]) -> bool:
+def _ts_filter(ts: str, since: str | None, until: str | None) -> bool:
     """Filter CSV timestamps by optional since/until range.
     Supports formats: YYYYMMDD_HHMMSS or YYYYMMDD (expanded to full-day range).
     """
@@ -559,9 +563,9 @@ def _ts_filter(ts: str, since: Optional[str], until: Optional[str]) -> bool:
     return True
 
 
-def _extract_csv_sizes(mapping: Dict[str, Any], path_ss: Dict[str, int]) -> Dict[str, int]:
+def _extract_csv_sizes(mapping: dict[str, Any], path_ss: dict[str, int]) -> dict[str, int]:
     """Map model_key -> sample_size for a selected {model_key: path-or-(ts,path)} mapping."""
-    out: Dict[str, int] = {}
+    out: dict[str, int] = {}
     for mk, val in mapping.items():
         p = val[1] if isinstance(val, tuple) else val
         ss = path_ss.get(p)
@@ -570,10 +574,10 @@ def _extract_csv_sizes(mapping: Dict[str, Any], path_ss: Dict[str, int]) -> Dict
     return out
 
 
-def find_latest_csvs(min_sample_size: int = 0, since: Optional[str] = None,
-                     until: Optional[str] = None, all_runs: bool = False,
+def find_latest_csvs(min_sample_size: int = 0, since: str | None = None,
+                     until: str | None = None, all_runs: bool = False,
                      merge_runs: int = 0
-                     ) -> Tuple[Dict[str, str], Dict[str, str], Dict[str, Dict[str, int]]]:
+                     ) -> tuple[dict[str, str], dict[str, str], dict[str, dict[str, int]]]:
     """Find CSV files for DS1000 and CoderEval, with time + run filtering.
     
     Args:
@@ -595,7 +599,7 @@ def find_latest_csvs(min_sample_size: int = 0, since: Optional[str] = None,
     )
     # Collect all valid entries: list of (ts, btype, lookup_key, fpath)
     all_entries: list[tuple[str, str, str, str]] = []
-    path_ss: Dict[str, int] = {}  # fpath -> sample_size
+    path_ss: dict[str, int] = {}  # fpath -> sample_size
     for fname in os.listdir(RESULTS_DIR):
         m = pat.match(fname)
         if not m:
@@ -656,8 +660,7 @@ def find_latest_csvs(min_sample_size: int = 0, since: Optional[str] = None,
             if lookup_key not in model_groups:
                 model_groups[lookup_key] = {"max_ts": ts, "ds1000": None, "codereval": None}
             mg = model_groups[lookup_key]
-            if ts > mg["max_ts"]:
-                mg["max_ts"] = ts
+            mg["max_ts"] = max(mg["max_ts"], ts)
             if btype == "DS1000":
                 if mg["ds1000"] is None or ts > mg["ds1000"][0]:
                     mg["ds1000"] = (ts, fpath)
@@ -704,7 +707,7 @@ def find_latest_csvs(min_sample_size: int = 0, since: Optional[str] = None,
         return {k: v[1] for k, v in ds1000.items()}, {k: v[1] for k, v in codereval.items()}, custom_sizes
 
 
-def _find_newest_by_mtime(prefix: str, model_key: str) -> Optional[str]:
+def _find_newest_by_mtime(prefix: str, model_key: str) -> str | None:
     """Find the newest {prefix}_{model_key} result directory by mtime.
     
     Falls back through:
@@ -752,7 +755,7 @@ def _find_newest_by_mtime(prefix: str, model_key: str) -> Optional[str]:
     return candidates[0][1]
 
 
-def _pick_newest_eval_file(dpath: str) -> Optional[str]:
+def _pick_newest_eval_file(dpath: str) -> str | None:
     """Pick the newest .eval_results.json in dpath by mtime."""
     candidates = []
     for fname in os.listdir(dpath):
@@ -765,7 +768,7 @@ def _pick_newest_eval_file(dpath: str) -> Optional[str]:
     return candidates[0][1]
 
 
-def try_read_evalplus(model_key: str) -> Optional[Dict[str, float]]:
+def try_read_evalplus(model_key: str) -> dict[str, float] | None:
     """Read EvalPlus (HumanEval+/MBPP+) results for a model.
 
     Finds the newest evalplus result directory for the model and returns
@@ -799,7 +802,7 @@ def try_read_evalplus(model_key: str) -> Optional[Dict[str, float]]:
     return results if results else None
 
 
-def _read_results_json(search_dir: str, task_name: str, metric_priority: List[str]) -> Any:
+def _read_results_json(search_dir: str, task_name: str, metric_priority: list[str]) -> Any:
     """Read a single results_*.json and return the first matching metric value for task_name."""
     if not os.path.isdir(search_dir):
         return None
@@ -818,7 +821,7 @@ def _read_results_json(search_dir: str, task_name: str, metric_priority: List[st
                 return td[metric]
     return None
 
-def read_lmeval_per_model(model_key: str) -> Optional[Dict[str, float]]:
+def read_lmeval_per_model(model_key: str) -> dict[str, float] | None:
     """Read LM-Eval results for a model into a {benchmark: score} dict.
 
     Scans all results_*.json files (newest first) under the model's
@@ -882,7 +885,7 @@ def read_lmeval_per_model(model_key: str) -> Optional[Dict[str, float]]:
     return results if results else None
 
 
-def read_agentic(model_key: str) -> Optional[float]:
+def read_agentic(model_key: str) -> float | None:
     """Read the newest agentic-tool-eval final score (0.0-1.0) for a model.
 
     Falls back to the average of scenario results when no final_score
@@ -927,13 +930,13 @@ def _agentic_ts_from_filename(p: str) -> str:
     return bn
 
 
-def _collect_pipeline_sample_sizes(model_keys: List[str]) -> Dict[str, set[int]]:
+def _collect_pipeline_sample_sizes(model_keys: list[str]) -> dict[str, set[int]]:
     """Distinct sample sizes per non-custom pipeline (EvalPlus/LM-Eval/Agentic).
 
     Reads the newest result files of the given model keys. Any unreadable
     or missing data is skipped silently.
     """
-    sizes: Dict[str, set[int]] = {}
+    sizes: dict[str, set[int]] = {}
     for mk in model_keys:
         # EvalPlus: len(eval) of the newest humaneval/mbpp eval_results.json
         root = _find_newest_by_mtime("evalplus", mk)
@@ -1000,12 +1003,12 @@ def _collect_pipeline_sample_sizes(model_keys: List[str]) -> Dict[str, set[int]]
     return sizes
 
 
-def _describe_sample_sizes(sizes: Dict[str, set[int]]) -> str:
+def _describe_sample_sizes(sizes: dict[str, set[int]]) -> str:
     """Human-readable sample-size summary: '20 (DS1000, CoderEval), 5 (EvalPlus)'."""
     if not sizes:
         return "mixed"
-    grouped: Dict[int, List[str]] = {}
-    mixed_parts: List[str] = []
+    grouped: dict[int, list[str]] = {}
+    mixed_parts: list[str] = []
     for bench in ("DS1000", "CoderEval", "EvalPlus", "LM-Eval", "Agentic"):
         ss = sizes.get(bench)
         if not ss:
@@ -1019,7 +1022,7 @@ def _describe_sample_sizes(sizes: Dict[str, set[int]]) -> str:
     return ", ".join(parts) if parts else "mixed"
 
 
-def compute_category_scores(bench_scores: Dict[str, Optional[float]]) -> Dict[str, Optional[float]]:
+def compute_category_scores(bench_scores: dict[str, float | None]) -> dict[str, float | None]:
     """Compute weighted category scores and Overall.
     
     Normalization: If a category has only partial data (e.g., only
@@ -1052,40 +1055,40 @@ def compute_category_scores(bench_scores: Dict[str, Optional[float]]) -> Dict[st
 @dataclass
 class ModelData:
     name: str
-    ds1000: Optional[float] = None
-    ds1000_ci_lo: Optional[float] = None
-    ds1000_ci_hi: Optional[float] = None
-    codereval: Optional[float] = None
-    codereval_ci_lo: Optional[float] = None
-    codereval_ci_hi: Optional[float] = None
-    humaneval: Optional[float] = None
-    mbpp: Optional[float] = None
-    arc: Optional[float] = None
-    hellaswag: Optional[float] = None
-    truthfulqa: Optional[float] = None
-    mmlu_pro: Optional[float] = None
-    ifeval: Optional[float] = None
-    math500: Optional[float] = None
-    agentic: Optional[float] = None
-    coding: Optional[float] = None
-    knowledge: Optional[float] = None
-    math: Optional[float] = None
-    overall: Optional[float] = None
-    runtime_min: Optional[str] = None
-    eff_score_h: Optional[str] = None
-    coding_eff_score_h: Optional[str] = None
-    tok_s: Optional[str] = None
-    vram_gb: Optional[float] = None
-    quant: Optional[str] = None
-    cpu_med: Optional[float] = None
-    cpu_p90: Optional[float] = None
-    gpu_med: Optional[float] = None
-    gpu_p90: Optional[float] = None
-    ram_med: Optional[float] = None
-    ram_p90: Optional[float] = None
-    gpu_temp_p90: Optional[float] = None
+    ds1000: float | None = None
+    ds1000_ci_lo: float | None = None
+    ds1000_ci_hi: float | None = None
+    codereval: float | None = None
+    codereval_ci_lo: float | None = None
+    codereval_ci_hi: float | None = None
+    humaneval: float | None = None
+    mbpp: float | None = None
+    arc: float | None = None
+    hellaswag: float | None = None
+    truthfulqa: float | None = None
+    mmlu_pro: float | None = None
+    ifeval: float | None = None
+    math500: float | None = None
+    agentic: float | None = None
+    coding: float | None = None
+    knowledge: float | None = None
+    math: float | None = None
+    overall: float | None = None
+    runtime_min: str | None = None
+    eff_score_h: str | None = None
+    coding_eff_score_h: str | None = None
+    tok_s: str | None = None
+    vram_gb: float | None = None
+    quant: str | None = None
+    cpu_med: float | None = None
+    cpu_p90: float | None = None
+    gpu_med: float | None = None
+    gpu_p90: float | None = None
+    ram_med: float | None = None
+    ram_p90: float | None = None
+    gpu_temp_p90: float | None = None
 
-    def to_csv_dict(self) -> Dict[str, Any]:
+    def to_csv_dict(self) -> dict[str, Any]:
         """Flatten the model row into the CSV column order."""
         return {
             "Model": self.name,
@@ -1122,13 +1125,13 @@ class ModelData:
         }
 
 
-def read_data(model_keys: Optional[List[str]] = None, min_sample_size: int = 0,
-              exclude_benchmarks: Optional[List[str]] = None,
-              since: Optional[str] = None, until: Optional[str] = None,
+def read_data(model_keys: list[str] | None = None, min_sample_size: int = 0,
+              exclude_benchmarks: list[str] | None = None,
+              since: str | None = None, until: str | None = None,
               all_runs: bool = False, no_installed: bool = False,
               merge_runs: int = 0,
-              out_sample_sizes: Optional[Dict[str, Dict[str, int]]] = None,
-              out_model_keys: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+              out_sample_sizes: dict[str, dict[str, int]] | None = None,
+              out_model_keys: list[str] | None = None) -> list[dict[str, Any]]:
     """Collect, score and aggregate results for all requested models.
 
     Discovers DS1000/CoderEval CSVs via find_latest_csvs(), optionally
@@ -1198,7 +1201,7 @@ def read_data(model_keys: Optional[List[str]] = None, min_sample_size: int = 0,
         latencies = []
 
         # DS1000 – match by model_key (handle missing @variant in CSV)
-        ds_scores: List[float] = []
+        ds_scores: list[float] = []
         for mk, fn in ds1000_files.items():
             if mk == model_key or ("@" not in mk and mk.split("@")[0] == model_key.split("@")[0]):
                 ds_score, ds_tps, ds_lat, ds_m = read_custom_csv(os.path.join(RESULTS_DIR, fn),
@@ -1214,7 +1217,7 @@ def read_data(model_keys: Optional[List[str]] = None, min_sample_size: int = 0,
             ds_m = {}
 
         # CoderEval – match by model_key (handle missing @variant in CSV)
-        ce_scores: List[float] = []
+        ce_scores: list[float] = []
         for mk, fn in codereval_files.items():
             if mk == model_key or ("@" not in mk and mk.split("@")[0] == model_key.split("@")[0]):
                 ce_score, ce_tps, ce_lat, ce_m = read_custom_csv(os.path.join(RESULTS_DIR, fn),
@@ -1263,8 +1266,7 @@ def read_data(model_keys: Optional[List[str]] = None, min_sample_size: int = 0,
         # Exclude benchmarks if requested (removes them before category scoring)
         if exclude_benchmarks:
             for b in exclude_benchmarks:
-                if b in bench_scores:
-                    del bench_scores[b]
+                bench_scores.pop(b, None)
 
         # Runtime (hours) from DS1000+CoderEval latencies
         runtime_h = sum(latencies) / 3600 if latencies else None
@@ -1293,7 +1295,7 @@ def read_data(model_keys: Optional[List[str]] = None, min_sample_size: int = 0,
         eff_str = f"{cats['overall']/runtime_h:.1f}" if cats.get('overall') is not None and runtime_h else "—"
         print(f"    {'Eff (Score/h)':20s} {eff_str} %p/h")
 
-        def pct(val: Optional[float]) -> Optional[float]:
+        def pct(val: float | None) -> float | None:
             """Fraction to percent (0-100) with 2 decimals; None passthrough."""
             return round(val * 100, 2) if val is not None else None
 
@@ -1350,7 +1352,7 @@ def read_data(model_keys: Optional[List[str]] = None, min_sample_size: int = 0,
 _NUMERIC_CELL_RE = re.compile(r"^-?\d+(?:\.\d+)?$")
 
 
-def _align_decimal_cells(cells: List[str]) -> None:
+def _align_decimal_cells(cells: list[str]) -> None:
     """Right-align numeric cells in place so decimal points align per column.
 
     Only cells matching a plain number (optional minus sign, integer part,
@@ -1377,8 +1379,8 @@ def _align_decimal_cells(cells: List[str]) -> None:
             cells[i] = v.rjust(int_w + 1 + frac_w)
 
 
-def _render_complete_table(rows: List[Dict[str, Any]], header_names: List[str],
-                           header_units: List[str], cols_md: List[str]) -> List[str]:
+def _render_complete_table(rows: list[dict[str, Any]], header_names: list[str],
+                           header_units: list[str], cols_md: list[str]) -> list[str]:
     """Render the complete-results Markdown table.
 
     Column widths are content-driven: the longest header, unit or data cell
@@ -1387,8 +1389,8 @@ def _render_complete_table(rows: List[Dict[str, Any]], header_names: List[str],
     point. Returns the table lines (two-line header + separator + data rows).
     """
     # Decimal-aligned cells per column
-    col_cells: List[List[str]] = []
-    widths: List[int] = []
+    col_cells: list[list[str]] = []
+    widths: list[int] = []
     for i, c in enumerate(cols_md):
         cells = [str(r.get(c, "")) for r in rows]
         _align_decimal_cells(cells)
@@ -1404,7 +1406,7 @@ def _render_complete_table(rows: List[Dict[str, Any]], header_names: List[str],
         s = str(txt)
         return s.ljust(w) if is_model else s.rjust(w)
 
-    lines: List[str] = []
+    lines: list[str] = []
     parts = [_md_cell(header_names[0], widths[0], True)]
     parts += [_md_cell(h, w) for h, w in zip(header_names[1:], widths[1:])]
     lines.append("| " + " | ".join(parts) + " |")
@@ -1422,7 +1424,7 @@ def _render_complete_table(rows: List[Dict[str, Any]], header_names: List[str],
     return lines
 
 
-def _val(key: str, r: Dict[str, Any], pct: bool = True) -> str:
+def _val(key: str, r: dict[str, Any], pct: bool = True) -> str:
     """Format a result value for the Markdown tables ("—" for missing).
 
     pct=True renders "NN%", otherwise one decimal (or integer above 100).
@@ -1441,14 +1443,14 @@ def _val(key: str, r: Dict[str, Any], pct: bool = True) -> str:
     except (ValueError, TypeError):
         return str(v)
 
-def _top(rows: List[Dict[str, Any]], sort_key: str) -> List[Dict[str, Any]]:
+def _top(rows: list[dict[str, Any]], sort_key: str) -> list[dict[str, Any]]:
     """Top-5 rows by a numeric sort_key, ignoring missing values."""
     valid = [r for r in rows if r.get(sort_key) not in (None, "", "—")]
     if not valid:
         return []
     return sorted(valid, key=lambda x: float(x.get(sort_key, 0)), reverse=True)[:5]
 
-def _write_tbl(f: Any, title: str, headers: List[str], sorted_rows: List[Dict[str, Any]], keys: List[str], pct_flags: Optional[List[bool]] = None) -> None:
+def _write_tbl(f: Any, title: str, headers: list[str], sorted_rows: list[dict[str, Any]], keys: list[str], pct_flags: list[bool] | None = None) -> None:
     """Write a ranked Markdown table (### title + header + data rows).
 
     Rows are written with a rank column and decimal-aligned numeric
@@ -1587,13 +1589,13 @@ def _parse_args() -> Any:
     return parser.parse_args()
 
 
-def _read_all_data(args: Any, model_keys: Optional[List[str]],
-                   exclude: Optional[List[str]]) -> Tuple[List[Dict[str, Any]], Dict[str, set[int]]]:
+def _read_all_data(args: Any, model_keys: list[str] | None,
+                   exclude: list[str] | None) -> tuple[list[dict[str, Any]], dict[str, set[int]]]:
     """Apply merge/installed flags, print the banner and read all result data.
 
     Returns (rows, ss_ctx) where ss_ctx maps pipeline -> used sample sizes.
     """
-    merge_runs = args.runs if args.runs > 0 else 0
+    merge_runs = max(0, args.runs)
     if args.merge:
         args.no_installed = True
         if merge_runs == 0:
@@ -1617,8 +1619,8 @@ def _read_all_data(args: Any, model_keys: Optional[List[str]],
     filter_str = f" [{', '.join(filters)}]" if filters else ""
     print(f"  {datetime.now().strftime('%Y-%m-%d %H:%M')}{ss_str}{filter_str}")
     print("=" * 60)
-    ss_sizes: Dict[str, Dict[str, int]] = {}
-    model_keys_used: List[str] = []
+    ss_sizes: dict[str, dict[str, int]] = {}
+    model_keys_used: list[str] = []
     rows = read_data(model_keys=model_keys, min_sample_size=args.sample_size,
                      exclude_benchmarks=exclude, since=args.since, until=args.until,
                      all_runs=args.all_runs, no_installed=args.no_installed,
@@ -1626,13 +1628,13 @@ def _read_all_data(args: Any, model_keys: Optional[List[str]],
                      out_sample_sizes=ss_sizes, out_model_keys=model_keys_used)
 
     # Sample sizes actually used across the included runs (for the MD header)
-    ss_ctx: Dict[str, set[int]] = {btype: set(m2s.values()) for btype, m2s in ss_sizes.items()}
+    ss_ctx: dict[str, set[int]] = {btype: set(m2s.values()) for btype, m2s in ss_sizes.items()}
     if not args.sample_size:
         ss_ctx.update(_collect_pipeline_sample_sizes(model_keys_used))
     return rows, ss_ctx
 
 
-def _write_csv(rows: List[Dict[str, Any]]) -> Tuple[str, str]:
+def _write_csv(rows: list[dict[str, Any]]) -> tuple[str, str]:
     """Write konsolidiert_<timestamp>.csv with the unified column order.
 
     Returns (csv_path, timestamp) so the Markdown report can reuse the
@@ -1661,8 +1663,8 @@ def _write_csv(rows: List[Dict[str, Any]]) -> Tuple[str, str]:
     return csv_path, ts
 
 
-def _write_markdown(rows: List[Dict[str, Any]], args: Any,
-                    ss_ctx: Dict[str, set[int]], ts: str) -> str:
+def _write_markdown(rows: list[dict[str, Any]], args: Any,
+                    ss_ctx: dict[str, set[int]], ts: str) -> str:
     """Render the consolidated Markdown report and return its path.
 
     Formats all values into display strings (with CI brackets for
@@ -1763,8 +1765,7 @@ def _write_markdown(rows: List[Dict[str, Any]], args: Any,
                         "%", "%",
                         "%", "%", "°C"]
 
-        for line in _render_complete_table(str_rows, header_names, header_units, cols_md):
-            f.write(line + "\n")
+        f.writelines(line + "\n" for line in _render_complete_table(str_rows, header_names, header_units, cols_md))
 
         f.write("\n---\n")
         f.write("\n**Weighting:**\n")
@@ -1776,18 +1777,18 @@ def _write_markdown(rows: List[Dict[str, Any]], args: Any,
         f.write("- System metrics: a=arithmetic mean, m=median, d=maximum, p=90th percentile – for CPU/GPU/RAM. In the table: m (median) and p (90th percentile). Tp = GPU temperature P90.\n")
 
         # ── TOP 5 tables ──
-        def _t5_named(title: str, sort_key: str, headers: List[str], keys: List[str], pct_flags: Optional[List[bool]] = None) -> None:
+        def _t5_named(title: str, sort_key: str, headers: list[str], keys: list[str], pct_flags: list[bool] | None = None) -> None:
             """Write a TOP-5 Markdown table for the given sort key."""
             t5 = _top(rows, sort_key)
             _write_tbl(f, title, headers, t5, keys, pct_flags)
 
-        def _threshold_filtered(rows: List[Dict[str, Any]], sort_key: str, threshold: float) -> List[Dict[str, Any]]:
+        def _threshold_filtered(rows: list[dict[str, Any]], sort_key: str, threshold: float) -> list[dict[str, Any]]:
             """Rows with sort_key >= threshold, sorted descending."""
             valid = [r for r in rows if r.get(sort_key) not in (None, "", "—")]
             sorted_rows = sorted(valid, key=lambda x: float(x.get(sort_key, 0)), reverse=True)
             return [r for r in sorted_rows if float(r.get(sort_key, 0)) >= threshold]
 
-        def _b5_named(title: str, sort_key: str, headers: List[str], keys: List[str], pct_flags: Optional[List[bool]] = None) -> None:
+        def _b5_named(title: str, sort_key: str, headers: list[str], keys: list[str], pct_flags: list[bool] | None = None) -> None:
             """Write a BOTTOM-5 Markdown table for the given sort key."""
             valid = [r for r in rows if r.get(sort_key) not in (None, "", "—")]
             if not valid:

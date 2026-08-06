@@ -429,8 +429,6 @@ BENCHMARK_CATEGORY_DEFAULTS  (global, 4 entries)
 | `qwen3.6` | enable_thinking=False | Thinking tokens block token budget |
 | `qwen3.5` | temp=0.2, no_system_msg | System-less prompt embedding |
 | `gemma` | enable_thinking=False | Thinking disrupts coding benchmarks |
-| `bonsai-27b` | temp=0.7, top_p=0.95, top_k=20 | **02.08.:** PrismML-Modellkarte (Ternary, Thinking-Mode). Ohne Override lief es mit `temp=0.0` (greedy) – Ursache der schlechten 2026-08-02-DS1000-Scores |
-| `bonsai-8b` | temp=0.6, top_p=0.95, top_k=40 | **02.08.:** Hersteller-Range 0.5–0.7 |
 
 **Merge order** (higher wins):
 1. `BENCHMARK_CATEGORY_DEFAULTS[category]` – global default
@@ -1498,7 +1496,7 @@ pytest tests/ -v
 
 ---
 
-*Created: 28.06.2026 | Updated: 02.08.2026*
+*Created: 28.06.2026 | Updated: 06.08.2026*
 *Based on: v13.0.5 – Pipeline-Validierung, Hybrid-Klassifikation (GGUF+Architektur-Map), vereinfachter Workflow*
 *24.07.: registry_tool.py validate (7 Checks), _word_boundary_match(), Pre-Run-Checks in run_benchmarks.py*
 *24.07.: _ARCH_REASONING_MAP, classify_reasoning() Priority-Chain, _detect_reasoning_from_template() Regex*
@@ -1510,3 +1508,4 @@ pytest tests/ -v
 *31.07.: Registry-getriebenes enable_thinking, Streaming-Thinking-Fixes, registry_tool rm, Single-Instance-Lock, A/B-Slots, gpt-oss→thinking, Qwen3-Instruct-Fix, Registry-Bereinigung*
 *01.08.: STOP_TOKENS_CODING-Fix (\n```\n) – DeepSeek DS1000 35%/CoderEval 67%; consolidate_results SampleSize+Tabellen-Formatierung; IFEval-GGUF-EOS-Fallback*
 *02.08.: v13.0.10 – P1 Struktur-Gate (classify_output/CSV-Spalten), P4 Agentic-Safety (--agentic-mode safety), P3 YAML-Run-Spec (--run-spec, SUPPRESS-Probe-Parser), gpt-oss Reason-Logik zentral (GPTOSS_*), Bonsai-Overrides, Registry-Sync +53*
+*06.08.: Sampling-Design v2 – MODEL_CATEGORY_SAMPLING (Tabelle > Defaults, JSON-temp nur noch GUI-only); REASONING_PATTERNS erweitert; Bonsai-Modelle entfernt (Registry, Tabelle, Doku); registry_tool.py: +pipeline (ersetzt sync_model_configs.ps1), +sync-templates (ersetzt tools/add_missing_prompt_templates.py), +patch-reasoning-effort (Port aus tools/); 9 Einmal-/Blindflug-Skripte in src/tools/ gelöscht*

@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 Benchmark script for local LLMs via LM Studio API – DS1000 + CoderEval (v13).
 
@@ -60,10 +59,8 @@ _sys.path.insert(0, _SRC_DIR)
 
 import ast
 import csv
-import csv_writer as csv_writer
 import json
 import math
-import multiprocessing
 import os
 import random
 import re
@@ -73,14 +70,16 @@ import threading
 import time
 import traceback
 from datetime import datetime
-from typing import Any, Optional
-
-from utils.terminal import ok, warn, error, info, green, yellow, red, cyan, bold, progress_bar
-from type_defs import ModelConfig, SandboxResult, SystemMetrics, MetricsSummary, TaskResult, GenerationConfig
+from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+import psutil
+import pynvml
 import requests
+
+import csv_writer as csv_writer
+from benchmark_config import EXCLUDE_KEYWORDS, get_model_config
 
 # Model management from shared module (is NOT initiated from here)
 # NOTE: This script imports the constants and helper functions from
@@ -88,22 +87,33 @@ import requests
 # is done exclusively by run_benchmarks.py as the parent
 # launcher. The exact model ID is passed via --api-model.
 from model_manager import (
-    API_BASE, TIMEOUT_CLI, TIMEOUT_HTTP, TIMEOUT_MODEL_READY,
-    TIMEOUT_HEALTH_CHECK, TIMEOUT_UNLOAD_WAIT,
-    is_api_available, get_current_loaded_model,
-    has_unloaded_all_models, load_model_via_lms, is_model_ready,
-    get_available_models, parse_selection
+    API_BASE,
+    get_available_models,
+    get_current_loaded_model,
+    has_unloaded_all_models,
+    is_api_available,
+    parse_selection,
 )
-from benchmark_config import EXCLUDE_KEYWORDS, get_model_config
-
-import psutil
-import pynvml
+from type_defs import (
+    GenerationConfig,
+    MetricsSummary,
+    ModelConfig,
+    SandboxResult,
+    SystemMetrics,
+    TaskResult,
+)
+from utils.terminal import (
+    error,
+    info,
+    ok,
+    warn,
+)
 
 # ── Registry Reasoning Check ────────────────────────────────────────────
 # Used to check if a model supports reasoning (thinking/instruct/unknown).
-_REGISTRY_REASONING_CACHE: Optional[dict[str, Optional[str]]] = None
+_REGISTRY_REASONING_CACHE: dict[str, str | None] | None = None
 
-def _model_supports_reasoning(model_identifier: str) -> Optional[bool]:
+def _model_supports_reasoning(model_identifier: str) -> bool | None:
     """Check registry for reasoning field.
 
     Returns True (thinking), False (instruct), None (missing / unknown).
@@ -112,8 +122,8 @@ def _model_supports_reasoning(model_identifier: str) -> Optional[bool]:
     if _REGISTRY_REASONING_CACHE is None:
         _REGISTRY_REASONING_CACHE = {}
         try:
-            from registry_tool import load_registry
             from assemble_blueprint import normalize_model_name
+            from registry_tool import load_registry
             data = load_registry()
             for key, entry in data.items():
                 if isinstance(entry, dict) and "reasoning" in entry:
@@ -338,7 +348,7 @@ class Monitor:
         if not self._is_nvml_ok:
             warn("GPU/VRAM monitoring via NVML not available")
 
-    def _read_gpu(self) -> tuple[Optional[float], Optional[float]]:
+    def _read_gpu(self) -> tuple[float | None, float | None]:
         """Return (gpu_util_percent, vram_used_gb) via NVML, or (None, None)."""
         if not self._is_nvml_ok:
             return None, None
@@ -389,20 +399,16 @@ class Monitor:
             while self._is_sampling:
                 cpu = psutil.cpu_percent(interval=MONITOR_SAMPLE_INTERVAL_S)
                 ram = psutil.virtual_memory().used / (1024 ** 3)
-                if cpu > self._peak["cpu"]:
-                    self._peak["cpu"] = cpu
-                if ram > self._peak["ram"]:
-                    self._peak["ram"] = ram
+                self._peak["cpu"] = max(self._peak["cpu"], cpu)
+                self._peak["ram"] = max(self._peak["ram"], ram)
                 if self._is_nvml_ok:
                     try:
                         util = pynvml.nvmlDeviceGetUtilizationRates(self._nvml_handle)
                         mem = pynvml.nvmlDeviceGetMemoryInfo(self._nvml_handle)
                         gpu_val = util.gpu
                         vram_val = mem.used / (1024 ** 3)
-                        if gpu_val > self._peak["gpu"]:
-                            self._peak["gpu"] = gpu_val
-                        if vram_val > self._peak["vram"]:
-                            self._peak["vram"] = vram_val
+                        self._peak["gpu"] = max(self._peak["gpu"], gpu_val)
+                        self._peak["vram"] = max(self._peak["vram"], vram_val)
                     except (pynvml.NVMLError, OSError):
                         pass
 
@@ -533,17 +539,17 @@ class MetricsCollector:
         """All non-None values of a metric key across the samples."""
         return [s[1].get(key) for s in self.samples if s[1].get(key) is not None]
 
-    def avg(self, key: str) -> Optional[float]:
+    def avg(self, key: str) -> float | None:
         """Average of a metric key over the samples (None if empty)."""
         vals = self._values(key)
         return sum(vals) / len(vals) if vals else None
 
-    def max(self, key: str) -> Optional[float]:
+    def max(self, key: str) -> float | None:
         """Maximum of a metric key over the samples (None if empty)."""
         vals = self._values(key)
         return max(vals) if vals else None
 
-    def min(self, key: str) -> Optional[float]:
+    def min(self, key: str) -> float | None:
         """Minimum of a metric key over the samples (None if empty)."""
         vals = self._values(key)
         return min(vals) if vals else None
@@ -564,7 +570,7 @@ def load_jsonl(filepath: str) -> list[dict[str, Any]]:
 
 
 
-def _stream_chat_completion(url: str, headers: dict[str, str], body: dict[str, Any], start_timeout: int = START_TIMEOUT, finish_timeout: int = FINISH_TIMEOUT, max_retries: int = MAX_RETRIES) -> tuple[Optional[str], float, int, int, float, int, bool, Optional[str], Optional[str]]:
+def _stream_chat_completion(url: str, headers: dict[str, str], body: dict[str, Any], start_timeout: int = START_TIMEOUT, finish_timeout: int = FINISH_TIMEOUT, max_retries: int = MAX_RETRIES) -> tuple[str | None, float, int, int, float, int, bool, str | None, str | None]:
     """Streaming chat completion with dual timeout and retry logic.
     
     Uses threading to monitor start_timeout (first token) and finish_timeout
@@ -724,7 +730,7 @@ def _stream_chat_completion(url: str, headers: dict[str, str], body: dict[str, A
     return None, 0, 0, 0, 0, 0, False, "api_error", "Max retries exceeded"
 
 
-def strip_thinking_tokens(text: Optional[str]) -> tuple[Optional[str], int]:
+def strip_thinking_tokens(text: str | None) -> tuple[str | None, int]:
     """Remove thinking sections from the response and estimate their token count.
 
     Supports both:
@@ -791,7 +797,7 @@ def strip_thinking_tokens(text: Optional[str]) -> tuple[Optional[str], int]:
     return cleaned, estimated_tokens
 
 
-def _non_streaming_fallback(url: str, body: dict[str, Any], timeout: int) -> tuple[Optional[str], int, int, int, bool]:
+def _non_streaming_fallback(url: str, body: dict[str, Any], timeout: int) -> tuple[str | None, int, int, int, bool]:
     """Non-streaming fallback, if streaming fails."""
     try:
         payload = json.dumps(body).encode("utf-8")
@@ -840,7 +846,7 @@ def _extract_reasoning_delta(delta: dict) -> str:
     return reasoning or ""
 
 
-def _uses_qwen_template(model_identifier: Optional[str]) -> bool:
+def _uses_qwen_template(model_identifier: str | None) -> bool:
     """True if the model uses the Qwen chat template.
 
     chat_template_kwargs (enable_thinking / reasoning_effort) is only
@@ -851,7 +857,7 @@ def _uses_qwen_template(model_identifier: Optional[str]) -> bool:
     return bool(model_identifier) and "qwen" in model_identifier.lower()
 
 
-def generate_answer(cfg: GenerationConfig) -> tuple[Optional[str], float, int, int, float, int, bool, Optional[str], Optional[str]]:
+def generate_answer(cfg: GenerationConfig) -> tuple[str | None, float, int, int, float, int, bool, str | None, str | None]:
     """Send one chat-completions request (streaming first, then fallback).
 
     Builds the request body from ``cfg``, including thinking control via
@@ -945,7 +951,7 @@ def classify_output(code: str, response: str, is_structured: bool, entry_point: 
                     status = "json_missing_code"
         else:
             status = "fenced" if re.search(r"```", response) else "bare"
-    ep_found: Optional[bool] = None
+    ep_found: bool | None = None
     if entry_point:
         ep_found = bool(code and re.search(r"(?m)^\s*def\s+" + re.escape(entry_point) + r"\s*\(", code))
     return {
@@ -955,7 +961,7 @@ def classify_output(code: str, response: str, is_structured: bool, entry_point: 
     }
 
 
-def extract_code(text: Optional[str], is_structured: bool = False) -> str:
+def extract_code(text: str | None, is_structured: bool = False) -> str:
     """Extract Python code from the model's response.
 
     Handles four output styles (see Code-Review_2026-07-12.md §7.7.7
@@ -1076,8 +1082,7 @@ def _repair_indentation(code: str, max_iter: int = 10) -> str:
 
             if current_indent > 0 and current_indent < indent_level * 4:
                 new_level = current_indent // 4
-                if new_level < indent_level:
-                    indent_level = new_level
+                indent_level = min(indent_level, new_level)
 
             expected_indent = indent_level * 4
             if indent_level > 0 and (not line.startswith(("    ", "\t")) or current_indent < expected_indent):
@@ -1153,10 +1158,9 @@ def _is_bare_statement(line: str) -> bool:
 # and unwanted builtins (open, eval, exec, __import__ for blocked modules).
 
 import json as _json
-import tempfile as _tempfile
-import textwrap as _textwrap
-import subprocess as _subprocess
 import os as _os
+import subprocess as _subprocess
+import tempfile as _tempfile
 
 _SANDBOX_SAFE_BUILTINS = frozenset({
     'abs', 'all', 'any', 'bin', 'bool', 'bytearray', 'bytes', 'callable',
@@ -1167,14 +1171,7 @@ _SANDBOX_SAFE_BUILTINS = frozenset({
     'property', 'range', 'repr', 'reversed', 'round', 'set', 'slice',
     'sorted', 'str', 'sum', 'super', 'tuple', 'type', 'zip',
     'True', 'False', 'None', 'staticmethod', 'classmethod',
-    'delattr', 'setattr', 'memoryview', 'bytes', 'bytearray',
-    'reversed', 'sorted', 'iter', 'next', 'enumerate', 'zip', 'map',
-    'filter', 'all', 'any', 'sum', 'min', 'max', 'abs', 'round',
-    'pow', 'divmod', 'hash', 'id', 'len', 'repr', 'ascii', 'ord',
-    'chr', 'bin', 'hex', 'oct', 'format', 'bool', 'int', 'float',
-    'complex', 'str', 'bytes', 'bytearray', 'list', 'tuple', 'set',
-    'frozenset', 'dict', 'type', 'object', 'range', 'slice',
-    'property', 'staticmethod', 'classmethod', 'super',
+    'delattr', 'setattr', 'memoryview', 'ascii',
 })
 
 _SANDBOX_BLOCKED_MODULES = frozenset({
@@ -1187,7 +1184,7 @@ _SANDBOX_BLOCKED_MODULES = frozenset({
 })
 
 
-def _build_sandbox_script(code_string: str, should_capture_state: bool = False, tests: Optional[list[str]] = None) -> str:
+def _build_sandbox_script(code_string: str, should_capture_state: bool = False, tests: list[str] | None = None) -> str:
     """Build a sandbox script that executes code_string in a restricted namespace."""
     safe_list = _json.dumps(sorted(_SANDBOX_SAFE_BUILTINS))
     blocked_list = _json.dumps(sorted(_SANDBOX_BLOCKED_MODULES))
@@ -1304,7 +1301,7 @@ def _run_sandbox(script: str, timeout: int = TIMEOUT_EXEC) -> SandboxResult:
             return {"ok": False, "error": f"Timeout ({timeout}s)", "state": None, "passed": 0, "total": 0}
 
 
-def exec_sandboxed(code: str, timeout: int = TIMEOUT_EXEC) -> tuple[bool, Optional[str]]:
+def exec_sandboxed(code: str, timeout: int = TIMEOUT_EXEC) -> tuple[bool, str | None]:
     """Execute code in the sandbox subprocess. Returns (ok, error)."""
     script = _build_sandbox_script(code)
     res = _run_sandbox(script, timeout)
@@ -1452,7 +1449,7 @@ def _eval_log(msg: str) -> None:
     print(f"    [EVAL] {msg}", file=sys.stderr)
 
 
-def _try_ds1000_harness(generated_code: str, setup_code: str) -> Optional[tuple[float, str]]:
+def _try_ds1000_harness(generated_code: str, setup_code: str) -> tuple[float, str] | None:
     """Run the official DS1000 harness (test_execution) against the code.
 
     Only usable when setup_code contains ``test_execution``; returns None
@@ -1631,7 +1628,7 @@ def evaluate_code(generated_code: str, entry_point: str, tests_field: Any, refer
     return passed / total if total > 0 else 1.0, f"Tests: {passed}/{total}"
 
 
-def _get_model_config(model_identifier: Optional[str], benchmark_category: str = "coding", is_thinking_enabled: bool = False) -> ModelConfig:
+def _get_model_config(model_identifier: str | None, benchmark_category: str = "coding", is_thinking_enabled: bool = False) -> ModelConfig:
     """Get merged config via benchmark_config.get_model_config()."""
     return get_model_config(model_identifier or "", category=benchmark_category, is_thinking_enabled=is_thinking_enabled)
 
@@ -1649,9 +1646,9 @@ def get_benchmark_category(benchmark_name: str) -> str:
     return BENCHMARK_CATEGORY_MAP.get(benchmark_name, "coding")
 
 
-def run_task(task: dict[str, Any], task_type: str, model_identifier: Optional[str] = None, api_model: Optional[str] = None,
-             model_config: Optional[ModelConfig] = None, benchmark_category: str = "coding",
-             native_model_identifier: Optional[str] = None) -> TaskResult:
+def run_task(task: dict[str, Any], task_type: str, model_identifier: str | None = None, api_model: str | None = None,
+             model_config: ModelConfig | None = None, benchmark_category: str = "coding",
+             native_model_identifier: str | None = None) -> TaskResult:
     """Run a single benchmark task end-to-end and return the TaskResult.
 
     Builds the generation parameters from the merged model config,
@@ -1774,7 +1771,7 @@ def _extract_setup_code(task: dict[str, Any], prompt: str, reference_code: str) 
     return setup_code
 
 
-def _call_and_evaluate(full_prompt: str, generation_parameters: dict[str, Any], model_identifier: Optional[str],
+def _call_and_evaluate(full_prompt: str, generation_parameters: dict[str, Any], model_identifier: str | None,
                        entry_point: str, tests_field: list, reference_code: str, setup_code: str) -> TaskResult:
     """Generate an answer, extract code, classify output and evaluate it.
 
@@ -1863,7 +1860,7 @@ class _TaskProgress:
                 print()
 
 
-def benchmark_model(model_info: Any, tasks: list[dict[str, Any]], task_type: str, benchmark_name: str, monitor: Monitor, is_quiet_mode: bool = False, num_parallel: int = 1) -> tuple[list[dict[str, Any]], Optional[float], float, float, dict[str, Any]]:
+def benchmark_model(model_info: Any, tasks: list[dict[str, Any]], task_type: str, benchmark_name: str, monitor: Monitor, is_quiet_mode: bool = False, num_parallel: int = 1) -> tuple[list[dict[str, Any]], float | None, float, float, dict[str, Any]]:
     """Run all tasks of one benchmark against one model.
 
     Iterates the tasks with retries on API errors (Channel-Error markers
@@ -1891,7 +1888,7 @@ def benchmark_model(model_info: Any, tasks: list[dict[str, Any]], task_type: str
     if num_parallel > 1:
         print(f"  Parallel:  {num_parallel} Worker (LM Studio Multi-Slot)")
     # Effektive Generations-Parameter anzeigen (Punkt 1): Quelle ist die
-    # LMS-JSON-Config ("lms-json") bzw. der Kategorie-Fallback.
+    # Sampling-Tabelle ("benchmark-table"), der Kategorie- bzw. Thinking-Fallback.
     _cfg_src = model_config.get("_source", "?")
     print(f"  Config:    temp={model_config.get('temperature')}, "
           f"top_p={model_config.get('top_p')}, "
@@ -2021,7 +2018,7 @@ def benchmark_model(model_info: Any, tasks: list[dict[str, Any]], task_type: str
     # System metrics: from per-task peak values (monitor thread, ~5Hz during inference)
     # instead of MetricsCollector (only every 10s over entire run including idle)
     _ram_total_gb = psutil.virtual_memory().total / (1073741824)
-    def _peak_avg_max(key: str, min_val: float = 0) -> tuple[Optional[float], Optional[float]]:
+    def _peak_avg_max(key: str, min_val: float = 0) -> tuple[float | None, float | None]:
         """Average and max of a per-task resource metric above ``min_val``."""
         vals = [r.get(key) for r in results if r.get(key) is not None and r[key] > min_val]
         if not vals:
@@ -2051,7 +2048,7 @@ def benchmark_model(model_info: Any, tasks: list[dict[str, Any]], task_type: str
 # Direkt csv_writer.write_per_task_csv / write_per_model_csv nutzen.
 
 
-def _safe_float(value: Any) -> Optional[float]:
+def _safe_float(value: Any) -> float | None:
     """Convert value to float, returning None for missing/non-numeric inputs.
 
     Code-Review 2026-07-18 §5.2: replaces 4x repeated
@@ -2064,7 +2061,7 @@ def _safe_float(value: Any) -> Optional[float]:
         return None
 
 
-def parse_resource_avgs(task_results: list[dict[str, Any]]) -> tuple[Optional[float], Optional[float], Optional[float], Optional[float]]:
+def parse_resource_avgs(task_results: list[dict[str, Any]]) -> tuple[float | None, float | None, float | None, float | None]:
     """Average CPU/RAM/GPU/VRAM "during" values across task results.
 
     Non-numeric or missing values are ignored (via _safe_float); returns

@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 A/B-Messung: sequenziell vs. parallele Slots (ein Modell, einmal geladen).
 
@@ -34,7 +33,7 @@ import sys
 import threading
 import time
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 import psutil
 import requests
@@ -44,10 +43,17 @@ PROJECT_ROOT = os.path.dirname(SRC_DIR)
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-from custom_benchmark import (API_BASE, load_jsonl, subsample_tasks,
-                              _make_datascience_prompt)  # noqa: E402
-from model_manager import (has_unloaded_all_models, is_model_ready,
-                           load_model_via_lms)  # noqa: E402
+from custom_benchmark import (
+    API_BASE,
+    _make_datascience_prompt,
+    load_jsonl,
+    subsample_tasks,
+)
+from model_manager import (
+    has_unloaded_all_models,
+    is_model_ready,
+    load_model_via_lms,
+)
 
 LOCK_PATH = os.path.join(PROJECT_ROOT, "ergebnisse", ".benchmark.lock")
 DS1000_FILE = os.path.join(PROJECT_ROOT, "tests", "data", "data_science.jsonl")
@@ -60,7 +66,7 @@ REQUEST_TIMEOUT_TOTAL = 900.0
 RANDOM_SEED = 42
 
 
-def build_prompts(sample_size: int, benchmark: str, seed: Optional[int] = None) -> list[str]:
+def build_prompts(sample_size: int, benchmark: str, seed: int | None = None) -> list[str]:
     """Echte DS1000-Prompts (identische Konstruktion wie custom_benchmark.py)."""
     seed = RANDOM_SEED if seed is None else seed
     tasks = load_jsonl(DS1000_FILE)
@@ -85,7 +91,7 @@ def build_body(model: str, prompt: str, max_tokens: int) -> dict[str, Any]:
     return body
 
 
-def _stream_request(body: dict[str, Any]) -> tuple[float, int, Optional[str]]:
+def _stream_request(body: dict[str, Any]) -> tuple[float, int, str | None]:
     """Ein Streaming-Request. Returns (latency_s, out_tokens, error)."""
     start = time.time()
     url = f"{API_BASE}/chat/completions"
@@ -141,7 +147,7 @@ def run_mode(prompts: list[str], slots: int, max_tokens: int, model: str) -> dic
     errors: list[str] = []
     wall_start = time.time()
 
-    def _one(prompt: str) -> tuple[float, int, Optional[str]]:
+    def _one(prompt: str) -> tuple[float, int, str | None]:
         return _stream_request(build_body(model, prompt, max_tokens))
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=slots) as pool:
@@ -181,7 +187,7 @@ def mode_sequence(slots: list[int], reps: int) -> list[int]:
     return seq
 
 
-def lock_held_by_live_process() -> Optional[int]:
+def lock_held_by_live_process() -> int | None:
     if not os.path.exists(LOCK_PATH):
         return None
     try:
@@ -211,7 +217,7 @@ def format_report(model: str, benchmark: str, sample_size: int, slots: list[int]
         "| Slots | Wall-Time (s) | Aggregat tok/s | Verhaeltnis | Mittlere Latenz (s) | Median (s) | Max RAM (GB) |",
         "|-------|--------------:|---------------:|------------:|---------------------:|-----------:|-------------:|",
     ]
-    base_wall: Optional[float] = None
+    base_wall: float | None = None
     for slot in slots:
         runs = results[slot]
         wall = min(r["wall_s"] for r in runs)

@@ -32,12 +32,10 @@ python src/registry_tool.py sync
 
 Easiest way: 
 Run in MS-PowerShell:
-`sync_model_configs.ps1 -AutoAdd` detects the model via `lms ls` and registers it automatically.
-Internally it calls `python src/registry_tool.py sync` (+ `assemble_blueprint.py classify`).
-
-> ⚠️ **`sync_model_configs.ps1` resolves `registry_tool.py`/`assemble_blueprint.py` from `src/`**
-> (since the v13.0.6 migration; variable `$SRC` = `<root>\src`). The universal fallback is
-> `python src/registry_tool.py sync`. 
+`python src/registry_tool.py pipeline sync` detects the model via `lms ls`, registers it automatically
+(sync) and runs the blueprint classification.
+Internally: `compare` → `sync` → `classify`.
+For the full run incl. prompt assembly + validation: `python src/registry_tool.py pipeline full`.
 
 > ℹ **CWD-unabhängig (03.08., F4):** Alle Einstiegspunkte haben einen sys.path-Bootstrap –
 > `python -m src.registry_tool sync` funktioniert aus jedem Verzeichnis.
@@ -76,20 +74,21 @@ python src/registry_tool.py sync           # Full maintenance – erledigt ALLES
 
 **All info that classify + registry_tool.py determine automatically:**
 
-| Field              | Source                                                      | Example                                      |
-|--------------------|-------------------------------------------------------------|----------------------------------------------|
-| `reasoning`        | **GGUF `tokenizer.chat_template`** via `read_gguf_arch()` (Patterns: `enable_thinking`, `<think>`, `reasoning_effort`, …) – kein Keyword-Fallback mehr. Modell wird ohne Eintrag übersprungen. | `thinking` / `instruct`                    |
-| `capabilities`     | Model name (vl/vision/ocr, coder/code)                     | `qwen2.5-coder-14b` → `[coding, text]`       |
-| `blueprint`        | From reasoning + capabilities                               | `thinking` → `reasoning_assistant`           |
-| `truncation`       | contextLength from JSON config                              | `16384` (≥8192) → `medium`                   |
-| `offload`          | Default 1 (full GPU offload) at `add` / `fill-ctx`          | `1`                                           |
-| `num_parallel`     | MoE=4 (except ERNIE→1), Dense=1, GPT-OSS=4                  | `4` (MoE) / `1` (Dense) / `1` (ERNIE)        |
-| `k_cache`          | `q8_0` (default), Gemma-4/GPT-OSS = `f16`                  | `q8_0`, `f16`                                |
-| `v_cache`          | `iq4_nl` (default), Gemma-4/GPT-OSS = `f16`                | `iq4_nl`, `q5_1`, `f16`                      |
-| `n_layers`         | **Automatically from GGUF header** via `add`/`fill-arch`    | `49` (North Mini Code), `64` (Qwen3.6-27B)   |
-| `hidden_dim`       | **Automatically from GGUF header** via `add`/`fill-arch`    | `2048` / `5120`                               |
-| `context_length`   | Formula from `file_size_bytes`, `num_parallel`, KV quant    | `16384` (default when size is missing)        |
-| `useUnifiedKvCache`| **VRAM formula** (see below) – written to JSON via `configs`| `false` / `true`                              |
+| Field                  | Source                                                      | Example                                                       |
+|------------------------|-------------------------------------------------------------|---------------------------------------------------------------|
+| `reasoning`/`thinking` | **GGUF `tokenizer.chat_template`** via `read_gguf_arch()`   | Patterns: `enable_thinking`, `<think>`, `reasoning_effort`, … |    
+|    / `instruct`        |  –> kein Keyword-Fallback mehr. Modell wird ohne Eintrag übersprungen.                                                      |
+| `capabilities`         | Model name (vl/vision/ocr, coder/code)                     | `qwen2.5-coder-14b` → `[coding, text]`                         |
+| `blueprint`            | From reasoning + capabilities                               | `thinking` → `reasoning_assistant`                            |
+| `truncation`           | contextLength from JSON config                              | `16384` (≥8192) → `medium`                                    |
+| `offload`              | Default 1 (full GPU offload) at `add` / `fill-ctx`          | `1`                                                           |
+| `num_parallel`         | MoE=4 (except ERNIE→1), Dense=1, GPT-OSS=4                  | `4` (MoE) / `1` (Dense) / `1` (ERNIE)                         |
+| `k_cache`              | `q8_0` (default), Gemma-4/GPT-OSS = `f16`                  | `q8_0`, `f16`                                                  |
+| `v_cache`              | `iq4_nl` (default), Gemma-4/GPT-OSS = `f16`                | `iq4_nl`, `q5_1`, `f16`                                        |
+| `n_layers`             | **Automatically from GGUF header** via `add`/`fill-arch`    | `49` (North Mini Code), `64` (Qwen3.6-27B)                    |
+| `hidden_dim`           | **Automatically from GGUF header** via `add`/`fill-arch`    | `2048` / `5120`                                               |
+| `context_length`       | Formula from `file_size_bytes`, `num_parallel`, KV quant    | `16384` (default when size is missing)                        |
+| `useUnifiedKvCache`    | **VRAM formula** (see below) – written to JSON via `configs`| `false` / `true`                                              |
 
 **VRAM formula for useUnifiedKvCache (since 17.07.):**
 ```
@@ -149,27 +148,31 @@ python src/registry_tool.py rm <model-key>
 python src/registry_tool.py rm <model-key> --delete-files --yes
 ```
 
-| Flag | Effect |
-|------|--------|
-| (none) | Only deletes the registry entry. Files/configs stay. Interactive confirm (`[y/N]`). |
-| `--delete-files` | Also deletes JSON configs (incl. `.bak-*` backups) and the model dir under `~/.lmstudio/hub/models/<pub>/<name>` / `~/.lmstudio/models/<pub>/<name>`. |
-| `--yes` | Skips the interactive confirmation. |
+| Flag              | Effect                                                                                                                                                |
+|-------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------|
+| (none)            | Only deletes the registry entry. Files/configs stay. Interactive confirm (`[y/N]`).                                                                   |
+| `--delete-files`  | Also deletes JSON configs (incl. `.bak-*` backups) and the model dir under `~/.lmstudio/hub/models/<pub>/<name>` / `~/.lmstudio/models/<pub>/<name>`. |
+| `--yes`           | Skips the interactive confirmation.                                                                                                                   |
 
 **Note:** The JSON configs live in `~/.lmstudio/.internal/user-concrete-model-default-config`
 (`CONFIG_ROOT` in `registry_tool.py`) and are removed **only** with `--delete-files`.
 Plain `rm <key>` deletes just the registry entry and leaves all files intact.
-Re-adding the model later is automatic via `sync_model_configs.ps1` / `registry_tool.py sync`.
+Re-adding the model later is automatic via `registry_tool.py sync` / `pipeline`.
 
-**Related native script:** `.\sync_model_configs.ps1` (project root). It wraps `registry_tool.py`
-and `assemble_blueprint.py`, resolving both from `src/`. Flags: `-Status`, `-AutoAdd`
-(new models + sync + classify), `-FullSync` (additionally assemble + validate), `-SyncCtx`,
-`-FillCtx`, `-FillArch`, `-FixNp`, `-FixCtx`.
+**One-shot maintenance pipeline (replaces the old `sync_model_configs.ps1`):**
+`python src/registry_tool.py pipeline [status|sync|full]`
+- `status` (default): LMS model count + `compare` report (writes nothing)
+- `sync`: + full `sync` + blueprint classification
+- `full`: + prompt assembly + validation
 
 ### Cheat Sheet
 
 ```bash
 # DER EINE Befehl für alles (nach neuem Modell oder Änderungen)
-python src/registry_tool.py sync
+python src/registry_tool.py pipeline full
+
+# Status-Report ohne Änderungen
+python src/registry_tool.py pipeline
 
 # Fill in architecture data from GGUF headers (n_layers, hidden_dim)
 python src/registry_tool.py fill-arch
@@ -183,18 +186,15 @@ python src/registry_tool.py fix-np
 # Recalculate context_length (e.g. after np change)
 python src/registry_tool.py fix-ctx
 
-# Write useUnifiedKvCache, offload, np from registry into JSON configs
-python src/registry_tool.py configs
-
-# Write JSON configs back to registry (overwrite)
+# Sync offload/np/UKV from JSON configs into registry (configs are the source)
 python src/registry_tool.py sync-from-configs
 
 # Compare registry vs LMS vs configs
 python src/registry_tool.py compare
 
+# Validate registry consistency (templates, drift, required fields)
+python src/registry_tool.py validate
+
 # Remove a model from the registry (files/configs stay; --delete-files removes everything)
 python src/registry_tool.py rm <model-key> [--delete-files] [--yes]
-
-# Prompt-Preview (ohne zu schreiben)
-python src/assemble_blueprint.py preview
 ```

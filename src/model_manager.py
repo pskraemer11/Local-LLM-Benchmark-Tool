@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 Shared module for LM Studio model management.
 Imported by run_benchmarks.py AND custom_benchmark.py.
@@ -39,14 +38,13 @@ import json
 import os
 import re
 import subprocess
-import sys
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
-from benchmark_config import PIPELINE_TIMEOUTS, is_support_file
+from benchmark_config import is_support_file
 from type_defs import AvailableModelInfo, LoadedModelInfo
-from utils.terminal import ok, warn, error, info
+from utils.terminal import error, info, ok, warn
 
 API_BASE = os.environ.get("LLM_API_BASE", "http://127.0.0.1:1234/v1")
 # REST API base (without /v1 suffix) for model management endpoints
@@ -97,8 +95,8 @@ def safe_json_loads(text: str) -> Any:
     return json.loads(text, object_pairs_hook=OrderedDict)
 
 
-def _rest_request(endpoint: str, method: str = "GET", data: Optional[dict] = None,
-                  timeout: int = TIMEOUT_HTTP) -> Optional[dict]:
+def _rest_request(endpoint: str, method: str = "GET", data: dict | None = None,
+                  timeout: int = TIMEOUT_HTTP) -> dict | None:
     """Make a request to LM Studio REST API.
     
     Args:
@@ -110,8 +108,8 @@ def _rest_request(endpoint: str, method: str = "GET", data: Optional[dict] = Non
     Returns:
         Parsed JSON response or None on error
     """
-    from urllib.request import Request, urlopen
     from urllib.error import HTTPError, URLError
+    from urllib.request import Request, urlopen
     
     url = f"{_REST_API_BASE}{endpoint}"
     headers = {"Content-Type": "application/json"}
@@ -147,7 +145,7 @@ def is_api_available() -> bool:
         return False
 
 
-def get_current_loaded_model() -> Optional[LoadedModelInfo]:
+def get_current_loaded_model() -> LoadedModelInfo | None:
     try:
         r = subprocess.run(["lms", "ps", "--json"], capture_output=True, text=True,
                            timeout=15, encoding="utf-8", errors="replace")
@@ -226,7 +224,7 @@ def has_unloaded_all_models() -> bool:
 
 
 # ── Registry Helpers ─────────────────────────────────────────────────
-_REGISTRY_CACHE: Optional[dict] = None
+_REGISTRY_CACHE: dict | None = None
 
 def _load_registry_data() -> dict:
     """Load and cache model_registry.yaml."""
@@ -262,7 +260,7 @@ def _registry_display_overrides() -> dict[str, str]:
     return overrides
 
 
-def get_available_models(exclude_keywords: Optional[list[str]] = None, registry_only: bool = False) -> list[AvailableModelInfo]:
+def get_available_models(exclude_keywords: list[str] | None = None, registry_only: bool = False) -> list[AvailableModelInfo]:
     """Query LM Studio for installed models via `lms ls --json`.
 
     Returns a list of dicts with keys:
@@ -320,8 +318,7 @@ def get_available_models(exclude_keywords: Optional[list[str]] = None, registry_
                             # displayName enthält den Quant ggf. als
                             # Leerzeichen-Variante ("TQ2 0") – entfernen.
                             space_form = quant_name.replace("_", " ")
-                            if display.endswith(" " + space_form):
-                                display = display[: -len(" " + space_form)]
+                            display = display.removesuffix(" " + space_form)
                         display = f"{display}@{quant_name}"
                     sz_bytes = item.get("sizeBytes", 0) or 0
                     models.append({
@@ -384,7 +381,7 @@ def get_available_models(exclude_keywords: Optional[list[str]] = None, registry_
     return []
 
 
-def parse_selection(choice: str, max_val: int) -> Optional[list[int]]:
+def parse_selection(choice: str, max_val: int) -> list[int] | None:
     """Parse user input like '1', '1,3,5', '1-5' into zero-based indices."""
     choice = choice.strip()
     if not choice:
@@ -427,8 +424,8 @@ def _is_lmstudio_running() -> bool:
     `.lmstudio/llmster/0.0.12-1/llmster.exe` which broke whenever LMS
     shipped a new version. See Code-Review 2026-07-18, Bug 2.
     """
-    from urllib.request import Request, urlopen
     from urllib.error import URLError
+    from urllib.request import Request, urlopen
     # 1. Already running?
     try:
         req = Request(f"{API_BASE}/models", method="GET")
@@ -519,7 +516,7 @@ def _validate_model_identifier(model_identifier: str) -> str:
     Valid characters: ASCII letters/digits, `.`, `_`, `/`, `-`, `@`, `:`, `+`, `=`, `#`, `?`.
     Max length 256 (longer-than-realistic for any model name on HF).
     '?' tritt als LM-Studio-Platzhalter in modelKeys auf, deren Quant-Name
-    nicht geparst werden kann (z.B. "ternary-bonsai-27b-stock-mtp@?").
+    nicht geparst werden kann.
     """
     if not isinstance(model_identifier, str) or not _VALID_MODEL_KEY_RE.match(model_identifier):
         raise ValueError(
@@ -529,7 +526,7 @@ def _validate_model_identifier(model_identifier: str) -> str:
     return model_identifier
 
 
-def load_model_via_lms(model_identifier: str, gpu_offload: Optional[float] = None) -> tuple[bool, Optional[str]]:
+def load_model_via_lms(model_identifier: str, gpu_offload: float | None = None) -> tuple[bool, str | None]:
     """Load model via LM Studio REST API.
     
     Uses POST /api/v1/models/load to load a model into memory.
@@ -592,8 +589,8 @@ def is_model_ready(timeout: int = TIMEOUT_MODEL_READY) -> bool:
     Unlike the previous implementation, this only considers HTTP 200 as "ready".
     Other errors (e.g. "No models loaded", 500, timeout) are retried until timeout.
     """
-    from urllib.request import Request, urlopen
     from urllib.error import HTTPError, URLError
+    from urllib.request import Request, urlopen
     start = time.time()
     print("  [INFO] Waiting for model readiness", end="", flush=True)
     while time.time() - start < timeout:

@@ -114,7 +114,7 @@ Fixed since 19.07. by top-level placement; since 04.08. Qwen3.6 intentionally ru
 **SINCE 02.08. (v13.0.10):** Central source in `benchmark_config.py`: `GPTOSS_REASONING_EFFORT = "medium"`, `GPTOSS_REASONING_BUDGET = 4096`.
 
 They control **both** levels synchronously: 
-(1) LM Studio engine config (`patch_reasoning_effort.py` writes `reasoningEffort`/`budgetTokens`, overridable via `--effort/--budget`) and 
+(1) LM Studio engine config (`registry_tool.py patch-reasoning-effort` writes `reasoningEffort`/`budgetTokens`, overridable via `--effort/--budget`) and 
 (2) the system prompt of the `gptoss_reasoning` blueprint (`assemble_blueprint.py`, "Reasoning: "). 
 
 Source reference below remains valid.
@@ -154,20 +154,20 @@ The table below documents the **effective** values (source: LMS JSON-Config
 family default). `MODEL_TEMP_OVERRIDES` no longer exists (removed 05.08.);
 all per-model values now come from the JSON-Config (matches the GUI).
 
-| Pattern             | enable_thinking | max_tokens | Special Notes                                       |
-|---------------------|-----------------|------------|-----------------------------------------------------|
-| default (category)  |  *False*        |      –     | Category defaults since 2026-07-11                  |
-| qwen3.5             |   False         |      –     | temp=0.2, top_p=0.9, no_system_msg; installed qwen3.5-9b is `instruct` in registry (GGUF variant would be thinking) |
-| qwen3.6 (all)       |  *True* (reg.)  |      –     | Registry `thinking` wins — no override anymore      |
-| gemma (all)         |  *True* (reg.)  |      –     | Registry `thinking` wins — no override anymore      |
-| gpt-oss             |  *True* (reg.)  |    4096    | stop: <\|return\|>, <\|call\|>, reasoning_effort central (GPTOSS_REASONING_EFFORT, default medium) |
-| phi-4               |  *True* (reg.)  |      –     | unsloth/phi-4 is `thinking` in registry; JSON-Config only sets temp=0.8/top_k=50 |
-| deepseek-r1-distill |   False         |      –     | Registry `instruct` (Qwen2.5 base, manually set 04.08.); JSON-Config only temp=0.0 |
-| deepseek-coder      |   False         |      –     | temp=0.6, min_p=0.02; registry `instruct`           |
-| kimi                |   False         |      –     | enable_thinking=True → "Content-only format" error |
-| rnj                 |  *True* (reg.)  |      –     | THOUGHT:/RESPONSE: parsing format (hub model.yaml)  |
-| bonsai-27b / 8b     |   (reg.)        |      –     | temp/top_k per manufacturer card (thinking-mode)    |
-| magistral/ministral/nemotron |  (reg.)  |      –     | temp=0.7, top_p=0.95                                 |
+| Pattern                       | enable_thinking | max_tokens | Special Notes                                                                                      |
+|-------------------------------|-----------------|------------|----------------------------------------------------------------------------------------------------|
+| default (category)            |  *False*        |      –     | Category defaults since 2026-07-11                                                                 |
+| qwen3.5                       |   False         |      –     | temp=0.2, top_p=0.9, no_system_msg; installed qwen3.5-9b is `instruct` in registry                 |
+|                                                              |      ... (GGUF variant would be thinking)                                                          |
+| qwen3.6 (all)                 |  *True* (reg.)  |      –     | Registry `thinking` wins — no override anymore                                                     |
+| gemma (all)                   |  *True* (reg.)  |      –     | Registry `thinking` wins — no override anymore                                                     |
+| gpt-oss                       |  *True* (reg.)  |    4096    | stop: <\|return\|>, <\|call\|>, reasoning_effort central (GPTOSS_REASONING_EFFORT, default medium) |
+| phi-4                         |  *True* (reg.)  |      –     | unsloth/phi-4 is `thinking` in registry; JSON-Config only sets temp=0.8/top_k=50                   |
+| deepseek-r1-distill           |   False         |      –     | Registry `instruct` (Qwen2.5 base, manually set 04.08.); JSON-Config only temp=0.0                 |
+| deepseek-coder                |   False         |      –     | temp=0.6, min_p=0.02; registry `instruct`                                                          |
+| kimi                          |   False         |      –     | enable_thinking=True → "Content-only format" error                                                 |
+| rnj                           |  *True* (reg.)  |      –     | THOUGHT:/RESPONSE: parsing format (hub model.yaml)                                                 |
+| magistral/ministral/nemotron  | (reg.)          |      –     | temp=0.7, top_p=0.95                                                                               |
 
 > `–` in the max_tokens column = category default applies (no override).
 > `(reg.)` = no `enable_thinking` in the JSON-Config; the registry value decides
@@ -176,20 +176,22 @@ all per-model values now come from the JSON-Config (matches the GUI).
 
 ### Effective `enable_thinking` per installed model family (verified 04.08.)
 
-| Family                                    | registry | enable_thinking |
-|-------------------------------------------|----------|-----------------|
-| qwen3.6-27b / -mtp / -i1 / 28b-reap-i1    | thinking | **True**        |
-| gemma-4-12b-it-qat / 19b-reap-i1 / 26b (all) | thinking | **True**   |
-| gpt-oss-20b                               | thinking | **True**        |
-| unsloth/phi-4                             | thinking | **True**        |
-| qwen3-coder-reap-25b-a3b-i1               | thinking | **True**        |
-| rnj-1 / magistral / ministral-3-14b / nemotron-cascade / mirothinker / bonsai-27b-mtp / glm-4.7 (all) / zai-org/glm-4.6v | thinking | **True** |
-| qwen3-30b-a3b-instruct / qwen3-coder-30b-a3b-instruct | instruct | False  |
-| qwen2.5-coder-14b-instruct (all quants)   | instruct | False          |
-| deepseek-r1-distill-qwen-14b              | instruct | False          |
-| deepseek-coder-33b-instruct / v2-lite     | instruct | False          |
-| ernie-4.5 / granite-4.x / devstral / codestral / falcon3 / lfm2 / mellum2-instruct / internlm2_5 / bonsai-8b | instruct | False |
-| kimi-linear-reap-35b                      | (none)   | False (override)|
+| Family                                                | registry | enable_thinking |
+|-------------------------------------------------------|----------|-----------------|
+| qwen3.6-27b / -mtp / -i1 / 28b-reap-i1                | thinking | **True**        |
+| gemma-4-12b-it-qat / 19b-reap-i1 / 26b (all)          | thinking | **True**        |
+| gpt-oss-20b                                           | thinking | **True**        |
+| unsloth/phi-4                                         | thinking | **True**        |
+| qwen3-coder-reap-25b-a3b-i1                           | thinking | **True**        |
+| rnj-1 / magistral / ministral-3-14b / nemotron-cascade| thinking | **True**        |
+|   ...  / mirothinker / glm-4.7 (all) / zai-org/glm-4.6v                            |
+| qwen3-30b-a3b-instruct / qwen3-coder-30b-a3b-instruct | instruct | False           |
+| qwen2.5-coder-14b-instruct (all quants)               | instruct | False           |
+| deepseek-r1-distill-qwen-14b                          | instruct | False           |
+| deepseek-coder-33b-instruct / v2-lite                 | instruct | False           |
+| ernie-4.5 / granite-4.x / devstral / codestral /      | instruct | False           |
+|  ... falcon3 / lfm2 / mellum2-instruct / internlm2_5                               |
+| kimi-linear-reap-35b                                  | (none)   | False (override)|
 
 
 ## Stop-String Trap: `"\n```"` breaks Code-Block Opening (2026-08-01)
@@ -210,9 +212,9 @@ DeepSeek R1 Distill does, because the final answer starts with a code block (suf
 
 | Stop list                          | content_len | Result                                  |
 |------------------------------------|-------------|-----------------------------------------|
-| `["\n```", "\n# Task", ...]` (old) | 1 (`"\n"`) | finish_reason=stop, code killed at open |
-| no `\n``` ` stop                   | 338         | full code block                         |
-| `["\n```\n", "\n# Task", ...]`     | 338         | full code block, stops at **close**     |
+| `["\n```", "\n# Task", ...]` (old) | 1 (`"\n"`)  | finish_reason=stop, code killed at open |
+| no `\n``` ` stop                ```| 338         | full code block                         |
+| `["\n```\n", "\n# Task", ...]`  ```| 338         | full code block, stops at **close**     |
 
 **Fix:** `custom_benchmark.py:192` — `"\n```"` → `"\n```\n"`.                                                                        #  ```
 The trailing newline means the stop only matches the **closing** fence (`\n```\n`, line end) and never the opening (`\n```python`).  # ```
@@ -227,15 +229,15 @@ Consistent with older SS30 runs from 23./24.07. (40% / 58%) — the 0% runs were
 
 ## --thinking Flag Behavior (v13, updated 05.08.)
 
-| Model group              | --thinking effect                         | Reason                                                                          |
-|--------------------------|-------------------------------------------|---------------------------------------------------------------------------------|
-| Reasoning models         | ✅ enable_thinking=True (+ timeout ×2)    | Detection via `REASONING_PATTERNS` keyword match (`benchmark_config.py:514`, word-boundary) |
-| (registry `thinking`)    |                                           |                                                                                 |
-| Gemma-4                  | ✅ registry already sets True             | Registry `thinking` wins; no override anymore                                   |
-| Qwen3.6 (all)            | ✅ registry already sets True             | Registry `thinking` wins; no override anymore (formerly forced False)           |
-| GPT-OSS                  | ✅ enable_thinking=True possible          | `gpt-oss` in REASONING_PATTERNS; registry already `thinking`                    |
-| Qwen3.5                  | ❌ no effect                              | Installed qwen3.5-9b is `instruct` (registry); JSON-Config False stays          |
-| Default (instruct models)| ❌ no effect                              | enable_thinking stays False (JSON-Config / category default)                    |
+| Model group              | --thinking effect                      | Reason                                                                          |
+|--------------------------|----------------------------------------|---------------------------------------------------------------------------------|
+| Reasoning models         | ✅ enable_thinking=True (+ timeout ×2) | Detection via `REASONING_PATTERNS` keyword match (`benchmark_config.py:514`,    |
+| (registry `thinking`)    |                                        |       ... word-boundary)                                                        |
+| Gemma-4                  | ✅ registry already sets True          | Registry `thinking` wins; no override anymore                                   |
+| Qwen3.6 (all)            | ✅ registry already sets True          | Registry `thinking` wins; no override anymore (formerly forced False)           |
+| GPT-OSS                  | ✅ enable_thinking=True possible       | `gpt-oss` in REASONING_PATTERNS; registry already `thinking`                    |
+| Qwen3.5                  | ❌ no effect                           | Installed qwen3.5-9b is `instruct` (registry); JSON-Config False stays          |
+| Default (instruct models)| ❌ no effect                           | enable_thinking stays False (JSON-Config / category default)                    |
 
 **Practical consequence:** `--thinking` is now mostly redundant for reasoning models —
 the registry already enables thinking. It remains useful as an explicit force for

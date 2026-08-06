@@ -40,7 +40,7 @@ async def _patched_chat_completion(self: Any, **kwargs: Any) -> Any:
 
 openai_compat.OpenAICompatibleAdapter.chat_completion = _patched_chat_completion
 
-from tool_eval_bench.cli.bench import main  # noqa: E402  (import after patch)
+from tool_eval_bench.cli.bench import main
 
 if __name__ == "__main__":
     main()

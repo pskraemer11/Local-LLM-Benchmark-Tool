@@ -16,7 +16,7 @@ Hardware: AMD Ryzen 7 (8 cores) | NVIDIA RTX 5070 Ti (16 GB VRAM) | Windows 11
 | **Reasoning**  | Explicit chain-of-thought before answer; needs more time/VRAM  |
 | **Vision/OCR** | Image/document processing; excluded from benchmarks            |
 | **Excluded**   | Excluded from benchmark selection (OCR/Vision/Embedding)       |
-| **✅ OK**      | Suitable for local LLM benchmarks                              |
+| **✅ OK**      | Suitable for local LLM benchmarks                             |
 | **⚠️ OK**     | Conditionally suitable (e.g. only with specific quantization)  |
 
 **Conservative KV-cache formula (per slot):**
@@ -37,44 +37,56 @@ vs FP16 = 4 bytes), especially for VRAM-critical models.
 > - Model-specific VRAM overhead
 
 | Model VRAM     | Approx. context length |
-|----------------|----------------------:|
-| > 14 GB        |                 16k   |
-| 13–14 GB       |                 32k   |
-| 12–13 GB       |                 49k   |
-| 11–12 GB       |                 64k   |
-| 10–11 GB       |                 98k   |
-| 9–10 GB        |                131k   |
-| < 9 GB         |                262k   |
+|----------------|-----------------------:|
+| > 14 GB        |        16k             |
+| 13–14 GB       |        32k             |
+| 12–13 GB       |        49k             |
+| 11–12 GB       |        64k             |
+| 10–11 GB       |        98k             |
+| 9–10 GB        |       131k             |
+| < 9 GB         |       262k             |
 
-**Rule of thumb:** Model VRAM should be ≤ VRAM minus 2 GB (reserve for KV-cache + overhead).
-
+**1st Rule of thumb:** Model weights size should be less then VRAM (reserved GPU memory) minus 2 GB (reserve for KV-cache + overhead).
+**2nd Rule of thumb:** Models greater 12GB need Unified KV Cache = true (activated) to use 4 parallel slots (normally faster)
+**3rd Rule of thumb:** some models can't use KV quantisation (e.g. Gemma-4, Kimi Linear). They need Unified KV Cache = true and allow less context length to fit into VRAM. 
+                        Otherwise their perfomance slow down dramatically (use of shared CPU memory).
 ---
 
 ## Context Length Regression (log-log)
 
 > **Goal:** Predict maximum usable context length from model metadata (VRAM, architecture).
-> **Use case:** `registry_tool.py configs` uses this formula to estimate np/UKV settings,
-> but does NOT overwrite context_length in JSON configs (manual GUI settings are authoritative).
+> **New Use case:** `registry_tool.py configs` uses this formula to estimate np/UKV settings,
+>        but does NOT overwrite context_length in JSON configs (manual GUI settings are authoritative).
 
 ### Method
+
+**Formula:**
+```
+ctx = b0 × max_ctx^(b1) × vram_gb^(b2) × kv_gb^(b3)
+```
 
 Linear regression on logarithmic parameters:
 - `log(ctx)` as dependent variable
 - `log(max_ctx)`, `log(vram_gb)`, `log(kv_gb)` as predictors
 
-**Exclusion criterion:** Cases where `ctx = max_ctx` (native GGUF limit) are excluded,
-because here the architecture — not VRAM — is the limiting factor.
+(The original, theoretical formula for ctx consists of the multiplication and division of independent variables (parameters: num_layer, 
+num_hidden, num_parallel slots, unifiedKvCache=true/false, K+V quantization). A direct linear regression using these variables is not effective. 
+The linear regression is therefore performed on the logarithmic parameters, because on this scale the (logarithmic) terms behave 
+additively or subtractively.) 
+
+**Exclusion criterion:** Cases where `ctx = max_ctx` (native GGUF limit) are excluded, because here the architecture 
+— not VRAM — is the limiting factor. 
 
 ### Results (05.08.2026)
 
-| Metric | Value |
-|--------|-------|
-| Data points | 56 (excl. 5 where ctx = max_ctx) |
-| R² | **0.5227** |
-| Intercept (b0) | 19.8329 |
-| max_ctx (b1) | -0.0575 |
-| vram_gb (b2) | -2.4782 |
-| kv_gb (b3) | 0.3042 |
+| Metric/factor  | Value                            |
+|----------------|----------------------------------|
+| Data points    | 56 (excl. 5 where ctx = max_ctx) |
+| R²             | **0.5227**                       |
+| Intercept (b0) | 19.8329                          |
+| max_ctx (b1)   | -0.0575                          |
+| vram_gb (b2)   | -2.4782                          |
+| kv_gb (b3)     |  0.3042                          |
 
 **Formula:**
 ```
@@ -83,34 +95,37 @@ ctx = 410512948 × max_ctx^(-0.0575) × vram_gb^(-2.4782) × kv_gb^(0.3042)
 
 ### Interpretation
 
-| Coefficient | Meaning |
-|-------------|---------|
-| `max_ctx^-0.0575` | Native ctx has minimal influence (exponent ≈ 0) |
+| Coefficient       | Meaning                                                 |
+|-------------------|---------------------------------------------------------|
+| `max_ctx^-0.0575` | Native ctx has minimal influence (exponent ≈ 0)         |
 | `vram_gb^-2.4782` | More VRAM → significantly more ctx (negative = inverse) |
-| `kv_gb^0.3042` | Larger KV-cache → slightly more ctx (positive) |
+| `kv_gb^0.3042`    | Larger KV-cache → slightly more ctx (positive)          |
 
 ### Excluded Cases (ctx = max_ctx)
 
 These models hit their native GGUF context limit, not VRAM:
 - `mradermacher/deepseek-coder-33b-instruct`: ctx = max_ctx = 16384
 - `qwen/qwen2.5-coder-14b-instruct@q5_k_m`: ctx = max_ctx = 131072
-- `vinpix/bonsai-8b-llama.cpp@q2_kt`: ctx = max_ctx = 65536
-- `prism-ml/bonsai-27b@q1_0`: ctx = max_ctx = 262144
 - `lmstudio-community/internlm2-math-plus-20b`: ctx = max_ctx = 8192
 
 ### Manual Corrections (05.08.2026)
 
-Some models require manual overrides in `model_registry.yaml`:
+**Some models** require manual overrides in `model_registry.yaml` (here are just a few examples):
 
-| Model | np | UKV | ctx | Reason |
-|-------|----|----|-----|--------|
-| Gemma-4-26B (all 3 variants) | 4 | True | 32768 | Too large without UKV |
-| DeepSeek-Coder-33B | 4 | True | 16384 | np=1 → np=4 with UKV |
-| Codestral-22B | 4 | True | 32768 | UKV required for np=4 |
-| DeepSeek-R1-Distill-14B | 4 | True | 49152 | UKV required for np=4 |
-| Qwen3.6-27B-MTP | 4 | False | 32768 | ctx reduced from 21845 |
-| Qwen3.6-27B-I1 | 4 | False | 32768 | ctx reduced from 49152 |
-| Qwen3.6-27B (Q3_K_S) | 4 | True | 32768 | 2GB larger than other variants |
+| Model                             | np | UKV    | ctx   | Reason                                                    |
+|-----------------------------------|----|--------|-------|-----------------------------------------------------------|
+| Gemma-4-26B (all 3 variants)      |  4 | *True* | 32768 | no KV quantisation => too large without UKV               |
+| DeepSeek-Coder-33B                |  4 |  True  | 16384 | before np=1 → after: np=4 with UKV                        |
+| Codestral-22B                     |  4 |  True  | 32768 | UKV required for np=4                                     |
+| DeepSeek-R1-Distill-14B           |  4 |  True  | 49152 | UKV required for np=4                                     |
+| Qwen3.6-27B-MTP                   |  4 |  False | 32768 | ctx empirically reduced                                   |
+| Qwen3.6-27B-I1                    |  4 |  False | 32768 | ctx empirically reduced                                   |
+| Qwen3.6-27B (Q3_K_S)              |  4 |  True  | 32768 | 2GB larger than other local variants                      |
+| GLM 4.7 Flash REAP 23B A3B@Q4_K_S |  4 | *True* | 32768 | UKV=False: VRAM excited, slow => UKV=True, VRAM fit, fast |
+
+**General rule for VRAM (GPU) = 16 GB** (minus 0.5–0.7 GB overhead): 
+All models with a model size (weights) of 12 GB or larger require the unified KV cache (UKV=true) when using 4 parallel slots (np=4).
+Otherwise they slow down dramatically.
 
 ---
 
@@ -122,36 +137,31 @@ Some models require manual overrides in `model_registry.yaml`:
 
 Only models with full pipeline run (DS1000 + CoderEval + EvalPlus + LMEval + MathQA + Agentic).
 
-| Rank | Model (best quant.)                    | MoE | VRAM    | Overall | Effiz.   | Coding | Knowl. | Math  | Agentic | Strength                                              |
-|------|----------------------------------------|-----|---------|---------|----------|--------|--------|-------|---------|-------------------------------------------------------|
-| 1    | *Qwen3 Coder 30B A3B Instruct@q3_k_s* | yes | 13.3 GB | *78%*   | 10.3 %p/h | *80%* | 65%    | *80%* | 60%     | Best overall; top Coding + Math                       |
-| 2    | *Qwen3 Coder REAP 25B A3B I1@q3_k_m*  | yes | 12.0 GB | *73%*   | 11.0 %p/h | *76%* | 58%    | *80%* | 65%     | REAP variant near-original quality, better efficiency  |
-| 3    | *Granite 4.1 8B@q6_k*                  | no  |  7.2 GB | *71%*   |  8.5 %p/h | 63%   | 68%    | 60%   | *90%*   | Best score/GB, strong Agentic, compact                |
-| 4    | Granite 4.1 30B@q3_k_s                 | no  | 12.6 GB | 65%     |  3.4 %p/h | 52%   | 72%    | 60%   | *90%*   | Strong Agentic + Knowledge, solid all-round           |
-| 5    | Gemma 4 26B A4B Instruct UD@iq3_s      | yes | 13.6 GB | 64%     | 20.4 %p/h | 67%   | 27%*  | 60%   | *90%*   | Very high efficiency, strong Coding + Agentic          |
-| 6    | Gemma 4 26B A4B Instruct I1@iq4_xs     | yes | 13.9 GB | 62%     | 20.8 %p/h | *71%* | 27%*  | 60%   | *90%*   | Highest efficiency among Gemma-4-26B variants          |
-| 7    | Qwen3.6 27B I1@q3_k_s                  | no  | 12.1 GB | 59%     |  6.6 %p/h | 33%   | 33%*  | *91%* | 77%     | Math winner (91%), strong Agentic, weak Coding         |
-| 8    | Google Gemma 4 26B A4B Instruct@q3_k_s | yes | 13.8 GB | 58%     |  4.6 %p/h | 52%   | 33%*  | 60%   | 80%     | Solid all-round, cheapest Gemma quant                  |
-| 9    | Qwen3.6 27B MTP@iq3_xxs               | no  | 12.2 GB | 49%     | 24.0 %p/h | 28%   | 32%*  | 50%   | *88%*   | MTP draft variant; DS1000 missing (NaN)                |
-| 10   | Granite 4.0 H Tiny@q8_0               | yes |  7.4 GB | 47%     | 21.9 %p/h | 61%   | 43%    | 20%   | 50%     | Compact (7.4 GB), high efficiency, weak Math           |
-| 11   | DeepSeek R1 Distill Qwen 14B@q6_k     | no  | 12.1 GB | 46%     |  0.3 %p/h | 35%   | 27%*  | 60%   | 40%     | Reasoning model; very slow, weak Coding/Agentic        |
-| 12   | Mistralai Codestral 22B V0.1@iq4_xs   | no  |    –    | 44%     |     –    | 40%   | 68%    | 40%   | 55%     | Coding scores invalid (DS1000/CoderEval=0%, aborted)   |
-| 13   | Bonsai 27B@q1_0                        | no  |  4.7 GB | 43%     |  0.3 %p/h | 16%   | 27%*  | 60%   | *90%*   | Extremely compact, but very slow; weak Coding           |
-| 14   | Openai Gpt Oss 20B@mxfp4              | yes |    –    | 39%     |  1.5 %p/h | 34%   | 72%    | 20%   | 55%     | MXFP4 quant; weak Coding/Math, VRAM not captured       |
-| 15   | Deepseek Coder 33B Instruct@q3_k_s    | no  | 14.4 GB | 37%     |  2.0 %p/h | 62%   | 20%    | 20%   | 60%     | Older coder; very slow (2.3 tok/s), weak Math/Knowl.   |
+|Rank| Model (best quant.)                    | MoE | VRAM    | Overall | Effiz.   | Coding | Knowl. | Math  | Agentic | Strength                                              |
+|----|----------------------------------------|-----|---------|---------|----------|--------|--------|-------|---------|-------------------------------------------------------|
+|  1 | *Qwen3 Coder 30B A3B Instruct@q3_k_s*  | yes | 13.3 GB | *78%*   | 10.3 %p/h | *80%* |  65%   | *80%* |  60%    | Best overall; top Coding + Math                       |
+|  2 | *Qwen3 Coder REAP 25B A3B I1@q3_k_m*   | yes | 12.0 GB | *73%*   | 11.0 %p/h | *76%* |  58%   | *80%* |  65%    | REAP variant near-original quality, better efficiency |
+|  3 | *Granite 4.1 8B@q6_k*                  | no  |  7.2 GB | *71%*   |  8.5 %p/h |  63%  |  68%   |  60%  | *90%*   | Best score/GB, strong Agentic, compact                |
+|  4 | Granite 4.1 30B@q3_k_s                 | no  | 12.6 GB |  65%    |  3.4 %p/h |  52%  |  72%   |  60%  | *90%*   | Strong Agentic + Knowledge, solid all-round           |
+|  5 | Gemma 4 26B A4B Instruct UD@iq3_s      | yes | 13.6 GB |  64%    | 20.4 %p/h |  67%  | [27%]  |  60%  | *90%*   | Very high efficiency, strong Coding ] Agentic         |
+|  6 | Gemma 4 26B A4B Instruct I1@iq4_xs     | yes | 13.9 GB |  62%    | 20.8 %p/h | *71%* | [27%]  |  60%  | *90%*   | Highest efficiency among Gemma-4-26B variants         |
+|  7 | Qwen3.6 27B I1@q3_k_s                  | no  | 12.1 GB |  59%    |  6.6 %p/h |  33%  | [33%]  | *91%* |  77%    | Math winner (91%), strong Agentic, weak Coding        |
+|  8 | Google Gemma 4 26B A4B Instruct@q3_k_s | yes | 13.8 GB |  58%    |  4.6 %p/h |  52%  | [33%]  |  60%  |  80%    | Solid all-round, cheapest Gemma quant                 |
+|  9 | Qwen3.6 27B MTP@iq3_xxs                | no  | 12.2 GB |  49%    | 24.0 %p/h |  28%  | [32%]  |  50%  | *88%*   | MTP draft variant; DS1000 missing (NaN)               |
+| 10 | Granite 4.0 H Tiny@q8_0                | yes |  7.4 GB |  47%    | 21.9 %p/h |  61%  |  43%   |  20%  |  50%    | Compact (7.4 GB), high efficiency, weak Math          |
+| 11 | DeepSeek R1 Distill Qwen 14B@q6_k      | no  | 12.1 GB |  46%    |  0.3 %p/h |  35%  | [27%]  |  60%  |  40%    | Reasoning model; very slow, weak Coding/Agentic       |
+| 12 | Mistralai Codestral 22B V0.1@iq4_xs    | no  |    –    |  44%    |     –     |  40%  |  68%   |  40%  |  55%    | Coding scores invalid (DS1000/CoderEval=0%, aborted)  |
+| 13 | Bonsai 27B@q1_0                        | no  |  4.7 GB |  43%    |  0.3 %p/h |  16%  | [27%]  |  60%  | *90%*   | Extremely compact, but very slow; weak Coding         |
+| 14 | Openai Gpt Oss 20B@mxfp4               | yes |    –    |  39%    |  1.5 %p/h |  34%  |  72%   |  20%  |  55%    | MXFP4 quant; weak Coding/Math, VRAM not captured      |
+| 15 | Deepseek Coder 33B Instruct@q3_k_s     | no  | 14.4 GB |  37%    |  2.0 %p/h |  62%  |  20%   |  20%  |  60%    | Older coder; very slow (2.3 tok/s), weak Math/Knowl.  |
 
-\* = HellaSwag/TruthfulQA = 0 (known HS/TQA issue) → Knowledge score distorted.
-Affects 7 models: all Gemma-4-26B variants, Qwen3.6-27B I1 + MTP,
-DeepSeek R1 Distill 14B, Bonsai 27B. HS/TQA re-run planned (in progress since 04.08.).
+[x] = HellaSwag/TruthfulQA = 0 (known HS/TQA issue) → Knowledge score distorted.
+Affects 7 models: all Gemma-4-26B variants, Qwen3.6-27B I1 + MTP, DeepSeek R1 Distill 14B, Bonsai 27B. 
+HS/TQA re-run planned (in progress since 04.08.).
 
 **Efficiency** = Overall / runtime (h) (runtime = DS1000 + CoderEval latency).
-Granite-4.0-H-Tiny has valid Coding scores in SS=100 run (DS1000 42% / CoderEval 62.5%)
-— the earlier 0% finding has been resolved. ERNIE 4.5 is not included in the consolidated
-results (double-quant bug, new release pending).
-
-**SS=4 run (12.07.2026):** A separate run with SampleSize=4 and 41 models was completed
-— results in `ergebnisse/konsolidiert_SS4_20260712_125230.ods`. Includes GPT-OSS 20B,
-LFM2 24B REAP I1, qwen3.6-28b-REAP-i1, and all Qwen3/Qwen3.6/Granite4.1 variants.
+Granite-4.0-H-Tiny has valid Coding scores in SS=100 run (DS1000 42% / CoderEval 62.5%) — the earlier 0% finding has been resolved. 
+ERNIE 4.5 is not included in the consolidated results (double-quant bug, new release pending).
 
 ---
 

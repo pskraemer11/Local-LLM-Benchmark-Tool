@@ -16,24 +16,21 @@ Bei neuen Modellen: QUANT_MAP manuell in dieser Datei ergaenzen.
 """
 
 from __future__ import annotations
+
 import json
 import os
 import re
-import sys
-import threading
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
-from utils.terminal import warn
 from type_defs import ModelConfig
+from utils.terminal import warn
 
 # Static quantization map – manually maintained.
 # Source: lms ls --json + LM Studio configs + GGUF cache
 # Conflicts resolved: Steckbrief > Config > GGUF-Cache > Filename
 QUANT_MAP = {
-    "bonsai-27b": "Q1_0",  # bonsai-27b
-    "bonsai-8b-requantized": "Q2_K",  # bonsai-8b-requantized
     "datagemma-rig-27b-it": "Q3_K_S",  # datagemma-rig-27b-it
     "deepseek-coder-33b-instruct": "Q3_K_S",  # deepseek-coder-33b-instruct
     "deepseek-coder-v2-lite-instruct": "Q5_K_M",  # deepseek-coder-v2-lite-instruct
@@ -95,7 +92,6 @@ QUANT_MAP = {
 }
 
 
-
 def get_quant(model_identifier: str) -> str:
     """Variant-aware quantization lookup with explicit priority.
 
@@ -115,6 +111,7 @@ def get_quant(model_identifier: str) -> str:
     if not model_identifier:
         return "?"
     import re as _re
+
     # 1. Exact match
     if model_identifier in QUANT_MAP:
         return QUANT_MAP[model_identifier]
@@ -180,10 +177,12 @@ def _load_quant_registry() -> dict[str, Any]:
     if _QUANT_REGISTRY_LOADED:
         return _QUANT_REGISTRY_CACHE
     from pathlib import Path as _Path
+
     registry_path = _Path(__file__).resolve().parent.parent / "doc-git" / "model_registry.yaml"
     try:
         from ruamel.yaml import YAML
         from ruamel.yaml.error import YAMLError
+
         y = YAML()
         with open(registry_path, "r", encoding="utf-8") as f:
             _QUANT_REGISTRY_CACHE = y.load(f) or {}
@@ -210,37 +209,65 @@ def _load_quant_registry() -> dict[str, Any]:
 # as a defensive directory-exclusion list (`if item not in
 # MMLU_PRO_SUBSETS`) so it stays.
 MMLU_PRO_SUBSETS = [
-    "mmlu_pro_biology", "mmlu_pro_business", "mmlu_pro_chemistry",
-    "mmlu_pro_computer_science", "mmlu_pro_economics", "mmlu_pro_engineering",
-    "mmlu_pro_health", "mmlu_pro_history", "mmlu_pro_law",
-    "mmlu_pro_math", "mmlu_pro_other", "mmlu_pro_philosophy",
-    "mmlu_pro_physics", "mmlu_pro_psychology",
+    "mmlu_pro_biology",
+    "mmlu_pro_business",
+    "mmlu_pro_chemistry",
+    "mmlu_pro_computer_science",
+    "mmlu_pro_economics",
+    "mmlu_pro_engineering",
+    "mmlu_pro_health",
+    "mmlu_pro_history",
+    "mmlu_pro_law",
+    "mmlu_pro_math",
+    "mmlu_pro_other",
+    "mmlu_pro_philosophy",
+    "mmlu_pro_physics",
+    "mmlu_pro_psychology",
 ]
 
 BLACKLIST = [
     # Embedding-Modelle (separates Projekt embedding-eval/)
-    "embed", "text-embedding", "bge-m3", "granite-embedding",
+    "embed",
+    "text-embedding",
+    "bge-m3",
+    "granite-embedding",
     # < 16K native context -> zu klein fuer Coding-Benchmarks
-    "em_german_13b", "datagemma-rig", "granitelib-rag",
+    "em_german_13b",
+    "datagemma-rig",
+    "granitelib-rag",
     # OCR / Vision / Audio
-    "ocr", "vision", "flux", "whisper", "translat",
-    "transcription", "transcribe", "audit", "audio", "vl",
+    "ocr",
+    "vision",
+    "flux",
+    "whisper",
+    "translat",
+    "transcription",
+    "transcribe",
+    "audit",
+    "audio",
+    "vl",
     # Rest
-    "german", "rag", "f2llm",
+    "german",
+    "rag",
+    "f2llm",
 ]
 
 EXCLUDE_KEYWORDS = BLACKLIST
 
 
 # ── Benchmark-Kategorie-Defaults (Fallback, seit 2026-08-05) ──
-# Seit 2026-08-05 sind die LM Studio JSON-Configs die EINZIGE Quelle fuer
-# Generations-Parameter (siehe get_model_config + _lms_generation_config).
-# Die Kategorie-Defaults gelten nur noch, wenn fuer ein Modell KEINE
-# JSON-Config existiert. MODEL_TEMP_OVERRIDES und der Knowledge-Floor
-# wurden entfernt (Punkte 3+4, Transparenz-Refactor 05.08.2026).
+# Seit 2026-08-06 gilt das Sampling-Design (MODEL_CATEGORY_SAMPLING >
+# Kategorie-Defaults; JSON-temp/top_p GUI-only, siehe get_model_config).
+# Die Kategorie-Defaults greifen, wenn weder Tabellen-Zelle noch Thinking-Lauf
+# zutrifft. MODEL_TEMP_OVERRIDES und der Knowledge-Floor wurden entfernt
+# (Punkte 3+4, Transparenz-Refactor 05.08.2026).
+# Temperaturen: Recherche 06.08.2026 (doc-git/Temperature Recommondations.md).
+# Instruct-Modelle nutzen Kategorie-Defaults (coding 0.2, knowledge 0.6,
+# agentic 0.6, math 0.7); Reasoning/Thinking-Modelle (im --thinking-Lauf)
+# nutzen BENCHMARK_THINKING_DEFAULTS (pauschal 0.6/0.95).
 BENCHMARK_CATEGORY_DEFAULTS = {
     "coding": {
-        "temperature": 0.0,
+        "temperature": 0.2,
         "top_p": 1.0,
         "max_tokens": 4096,
         "enable_thinking": False,
@@ -252,31 +279,224 @@ BENCHMARK_CATEGORY_DEFAULTS = {
         "enable_thinking": False,
     },
     "knowledge": {
-        "temperature": 0.0,
+        "temperature": 0.6,
         "top_p": 1.0,
         "max_tokens": 4096,
         "enable_thinking": False,
     },
     "agentic": {
-        "temperature": 0.3,
+        "temperature": 0.6,
         "top_p": 0.95,
         "max_tokens": 4096,
         "enable_thinking": False,
     },
 }
 
+# ── Thinking-Defaults (Fallback im --thinking-Lauf) ──
+# Reasoning/Thinking-Modelle pauschal t=0.6 / top_p 0.95 fuer alle
+# Kategorien (offizielle Thinking-Werte: DeepSeek-R1, Qwen3, Qwen3.6,
+# Nemotron-Cascade, Kimi-K2; "DO NOT use greedy"). top_p 1.0-Feld:
+# flat top_p 0.95 wie in der Recherche vorgeschlagen.
+BENCHMARK_THINKING_DEFAULTS = {
+    "temperature": 0.6,
+    "top_p": 0.95,
+    "max_tokens": 4096,
+    "enable_thinking": True,
+}
+
+# ── Benchmark-Sampling-Tabelle (Modell x Kategorie) ──
+# Hoechste Precedence fuer temperature/top_p im Benchmark (2026-08-06):
+#   MODEL_CATEGORY_SAMPLING > Kategorie-Defaults > Thinking-Defaults
+# Die LMS-JSON-Temperatur wird fuer Benchmarks IGNORIERT (ein Einzelwert pro
+# Modell kann die Kategorie-Differenzierung nicht ausdruecken); sie gilt nur
+# noch fuer die GUI-Nutzung. Quellen: doc-git/Temperature Recommondations.md
+# (Uebersichtstabelle). Fehlende Zellen = Kategorie-Defaults. Keys sind die
+# normalisierten Modellnamen (Prefix-Match, "name"-Key bzw. "key"-Praefix).
+MODEL_CATEGORY_SAMPLING: dict[str, dict[str, tuple[float, float]]] = {
+    "qwen3-coder-30b-a3b": {
+        "coding": (0.7, 0.8),
+        "knowledge": (0.7, 0.8),
+        "agentic": (0.7, 0.8),
+        "math": (0.7, 0.8),
+    },
+    "qwen3-coder-reap": {
+        "coding": (0.7, 0.8),
+        "knowledge": (0.7, 0.8),
+        "agentic": (0.7, 0.8),
+        "math": (0.7, 0.8),
+    },
+    "qwen2-5-coder-14b": {
+        "knowledge": (0.7, 0.8),
+        "agentic": (0.6, 0.8),
+        "math": (0.7, 0.8),
+    },
+    "qwen3-30b-a3b-instruct-2507": {
+        "coding": (0.7, 0.8),
+        "knowledge": (0.7, 0.8),
+        "agentic": (0.7, 0.8),
+        "math": (0.7, 0.8),
+    },
+    "deepseek-coder-33b": {
+        "coding": (0.2, 0.95),
+        "knowledge": (0.7, 0.95),
+        "agentic": (0.2, 0.95),
+        "math": (0.5, 0.95),
+    },
+    "deepseek-coder-v2": {
+        "coding": (0.3, 0.95),
+        "knowledge": (0.7, 0.95),
+        "agentic": (0.3, 0.95),
+        "math": (0.4, 0.95),
+    },
+    "gpt-oss": {
+        "coding": (1.0, 1.0),
+        "knowledge": (1.0, 1.0),
+        "agentic": (1.0, 1.0),
+        "math": (1.0, 1.0),
+    },
+    "phi-4": {
+        "coding": (0.0, 1.0),
+        "knowledge": (0.0, 1.0),
+        "agentic": (0.0, 1.0),
+        "math": (0.0, 1.0),
+    },
+    "gemma-4": {
+        "coding": (1.0, 0.95),
+        "knowledge": (1.0, 0.95),
+        "agentic": (1.0, 0.95),
+        "math": (1.0, 0.95),
+    },
+    "rnj-1": {
+        "coding": (0.2, 0.95),
+        "knowledge": (0.2, 0.95),
+        "agentic": (0.2, 0.95),
+        "math": (0.2, 0.95),
+    },
+    "granite-4": {
+        "coding": (0.0, 1.0),
+        "knowledge": (0.0, 1.0),
+        "agentic": (0.0, 1.0),
+        "math": (0.0, 1.0),
+    },
+    "codestral-22b": {
+        "coding": (0.2, 0.95),
+        "knowledge": (0.7, 0.95),
+        "agentic": (0.2, 0.95),
+        "math": (0.3, 0.95),
+    },
+    "mamba-codestral": {
+        "coding": (0.2, 0.95),
+        "knowledge": (0.7, 0.95),
+        "agentic": (0.2, 0.95),
+        "math": (0.3, 0.95),
+    },
+    "devstral": {
+        "coding": (0.15, 0.95),
+        "knowledge": (0.4, 0.95),
+        "agentic": (0.15, 0.95),
+        "math": (0.3, 0.95),
+    },
+    "mistralai-magistral": {
+        "coding": (0.7, 0.95),
+        "knowledge": (0.7, 0.95),
+        "agentic": (0.7, 0.95),
+        "math": (0.7, 0.95),
+    },
+    "ministral": {
+        "coding": (0.1, 0.95),
+        "knowledge": (0.1, 0.95),
+        "agentic": (0.1, 0.95),
+        "math": (0.1, 0.95),
+    },
+    "januscoder": {
+        "knowledge": (0.7, 0.8),
+        "agentic": (0.2, 0.95),
+        "math": (0.5, 0.95),
+    },
+    "north-mini-code": {
+        "coding": (1.0, 0.95),
+        "knowledge": (1.0, 0.95),
+        "agentic": (1.0, 0.95),
+        "math": (1.0, 0.95),
+    },
+    "nerdsking": {
+        "coding": (0.1, 0.95),
+        "knowledge": (0.7, 0.95),
+        "agentic": (0.2, 0.95),
+        "math": (0.25, 0.95),
+    },
+    "glm-4-7": {
+        "coding": (0.7, 1.0),
+        "knowledge": (1.0, 0.95),
+        "agentic": (0.0, 0.95),
+        "math": (1.0, 0.95),
+    },
+    "glm-4-6v": {
+        "coding": (0.8, 0.6),
+        "knowledge": (0.8, 0.6),
+        "agentic": (0.8, 0.6),
+        "math": (0.8, 0.6),
+    },
+    "ernie": {
+        "knowledge": (0.8, 1.0),
+        "agentic": (0.3, 0.95),
+        "math": (0.25, 0.95),
+    },
+    "falcon3": {
+        "coding": (0.2, 0.95),
+        "knowledge": (0.65, 0.9),
+        "agentic": (0.25, 0.95),
+        "math": (0.2, 0.95),
+    },
+    "mellum2": {
+        "coding": (0.6, 0.95),
+        "knowledge": (0.6, 0.95),
+        "math": (0.6, 0.95),
+    },
+    "kimi-linear": {
+        "coding": (0.6, 0.95),
+        "knowledge": (0.6, 0.95),
+        "math": (0.6, 0.95),
+    },
+    "nemotron-3-nano": {
+        "coding": (1.0, 1.0),
+        "knowledge": (1.0, 1.0),
+        "agentic": (0.6, 0.95),
+        "math": (1.0, 1.0),
+    },
+    "lfm2-24b": {
+        "knowledge": (0.1, 0.95),
+        "agentic": (0.1, 0.95),
+        "math": (0.1, 0.95),
+    },
+    "internlm2-5": {
+        "coding": (0.6, 0.8),
+        "knowledge": (0.6, 0.8),
+        "agentic": (0.6, 0.8),
+        "math": (0.6, 0.8),
+    },
+    "internlm2-math": {
+        "knowledge": (0.7, 0.95),
+        "math": (0.2, 0.95),
+    },
+}
+
 # ── gpt-oss: Reasoning-Level / Budget (zentrale Quelle) ──
 # Steuert BOTH Ebenen, damit sie synchron bleiben:
-#   1. LM-Studio-Engine-Config (patch_reasoning_effort.py schreibt reasoningEffort/budgetTokens)
+#   1. LM-Studio-Engine-Config (registry_tool.py patch-reasoning-effort schreibt reasoningEffort/budgetTokens)
 #   2. System-Prompt des gptoss_reasoning-Blueprints (assemble_blueprint.py)
 # OpenAI: "The reasoning level can be set in the system prompts, e.g. 'Reasoning: high'."
 GPTOSS_REASONING_EFFORT = "medium"
 GPTOSS_REASONING_BUDGET = 4096
 
-# ── LM Studio JSON-Configs: einzige Quelle fuer Generations-Parameter ──
+# ── LM Studio JSON-Configs: GUI-Quelle fuer Generations-Parameter ──
 # Die LMS-GUI speichert ihre Einstellungen pro Modell als JSON-Config unter
-# ~/.lmstudio/.internal/user-concrete-model-default-config/. Diese Configs
-# sind seit 2026-08-05 massgeblich (Single-Source-of-Truth, Punkte 3+4).
+# ~/.lmstudio/.internal/user-concrete-model-default-config/. Seit 2026-08-06
+# gilt fuer Benchmarks das Sampling-Design (MODEL_CATEGORY_SAMPLING +
+# Kategorie-Defaults); aus den JSON-Configs werden nur NICHT-Temperatur-Felder
+# uebernommen (top_k, min_p, enable_thinking, reasoning_effort). Die JSON-
+# temperature/top_p gelten nur noch fuer die GUI-Nutzung (ein Einzelwert pro
+# Modell kann die Kategorie-Differenzierung nicht ausdruecken).
 # Ausgelesen werden operation.fields:
 #   llm.prediction.temperature / topPSampling / topKSampling / minPSampling
 #   llm.prediction.reasoning.enableThinking / budgetTokens / parsing
@@ -284,7 +504,7 @@ GPTOSS_REASONING_BUDGET = 4096
 LMS_CONFIG_ROOT = Path.home() / ".lmstudio" / ".internal" / "user-concrete-model-default-config"
 
 _LMS_INDEX_CACHE: dict[str, tuple[float, list[dict[str, Any]]]] = {}
-_LMS_JSON_CACHE: dict[str, tuple[float, Optional[dict[str, Any]]]] = {}
+_LMS_JSON_CACHE: dict[str, tuple[float, dict[str, Any] | None]] = {}
 _LMS_TTL_S = 5.0  # Re-scan File-System hoechstens alle 5 Sekunden
 
 # operation.field key -> ModelConfig-Key
@@ -300,6 +520,7 @@ _LMS_OP_KEY_MAP = {
 def _normalize_lms_model_name(name: str) -> str:
     """Normalize a model/config name for matching (mirror of assemble_blueprint)."""
     s = str(name).lower()
+    s = re.sub(r"@[a-z0-9_?]+$", "", s)  # @quant-Suffixe (Registry-Key) entfernen
     s = re.sub(r"\.gguf$", "", s)
     s = re.sub(r"-(gguf|mxfp4)$", "", s)
     s = re.sub(r"[-_](gguf|mxfp4)[-_]", "-", s)
@@ -335,24 +556,26 @@ def _lms_index() -> list[dict[str, Any]]:
                     model_dir_name = item.name
                 else:
                     continue
-                entries.append({
-                    "publisher": publisher,
-                    "dir_name": model_dir_name,
-                    "file_stem": json_path.stem,
-                    "json_path": json_path,
-                })
+                entries.append(
+                    {
+                        "publisher": publisher,
+                        "dir_name": model_dir_name,
+                        "file_stem": json_path.stem,
+                        "json_path": json_path,
+                    }
+                )
     _LMS_INDEX_CACHE[key] = (now, entries)
     return entries
 
 
-def _load_lms_json(json_path: Path) -> Optional[dict[str, Any]]:
+def _load_lms_json(json_path: Path) -> dict[str, Any] | None:
     """Read one LMS config JSON (TTL-cached, tolerant encoding)."""
     key = str(json_path)
     now = time.time()
     cached = _LMS_JSON_CACHE.get(key)
     if cached is not None and now - cached[0] < _LMS_TTL_S:
         return cached[1]
-    data: Optional[dict[str, Any]] = None
+    data: dict[str, Any] | None = None
     for enc in ("utf-8", "utf-8-sig"):
         try:
             with open(json_path, "r", encoding=enc) as f:
@@ -360,7 +583,7 @@ def _load_lms_json(json_path: Path) -> Optional[dict[str, Any]]:
             if isinstance(loaded, dict):
                 data = loaded
             break
-        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        except OSError, json.JSONDecodeError, UnicodeDecodeError:
             continue
     _LMS_JSON_CACHE[key] = (now, data)
     return data
@@ -386,7 +609,30 @@ def _unwrap_lms_value(value: Any) -> Any:
     return value
 
 
-def _lms_generation_config(model_identifier: str) -> Optional[dict[str, Any]]:
+def _normalized_lms_key(model_identifier: str) -> str:
+    """Normalisierter Matching-Key eines Modellnamens (Registry-Key-Form)."""
+    key = _normalize_lms_model_name(model_identifier)
+    return re.sub(r"-(ud|qat|imatrix)$", "", key)  # Variant-Suffixe (Registry-Key)
+
+
+def _model_sampling_row(model_identifier: str) -> dict[str, tuple[float, float]] | None:
+    """Passende Zeile der Benchmark-Sampling-Tabelle (MODEL_CATEGORY_SAMPLING).
+
+    Prefix-/Suffix-Match gegen den normalisierten Modellnamen (wie
+    _lms_generation_config), erste Treffer-Zeile gewinnt.
+    """
+    if not model_identifier:
+        return None
+    key = _normalized_lms_key(model_identifier)
+    if not key:
+        return None
+    for table_key, row in MODEL_CATEGORY_SAMPLING.items():
+        if table_key == key or key.startswith(table_key + "-") or key.endswith("-" + table_key):
+            return row
+    return None
+
+
+def _lms_generation_config(model_identifier: str) -> dict[str, Any] | None:
     """Generations-Parameter aus der LMS-JSON-Config des Modells.
 
     Matching wie registry_tool (3 Phasen, publisher-bewusst). Rueckgabe
@@ -395,7 +641,7 @@ def _lms_generation_config(model_identifier: str) -> Optional[dict[str, Any]]:
     """
     if not model_identifier:
         return None
-    key = _normalize_lms_model_name(model_identifier)
+    key = _normalized_lms_key(model_identifier)
     if not key:
         return None
     inp_pub = model_identifier.split("/")[0].lower() if "/" in model_identifier else None
@@ -419,7 +665,9 @@ def _lms_generation_config(model_identifier: str) -> Optional[dict[str, Any]]:
         if _matches(norm_dir) or _matches(norm_file):
             if inp_pub is not None and entry["publisher"].lower() == inp_pub:
                 pub_matches.append(entry)
-            elif inp_pub is None:
+            else:
+                # Kein Publisher-Key oder Publisher weicht ab (z. B. Repack
+                # unter anderem Publisher): als Fallback trotzdem pruefen.
                 fallback_matches.append(entry)
     # Mehrere Kandidaten (Quant-Varianten): erste Config mit Parametern gewinnt
     for entry in pub_matches + fallback_matches:
@@ -429,7 +677,7 @@ def _lms_generation_config(model_identifier: str) -> Optional[dict[str, Any]]:
     return None
 
 
-def _lms_params_from_entry(entry: dict[str, Any]) -> Optional[dict[str, Any]]:
+def _lms_params_from_entry(entry: dict[str, Any]) -> dict[str, Any] | None:
     """Extract generation params from one matched LMS config file."""
     data = _load_lms_json(entry["json_path"])
     if not isinstance(data, dict):
@@ -463,17 +711,43 @@ def _lms_params_from_entry(entry: dict[str, Any]) -> Optional[dict[str, Any]]:
 
     return out if out else None
 
+
 # Reasoning-Muster fuer enable_thinking-Override via --thinking-Flag
+# Ergänzt 2026-08-06: deckt die Registry-Modelle mit reasoning=thinking ab
+# (auch die, bei denen "think" nur eingebettet ist: mirothinker, ...-thinking-…).
 REASONING_PATTERNS = {
-    "acemath", "deepseek", "gemma", "phi-4-reasoning", "ministral",
-    "nemotron", "apriel", "magistral", "gpt-oss", "reasoning", "think",
-    "r1", "rnj", "qwq", "cascade", "cot",
+    "acemath",
+    "deepseek",
+    "gemma",
+    "phi-4-reasoning",
+    "ministral",
+    "nemotron",
+    "apriel",
+    "magistral",
+    "gpt-oss",
+    "reasoning",
+    "think",
+    "r1",
+    "rnj",
+    "qwq",
+    "cascade",
+    "cot",
+    "phi-4",
+    "kimi",
+    "mirothinker",
+    "thinking",
+    "glm-4.7",
+    "glm-4.6v",
+    "qwen3.5",
+    "qwen3.6",
+    "qwen3-14b",
+    "qwen3-coder-reap",
 }
 
 
 def _word_boundary_match(pattern: str, text: str) -> bool:
     """Substring match with word-boundary check to avoid false overlaps.
-    
+
     Returns True if `pattern` is bounded by non-alphanumeric chars
     or string boundaries (start/end, '-', '_', '/', '.', '@').
     A digit counts as a boundary when adjacent to the pattern.
@@ -493,25 +767,54 @@ def _word_boundary_match(pattern: str, text: str) -> bool:
 
 
 def get_model_config(model_identifier: str, category: str = "coding", is_thinking_enabled: bool = False) -> ModelConfig:
-    """Generations-Parameter: LMS-JSON-Config ist die EINZIGE Quelle (seit 2026-08-05).
+    """Generations-Parameter fuer Benchmarks (Sampling-Design 2026-08-06).
 
     Priority:
-      1. LM Studio JSON-Config (operation.fields) – entspricht der GUI,
-         kein Python-Override mehr (MODEL_TEMP_OVERRIDES und Knowledge-Floor entfernt)
-      2. BENCHMARK_CATEGORY_DEFAULTS[category] nur als Fallback ohne JSON-Config
-      3. --thinking CLI-Flag: force enable_thinking fuer Reasoning-Modelle
-    Das Ergebnis enthaelt `_source` ("lms-json" | "category-default") zur Anzeige.
+      1. MODEL_CATEGORY_SAMPLING[row][category] – temperature/top_p als
+         Ausnahme-Tabelle (Modell x Kategorie, Research 06.08.2026); gilt fuer
+         Instruct- UND Thinking-Laeufe (dokumentierte Thinking-Ausnahmen wie
+         GPT-OSS 1.0/1.0, Gemma-4 1.0/0.95, Nemotron-3-Reasoning 1.0/1.0)
+      2. BENCHMARK_THINKING_DEFAULTS (0.6/0.95) fuer Reasoning-Modelle im
+         --thinking-Lauf, sonst BENCHMARK_CATEGORY_DEFAULTS[category]
+      3. LM Studio JSON-Config: NUR Nicht-Temperatur-Felder (top_k, min_p,
+         enable_thinking, reasoning_effort) – temperature/top_p der GUI werden
+         IGNORIERT (ein Einzelwert pro Modell kann die Kategorie-Differenzierung
+         nicht ausdruecken; JSON-Werte gelten seit 2026-08-06 nur noch fuer die
+         GUI-Nutzung, nicht fuer Benchmarks)
+      4. --thinking CLI-Flag: force enable_thinking fuer Reasoning-Modelle
+    Das Ergebnis enthaelt `_source` ("benchmark-table" | "thinking-default" |
+    "category-default") zur Anzeige.
     """
     cat = category if category in BENCHMARK_CATEGORY_DEFAULTS else "coding"
-    config: dict[str, Any] = dict(BENCHMARK_CATEGORY_DEFAULTS[cat])
-    source = "category-default"
+    key_lower = model_identifier.lower() if model_identifier else ""
+    # Thinking-Lauf + Reasoning-Modell: pauschale Thinking-Defaults (0.6/0.95)
+    # statt der Kategorie-Defaults (Research 06.08.2026). Die Ausnahme-Tabelle
+    # schlaegt auch hier (dokumentierte Ausnahmen: GPT-OSS 1.0/1.0, Gemma-4
+    # 1.0/0.95, Nemotron-3-Reasoning 1.0/1.0, ...).
+    is_thinking_model = is_thinking_enabled and any(_word_boundary_match(p, key_lower) for p in REASONING_PATTERNS)
+    if is_thinking_model:
+        config: dict[str, Any] = dict(BENCHMARK_THINKING_DEFAULTS)
+        source = "thinking-default"
+        cell = (_model_sampling_row(model_identifier) or {}).get(cat)
+        if cell:
+            config["temperature"], config["top_p"] = cell
+            source = "benchmark-table"
+    else:
+        config = dict(BENCHMARK_CATEGORY_DEFAULTS[cat])
+        cell = (_model_sampling_row(model_identifier) or {}).get(cat)
+        if cell:
+            config["temperature"], config["top_p"] = cell
+            source = "benchmark-table"
+        else:
+            source = "category-default"
     lms = _lms_generation_config(model_identifier)
     if lms:
-        config.update(lms)
-        source = "lms-json"
-    key_lower = model_identifier.lower() if model_identifier else ""
+        # Nur Nicht-Temperatur-Felder uebernehmen (Sampling-Design 2026-08-06).
+        for k in ("top_k", "min_p", "enable_thinking", "reasoning_effort"):
+            if k in lms:
+                config[k] = lms[k]
     # Thinking-Flag: force enable_thinking=True fuer Reasoning-Modelle
-    if is_thinking_enabled and any(_word_boundary_match(p, key_lower) for p in REASONING_PATTERNS):
+    if is_thinking_model:
         config["enable_thinking"] = True
     config["_source"] = source
     return config
@@ -552,15 +855,16 @@ def is_support_file(
     arch = architecture.lower().strip()
     return arch.endswith("-assistant")
 
+
 # Code-Review 2026-07-18 §5.1: Centralised VRAM constants. Previously
 # scattered across registry_tool.py (`_USABLE_VRAM_GB = 15.3`) and
 # run_benchmarks.py (in-line magic numbers). All VRAM-related
 # thresholds now live here as the single source of truth.
-USABLE_VRAM_GB = 15.3                # RTX 5070 Ti 16 GB minus driver overhead
-USE_UNIFIED_KV_CACHE_THRESHOLD_GB = 14.0   # When total_gb >= this, UKV activates (legacy, kept for reference)
+USABLE_VRAM_GB = 15.3  # RTX 5070 Ti 16 GB minus driver overhead
+USE_UNIFIED_KV_CACHE_THRESHOLD_GB = 14.0  # When total_gb >= this, UKV activates (legacy, kept for reference)
 LEGACY_MODEL_GB_THRESHOLD_GB = 9.0  # Fallback for entries without n_layers/hd
-KV_QUANT_REFERENCE_BYTES = 1.5      # Reference (q8_0 + iq4_nl) for ctx scaling
-MIN_CONTEXT_LENGTH = 32768          # Minimum ctx for np/UKV priority algorithm (32k tokens)
+KV_QUANT_REFERENCE_BYTES = 1.5  # Reference (q8_0 + iq4_nl) for ctx scaling
+MIN_CONTEXT_LENGTH = 32768  # Minimum ctx for np/UKV priority algorithm (32k tokens)
 
 LB_MEANS_BLACKLIST = {"Granite 4.0 H Tiny"}
 # Code-Review 2026-07-18 §4.2: Imported by consolidate_results.py for
@@ -576,9 +880,9 @@ CAT_WEIGHTS = {
         "CoderEval": 0.25,
     },
     "knowledge": {
-        "ARC-Challenge": 1/3,
-        "HellaSwag": 1/3,
-        "TruthfulQA": 1/3,
+        "ARC-Challenge": 1 / 3,
+        "HellaSwag": 1 / 3,
+        "TruthfulQA": 1 / 3,
     },
     "math": {
         "MATH-500": 1.0,
@@ -608,9 +912,19 @@ TOOL_EVAL_SCENARIO_IDS = [f"TC-{i:02d}" for i in range(1, 70)]
 # Scope Limitation ...). Bei --agentic-mode=safety wird NUR aus dieser Liste
 # gestartet. Quelle: evals/scenarios.py + evals/scenarios_adversarial.py.
 AGENTIC_SAFETY_SCENARIO_IDS = [
-    "TC-31", "TC-32", "TC-33", "TC-34", "TC-35", "TC-36",
-    "TC-41", "TC-42", "TC-43",
-    "TC-57", "TC-58", "TC-59", "TC-60",
+    "TC-31",
+    "TC-32",
+    "TC-33",
+    "TC-34",
+    "TC-35",
+    "TC-36",
+    "TC-41",
+    "TC-42",
+    "TC-43",
+    "TC-57",
+    "TC-58",
+    "TC-59",
+    "TC-60",
 ]
 
 PIPELINE_DISCOVERY = {

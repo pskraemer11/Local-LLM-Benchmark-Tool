@@ -32,6 +32,7 @@ Stand: 2026-08-06. Legende: [ ] offen, [~] in Arbeit, [x] erledigt/geprüft.
 ## Offen
 
 - [ ] **16. Top-Candidates-Tabelle aktualisieren** — nach dem laufenden SS=30/np=4-Lauf (seit ~05.08., Bugfixes: Parallelisierung evalplus + lmeval, aiohttp 3.14.3): Tabellenwerte in `doc-git/Model-Parameters-and-Benchmarks_en.md` aus dem neuen Konsolidierungs-ODS neu erzeugen (Scores + Effizienz ändern sich durch schnellere Laufzeiten). Vorher (06.08.) bereinigt: veralteter SS=4-Hinweis (12.07., nicht aussagekräftig) entfernt, Quellenangabe `konsolidiert_15 Modelle, SampleSize 100, seit 20260711_20260803_172150.ods` verifiziert — Tabelle stammt aus dem SS=100-Lauf 11.07.–03.08. **Danach comitten** (inkl. Manual-Corrections-Tabelle 05.08. + SS=4-Entfernung, aktuell uncommittet in `Model-Parameters-and-Benchmarks_en.md`).
+- [ ] **17. Zentrales Alias-Map für Modellfamilien-Namen** — Idee aus Sichtung von transformers `modeling_gguf_pytorch_utils.py` (06.08.): eine zentrale Tabelle für Namens-Aliasse (HF-model_type ↔ GGUF-arch ↔ Registry-arch, z. B. `gpt-oss-20b` → `gpt_oss`, `qwen2_moe` → `qwen2moe`, `minimax_m2` → `minimax-m2`) statt verstreuter Regexes (`-(ud|qat|imatrix)`-Suffixe, `@quant`-Strips, Arch-Substring-Erkennung). Anwendungsorte: `normalize_model_name`/`_normalize_lms_model_name` + `_ARCH_REASONING_MAP` + `GGUF_TO_TRANSFORMERS_MAPPING`-Analogon. Reine Struktur-Verbesserung (Robustheit), kein Funktionsgewinn — aufschiebbar.
 
 ## Bewusst NICHT enthalten (Entscheid 02.08., Code-Review §5)
 

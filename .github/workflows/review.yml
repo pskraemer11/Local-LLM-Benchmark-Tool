@@ -1,0 +1,22 @@
+name: Pre-Review Checks
+on: [push]
+jobs:
+  lint:
+    runs-on: Windows 11
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install ruff mypy
+      - run: ruff check .
+      - run: mypy .
+  validate-registry:
+    runs-on: Windows 11
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install -e .
+      - run: python .\src\registry_tool.py validate
+  test:
+    runs-on: Windows 11
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install pytest
+      - run: pytest .\tests\

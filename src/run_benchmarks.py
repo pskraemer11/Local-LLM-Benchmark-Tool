@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 Unified benchmark launcher v13 – integrates:
   [1] Custom: DS1000, CoderEval (custom_benchmark.py)
@@ -60,10 +59,8 @@ _sys.path.insert(0, _SRC_DIR)
 
 import argparse
 import atexit
-import csv_writer as csv_writer
 import glob
 import json
-import math
 import os
 import random
 import re
@@ -73,13 +70,11 @@ import threading
 import time
 import warnings
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 import psutil
 
-from type_defs import AvailableModelInfo, BenchmarkDef, PipelineResult
-
-from utils.terminal import green, yellow, red, cyan, bold, ok, warn, error, info, progress_bar
+import csv_writer as csv_writer
 
 # ── Model Management from Shared Module ──────────────────────
 # Load/Unload is ONLY initiated in main() of this script.
@@ -98,15 +93,29 @@ from utils.terminal import green, yellow, red, cyan, bold, ok, warn, error, info
 #   /v1/chat/completions        POST – OpenAI-Compat: chat inference
 #   /v1/models                  GET  – OpenAI-Compat: model list
 #
-from benchmark_config import (PIPELINE_DISCOVERY, TOOL_EVAL_SCENARIO_IDS,
-                              AGENTIC_SAFETY_SCENARIO_IDS,
-                              EXCLUDE_KEYWORDS, get_model_config,
-                              BENCHMARK_CATEGORY_DEFAULTS)
+from benchmark_config import (
+    AGENTIC_SAFETY_SCENARIO_IDS,
+    EXCLUDE_KEYWORDS,
+    PIPELINE_TIMEOUTS,
+    TOOL_EVAL_SCENARIO_IDS,
+    get_model_config,
+)
 from model_manager import (
-    API_BASE, TIMEOUT_CLI, TIMEOUT_MODEL_READY, PIPELINE_TIMEOUTS,
-    get_current_loaded_model, has_unloaded_all_models,
-    load_model_via_lms, get_available_models, parse_selection,
-    is_model_ready
+    API_BASE,
+    get_available_models,
+    get_current_loaded_model,
+    has_unloaded_all_models,
+    is_model_ready,
+    load_model_via_lms,
+    parse_selection,
+)
+from type_defs import AvailableModelInfo, BenchmarkDef, PipelineResult
+from utils.terminal import (
+    cyan,
+    green,
+    ok,
+    progress_bar,
+    warn,
 )
 
 # Model classification helper functions
@@ -141,7 +150,7 @@ def _is_reasoning_model(model_identifier: str) -> bool:
     return False
 
 
-def _check_reasoning_registry(model_identifier: str) -> Optional[bool]:
+def _check_reasoning_registry(model_identifier: str) -> bool | None:
     """Tri-state: True (thinking), False (instruct), None (missing/unknown)."""
     try:
         from assemble_blueprint import normalize_model_name
@@ -184,10 +193,10 @@ def _is_gemma_model(model_identifier: str) -> bool:
 # template format. Other lm_eval tasks define `until` in their YAML and are
 # unaffected. Fix: resolve the model's EOS token from the GGUF header and send
 # it as `eos_string` (-> `stop` in the OpenAI payload) for such tasks.
-_GGUF_EOS_CACHE: dict[str, Optional[str]] = {}
+_GGUF_EOS_CACHE: dict[str, str | None] = {}
 _GGUF_EOS_LOCK = threading.Lock()
 
-def _resolve_model_gguf_path(model_identifier: str) -> Optional[str]:
+def _resolve_model_gguf_path(model_identifier: str) -> str | None:
     """Find the model's GGUF file under the LM Studio models cache.
 
     Substring match on the normalised identifier suffix (like
@@ -208,7 +217,7 @@ def _resolve_model_gguf_path(model_identifier: str) -> Optional[str]:
     return None
 
 
-def _get_model_eos_string(model_identifier: str) -> Optional[str]:
+def _get_model_eos_string(model_identifier: str) -> str | None:
     """Return the EOS token string of a model from its GGUF header (cached).
 
     Reads tokenizer.ggml.eos_token_id + the interleaved string-array vocab
@@ -259,7 +268,7 @@ def _task_yaml_has_until_sequence(task_name: str) -> bool:
         os.path.join(LMEVAL_TASKS_DIR, task_name, f"{task_name}.yaml"),
     ]
     try:
-        import lm_eval  # noqa: F401
+        import lm_eval
         lm_eval_tasks = os.path.join(os.path.dirname(lm_eval.__file__), "tasks")
         candidates += [
             os.path.join(lm_eval_tasks, f"{task_name}.yaml"),
@@ -320,7 +329,7 @@ os.makedirs(RESULTS_DIR, exist_ok=True)
 # ── LM-Eval Proxy ──────────────────────────────────────────────
 LMEVAL_PROXY_PORT = 1235
 LMEVAL_PROXY_SCRIPT = os.path.join(SRC_DIR, "tools", "lmeval_proxy.py")
-_lmeval_proxy_proc: Optional[subprocess.Popen] = None
+_lmeval_proxy_proc: subprocess.Popen | None = None
 
 
 def _proxy_is_running() -> bool:
@@ -378,7 +387,7 @@ def _stop_lmeval_proxy() -> None:
 LOCK_PATH = os.path.join(RESULTS_DIR, ".benchmark.lock")
 
 
-def _acquire_single_instance_lock(lock_path: Optional[str] = None) -> Optional[str]:
+def _acquire_single_instance_lock(lock_path: str | None = None) -> str | None:
     """Acquire the single-instance lock file.
 
     Returns an error message if another LIVE launcher holds the lock,
@@ -412,7 +421,7 @@ def _acquire_single_instance_lock(lock_path: Optional[str] = None) -> Optional[s
     return None
 
 
-def _release_single_instance_lock(lock_path: Optional[str] = None) -> None:
+def _release_single_instance_lock(lock_path: str | None = None) -> None:
     """Remove the lock file if this process still owns it."""
     lock_path = lock_path or LOCK_PATH
     try:
@@ -499,16 +508,17 @@ SAFE_CONTEXT_FALLBACK: dict[str, int] = {
 }
 
 # Cached registry data
-_REGISTRY_DATA: Optional[dict] = None
-_REGISTRY_NORM: Optional[dict[str, str]] = None
+_REGISTRY_DATA: dict | None = None
+_REGISTRY_NORM: dict[str, str] | None = None
 
 def _load_registry_for_context() -> tuple[dict[str, Any], dict[str, str]]:
     global _REGISTRY_DATA, _REGISTRY_NORM
     if _REGISTRY_DATA is not None:
         return _REGISTRY_DATA, _REGISTRY_NORM
 
-    from assemble_blueprint import normalize_model_name
     from pathlib import Path
+
+    from assemble_blueprint import normalize_model_name
 
     rpath = Path(__file__).resolve().parent.parent / "doc-git" / "model_registry.yaml"
     if not rpath.exists():
@@ -539,7 +549,7 @@ def _load_registry_for_context() -> tuple[dict[str, Any], dict[str, str]]:
     return _REGISTRY_DATA, _REGISTRY_NORM
 
 
-def _get_safe_context(model_identifier: str) -> Optional[int]:
+def _get_safe_context(model_identifier: str) -> int | None:
     """Return capped context length for VRAM-safe model loading.
 
     Priority:
@@ -571,7 +581,7 @@ def _get_safe_context(model_identifier: str) -> Optional[int]:
 
 
 def _resolve_num_parallel(model_identifier: str, sample_size: int,
-                          cli_override: Optional[int]) -> int:
+                          cli_override: int | None) -> int:
     """Determine num_parallel for a model benchmark run.
 
     Resolution order:
@@ -606,7 +616,7 @@ def _model_family(model_identifier: str) -> str:
     """Extract model family (without publisher prefix) for deduplication."""
     return model_identifier.replace("\\", "/").split("/")[-1].lower()
 
-def resolve_models(available_models: list[dict[str, Any]], model_arg: Optional[str]) -> Optional[list[dict[str, Any]]]:
+def resolve_models(available_models: list[dict[str, Any]], model_arg: str | None) -> list[dict[str, Any]] | None:
     # Code-Review 2026-07-18 §4.1: EXCLUDE_KEYWORDS filtering is already
     # done in get_available_models(); doing it again here would be
     # redundant and drift-prone.
@@ -661,7 +671,7 @@ def resolve_models(available_models: list[dict[str, Any]], model_arg: Optional[s
     return None
 
 
-def resolve_benchmarks(bench_arg: Optional[str]) -> Optional[list[dict[str, Any]]]:
+def resolve_benchmarks(bench_arg: str | None) -> list[dict[str, Any]] | None:
     if not bench_arg or bench_arg == "all":
         return ALL_BENCHMARKS
 
@@ -682,7 +692,7 @@ def resolve_benchmarks(bench_arg: Optional[str]) -> Optional[list[dict[str, Any]
     return result
 
 
-def select_models_interactive(available_models: list[dict[str, Any]]) -> Optional[list[dict[str, Any]]]:
+def select_models_interactive(available_models: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
     # Code-Review 2026-07-18 §4.1: filtering already applied upstream.
     filtered = available_models
     if not filtered:
@@ -706,7 +716,7 @@ def select_models_interactive(available_models: list[dict[str, Any]]) -> Optiona
         print("  Invalid input.")
 
 
-def select_benchmarks_interactive() -> Optional[list[dict[str, Any]]]:
+def select_benchmarks_interactive() -> list[dict[str, Any]] | None:
     print("\n" + "=" * 60)
     print("  Benchmark Selection")
     print("=" * 60)
@@ -775,7 +785,8 @@ def _evaluation_summary(model_identifier: str, category: str) -> str:
     """Human-readable summary of the effective generation config (Punkt 1).
 
     Shows temp/top_p/top_k/min_p/max_tokens/thinking and the source
-    ("lms-json" = LM Studio GUI Config, "category-default" = Fallback).
+    ("benchmark-table" = MODEL_CATEGORY_SAMPLING-Ausnahme, "category-default" =
+    Instruct-Fallback, "thinking-default" = Thinking-Fallback im --thinking-Lauf).
     """
     cfg = get_model_config(model_identifier, category=category, is_thinking_enabled=IS_THINKING_ENABLED)
     parts = [f"temp={cfg.get('temperature')}", f"top_p={cfg.get('top_p')}",
@@ -791,11 +802,11 @@ def _evaluation_summary(model_identifier: str, category: str) -> str:
 
 
 def _get_evaluation_parameters(model_identifier: str, bench_name: str = "") -> dict[str, Any]:
-    """Returns LM-Eval parameters from the LM Studio JSON config (Punkt 3+4).
+    """Returns LM-Eval parameters from benchmark_config.get_model_config().
 
     Derives benchmark category from bench_name, then calls get_model_config()
-    which reads the LMS JSON-Config (einzige Quelle, GUI-entsprechend). Ohne
-    JSON-Config gelten BENCHMARK_CATEGORY_DEFAULTS als Fallback.
+    (Sampling-Design 2026-08-06: MODEL_CATEGORY_SAMPLING > Kategorie-Defaults;
+    aus der LMS-JSON-Config nur Nicht-Temperatur-Felder).
     MODEL_TEMP_OVERRIDES / Registry-Thinking / Knowledge-Floor sind entfernt.
 
     Returned keys are split by the caller into --model_args (constructor) and
@@ -886,7 +897,7 @@ def _build_lmeval_cmd(model_identifier: str, api_model: str, subset_task: str, p
     return cmd
 
 
-def _parse_subset_score(sub_output_dir: str, subset_task: str) -> Optional[float]:
+def _parse_subset_score(sub_output_dir: str, subset_task: str) -> float | None:
     sub_score = None
     for item in os.listdir(sub_output_dir):
         sub = os.path.join(sub_output_dir, item)
@@ -946,7 +957,7 @@ def _ensure_model_still_loaded(model_identifier: str, model_load_key: str, bench
 
 
 # Returns: dict with pipeline="custom", score (0-1).
-def run_custom_benchmark(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_size: int = 5, seed: Optional[int] = None, is_structured_output_disabled: bool = False, should_keep_response: bool = False, num_parallel: int = 1) -> Optional[PipelineResult]:
+def run_custom_benchmark(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_size: int = 5, seed: int | None = None, is_structured_output_disabled: bool = False, should_keep_response: bool = False, num_parallel: int = 1) -> PipelineResult | None:
     model_identifier = model_info["key"]
     model_display = model_info["display"]
     fp = os.path.join(DATA_DIR, bench["file"])
@@ -1035,7 +1046,7 @@ def run_custom_benchmark(model_info: AvailableModelInfo, bench: BenchmarkDef, sa
 #   3. evalplus.evaluate -> differential testing with plus_input
 # Uses evalplus-native datasets (humanEval, mbpp).
 # Returns: dict with pipeline="evalplus", score pass@1 (0-1).
-def run_evalplus(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_size: int = 5, seed: Optional[int] = None, is_reasoning_model: bool = False, num_parallel: int = 1) -> Optional[PipelineResult]:
+def run_evalplus(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_size: int = 5, seed: int | None = None, is_reasoning_model: bool = False, num_parallel: int = 1) -> PipelineResult | None:
     # Some models (e.g. DeepSeek Coder) generate regex patterns like "\d+"
     # instead of r"\d+", causing SyntaxWarning spam from Python 3.12+.
     warnings.filterwarnings("ignore", category=SyntaxWarning)
@@ -1061,8 +1072,8 @@ def run_evalplus(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_siz
     t0 = time.time()
 
     # ── Codegen via evalplus Python API ──────────────────────
-    from evalplus.provider import make_model
     from evalplus.codegen import codegen as evalplus_codegen
+    from evalplus.provider import make_model
 
     # Sentinel name required by evalplus; the actual model ID is sent
     # via the OpenAI-compatible request (Code-Review 2026-07-18 §5.3).
@@ -1101,9 +1112,11 @@ def run_evalplus(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_siz
     eval_base = PIPELINE_TIMEOUTS["evalplus_base"]
     eval_timeout = (eval_base * 2 if is_reasoning_model else eval_base) * limit_scale
 
-    from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FUTimeout
     import io
+    from concurrent.futures import ThreadPoolExecutor
+    from concurrent.futures import TimeoutError as _FUTimeout
     from contextlib import redirect_stdout
+
     from evalplus.codegen import sanitize as _evalplus_sanitize
     _total_tasks = len(filtered_tasks)
     # Progress live via StringIO-Polling (Punkt 2b): evalplus schreibt die
@@ -1241,7 +1254,7 @@ def run_evalplus(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_siz
 # For MMLU-Pro there is a separate modified function (see below),
 # which stratifies the benchmark across 14 subset tasks.
 # Returns: dict with pipeline="lmeval", score (0-1).
-def run_lmeval(model_info: AvailableModelInfo, bench: BenchmarkDef, limit: int = 5, is_reasoning_model: bool = False, num_parallel: int = 1) -> Optional[PipelineResult]:
+def run_lmeval(model_info: AvailableModelInfo, bench: BenchmarkDef, limit: int = 5, is_reasoning_model: bool = False, num_parallel: int = 1) -> PipelineResult | None:
     model_identifier = model_info["key"]
     model_display = model_info["display"]
     gptoss = _is_gptoss_model(model_identifier)
@@ -1458,7 +1471,7 @@ def run_lmeval(model_info: AvailableModelInfo, bench: BenchmarkDef, limit: int =
 # Result is extracted from JSON envelope (final_score 0-100 -> 0-1).
 # Returns: dict with pipeline="agentic", score (0-1).
 def run_agentic(model_info: AvailableModelInfo, limit: int = 5, mode: str = "random",
-                seed: Optional[int] = None) -> Optional[PipelineResult]:
+                seed: int | None = None) -> PipelineResult | None:
     """Agentic: tool-eval-bench with sample_size scenarios.
 
     mode:
@@ -1572,7 +1585,7 @@ def run_agentic(model_info: AvailableModelInfo, limit: int = 5, mode: str = "ran
             "score": score, "thinking": IS_THINKING_ENABLED}
 
 
-def save_summary_csv(results: list[dict[str, Any]], model_info: Optional[dict[str, Any]] = None,
+def save_summary_csv(results: list[dict[str, Any]], model_info: dict[str, Any] | None = None,
                      sample_size: int = 5, seed: str = "", exclude_benchmarks: str = "",
                      no_structured_output: str = "", no_unload_between: str = "") -> Any:
     """Legacy – forwards to csv_writer."""
@@ -1710,7 +1723,7 @@ def _validate_run_spec_selections(spec: dict[str, Any],
 
 
 def _apply_run_spec(args: Any, spec: dict[str, Any],
-                    explicit_dests: Optional[set[str]] = None) -> Any:
+                    explicit_dests: set[str] | None = None) -> Any:
     """Rechne Run-Spec in das Namespace-Objekt ein.
 
     Precedence: CLI (explizit gesetzt) > YAML > Defaults.
@@ -1786,7 +1799,7 @@ def _build_launcher_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _parse_args(argv: Optional[list[str]] = None) -> tuple[Any, str]:
+def _parse_args(argv: list[str] | None = None) -> tuple[Any, str]:
     """Phase 1: CLI-Parse + Run-Spec (--run-spec/config) + Versionsinfo.
 
     CLI-Flags haben Vorrang vor Run-Spec-Werten. Erkennung, welche
@@ -1883,7 +1896,7 @@ def _start_proxy_if_needed(models: list[AvailableModelInfo], benchmarks: list[Be
         _start_lmeval_proxy()
 
 
-def _check_registry_for_model(model_identifier: str, model_display: str) -> Optional[bool]:
+def _check_registry_for_model(model_identifier: str, model_display: str) -> bool | None:
     """Registry-Prüfungen (7 Checks). Gibt is_reasoning zurück oder None (skip)."""
     try:
         from assemble_blueprint import normalize_model_name
@@ -1926,8 +1939,9 @@ def _check_registry_for_model(model_identifier: str, model_display: str) -> Opti
 
         # Check assembled systemPrompt in Config JSON
         try:
-            from assemble_blueprint import read_lms_configs
             from pathlib import Path as _Path
+
+            from assemble_blueprint import read_lms_configs
             cfgs = read_lms_configs(_Path.home() / ".lmstudio" / ".internal" / "user-concrete-model-default-config")
             cfg_key = normalize_model_name(model_identifier)
             for c in cfgs:
@@ -1948,7 +1962,7 @@ def _check_registry_for_model(model_identifier: str, model_display: str) -> Opti
         return False
 
 
-def _load_model(model_info: AvailableModelInfo, model_load_key: str, args: Any) -> Optional[str]:
+def _load_model(model_info: AvailableModelInfo, model_load_key: str, args: Any) -> str | None:
     """Modell laden + API-Ready prüfen. Gibt api_model zurück oder None (skip)."""
     loaded = get_current_loaded_model()
     api_model = None

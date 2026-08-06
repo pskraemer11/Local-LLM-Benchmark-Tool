@@ -1,14 +1,6 @@
-# Prio 4.15 (Code-Review_2026-07-12.md §4 Prio 4) – minimal config
-# for ruff, mypy, pylint and pytest.
-
-[project]
-# Only the metadata that tools need; runtime dependencies are
-# documented in README.md (avoid coupling pyproject to the
-# experimental dependency set here).
-name = "llm-benchmark-suite"
-version = "13.0.0"
-description = "Local benchmark framework for LLMs via LM Studio REST API"
-requires-python = ">=3.11"
+# pytest-Konfiguration (Ruff/pylint/mypy siehe .ruff.toml und .pyproject.toml).
+# pytest erkennt NUR unversteckte Konfigurationsdateien (pyproject.toml, pytest.ini,
+# tox.ini, setup.cfg) - deshalb wird dieser Block hier gefuehrt.
 
 [tool.pytest.ini_options]
 minversion = "8.0"
@@ -16,41 +8,3 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 addopts = "-v --tb=short"
-
-[tool.ruff]
-line-length = 120
-# target-version = "py311"
-target-version = "py314"
-# Don't lint the Archiv/ folder (legacy code)
-extend-exclude = ["Archiv", "build", "dist", "doc-git", "Doc-intern", "src/_corr_final.py"]
-
-[tool.ruff.lint]
-# Lenient default: catch E (errors) and F (pyflakes), ignore style.
-# Run `ruff check` in CI; run `ruff format` manually for style.
-# select = ["E", "F"]
-select = ["ALL"]
-ignore = [
-    "D",
-    "E501",
-    "F401",
-    "ANN101",
-    "COM812",
-    "PT",
-    "T20",
-]
-
-# neu aufgenommen zur Ergänzung von Lücken bei Ruff, aber viele disable gegen False Negativ Meldungen:
-[tool.pylint.main]
-disable = ["all"]
-enable = ["R0902", "R0903", "R0913", "R0914", "R0801"]
-
-[tool.mypy]
-# Lenient settings: legacy research codebase with gradual typing.
-# python_version = "3.11"
-python_version = "3.14"
-ignore_missing_imports = true
-# no_strict_optional = true
-strict = true
-warn_unused_ignores = false
-warn_redundant_casts = false
-

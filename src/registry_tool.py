@@ -28,6 +28,15 @@ Commands:
   validate      Check model_registry.yaml consistency: template files exist,
                 Config JSON promptTemplate matches YAML, override overlap,
                 required fields present, registry-vs-config drift, etc.
+  sync-templates
+                Write promptTemplate from registry template files into config
+                JSONs that are missing it (fixes validate template_missing_config)
+  pipeline      One-shot maintenance (replaces sync_model_configs.ps1):
+                pipeline [status|sync|full] -> compare, +sync, +classify,
+                +assemble+validate (full)
+  patch-reasoning-effort
+                Add gpt-oss-20b reasoningEffort/budgetTokens to LMS configs
+                (--dry-run, --wait-for-lock, --effort, --budget)
   sync          Full sync: add → fill-arch → fill-reasoning → sync-from-configs → fmt
 
 Prinzip (seit 05.08.2026): JSON-Configs sind die Quelle für Laufzeit-Parameter
@@ -40,19 +49,21 @@ Code regeneriert). Dieser Code überschreibt keine JSON-Configs mehr.
 
 from __future__ import annotations
 
-import csv
+import concurrent.futures
 import json
 import os
 import re
 import shutil
 import struct
-import sys
 import subprocess
-import tempfile
-import concurrent.futures
+import sys
+import time
+from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
-from collections import OrderedDict
-from typing import Any, Callable, Optional
+from typing import Any
+
+import psutil
 
 _SRC_DIR = Path(__file__).resolve().parent
 # Make `src` importable regardless of how the tool is invoked
@@ -60,7 +71,6 @@ _SRC_DIR = Path(__file__).resolve().parent
 # on sys.path, not `src/`). Fix for Code-Review_2026-08-03.md F4.
 sys.path.insert(0, str(_SRC_DIR))
 
-from utils.terminal import ok, warn, error
 from type_defs import RegistryEntry
 
 PROJECT_ROOT = _SRC_DIR.parent
@@ -69,27 +79,45 @@ CONFIG_ROOT = Path.home() / ".lmstudio" / ".internal" / "user-concrete-model-def
 
 # ── ruamel.yaml setup ──────────────────────────────────────────────
 from ruamel.yaml import YAML
+
 y = YAML()
 y.preserve_quotes = True
 y.indent(mapping=2, sequence=4, offset=2)
 
 # ── assemble_blueprint helpers ─────────────────────────────────────
 from assemble_blueprint import (
-    normalize_model_name, normalize_for_config, find_config_for_registry_key,
-    find_all_configs_for_registry_key, find_registry_key_for_config,
-    read_lms_configs, _ARCH_REASONING_MAP,
+    _ARCH_REASONING_MAP,
+    assemble_prompts,
+    classify_registry,
+    find_all_configs_for_registry_key,
+    find_config_for_registry_key,
+    find_registry_key_for_config,
+    normalize_for_config,
+    normalize_model_name,
+    read_lms_configs,
+    validate_prompts,
 )
 from benchmark_config import (
     BLACKLIST,
+    GPTOSS_REASONING_BUDGET,
+    GPTOSS_REASONING_EFFORT,
     is_support_file,
-    USABLE_VRAM_GB as _USABLE_VRAM_GB,
-    USE_UNIFIED_KV_CACHE_THRESHOLD_GB as _USE_UNIFIED_KV_CACHE_THRESHOLD_GB,
+)
+from benchmark_config import (
     LEGACY_MODEL_GB_THRESHOLD_GB as _LEGACY_MODEL_GB_THRESHOLD_GB,
+)
+from benchmark_config import (
     MIN_CONTEXT_LENGTH as _MIN_CONTEXT_LENGTH,
 )
-
+from benchmark_config import (
+    USABLE_VRAM_GB as _USABLE_VRAM_GB,
+)
+from benchmark_config import (
+    USE_UNIFIED_KV_CACHE_THRESHOLD_GB as _USE_UNIFIED_KV_CACHE_THRESHOLD_GB,
+)
 
 # ── I/O helpers ────────────────────────────────────────────────────
+
 
 def load_registry(path: Path | None = None) -> dict[str, RegistryEntry]:
     if path is None:
@@ -101,7 +129,7 @@ def load_registry(path: Path | None = None) -> dict[str, RegistryEntry]:
 def _normalize_quants_flow_style(path: Path) -> None:
     """Convert block-style quants (multiline list) to flow-style [item] inline."""
     content = path.read_text("utf-8")
-    new, n = re.subn(r'  quants:\n    - (\S+)', r'  quants: [\1]', content)
+    new, n = re.subn(r"  quants:\n    - (\S+)", r"  quants: [\1]", content)
     if n:
         path.write_text(new, "utf-8")
 
@@ -135,6 +163,7 @@ def _run_lms_ls() -> list[dict[str, Any]]:
     print(f"[INFO] lms ls fehlgeschlagen ({stderr}) – versuche Server-Start...")
     try:
         from model_manager import _is_lmstudio_running
+
         if _is_lmstudio_running():
             r = subprocess.run(["lms", "ls", "--json"], capture_output=True, text=True, timeout=15)
             if r.returncode == 0:
@@ -148,6 +177,7 @@ def _run_lms_ls() -> list[dict[str, Any]]:
 
 
 # ── Blank-line formatting ──────────────────────────────────────────
+
 
 def _format_blank_lines(path: Path) -> None:
     """Normalize blank lines in YAML: none within entries, one between entries."""
@@ -193,12 +223,14 @@ def _format_blank_lines(path: Path) -> None:
 
 # ── fmt command ────────────────────────────────────────────────────
 
+
 def cmd_fmt() -> None:
     _format_blank_lines(REGISTRY_PATH)
     print(f"[OK] Blank lines formatted in {REGISTRY_PATH.name}")
 
 
 # ── fill-ctx command ───────────────────────────────────────────────
+
 
 def cmd_fill_ctx(default: int = 16384) -> None:
     reg = load_registry()
@@ -224,6 +256,7 @@ def cmd_fill_ctx(default: int = 16384) -> None:
 
 # ── fix-ctx command ──────────────────────────────────────────────
 
+
 def cmd_fix_ctx() -> None:
     """Recompute context_length for ALL entries based on current np and KV-cache settings."""
     reg = load_registry()
@@ -247,6 +280,7 @@ def cmd_fix_ctx() -> None:
 
 # ── fill-size command ──────────────────────────────────────────────
 
+
 def cmd_fill_size() -> None:
     """Look up file_size_bytes from LMS for registry entries missing it."""
     reg = load_registry()
@@ -266,7 +300,7 @@ def cmd_fill_size() -> None:
     for key, entry in reg.items():
         if not isinstance(entry, dict):
             continue
-        if "file_size_bytes" in entry and entry["file_size_bytes"]:
+        if entry.get("file_size_bytes"):
             continue
         normalized_key = normalize_model_name(key)
         if normalized_key in lms_sizes:
@@ -290,7 +324,15 @@ def _get_all_ggufs() -> list[Path]:
 
 def _norm(s: str) -> str:
     """Lower-case, strip ``.gguf``, replace ``-``/``_``/``\\``/``/``/``@`` with space."""
-    s = s.lower().replace(".gguf", "").replace("-", " ").replace("_", " ").replace("\\", " ").replace("/", " ").replace("@", " ")
+    s = (
+        s.lower()
+        .replace(".gguf", "")
+        .replace("-", " ")
+        .replace("_", " ")
+        .replace("\\", " ")
+        .replace("/", " ")
+        .replace("@", " ")
+    )
     return " ".join(s.split())
 
 
@@ -342,6 +384,7 @@ def _resolve_model_path_multi(key: str) -> str:
 
 
 # ── fix-np command ─────────────────────────────────────────────────
+
 
 def _normalize_variants(key: str) -> set[str]:
     """All normalized spellings of a model key.
@@ -415,9 +458,9 @@ def cmd_fix_np() -> None:
 
     # ── build lookup maps from lms ls ──
     lms_path_map: dict[str, str] = {}
-    lms_variants: dict[str, str] = {}   # normalized variant → lms key
-    lms_quant: dict[str, str] = {}      # normalized quant form → lms key
-    lms_file_map: dict[str, str] = {}   # normcased file path → lms key
+    lms_variants: dict[str, str] = {}  # normalized variant → lms key
+    lms_quant: dict[str, str] = {}  # normalized quant form → lms key
+    lms_file_map: dict[str, str] = {}  # normcased file path → lms key
     for m in lms_models:
         mk = str(m.get("modelKey", "")).lower()
         rp = m.get("path", "")
@@ -426,8 +469,8 @@ def cmd_fix_np() -> None:
         lms_path_map[normalize_model_name(mk)] = full_path
         for i, ch in enumerate(mk):
             if ch == "/":
-                lms_path_map[mk[i+1:]] = full_path
-                lms_path_map[normalize_model_name(mk[i+1:])] = full_path
+                lms_path_map[mk[i + 1 :]] = full_path
+                lms_path_map[normalize_model_name(mk[i + 1 :])] = full_path
                 break
         for variant in _normalize_variants(mk):
             lms_variants.setdefault(variant, mk)
@@ -541,6 +584,7 @@ def cmd_fix_np() -> None:
 
 # ── compare command ────────────────────────────────────────────────
 
+
 def cmd_compare() -> dict[str, Any]:
     reg = load_registry()
     lms = _run_lms_ls()
@@ -574,16 +618,19 @@ def cmd_compare() -> dict[str, Any]:
         "new": len(new_models),
         "missing": len(missing),
         "orphan": len(orphan),
-        "newd": [{
-            "key": m.get("modelKey", "?"),
-            "publisher": m.get("publisher", "?"),
-            "arch": m.get("architecture", "?"),
-            "params": m.get("paramsString", "?"),
-            "ctx": m.get("maxContextLength", 0),
-            "vision": m.get("vision", False),
-            "tools": m.get("trainedForToolUse", False),
-            "size_bytes": m.get("sizeBytes", 0),
-        } for m in new_models[:20]],
+        "newd": [
+            {
+                "key": m.get("modelKey", "?"),
+                "publisher": m.get("publisher", "?"),
+                "arch": m.get("architecture", "?"),
+                "params": m.get("paramsString", "?"),
+                "ctx": m.get("maxContextLength", 0),
+                "vision": m.get("vision", False),
+                "tools": m.get("trainedForToolUse", False),
+                "size_bytes": m.get("sizeBytes", 0),
+            }
+            for m in new_models[:20]
+        ],
         "missd": missing[:20],
         "orphd": sorted(orphan)[:20],
     }
@@ -593,6 +640,7 @@ def cmd_compare() -> dict[str, Any]:
 
 
 # ── np inference helper ────────────────────────────────────────────
+
 
 def _classify_arch(
     model_identifier: str = "",
@@ -621,9 +669,13 @@ def _infer_num_parallel(classification: str) -> int:
     return 4 if classification in ("moe", "mtp") else 1
 
 
-def _compute_np_ukv(model_gb: float, kv_per_slot_gb: float, native_ctx: int,
-                     vram_available: float = _USABLE_VRAM_GB,
-                     min_ctx: int = _MIN_CONTEXT_LENGTH) -> tuple[int, bool, int]:
+def _compute_np_ukv(
+    model_gb: float,
+    kv_per_slot_gb: float,
+    native_ctx: int,
+    vram_available: float = _USABLE_VRAM_GB,
+    min_ctx: int = _MIN_CONTEXT_LENGTH,
+) -> tuple[int, bool, int]:
     """Compute optimal num_parallel and useUnifiedKvCache based on VRAM budget.
 
     Priority (user-defined, 05.08.2026):
@@ -666,6 +718,7 @@ def _compute_np_ukv(model_gb: float, kv_per_slot_gb: float, native_ctx: int,
 
 
 # ── add command ────────────────────────────────────────────────────
+
 
 def cmd_add(models: list[dict[str, Any]], interactive: bool = False) -> dict[str, Any]:
     reg = load_registry()
@@ -720,10 +773,7 @@ def cmd_add(models: list[dict[str, Any]], interactive: bool = False) -> dict[str
         }
         if size_bytes and size_bytes > 0:
             entry["file_size_bytes"] = int(size_bytes)
-            entry["context_length"] = _default_ctx_from_size(
-                int(size_bytes), num_p,
-                entry["k_cache"], entry["v_cache"]
-            )
+            entry["context_length"] = _default_ctx_from_size(int(size_bytes), num_p, entry["k_cache"], entry["v_cache"])
 
         # Auto-fill arch data from GGUF file if available
         model_path = m.get("path", "")
@@ -765,6 +815,7 @@ def cmd_add(models: list[dict[str, Any]], interactive: bool = False) -> dict[str
 
 # ── configs command ────────────────────────────────────────────────
 
+
 def cmd_suggest() -> dict[str, Any]:
     """Dry-run: compute VRAM-based np/UKV/offload recommendation, write NOTHING.
 
@@ -790,13 +841,13 @@ def cmd_suggest() -> dict[str, Any]:
         # Phase 2: config name has extra quantization suffix (e.g. -mxfp4, -Q3_K_M)
         if not match:
             for rn2, rnk in registry_key_sorted:
-                if cn.startswith(rn2 + '-'):
+                if cn.startswith(rn2 + "-"):
                     match = rnk
                     break
         # Phase 3: config name stripped publisher that is embedded in registry key
         if not match:
             for rn2, rnk in registry_key_sorted:
-                if rn2.endswith('-' + cn):
+                if rn2.endswith("-" + cn):
                     match = rnk
                     break
         if not match:
@@ -825,7 +876,9 @@ def cmd_suggest() -> dict[str, Any]:
             native_ctx = entry.get("max_context_length") or 262144  # fallback: 256k
 
             np_new, ukv_new, ctx_new = _compute_np_ukv(
-                model_gb, kv_per_slot_gb, native_ctx,
+                model_gb,
+                kv_per_slot_gb,
+                native_ctx,
                 vram_available=_USABLE_VRAM_GB,
                 min_ctx=_MIN_CONTEXT_LENGTH,
             )
@@ -850,6 +903,7 @@ def cmd_suggest() -> dict[str, Any]:
 
 # ── rm command (NEW 2026-07-31) ───────────────────────────────────
 
+
 def cmd_rm(model_key: str, delete_files: bool = False, assume_yes: bool = False) -> int:
     """Remove a model entry from the registry.
 
@@ -862,10 +916,9 @@ def cmd_rm(model_key: str, delete_files: bool = False, assume_yes: bool = False)
     reg = load_registry()
     target = normalize_model_name(model_key)
     matches = [
-        k for k, v in reg.items()
-        if isinstance(v, dict)
-        and (normalize_model_name(k) == target
-             or normalize_model_name(k).endswith("-" + target))
+        k
+        for k, v in reg.items()
+        if isinstance(v, dict) and (normalize_model_name(k) == target or normalize_model_name(k).endswith("-" + target))
     ]
     if not matches:
         print(f"[ERROR] Kein Registry-Eintrag gefunden für: {model_key} (normalisiert: {target})")
@@ -923,6 +976,7 @@ def cmd_rm(model_key: str, delete_files: bool = False, assume_yes: bool = False)
 
 
 # ── sync-from-configs command ────────────────────────────────────
+
 
 def cmd_sync_from_configs() -> None:
     """Sync offload, num_parallel, useUnifiedKvCache from JSON configs into registry (skips context_length to preserve native model limit)."""
@@ -983,13 +1037,16 @@ def cmd_sync_from_configs() -> None:
 
     if updated_offload or updated_np or updated_ukv:
         save_registry(reg)
-    print(f"[OK] sync-from-configs: offload {updated_offload}, np {updated_np}, ukv {updated_ukv} aktualisiert ({skipped_no_match} kein Match, {blacklisted} blacklisted)")
+    print(
+        f"[OK] sync-from-configs: offload {updated_offload}, np {updated_np}, ukv {updated_ukv} aktualisiert ({skipped_no_match} kein Match, {blacklisted} blacklisted)"
+    )
 
 
 # ── sync-ctx command ───────────────────────────────────────────────
 
+
 def _strip_quant(norm_key: str) -> str:
-    idx = norm_key.find('@')
+    idx = norm_key.find("@")
     return norm_key[:idx] if idx > 0 else norm_key
 
 
@@ -1005,16 +1062,18 @@ _CTX_FROM_SIZE: list[tuple[float, int]] = [
 # Bytes per KV-cache element per quantization type.
 # Read-only after init — treat as immutable (thread-safe by design).
 _KV_BYTES: dict[str, float] = {
-    "q8_0": 1.0, "q8_1": 2.0,
-    "q5_1": 0.625, "q5_l": 0.625,
+    "q8_0": 1.0,
+    "q8_1": 2.0,
+    "q5_1": 0.625,
+    "q5_l": 0.625,
     "iq4_nl": 0.5,
-    "q4_0": 0.5, "q4_1": 0.625,
+    "q4_0": 0.5,
+    "q4_1": 0.625,
     "f16": 2.0,
 }
 
 
-def _default_ctx_from_size(size_bytes: int, np: int = 1,
-                           k_cache: str = "q8_0", v_cache: str = "iq4_nl") -> int:
+def _default_ctx_from_size(size_bytes: int, np: int = 1, k_cache: str = "q8_0", v_cache: str = "iq4_nl") -> int:
     gb = size_bytes / 1_000_000_000
     for limit, ctx in _CTX_FROM_SIZE:
         if gb > limit:
@@ -1039,8 +1098,7 @@ def _default_ctx_from_size(size_bytes: int, np: int = 1,
 # VRAM constants).
 
 
-def _max_ctx_from_vram(model_gb: float, np_val: int, nl: int, hd: int,
-                       kv_bytes: float) -> int:
+def _max_ctx_from_vram(model_gb: float, np_val: int, nl: int, hd: int, kv_bytes: float) -> int:
     """Maximum context length that fits in usable VRAM.
 
     Formula:  ctx = (usable_vram - model_gb) / (np × nl × hd × 2 × kv_bytes / 1e9)
@@ -1055,8 +1113,8 @@ def _max_ctx_from_vram(model_gb: float, np_val: int, nl: int, hd: int,
 def _canonical_key(mk: str, pub: str) -> str:
     """Build canonical registry key: publisher/model-name (cleaned)."""
     s = mk.strip().lower()
-    s = re.sub(r'\.gguf$', '', s)
-    s = re.sub(r'-(gguf|mxpr4)$', '', s)
+    s = re.sub(r"\.gguf$", "", s)
+    s = re.sub(r"-(gguf|mxpr4)$", "", s)
     if "/" not in s:
         s = f"{pub.lower().strip()}/{s}"
     return s
@@ -1107,9 +1165,7 @@ def cmd_sync_ctx() -> None:
             continue
         base_key = _strip_quant(norm_key)
         broad_key = normalize_for_config(orig_key)
-        ctx = (dir_best_ctx.get(base_key)
-               or dir_best_ctx.get(norm_key)
-               or dir_broad_best_ctx.get(broad_key))
+        ctx = dir_best_ctx.get(base_key) or dir_best_ctx.get(norm_key) or dir_broad_best_ctx.get(broad_key)
         if ctx is not None:
             entry["context_length"] = ctx
             updated += 1
@@ -1122,10 +1178,13 @@ def cmd_sync_ctx() -> None:
 
     if updated:
         save_registry(reg)
-    print(f"[OK] sync-ctx: {updated} aktualisiert, {skipped_has_value} bereits vorhanden, {skipped_no_config} keine Config gefunden")
+    print(
+        f"[OK] sync-ctx: {updated} aktualisiert, {skipped_has_value} bereits vorhanden, {skipped_no_config} keine Config gefunden"
+    )
 
 
 # ── migrate-keys command ───────────────────────────────────────────
+
 
 def cmd_migrate_keys() -> None:
     """Migrate registry keys without publisher prefix to canonical format (publisher/model-name)."""
@@ -1173,7 +1232,8 @@ def cmd_migrate_keys() -> None:
 
 # ── fill-arch command ──────────────────────────────────────────────
 
-def _read_gguf_arch(model_path: str) -> tuple[Optional[int], Optional[int], Optional[bool], Optional[int]]:
+
+def _read_gguf_arch(model_path: str) -> tuple[int | None, int | None, bool | None, int | None]:
     """Read n_layers (block_count), hidden_dim (embedding_length), reasoning-support and context_length from a GGUF file header.
 
     Returns (block_count, embedding_length, is_reasoning, context_length) where is_reasoning
@@ -1256,21 +1316,27 @@ def _read_gguf_arch(model_path: str) -> tuple[Optional[int], Optional[int], Opti
                     chat_template = str(val)
                 # Erst abbrechen, wenn ALLE vier Werte gelesen sind: tokenizer.chat_template
                 # steht im GGUF-Header meist NACH block_count/embedding_length/context_length.
-                if block_count is not None and embedding_length is not None and context_length is not None and chat_template is not None:
+                if (
+                    block_count is not None
+                    and embedding_length is not None
+                    and context_length is not None
+                    and chat_template is not None
+                ):
                     break
         is_reasoning = _detect_reasoning_from_template(chat_template) if chat_template else False
         return block_count, embedding_length, is_reasoning, context_length
-    except (OSError, ValueError, struct.error):
+    except OSError, ValueError, struct.error:
         # GGUF header parse failures (corrupt file, unsupported version, etc.)
         return None, None, None, None
 
 
 _REASONING_TOKEN_RE = re.compile(
-    r'<\s*/?\s*(?:think|thinking|thought)\s*>|'
-    r'<\|channel>\s*(?:thought|think)|'
-    r'<\|channel\|>\s*analysis',
+    r"<\s*/?\s*(?:think|thinking|thought)\s*>|"
+    r"<\|channel>\s*(?:thought|think)|"
+    r"<\|channel\|>\s*analysis",
     re.IGNORECASE,
 )
+
 
 def _detect_reasoning_from_template(template: str) -> bool:
     """Check if a GGUF chat_template supports reasoning/thinking mode.
@@ -1291,6 +1357,7 @@ MODELS_CACHE = Path.home() / ".lmstudio" / "models"
 _GGUF_EXPERT_CACHE: dict[str, bool] = {}
 _GGUF_MOE_READER_LOCK: Any = None  # lazy import for threading
 
+
 def _gguf_has_experts(model_path: str) -> bool:
     """Read GGUF header and return True if expert_count > 0 (MoE).
 
@@ -1303,6 +1370,7 @@ def _gguf_has_experts(model_path: str) -> bool:
         return _GGUF_EXPERT_CACHE[model_path]
     try:
         import gguf
+
         reader = gguf.GGUFReader(model_path)
         arch_field = reader.fields.get("general.architecture")
         if arch_field is None:
@@ -1435,13 +1503,16 @@ def cmd_fill_arch() -> None:
                 entry["reasoning"] = "thinking" if found[2] else "instruct"
                 reasoning_updated += 1
 
-    print(f"[OK] fill-arch: {updated} n_layers/hidden_dim gesetzt, {reasoning_updated} reasoning gesetzt, {skipped_has} bereits vorhanden, {skipped_no} kein GGUF-Match ({len(gguf_arch)} GGUF-Dateien ausgewertet)")
+    print(
+        f"[OK] fill-arch: {updated} n_layers/hidden_dim gesetzt, {reasoning_updated} reasoning gesetzt, {skipped_has} bereits vorhanden, {skipped_no} kein GGUF-Match ({len(gguf_arch)} GGUF-Dateien ausgewertet)"
+    )
 
     if updated or reasoning_updated:
         save_registry(reg)
 
 
 # ── fill-reasoning command ──────────────────────────────────────────
+
 
 def cmd_fill_reasoning() -> None:
     """Fill reasoning field from GGUF headers for all registry entries without it.
@@ -1514,12 +1585,69 @@ def cmd_fill_reasoning() -> None:
         else:
             skipped_no_match += 1
 
-    print(f"[OK] fill-reasoning: {updated} reasoning gesetzt, {skipped_has} bereits vorhanden, {skipped_no_match} kein GGUF-Match ({len(gguf_reasoning)} GGUF-Dateien ausgewertet)")
+    print(
+        f"[OK] fill-reasoning: {updated} reasoning gesetzt, {skipped_has} bereits vorhanden, {skipped_no_match} kein GGUF-Match ({len(gguf_reasoning)} GGUF-Dateien ausgewertet)"
+    )
+
+
+# ── sync-templates command ─────────────────────────────────────────
+
+TEMPLATE_DIR = PROJECT_ROOT / "doc-git" / "Jinja-Chat-Templates"
+
+
+def cmd_sync_templates() -> None:
+    """Write promptTemplate from registry template files into configs missing it.
+
+    Registry-driven (kein hardcodiertes Modell-Listing): jedes Registry-Entry
+    mit ``template:`` wird gegen seine Config geprueft; fehlt/leer ist das Feld
+    ``llm.prediction.promptTemplate``, wird der Inhalt der .jinja-Datei geschrieben.
+    Behebt die validate-Kategorie ``template_missing_config``.
+    """
+    reg = load_registry()
+    cfgs = read_lms_configs(CONFIG_ROOT)
+    added = skipped = errors = 0
+    for model_key, entry in reg.items():
+        if not isinstance(entry, dict) or not entry.get("template"):
+            continue
+        tpl_path = TEMPLATE_DIR / entry["template"]
+        if not tpl_path.exists():
+            print(f"  [ERROR] {model_key}: Template-Datei fehlt ({tpl_path})")
+            errors += 1
+            continue
+        match = find_config_for_registry_key(model_key, cfgs)
+        if match is None:
+            print(f"  [SKIP] {model_key}: keine Config-JSON gefunden")
+            skipped += 1
+            continue
+        json_path = Path(match["json_path"])
+        try:
+            data = json.loads(json_path.read_text(encoding="utf-8"))
+            template_content = tpl_path.read_text(encoding="utf-8")
+            fields = data.setdefault("operation", {}).setdefault("fields", [])
+            found = False
+            for field in fields:
+                if field.get("key") == "llm.prediction.promptTemplate":
+                    found = True
+                    if not field.get("value"):
+                        field["value"] = template_content
+                        json_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+                        print(f"  [FIX] {model_key}: promptTemplate ergänzt")
+                        added += 1
+                    else:
+                        skipped += 1
+                    break
+            if not found:
+                fields.append({"key": "llm.prediction.promptTemplate", "value": template_content})
+                json_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+                print(f"  [FIX] {model_key}: promptTemplate ergänzt")
+                added += 1
+        except Exception as e:
+            print(f"  [ERROR] {model_key}: {e}")
+            errors += 1
+    print(f"\n[OK] sync-templates: {added} Configs aktualisiert, {skipped} übersprungen, {errors} Fehler")
 
 
 # ── validate command ───────────────────────────────────────────────
-
-TEMPLATE_DIR = PROJECT_ROOT / "doc-git" / "Jinja-Chat-Templates"
 
 
 def cmd_validate() -> dict[str, Any]:
@@ -1569,9 +1697,7 @@ def cmd_validate() -> dict[str, Any]:
         try:
             data = json.loads(json_path.read_text(encoding="utf-8"))
         except Exception:
-            errors["template_missing_config"].append(
-                f"{model_key}: Config-JSON nicht lesbar ({json_path})"
-            )
+            errors["template_missing_config"].append(f"{model_key}: Config-JSON nicht lesbar ({json_path})")
             continue
         has_pt = False
         for field in data.get("operation", {}).get("fields", []):
@@ -1607,9 +1733,7 @@ def cmd_validate() -> dict[str, Any]:
         match = find_config_for_registry_key(model_key, cfgs)
         if match is None:
             rk = normalize_model_name(model_key)
-            errors["registry_no_config"].append(
-                f"{model_key}: keine passende Config-JSON gefunden (normalized: {rk})"
-            )
+            errors["registry_no_config"].append(f"{model_key}: keine passende Config-JSON gefunden (normalized: {rk})")
 
     # ── Check 7: reasoning stimmt mit Architektur-Map überein ──────
     for model_key, entry in reg.items():
@@ -1627,8 +1751,7 @@ def cmd_validate() -> dict[str, Any]:
                 break
         if detected is not None and reasoning != detected:
             errors["reasoning_arch_mismatch"].append(
-                f"{model_key}: reasoning={reasoning}, aber Architektur "
-                f"'{arch_raw}' erwartet '{detected}'"
+                f"{model_key}: reasoning={reasoning}, aber Architektur '{arch_raw}' erwartet '{detected}'"
             )
 
     # ── Check 8: JSON-Config vs. Registry (Drift) ──────────────────
@@ -1647,12 +1770,12 @@ def cmd_validate() -> dict[str, Any]:
                 break
         if not match:
             for rn2, rnk in registry_key_sorted:
-                if cn.startswith(rn2 + '-'):
+                if cn.startswith(rn2 + "-"):
                     match = rnk
                     break
         if not match:
             for rn2, rnk in registry_key_sorted:
-                if rn2.endswith('-' + cn):
+                if rn2.endswith("-" + cn):
                     match = rnk
                     break
         if not match:
@@ -1663,7 +1786,9 @@ def cmd_validate() -> dict[str, Any]:
             data = json.loads(json_path.read_text(encoding="utf-8"))
         except Exception:
             continue
-        load_fields = {f.get("key"): f.get("value") for f in data.get("load", {}).get("fields", []) if isinstance(f, dict)}
+        load_fields = {
+            f.get("key"): f.get("value") for f in data.get("load", {}).get("fields", []) if isinstance(f, dict)
+        }
 
         cfg_ctx = load_fields.get("llm.load.contextLength")
         cfg_np = load_fields.get("llm.load.numParallelSessions")
@@ -1674,8 +1799,7 @@ def cmd_validate() -> dict[str, Any]:
         reg_ctx = entry.get("context_length")
         if isinstance(cfg_ctx, int) and isinstance(reg_ctx, int) and cfg_ctx != reg_ctx:
             errors["config_context_drift"].append(
-                f"{match}: Config contextLength={cfg_ctx} != Registry context_length={reg_ctx} "
-                f"({cfg['json_path']})"
+                f"{match}: Config contextLength={cfg_ctx} != Registry context_length={reg_ctx} ({cfg['json_path']})"
             )
         # Only check: config must not exceed model's native max_context_length
         max_ctx = entry.get("max_context_length")
@@ -1687,24 +1811,28 @@ def cmd_validate() -> dict[str, Any]:
         # Also check for invalid zero/negative values
         if isinstance(cfg_ctx, int) and cfg_ctx <= 0:
             errors["config_context_too_small"].append(
-                f"{match}: Config contextLength={cfg_ctx} <= 0 "
-                f"(invalid, {cfg['json_path']})"
+                f"{match}: Config contextLength={cfg_ctx} <= 0 (invalid, {cfg['json_path']})"
             )
 
         # np/UKV/offload: Registry-Werte nur warnen, wenn sie von der Config abweichen
         # (die Config ist die Quelle - Registry sollte der Config folgen)
-        if isinstance(cfg_np, int) and entry.get("num_parallel") is not None \
-                and int(entry["num_parallel"]) != cfg_np:
+        if isinstance(cfg_np, int) and entry.get("num_parallel") is not None and int(entry["num_parallel"]) != cfg_np:
             errors["config_np_ukv_drift"].append(
                 f"{match}: Registry num_parallel={entry['num_parallel']} != Config {cfg_np}"
             )
-        if isinstance(cfg_ukv, bool) and entry.get("useUnifiedKvCache") is not None \
-                and bool(entry["useUnifiedKvCache"]) != cfg_ukv:
+        if (
+            isinstance(cfg_ukv, bool)
+            and entry.get("useUnifiedKvCache") is not None
+            and bool(entry["useUnifiedKvCache"]) != cfg_ukv
+        ):
             errors["config_np_ukv_drift"].append(
                 f"{match}: Registry useUnifiedKvCache={entry['useUnifiedKvCache']} != Config {cfg_ukv}"
             )
-        if isinstance(cfg_offload, (int, float)) and entry.get("offload") is not None \
-                and float(entry["offload"]) != float(cfg_offload):
+        if (
+            isinstance(cfg_offload, (int, float))
+            and entry.get("offload") is not None
+            and float(entry["offload"]) != float(cfg_offload)
+        ):
             errors["config_np_ukv_drift"].append(
                 f"{match}: Registry offload={entry['offload']} != Config {cfg_offload}"
             )
@@ -1728,6 +1856,7 @@ def cmd_validate() -> dict[str, Any]:
 
 
 # ── sync command (full) ────────────────────────────────────────────
+
 
 def cmd_sync() -> None:
     """Full sync: add → fill-arch → fill-reasoning → sync-from-configs → fmt.
@@ -1762,7 +1891,9 @@ def cmd_sync() -> None:
     print("[fill-reasoning] Fehlende reasoning-Felder aus GGUF-Headern ergänzen ...")
     cmd_fill_reasoning()
 
-    print("[sync-from-configs] offload, num_parallel, useUnifiedKvCache from JSON configs into Registry (skipping context_length) ...")
+    print(
+        "[sync-from-configs] offload, num_parallel, useUnifiedKvCache from JSON configs into Registry (skipping context_length) ..."
+    )
     cmd_sync_from_configs()
 
     print("[fmt] Blank lines normalisieren ...")
@@ -1770,11 +1901,204 @@ def cmd_sync() -> None:
 
     print("[OK] Sync abgeschlossen")
     print("Hinweis: Blueprint-YAML ist die Quelle (wird nicht regeneriert).")
-    print("  Für Prompts:  python assemble_blueprint.py all")
+    print("  Für Prompts:  python registry_tool.py pipeline full")
     print("  Für Empfehlungen (Dry-run, schreibt nichts): python registry_tool.py suggest")
 
 
+# ── pipeline command ───────────────────────────────────────────────
+# Ersetzt sync_model_configs.ps1 (01.08.-2026): ein Einstiegspunkt fuer
+# Status-Report, AutoAdd und FullSync - ohne PowerShell-Wrapper.
+
+
+def cmd_pipeline(mode: str = "status") -> None:
+    """Ein-Aufruf-Wartungspipeline (ersetzt sync_model_configs.ps1).
+
+    Modus:
+      status  -> LMS-Modellzahl + compare-Report (Default, schreibt nichts)
+      sync    -> status + registry_tool sync + Klassifikation
+      full    -> sync + Prompt-Assembly + Validierung
+    """
+    try:
+        lms = _run_lms_ls()
+        print(f"[1] LMS Modelle: {len(lms)}")
+    except Exception as e:
+        print(f"[WARN] lms ls fehlgeschlagen: {e}")
+
+    print("[2] Registry <> LMS <> Configs (compare) ...")
+    cmd_compare()
+
+    if mode == "status":
+        return
+
+    print("[3] Full sync (add + fill-arch + fill-reasoning + sync-from-configs + fmt) ...")
+    cmd_sync()
+
+    print("[4] Klassifikation (blueprint + reasoning) ...")
+    classify_registry()
+
+    if mode == "full":
+        print("[5] Prompt-Assembly ...")
+        assemble_prompts(preview_only=False)
+        print("[6] Validierung ...")
+        validate_prompts()
+
+    print("[OK] pipeline %s abgeschlossen" % mode)
+
+
+# ── patch-reasoning-effort command ─────────────────────────────────
+# Port von tools/patch_reasoning_effort.py (Fix 2026-07-31): traegt gpt-oss-20b-
+# GGUF-Varianten die Reasoning-Effort-Felder idempotent nach (mit Backup).
+
+_PRE_LOCK_PATH = PROJECT_ROOT / "ergebnisse" / ".benchmark.lock"
+_PRE_EFFORT_FIELD = {
+    "key": "ext.virtualModel.customField.openai.gptOss20b.reasoningEffort",
+    "value": GPTOSS_REASONING_EFFORT,
+}
+_PRE_PARSING_FIELD = {
+    "key": "llm.prediction.reasoning.parsing",
+    "value": {"enabled": False, "startString": " thinking", "endString": " response"},
+}
+_PRE_BUDGET_FIELD = {
+    "key": "llm.prediction.reasoning.budgetTokens",
+    "value": {"checked": True, "value": GPTOSS_REASONING_BUDGET},
+}
+_PRE_REQUIRED_FIELDS = [_PRE_EFFORT_FIELD, _PRE_PARSING_FIELD, _PRE_BUDGET_FIELD]
+
+
+def find_gptoss_configs() -> list[str]:
+    """Alle gpt-oss-20b-Konfigurationsdateien unter dem LM-Studio-Config-Verzeichnis."""
+    configs = []
+    for path in sorted(CONFIG_ROOT.glob("**/*gpt-oss*20b*.json")):
+        if ".bak" in str(path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if "operation" in data and "fields" in data.get("operation", {}):
+                configs.append(str(path))
+        except OSError, json.JSONDecodeError:
+            continue
+    return configs
+
+
+def gptoss_missing_fields(data: dict[str, Any]) -> list[dict[str, Any]]:
+    """Die der Konfiguration fehlenden Pflichtfelder (idempotent)."""
+    present_keys = {f.get("key") for f in data.get("operation", {}).get("fields", [])}
+    return [f for f in _PRE_REQUIRED_FIELDS if f["key"] not in present_keys]
+
+
+def _pre_backup_path(path: str) -> str:
+    return f"{path}.bak-{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+
+def gptoss_patch_config(path: str, dry_run: bool = False) -> tuple[bool, list[str], list[str], str | None]:
+    """Gpt-oss-Config patchen. Returns (changed, added_keys, updated_keys, backup_path)."""
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    missing = gptoss_missing_fields(data)
+    present = {f.get("key"): f for f in data.get("operation", {}).get("fields", [])}
+    to_overwrite = [
+        f for f in _PRE_REQUIRED_FIELDS if f["key"] in present and present[f["key"]].get("value") != f["value"]
+    ]
+    if not missing and not to_overwrite:
+        return False, [], [], None
+    if dry_run:
+        return True, [m["key"] for m in missing], [f["key"] for f in to_overwrite], None
+    backup = _pre_backup_path(path)
+    with open(path, "r", encoding="utf-8") as f_src, open(backup, "w", encoding="utf-8") as f_dst:
+        f_dst.write(f_src.read())
+    data["operation"]["fields"].extend(missing)
+    by_key = {f["key"]: f for f in data["operation"]["fields"]}
+    for f in to_overwrite:
+        by_key[f["key"]]["value"] = f["value"]
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    return True, [m["key"] for m in missing], [f["key"] for f in to_overwrite], backup
+
+
+def _pre_lock_held_by_live_process() -> int | None:
+    """PID des laufenden Benchmark-Launchers (aus ergebnisse/.benchmark.lock) oder None."""
+    if not _PRE_LOCK_PATH.exists():
+        return None
+    try:
+        with open(_PRE_LOCK_PATH, "r", encoding="utf-8") as f:
+            pid = int(json.load(f).get("pid", -1))
+    except OSError, ValueError, KeyError:
+        return None
+    if pid > 0 and psutil.pid_exists(pid):
+        try:
+            if psutil.Process(pid).is_running():
+                return pid
+        except psutil.Error:
+            return None
+    return None
+
+
+def cmd_patch_reasoning_effort(
+    dry_run: bool = False,
+    wait_for_lock: bool = False,
+    effort: str | None = None,
+    budget: int | None = None,
+) -> None:
+    """Traegt gpt-oss-20b-GGUF-Varianten die Reasoning-Effort-Felder in LMS-Configs nach."""
+    if effort is None:
+        effort = GPTOSS_REASONING_EFFORT
+    if effort not in ("low", "medium", "high"):
+        print(f"[ERROR] Ungültiger effort: {effort} (low|medium|high)")
+        sys.exit(1)
+    if budget is None:
+        budget = GPTOSS_REASONING_BUDGET
+    budget = max(int(budget), 1)
+    _PRE_EFFORT_FIELD["value"] = effort
+    _PRE_BUDGET_FIELD["value"]["value"] = budget
+    if effort != GPTOSS_REASONING_EFFORT or budget != GPTOSS_REASONING_BUDGET:
+        print(
+            f"[INFO] Übersteuert: effort={effort} (Default {GPTOSS_REASONING_EFFORT}), "
+            f"budget={budget} (Default {GPTOSS_REASONING_BUDGET})"
+        )
+
+    while True:
+        owner = _pre_lock_held_by_live_process()
+        if owner is None:
+            break
+        if not wait_for_lock:
+            print(
+                f"[FATAL] Benchmark-Launcher läuft noch (PID {owner}) - Config-Änderung "
+                "während eines Laufs würde die Ergebnisse inkonsistent machen. "
+                "--wait-for-lock nutzen."
+            )
+            sys.exit(1)
+        print(f"[WAIT] Launcher PID {owner} läuft noch - prüfe in 60s erneut...")
+        time.sleep(60)
+
+    configs = find_gptoss_configs()
+    if not configs:
+        print(f"[WARN] Keine gpt-oss-20b-Konfigurationsdateien unter {CONFIG_ROOT} gefunden")
+        return
+
+    print(f"[INFO] {len(configs)} gpt-oss-20b-Configs gefunden" + (" (DRY-RUN)" if dry_run else ""))
+    changed = 0
+    for path in configs:
+        did_change, added, updated, backup = gptoss_patch_config(path, dry_run=dry_run)
+        if did_change:
+            changed += 1
+            short = str(path).replace(str(CONFIG_ROOT), "")
+            print(f"  [{'PATCH' if not dry_run else 'WUERDE PATCHEN'}] {short}")
+            for key in added:
+                print(f"      + {key}")
+            for key in updated:
+                print(f"      ~ {key} (Wert aktualisiert)")
+            if backup:
+                print(f"      Backup: {backup}")
+        else:
+            print(f"  [OK]   {str(path).replace(str(CONFIG_ROOT), '')} (bereits vollständig)")
+    print(f"\n[{'DRY-RUN' if dry_run else 'OK'}] {changed}/{len(configs)} Configs geändert.")
+    if not dry_run and changed:
+        print("[INFO] Wirksam ab dem nächsten Laden des Modells.")
+
+
 # ── CLI dispatch ──────────────────────────────────────────────────
+
 
 def _print_menu(cmds: list[tuple[str, str]]) -> None:
     print("=" * 60)
@@ -1791,6 +2115,8 @@ def _run_menu_cmd(cmd: str) -> None:
     print(f"\n[RUN] registry_tool.py {cmd}\n")
     dispatch: dict[str, Callable[[], Any]] = {
         "sync": cmd_sync,
+        "pipeline": lambda: cmd_pipeline("full"),
+        "patch-reasoning-effort": lambda: cmd_patch_reasoning_effort(dry_run=True),
         "validate": cmd_validate,
         "suggest": cmd_suggest,
         "compare": cmd_compare,
@@ -1803,6 +2129,7 @@ def _run_menu_cmd(cmd: str) -> None:
         "fill-size": cmd_fill_size,
         "sync-ctx": cmd_sync_ctx,
         "sync-from-configs": cmd_sync_from_configs,
+        "sync-templates": cmd_sync_templates,
         "migrate-keys": cmd_migrate_keys,
     }
     if cmd == "add":
@@ -1835,28 +2162,31 @@ def _run_menu_cmd(cmd: str) -> None:
 def _interactive_menu() -> None:
     """Show interactive command selection menu when no args given."""
     cmds = [
-        ("sync",      "Full sync: add → fill-arch → fill-reasoning → sync-from-configs → fmt"),
-        ("validate",  "Check model_registry.yaml consistency (inkl. Config-Abweichungen)"),
-        ("suggest",   "Dry-run: VRAM-basierte np/UKV/ctx-Empfehlung (schreibt NICHTS)"),
-        ("compare",   "Compare registry vs LMS vs JSON configs"),
-        ("add",       "Add LMS models to registry (pipe JSON or provide file)"),
-        ("fmt",       "Normalize blank lines in registry YAML"),
-        ("fix-np",    "Recompute num_parallel for ALL entries"),
-        ("fix-ctx",   "Recompute context_length for ALL entries"),
+        ("sync", "Full sync: add → fill-arch → fill-reasoning → sync-from-configs → fmt"),
+        ("pipeline", "Status/Sync/Full-Wartung: status | sync | full"),
+        ("patch-reasoning-effort", "gpt-oss-20b Reasoning-Effort in LMS-Configs nachtragen"),
+        ("validate", "Check model_registry.yaml consistency (inkl. Config-Abweichungen)"),
+        ("sync-templates", "promptTemplate aus Registry-Templates in Config-JSONs nachtragen"),
+        ("suggest", "Dry-run: VRAM-basierte np/UKV/ctx-Empfehlung (schreibt NICHTS)"),
+        ("compare", "Compare registry vs LMS vs JSON configs"),
+        ("add", "Add LMS models to registry (pipe JSON or provide file)"),
+        ("fmt", "Normalize blank lines in registry YAML"),
+        ("fix-np", "Recompute num_parallel for ALL entries"),
+        ("fix-ctx", "Recompute context_length for ALL entries"),
         ("fill-arch", "Read n_layers/hidden_dim from GGUF headers"),
         ("fill-reasoning", "Read reasoning from GGUF chat_template"),
-        ("fill-ctx",  "Add default context_length to missing entries"),
+        ("fill-ctx", "Add default context_length to missing entries"),
         ("fill-size", "Look up file_size_bytes from LMS"),
-        ("sync-ctx",  "Sync context_length from JSON configs into registry"),
+        ("sync-ctx", "Sync context_length from JSON configs into registry"),
         ("sync-from-configs", "Sync offload/np/UKV from configs into registry"),
         ("migrate-keys", "Re-key entries without publisher prefix"),
-        ("rm",        "Remove registry entry (optionally files + configs too)"),
+        ("rm", "Remove registry entry (optionally files + configs too)"),
     ]
 
     _print_menu(cmds)
     while True:
         try:
-            choice = input("Select command [1-15] or q: ").strip().lower()
+            choice = input("Select command [1-19] or q: ").strip().lower()
             if not choice or choice == "q":
                 print("[OK] Bye")
                 sys.exit(0)
@@ -1866,7 +2196,7 @@ def _interactive_menu() -> None:
                 _print_menu(cmds)
             else:
                 print(f"[ERROR] Invalid choice: {choice}")
-        except (EOFError, KeyboardInterrupt):
+        except EOFError, KeyboardInterrupt:
             print("\n[OK] Bye")
             sys.exit(0)
         except ValueError:
@@ -1934,6 +2264,27 @@ def main() -> None:
         sys.exit(cmd_rm(sys.argv[2], delete_files=delete_files, assume_yes=assume_yes))
     elif cmd == "validate":
         cmd_validate()
+    elif cmd == "sync-templates":
+        cmd_sync_templates()
+    elif cmd == "pipeline":
+        mode = sys.argv[2] if len(sys.argv) > 2 else "status"
+        if mode not in ("status", "sync", "full"):
+            print(f"[ERROR] Unbekannter pipeline-Modus: {mode} (status|sync|full)")
+            sys.exit(1)
+        cmd_pipeline(mode)
+    elif cmd == "patch-reasoning-effort":
+        flags = set(sys.argv[2:])
+        effort = budget = None
+        if "--effort" in flags:
+            effort = sys.argv[sys.argv.index("--effort") + 1]
+        if "--budget" in flags:
+            budget = int(sys.argv[sys.argv.index("--budget") + 1])
+        cmd_patch_reasoning_effort(
+            dry_run="--dry-run" in flags,
+            wait_for_lock="--wait-for-lock" in flags,
+            effort=effort,
+            budget=budget,
+        )
     elif cmd == "sync":
         cmd_sync()
     else:

@@ -1,6 +1,5 @@
-from dataclasses import dataclass, field
-from typing import TypedDict, Optional, NotRequired
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, NotRequired, TypedDict
 
 
 class ModelConfig(TypedDict):
@@ -9,7 +8,7 @@ class ModelConfig(TypedDict):
     max_tokens: int
     enable_thinking: bool
     top_k: NotRequired[int]
-    min_p: NotRequired[Optional[float]]
+    min_p: NotRequired[float | None]
     stop: NotRequired[list[str]]
     reasoning_effort: NotRequired[str]
     no_system_msg: NotRequired[bool]
@@ -26,7 +25,7 @@ class AvailableModelInfo(TypedDict):
     identifier: str
     params: str
     publisher: str
-    _api_model: NotRequired[Optional[str]]
+    _api_model: NotRequired[str | None]
 
 
 class LoadedModelInfo(TypedDict):
@@ -50,10 +49,10 @@ class BenchmarkDef(TypedDict):
 
 
 class TaskResult(TypedDict):
-    response: Optional[str]
+    response: str | None
     extracted_code: str
     output_status: NotRequired[str]
-    entry_point_found: NotRequired[Optional[bool]]
+    entry_point_found: NotRequired[bool | None]
     score: float
     score_detail: str
     latency: float
@@ -62,8 +61,8 @@ class TaskResult(TypedDict):
     tokens_per_sec: float
     thinking_tokens: int
     truncated: NotRequired[bool]
-    error_type: NotRequired[Optional[str]]
-    error_detail: NotRequired[Optional[str]]
+    error_type: NotRequired[str | None]
+    error_detail: NotRequired[str | None]
 
 
 class PipelineResult(TypedDict):
@@ -71,15 +70,15 @@ class PipelineResult(TypedDict):
     bench: str
     category: str
     model: str
-    score: Optional[float]
+    score: float | None
     thinking: bool
     samples: NotRequired[str]
 
 
 class SandboxResult(TypedDict):
     ok: bool
-    error: Optional[str]
-    state: NotRequired[Optional[dict[str, str]]]
+    error: str | None
+    state: NotRequired[dict[str, str] | None]
     passed: int
     total: int
     details: NotRequired[list[dict[str, Any]]]
@@ -110,62 +109,62 @@ class SystemMetrics(TypedDict):
     ram_percent: float
     ram_used_gb: float
     ram_total_gb: float
-    gpu_util: Optional[float]
-    gpu_mem_util: Optional[float]
-    gpu_mem_used_gb: Optional[float]
-    gpu_mem_total_gb: Optional[float]
-    gpu_temp: Optional[float]
-    vram_gb: Optional[float]
+    gpu_util: float | None
+    gpu_mem_util: float | None
+    gpu_mem_used_gb: float | None
+    gpu_mem_total_gb: float | None
+    gpu_temp: float | None
+    vram_gb: float | None
 
 
 class MetricsSummary(TypedDict):
-    cpu_percent_avg: Optional[float]
-    cpu_percent_max: Optional[float]
-    gpu_util_avg: Optional[float]
-    gpu_util_max: Optional[float]
-    ram_percent_avg: Optional[float]
-    ram_percent_max: Optional[float]
-    ram_used_gb_avg: Optional[float]
-    ram_used_gb_max: Optional[float]
-    gpu_mem_used_gb_avg: Optional[float]
-    gpu_mem_used_gb_max: Optional[float]
-    gpu_temp_avg: Optional[float]
-    gpu_temp_max: Optional[float]
-    vram_gb_avg: Optional[float]
-    vram_gb_max: Optional[float]
+    cpu_percent_avg: float | None
+    cpu_percent_max: float | None
+    gpu_util_avg: float | None
+    gpu_util_max: float | None
+    ram_percent_avg: float | None
+    ram_percent_max: float | None
+    ram_used_gb_avg: float | None
+    ram_used_gb_max: float | None
+    gpu_mem_used_gb_avg: float | None
+    gpu_mem_used_gb_max: float | None
+    gpu_temp_avg: float | None
+    gpu_temp_max: float | None
+    vram_gb_avg: float | None
+    vram_gb_max: float | None
 
 
 class PerModelBenchmarkResult(TypedDict):
     benchmark_name: str
-    avg_score: Optional[float]
-    avg_latency: Optional[float]
-    avg_tps: Optional[float]
-    avg_cpu: Optional[float]
-    avg_ram: Optional[float]
-    avg_gpu: Optional[float]
-    avg_vram: Optional[float]
-    cpu_max: Optional[float]
-    gpu_max: Optional[float]
-    ram_max: Optional[float]
-    gpu_temp_max: Optional[float]
-    vram_gb: Optional[float]
+    avg_score: float | None
+    avg_latency: float | None
+    avg_tps: float | None
+    avg_cpu: float | None
+    avg_ram: float | None
+    avg_gpu: float | None
+    avg_vram: float | None
+    cpu_max: float | None
+    gpu_max: float | None
+    ram_max: float | None
+    gpu_temp_max: float | None
+    vram_gb: float | None
 
 
 @dataclass
 class GenerationConfig:
-    prompt: Optional[str] = None
-    model_identifier: Optional[str] = None
-    native_model_identifier: Optional[str] = None
+    prompt: str | None = None
+    model_identifier: str | None = None
+    native_model_identifier: str | None = None
     timeout: int = 120_000
     max_tokens: int = 4096
-    system_msg: Optional[str] = None
-    messages: Optional[list[dict[str, Any]]] = None
+    system_msg: str | None = None
+    messages: list[dict[str, Any]] | None = None
     temperature: float = 0.0
     top_p: float = 1.0
-    top_k: Optional[int] = None
-    min_p: Optional[float] = None
-    is_thinking_enabled: Optional[bool] = None
-    reasoning_effort: Optional[str] = None
+    top_k: int | None = None
+    min_p: float | None = None
+    is_thinking_enabled: bool | None = None
+    reasoning_effort: str | None = None
     is_streaming: bool = True
-    stop: Optional[list[str]] = None
-    response_format: Optional[dict] = None
+    stop: list[str] | None = None
+    response_format: dict | None = None

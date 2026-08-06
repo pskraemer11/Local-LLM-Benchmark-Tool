@@ -19,9 +19,9 @@ import os
 import sys
 import time
 import uuid
-from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
-from urllib.request import Request, urlopen
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
 # ── Defaults ──
 DEFAULT_PORT = 1235
@@ -56,7 +56,7 @@ def _proxy_upstream(upstream: str, path: str, headers: dict, body: bytes = None)
                 err_body = str(e)
         except Exception:
             err_body = str(e)
-        return 502, {"Content-Type": "text/plain"}, f"Proxy error: {err_body}".encode("utf-8")
+        return 502, {"Content-Type": "text/plain"}, f"Proxy error: {err_body}".encode()
 
 
 # ── HTTP Handler ──
@@ -162,7 +162,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 "model": openai_body.get("model", "local-model"),
                 "choices": [{"index": 0, "delta": {}, "finish_reason": "error"}],
             }
-            self.wfile.write(f"data: {json.dumps(error_chunk, ensure_ascii=False)}\n\n".encode("utf-8"))
+            self.wfile.write(f"data: {json.dumps(error_chunk, ensure_ascii=False)}\n\n".encode())
             self.wfile.flush()
         finally:
             self.wfile.write(b"data: [DONE]\n\n")

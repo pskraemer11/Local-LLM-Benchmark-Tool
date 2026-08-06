@@ -254,11 +254,13 @@ class TestResolveBenchmarks:
 # ======================================================================
 
 class TestLmevalParams:
-    """Tests fuer _get_evaluation_parameters() (Single-Source-of-Truth, Punkte 3+4).
+    """Tests fuer _get_evaluation_parameters() (Sampling-Design 2026-08-06).
 
-    Seit 2026-08-05: LMS-JSON-Config ist die einzige Quelle. MODEL_TEMP_OVERRIDES
-    und der Knowledge-Floor sind entfernt. Diese Tests patchen LMS_CONFIG_ROOT
-    auf ein leeres Verzeichnis, damit sie maschinenunabhaengig bleiben.
+    Seit 2026-08-05: MODEL_TEMP_OVERRIDES und der Knowledge-Floor sind entfernt.
+    Seit 2026-08-06: temperature/top_p kommen aus MODEL_CATEGORY_SAMPLING bzw.
+    den Kategorie-Defaults; LMS-JSON liefert nur noch Nicht-Temperatur-Felder.
+    Diese Tests patchen LMS_CONFIG_ROOT auf ein leeres Verzeichnis, damit sie
+    maschinenunabhaengig bleiben.
     """
 
     @pytest.fixture(autouse=True)
@@ -294,7 +296,7 @@ class TestLmevalParams:
     # Region: Category-Defaults (Fallback ohne JSON-Config) ----------------
     def test_coding_default_is_deterministic(self):
         params = _get_evaluation_parameters("plain-7b-model", "coding")
-        assert params["temperature"] == 0.0        # coding = deterministisch
+        assert params["temperature"] == 0.2        # coding (Research 06.08.)
         assert params["top_p"] == 1.0
         assert params["max_tokens"] == 4096
 
@@ -303,22 +305,29 @@ class TestLmevalParams:
         assert params["max_tokens"] == 4096        # math erlaubt mehr Tokens
 
     def test_knowledge_default(self):
-        params = _get_evaluation_parameters("plain-7b-model", "knowledge")
-        assert params["temperature"] == 0.0
+        params = _get_evaluation_parameters("plain-7b-model", "arc")
+        assert params["temperature"] == 0.6
         assert params["max_tokens"] == 4096
 
     def test_agentic_default(self):
-        params = _get_evaluation_parameters("plain-7b-model", "agentic")
-        assert params["temperature"] == 0.3        # leicht stochastisch fuer tool-use
+        params = _get_evaluation_parameters("plain-7b-model", "ifeval")
+        assert params["temperature"] == 0.6        # leicht stochastisch fuer tool-use
         assert params["max_tokens"] == 4096
 
-    def test_no_model_overrides_anymore(self):
-        # MODEL_TEMP_OVERRIDES sind entfernt: ohne JSON-Config gelten die
-        # Kategorie-Defaults, egal welcher Modellname.
-        for model in ("unsloth/phi-4", "unsloth/gpt-oss-20b", "vinpix/bonsai-8b-llama.cpp",
-                      "qwen3.5-72b-instruct", "deepseek-coder-v2-lite-instruct", "gemma-3-12b"):
+    def test_sampling_table_replaces_model_overrides(self):
+        # MODEL_TEMP_OVERRIDES sind entfernt; stattdessen entscheidet
+        # MODEL_CATEGORY_SAMPLING (Modell x Kategorie) ueber die Defaults.
+        expected = {
+            "unsloth/phi-4": 0.0,                       # Zeile phi-4
+            "unsloth/gpt-oss-20b": 1.0,                 # Zeile gpt-oss
+            "vinpix/bonsai-8b-llama.cpp": 0.2,          # Bonsai 06.08. entfernt -> Kategorie-Default
+            "lmstudio-community/deepseek-coder-v2-lite-instruct": 0.3,  # Zeile deepseek-coder-v2
+            "qwen3.5-72b-instruct": 0.2,                # keine Zeile -> Kategorie-Default
+            "gemma-3-12b": 0.2,                         # keine Zeile -> Kategorie-Default
+        }
+        for model, temp in expected.items():
             params = _get_evaluation_parameters(model, "coding")
-            assert params["temperature"] == 0.0
+            assert params["temperature"] == temp, model
             assert "top_k" not in params
             assert "min_p" not in params
             assert "until" not in params
@@ -333,28 +342,31 @@ class TestLmevalParams:
             # Kein reasoning="off" mehr (Native API entfernt)
             assert "reasoning" not in params or params.get("reasoning") != "off"
 
-    # Region: LMS-JSON-Config als einzige Quelle ---------------------------
-    def test_lms_config_temperature_wins(self, tmp_path):
+    # Region: LMS-JSON-Config liefert nur Nicht-Temperatur-Felder ----------
+    def test_lms_temp_ignored_non_temp_merged(self, tmp_path):
+        # JSON-temperature zaehlt nicht mehr (2026-08-06); min_p aus der
+        # Config wird weiterhin uebernommen.
         self._write_lms_config(tmp_path, "pub1", "fake-model-7b",
                                {"llm.prediction.temperature": 0.6,
                                 "llm.prediction.minPSampling": 0.02})
         import benchmark_config as bc
         with patch.object(bc, "LMS_CONFIG_ROOT", tmp_path):
             params = _get_evaluation_parameters("pub1/fake-model-7b", "coding")
-        assert params["temperature"] == 0.6
+        assert params["temperature"] == 0.2
         assert params["min_p"] == 0.02
 
-    def test_lms_config_no_benchmark_variation(self, tmp_path):
-        # Gleiche Config -> gleiche Temperatur in JEDER Kategorie (kein
-        # Knowledge-Floor, keine Category-Overrides mehr; der GUI-Wert ist
-        # fuer alle Benchmarks verbindlich).
+    def test_lms_temp_ignored_category_variation_applies(self, tmp_path):
+        # Gleiche Config -> Kategorie-Differenzierung greift (2026-08-06):
+        # ohne Tabellen-Zeile gelten pro Kategorie die Defaults, nicht der
+        # eine GUI-Wert.
         self._write_lms_config(tmp_path, "pub1", "fake-model-7b",
                                {"llm.prediction.temperature": 0.6})
         import benchmark_config as bc
+        expected = {"arc": 0.6, "ifeval": 0.6, "ds1000": 0.2, "math-500": 0.7}
         with patch.object(bc, "LMS_CONFIG_ROOT", tmp_path):
-            for bench in ("arc", "ifeval", "ds1000", "math-500"):
+            for bench, temp in expected.items():
                 params = _get_evaluation_parameters("pub1/fake-model-7b", bench)
-                assert params["temperature"] == 0.6, bench
+                assert params["temperature"] == temp, bench
 
     def test_lms_thinking_enabled_emits_chat_template_kwargs(self, tmp_path):
         self._write_lms_config(tmp_path, "pub1", "fake-model-7b",

@@ -17,9 +17,7 @@ _SRC_DIR = Path(__file__).resolve().parents[1]
 _PROJECT_ROOT = _SRC_DIR.parent
 sys.path.insert(0, str(_SRC_DIR))
 
-from benchmark_config import USABLE_VRAM_GB
-from registry_tool import load_registry, _KV_BYTES
-from assemble_blueprint import read_lms_configs, find_all_configs_for_registry_key
+from registry_tool import _KV_BYTES, load_registry
 
 CONFIG_ROOT = Path.home() / ".lmstudio" / ".internal" / "user-concrete-model-default-config"
 
@@ -38,7 +36,6 @@ def _read_config_value(fields: list, key: str):
 
 def read_full_configs(config_root: Path) -> list[dict]:
     """Like read_lms_configs but also reads KV cache, offload, num_parallel, UKV."""
-    import time as _time
     models = []
     if not config_root.exists():
         print(f"[WARN] Config root not found: {config_root}")

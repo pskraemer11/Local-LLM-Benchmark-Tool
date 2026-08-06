@@ -15,17 +15,15 @@ Usage:
   python assemble_blueprint.py all         -> Alle Phasen ausführen
 """
 
+import json
+import re
+import sys
+from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from ruamel.yaml import YAML
-import json
-import re
-import os
-import sys
-from pathlib import Path
-from datetime import datetime
 
-from utils.terminal import ok, warn, error
 from benchmark_config import BLACKLIST, GPTOSS_REASONING_EFFORT
 
 # === Pfade ===
@@ -931,8 +929,7 @@ def assemble_prompts(preview_only: bool = False) -> None:
                     if ck in search_key:
                         # Config key is shorter: verify file name has distinguishing suffix
                         file_stem = info.get("file_name", "")
-                        if file_stem.endswith(".json"):
-                            file_stem = file_stem[:-5]
+                        file_stem = file_stem.removesuffix(".json")
                         file_key = normalize_model_name(file_stem)
                         if search_key not in file_key:
                             continue

@@ -211,12 +211,13 @@ class TestLookupVramFuzzyFix:
 
 
 class TestGetModelConfigLmsSource:
-    """LMS-JSON-Config ist die einzige Quelle fuer Generations-Parameter (Punkte 3+4).
+    """Sampling-Design 2026-08-06: Tabelle > Defaults; JSON-temp/top_p GUI-only.
 
     Seit 2026-08-05: MODEL_TEMP_OVERRIDES, Registry-Thinking und der
-    Knowledge-Temperature-Floor sind entfernt. Die GUI-Einstellungen aus
-    ~/.lmstudio/.internal/user-concrete-model-default-config gewinnen;
-    BENCHMARK_CATEGORY_DEFAULTS gilt nur als Fallback ohne JSON-Config.
+    Knowledge-Temperature-Floor sind entfernt. Seit 2026-08-06 kommen aus
+    ~/.lmstudio/.internal/user-concrete-model-default-config nur noch
+    NICHT-Temperatur-Felder (top_k, min_p, enable_thinking, reasoning_effort);
+    temperature/top_p entscheiden MODEL_CATEGORY_SAMPLING bzw. die Defaults.
     """
 
     @staticmethod
@@ -233,25 +234,28 @@ class TestGetModelConfigLmsSource:
     def test_no_config_falls_back_to_category_default(self, tmp_path):
         with patch("benchmark_config.LMS_CONFIG_ROOT", tmp_path / "empty"):
             cfg = get_model_config("plain-7b-model", category="coding")
-        assert cfg["temperature"] == 0.0
+        assert cfg["temperature"] == 0.2
         assert cfg["_source"] == "category-default"
 
-    def test_lms_config_wins_over_category_default(self, tmp_path):
+    def test_lms_temp_ignored_category_default_used(self, tmp_path):
+        # JSON-temperature/top_p zaehlen seit 2026-08-06 nicht mehr fuer
+        # Benchmarks (ein Einzelwert kann keine Kategorie-Differenzierung
+        # ausdruecken); ohne Tabellen-Zeile gelten die Kategorie-Defaults.
         self._write_lms_config(tmp_path, "pub1", "fake-model-7b",
                                {"llm.prediction.temperature": 0.5,
                                 "llm.prediction.topPSampling": 0.9})
         with patch("benchmark_config.LMS_CONFIG_ROOT", tmp_path):
             cfg = get_model_config("pub1/fake-model-7b", category="coding")
-        assert cfg["temperature"] == 0.5
-        assert cfg["top_p"] == 0.9
-        assert cfg["_source"] == "lms-json"
+        assert cfg["temperature"] == 0.2
+        assert cfg["top_p"] == 1.0
+        assert cfg["_source"] == "category-default"
 
     def test_lms_config_matches_dir_with_gguf_suffix(self, tmp_path):
         self._write_lms_config(tmp_path, "pub1", "fake-model-7b-GGUF",
                                {"llm.prediction.temperature": 0.5})
         with patch("benchmark_config.LMS_CONFIG_ROOT", tmp_path):
             cfg = get_model_config("pub1/fake-model-7b", category="coding")
-        assert cfg["temperature"] == 0.5
+        assert cfg["temperature"] == 0.2
 
     def test_enable_thinking_from_config(self, tmp_path):
         self._write_lms_config(tmp_path, "pub1", "fake-model-7b",
@@ -287,12 +291,13 @@ class TestGetModelConfigLmsSource:
 
     def test_knowledge_temperature_floor_removed(self, tmp_path):
         # Frueher hob der Knowledge-Floor temp < 0.7 auf 0.7 an. Seit dem
-        # Transparenz-Refactor gewinnt der GUI-Wert unangetastet.
+        # Transparenz-Refactor gewinnt der GUI-Wert; seit 2026-08-06 gilt
+        # fuer Benchmarks der Kategorie-Default (JSON-temp ignoriert).
         self._write_lms_config(tmp_path, "pub1", "fake-model-7b",
                                {"llm.prediction.temperature": 0.2})
         with patch("benchmark_config.LMS_CONFIG_ROOT", tmp_path):
             cfg = get_model_config("pub1/fake-model-7b", category="knowledge")
-        assert cfg["temperature"] == 0.2
+        assert cfg["temperature"] == 0.6
 
     def test_registry_no_longer_affects_thinking(self, tmp_path):
         # Registry ist nur noch Uebersicht: reasoning: thinking setzt
