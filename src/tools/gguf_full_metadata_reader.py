@@ -7,7 +7,7 @@ import json
 from gguf import GGUFReader
 
 
-def extract_all_gguf_metadata(file_path: str, output_json: str = None):
+def extract_all_gguf_metadata(file_path: str, output_json: str | None = None) -> dict:
     """
     Extrahiert ALLE Metadaten aus einer GGUF-Datei, einschließlich MoE-spezifischer Informationen.
 

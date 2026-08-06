@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-LM-Eval Proxy – forwards OpenAI Chat Completions requests directly to
+LM-Eval Proxy - forwards OpenAI Chat Completions requests directly to
 an OpenAI-compatible endpoint (e.g. LM Studio /v1/chat/completions).
 
 Usage:
@@ -38,7 +38,7 @@ def _upstream_url(upstream: str, path: str) -> str:
 # Longer timeout for API calls (MATH-500 needs up to 120s per request)
 API_TIMEOUT = 900
 
-def _proxy_upstream(upstream: str, path: str, headers: dict, body: bytes = None) -> tuple[int, dict, bytes]:
+def _proxy_upstream(upstream: str, path: str, headers: dict, body: bytes | None = None) -> tuple[int, dict, bytes]:
     """Forward a request to the upstream server and return (status, response_headers, body)."""
     url = _upstream_url(upstream, path)
     method = "POST" if body else "GET"
@@ -184,7 +184,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
 def main() -> None:
     import argparse
-    parser = argparse.ArgumentParser(description="LM-Eval Proxy – forwards OpenAI Chat Completions to upstream")
+    parser = argparse.ArgumentParser(description="LM-Eval Proxy - forwards OpenAI Chat Completions to upstream")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help=f"Proxy port (default: {DEFAULT_PORT})")
     parser.add_argument("--upstream", type=str, default=DEFAULT_UPSTREAM,
                         help=f"Upstream server URL (default: {DEFAULT_UPSTREAM})")

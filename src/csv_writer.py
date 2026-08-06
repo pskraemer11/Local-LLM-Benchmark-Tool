@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Shared CSV writer – unified schema for ALL benchmark pipelines.
+Shared CSV writer - unified schema for ALL benchmark pipelines.
 
 ── Role in the system ─────────────────────────────────────────────
   This module is used by ALL four pipelines to output results
@@ -20,16 +20,16 @@ Shared CSV writer – unified schema for ALL benchmark pipelines.
 ── Conventions ────────────────────────────────────────────────────
   - Delimiter: ; (semicolon)
   - Encoding:  utf-8 (no BOM)
-  - Scores:    0.0–100.0 (percent, float)
+  - Scores:    0.0-100.0 (percent, float)
   - Field names: lowercase_with_underscores (English)
   - Metadata: pipeline, model, model_key, benchmark, timestamp, sample_size
               in EVERY output.
 
 ── CSV types ──────────────────────────────────────────────────────
-  1. TASK_FIELDS    (tasks_*.csv)       – Per-task raw data (one entry per task)
-  2. MODEL_FIELDS   (model_*.csv)       – Aggregated model summary
-  3. SUMMARY_FIELDS (modell_*.csv)      – Accumulated overview (from launcher)
-  4. CONSOLIDATED_FIELDS (konsolidiert_aktuell.csv) – Final overview
+  1. TASK_FIELDS    (tasks_*.csv)       - Per-task raw data (one entry per task)
+  2. MODEL_FIELDS   (model_*.csv)       - Aggregated model summary
+  3. SUMMARY_FIELDS (modell_*.csv)      - Accumulated overview (from launcher)
+  4. CONSOLIDATED_FIELDS (konsolidiert_aktuell.csv) - Final overview
 
 ── Backward compatibility ─────────────────────────────────────────
   The aliases save_csv/save_model_summary forward old calls from
@@ -161,7 +161,7 @@ SUMMARY_FIELDS = [
     "vram_gb",
 ]
 
-# Consolidated overview (all models × benchmarks)
+# Consolidated overview (all models x benchmarks)
 CONSOLIDATED_FIELDS = [
     "pipeline",
     "model",
@@ -345,7 +345,7 @@ def write_accumulative_summary(results: list[dict[str, Any]], model_info: dict[s
                                seed: str = "", exclude_benchmarks: str = "",
                                no_structured_output: str = "", no_unload_between: str = "",
                                base_dir: str | None = None) -> str:
-    """Accumulating model CSV – EACH call creates a NEW file with timestamp.
+    """Accumulating model CSV - EACH call creates a NEW file with timestamp.
     
     Filename: modell_<YYYYMMDD_HHMMSS>_<model_key>.csv
     This prevents data loss through overwriting/dedup.
@@ -354,8 +354,8 @@ def write_accumulative_summary(results: list[dict[str, Any]], model_info: dict[s
     model_info: dict with key, display
     """
     ts = _now_ts()
-    # _safe_slice ersetzt auch '?' – LM Studios Platzhalter für nicht
-    # parsebare Quant-Namen (z.B. "...@?") – '?' ist in Windows-Dateinamen
+    # _safe_slice ersetzt auch '?' - LM Studios Platzhalter für nicht
+    # parsebare Quant-Namen (z.B. "...@?") - '?' ist in Windows-Dateinamen
     # illegal und würde hier sonst eine OSError werfen.
     short = _safe_slice(model_info["key"], 50)
     d = _results_dir(base_dir)

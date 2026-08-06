@@ -191,7 +191,7 @@ def lock_held_by_live_process() -> int | None:
     if not os.path.exists(LOCK_PATH):
         return None
     try:
-        with open(LOCK_PATH, "r", encoding="utf-8") as f:
+        with open(LOCK_PATH, encoding="utf-8") as f:
             pid = int(json.load(f).get("pid", -1))
     except (OSError, ValueError, KeyError):
         return None
@@ -269,11 +269,11 @@ def main() -> None:
         if owner is None:
             break
         if not args.wait_for_lock:
-            print(f"[FATAL] Benchmark-Launcher laeuft (PID {owner}) – "
+            print(f"[FATAL] Benchmark-Launcher laeuft (PID {owner}) - "
                   f"Parallel-Messung wuerde das Modell stoeren. "
                   f"--wait-for-lock nutzen oder warten.")
             sys.exit(1)
-        print(f"[WAIT] Launcher PID {owner} laeuft noch – pruefe in 60s erneut...")
+        print(f"[WAIT] Launcher PID {owner} laeuft noch - pruefe in 60s erneut...")
         time.sleep(60)
 
     max_tokens = MAX_TOKENS_DS1000 if args.benchmark == "ds1000" else MAX_TOKENS_SHORT

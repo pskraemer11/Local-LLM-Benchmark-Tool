@@ -12,6 +12,7 @@ import csv
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 _SRC_DIR = Path(__file__).resolve().parents[1]
 _PROJECT_ROOT = _SRC_DIR.parent
@@ -23,7 +24,7 @@ CONFIG_ROOT = Path.home() / ".lmstudio" / ".internal" / "user-concrete-model-def
 
 # ── Extended config reader ───────────────────────────────────────────
 
-def _read_config_value(fields: list, key: str):
+def _read_config_value(fields: list, key: str) -> Any:
     """Extract a scalar or {'checked': bool, 'value': ...} from a load/operation field list."""
     for f in fields:
         if f.get("key") == key:
@@ -59,7 +60,7 @@ def read_full_configs(config_root: Path) -> list[dict]:
                 data = None
                 for enc in ("utf-8", "utf-8-sig"):
                     try:
-                        with open(json_path, "r", encoding=enc) as f:
+                        with open(json_path, encoding=enc) as f:
                             data = json.load(f)
                         break
                     except (json.JSONDecodeError, UnicodeDecodeError):
@@ -124,7 +125,7 @@ def _is_moe(arch: str, entry: dict) -> str:
         return "N"  # data entry error — Granite-4.0 H Tiny is dense
     # Standard MoE pattern: "Y MoE" where "MoE" is a separate token
     import re
-    if re.search(r'\bmoe\b', al):
+    if re.search(r"\bmoe\b", al):
         return "Y"
     return "N"
 
@@ -167,7 +168,7 @@ def _is_excluded(arch: str, model_key: str) -> bool:
 
 # ── Main ─────────────────────────────────────────────────────────────
 
-def main():
+def main() -> None:
     print("[1] Registry laden ...")
     reg = load_registry()
     if not reg:

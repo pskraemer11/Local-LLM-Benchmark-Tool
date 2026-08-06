@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Benchmark script for local LLMs via LM Studio API – DS1000 + CoderEval (v13).
+Benchmark script for local LLMs via LM Studio API - DS1000 + CoderEval (v13).
 
 ── Role in the overall system ─────────────────────────────────────────
   This script is the "Custom" pipeline of the four-pipeline architecture:
@@ -226,7 +226,7 @@ RETRY_MULTIPLIER = 1.5       # Timeout-Multiplikator pro Retry
 # (Modelle wie deepseek-r1-distill-qwen-14b beginnen die Antwort mit "\n```python"),
 # schneidet die gesamte Antwort auf ~0 Tokens ab ("No code generated").
 # Mit folgendem Newline matcht der Stop nur das SCHLIESSEN des Blocks.
-# Siehe: Server-Experiment 01.08.2026 – DeepSeek-Verifikationslauf 0% trotz Prompt-Hardening.
+# Siehe: Server-Experiment 01.08.2026 - DeepSeek-Verifikationslauf 0% trotz Prompt-Hardening.
 STOP_TOKENS_CODING = ["\n```\n", "\n# Task", "\n// ", "<|endoftext|>"]
 STOP_TOKENS_DEFAULT = ["<|endoftext|>"]
 
@@ -565,7 +565,7 @@ class MetricsCollector:
 
 def load_jsonl(filepath: str) -> list[dict[str, Any]]:
     """Load a JSONL file into a list of dicts, skipping blank lines."""
-    with open(filepath, "r", encoding="utf-8") as f:
+    with open(filepath, encoding="utf-8") as f:
         return [json.loads(line) for line in f if line.strip()]
 
 
@@ -586,17 +586,22 @@ def _stream_chat_completion(url: str, headers: dict[str, str], body: dict[str, A
         result_lock = threading.Lock()
         cancel_event = threading.Event()
 
-        def _set_result(key: str, value: Any) -> None:
+        def _set_result(key: str, value: Any, result_lock: threading.Lock = result_lock,
+                        result: dict[str, Any] = result) -> None:
             """Thread-safe write to the shared result dict."""
             with result_lock:
                 result[key] = value
 
-        def _result(key: str) -> Any:
+        def _result(key: str, result_lock: threading.Lock = result_lock,
+                    result: dict[str, Any] = result) -> Any:
             """Thread-safe read from the shared result dict."""
             with result_lock:
                 return result.get(key)
 
-        def _worker() -> None:
+        def _worker(result_lock: threading.Lock = result_lock,
+                    result: dict[str, Any] = result,
+                    cancel_event: threading.Event = cancel_event,
+                    current_start_timeout: int = current_start_timeout) -> None:
             """Stream SSE deltas into the shared result dict in a background thread."""
             sess = None
             try:
@@ -634,7 +639,7 @@ def _stream_chat_completion(url: str, headers: dict[str, str], body: dict[str, A
             except (requests.exceptions.RequestException, ConnectionError, TimeoutError, ValueError, KeyError) as e:
                 # Extract response body for HTTPError so the launcher can detect
                 # "Cannot combine structured output constraints with lazy grammar"
-                # (LM Studio Channel-Error – see Server-Log 12.07.2026 L58671).
+                # (LM Studio Channel-Error - see Server-Log 12.07.2026 L58671).
                 err_text = str(e)
                 try:
                     if hasattr(e, "response") and e.response is not None:
@@ -719,7 +724,7 @@ def _stream_chat_completion(url: str, headers: dict[str, str], body: dict[str, A
         tokens_out = usage.get("completion_tokens", 0)
         usage_present = bool(usage)
         if not usage_present:
-            # LM Studio liefert usage nicht immer im Stream – dann abschaetzen
+            # LM Studio liefert usage nicht immer im Stream - dann abschaetzen
             # ueber Wortzahl (inkl. Thinking-Anteil fuer Reasoning-Modelle).
             tokens_out = len((content_raw + " " + thinking_content).split())
         truncated = finish_reason == "length"
@@ -744,7 +749,7 @@ def strip_thinking_tokens(text: str | None) -> tuple[str | None, int]:
       - Whitespace-split words (best for natural language + code)
       - Whitespace split + special-token penalty for Gemma-4
 
-    See: server-log 12.07.2026 – Qwen3.6-28b thinking tokens were estimated
+    See: server-log 12.07.2026 - Qwen3.6-28b thinking tokens were estimated
     at >50% of total tokens for some prompts; the new heuristic brings that
     to a more realistic 20-35%.
     """
@@ -767,7 +772,7 @@ def strip_thinking_tokens(text: str | None) -> tuple[str | None, int]:
     # - char_count is the fallback (was the old behavior)
     # - We pick the larger of the two as a conservative upper bound and cap
     #   with char//4 to detect pathological whitespace-heavy sections.
-    # NB: filter() to exclude empty strings – ``str.split()`` counts
+    # NB: filter() to exclude empty strings - ``str.split()`` counts
     # consecutive whitespace as empty tokens, inflating word_count.
     word_count = sum(len([w for w in m.split() if w]) for m in all_content)
     char_count = sum(len(m) for m in all_content)
@@ -1067,7 +1072,7 @@ def _repair_indentation(code: str, max_iter: int = 10) -> str:
         lines = code.split("\n")
         result = []
         indent_level = 0
-        for i, line in enumerate(lines):
+        for _, line in enumerate(lines):
             stripped = line.strip()
             if not stripped:
                 result.append(line)
@@ -1163,24 +1168,24 @@ import subprocess as _subprocess
 import tempfile as _tempfile
 
 _SANDBOX_SAFE_BUILTINS = frozenset({
-    'abs', 'all', 'any', 'bin', 'bool', 'bytearray', 'bytes', 'callable',
-    'chr', 'complex', 'dict', 'dir', 'divmod', 'enumerate', 'filter',
-    'float', 'format', 'frozenset', 'getattr', 'hasattr', 'hash', 'hex',
-    'id', 'int', 'isinstance', 'issubclass', 'iter', 'len', 'list', 'map',
-    'max', 'min', 'next', 'object', 'oct', 'ord', 'pow', 'print',
-    'property', 'range', 'repr', 'reversed', 'round', 'set', 'slice',
-    'sorted', 'str', 'sum', 'super', 'tuple', 'type', 'zip',
-    'True', 'False', 'None', 'staticmethod', 'classmethod',
-    'delattr', 'setattr', 'memoryview', 'ascii',
+    "abs", "all", "any", "bin", "bool", "bytearray", "bytes", "callable",
+    "chr", "complex", "dict", "dir", "divmod", "enumerate", "filter",
+    "float", "format", "frozenset", "getattr", "hasattr", "hash", "hex",
+    "id", "int", "isinstance", "issubclass", "iter", "len", "list", "map",
+    "max", "min", "next", "object", "oct", "ord", "pow", "print",
+    "property", "range", "repr", "reversed", "round", "set", "slice",
+    "sorted", "str", "sum", "super", "tuple", "type", "zip",
+    "True", "False", "None", "staticmethod", "classmethod",
+    "delattr", "setattr", "memoryview", "ascii",
 })
 
 _SANDBOX_BLOCKED_MODULES = frozenset({
-    'subprocess', 'shutil', 'ctypes', 'socket',
-    'http', 'urllib', 'ftplib', 'smtplib', 'telnetlib',
-    'multiprocessing', 'threading', 'webbrowser',
-    'signal', 'asyncio', 'code', 'codeop', 'pdb',
-    'traceback', 'inspect', 'antigravity', 'tkinter',
-    'platform', 'sysconfig', 'distutils',
+    "subprocess", "shutil", "ctypes", "socket",
+    "http", "urllib", "ftplib", "smtplib", "telnetlib",
+    "multiprocessing", "threading", "webbrowser",
+    "signal", "asyncio", "code", "codeop", "pdb",
+    "traceback", "inspect", "antigravity", "tkinter",
+    "platform", "sysconfig", "distutils",
 })
 
 
@@ -1191,71 +1196,71 @@ def _build_sandbox_script(code_string: str, should_capture_state: bool = False, 
     code_json = _json.dumps(code_string)
 
     lines = [
-        'import json as _js, sys as _sys',
-        '',
-        '_SAFE = ' + safe_list,
-        '_BLOCKED = ' + blocked_list,
-        '',
-        '_bd = {}',
-        'if isinstance(__builtins__, dict):',
-        '    for _k in _SAFE:',
-        '        if _k in __builtins__:',
-        '            _bd[_k] = __builtins__[_k]',
-        'else:',
-        '    for _k in _SAFE:',
-        '        _v = getattr(__builtins__, _k, None)',
-        '        if _v is not None:',
-        '            _bd[_k] = _v',
-        '',
+        "import json as _js, sys as _sys",
+        "",
+        "_SAFE = " + safe_list,
+        "_BLOCKED = " + blocked_list,
+        "",
+        "_bd = {}",
+        "if isinstance(__builtins__, dict):",
+        "    for _k in _SAFE:",
+        "        if _k in __builtins__:",
+        "            _bd[_k] = __builtins__[_k]",
+        "else:",
+        "    for _k in _SAFE:",
+        "        _v = getattr(__builtins__, _k, None)",
+        "        if _v is not None:",
+        "            _bd[_k] = _v",
+        "",
         '_ns = {"__builtins__": _bd}',
-        '',
-        'for _m in _BLOCKED:',
-        '    _sys.modules.pop(_m, None)',
-        '',
+        "",
+        "for _m in _BLOCKED:",
+        "    _sys.modules.pop(_m, None)",
+        "",
         '_orig_imp = _bd.get("__import__")',
-        'def _safe_import(name, *args, **kwargs):',
+        "def _safe_import(name, *args, **kwargs):",
         '    top = name.split(".")[0]',
-        '    if top in _BLOCKED:',
+        "    if top in _BLOCKED:",
         '        raise ImportError(f"Module {name!r} is blocked")',
-        '    if _orig_imp is not None:',
-        '        return _orig_imp(name, *args, **kwargs)',
-        '    return __import__(name, *args, **kwargs)',
+        "    if _orig_imp is not None:",
+        "        return _orig_imp(name, *args, **kwargs)",
+        "    return __import__(name, *args, **kwargs)",
         "_bd['__import__'] = _safe_import",
-        '',
+        "",
         "for _bd_rm in ('exec', 'open', 'input', 'compile', 'globals', 'locals', 'vars'):",
-        '    _bd.pop(_bd_rm, None)',
-        '',
+        "    _bd.pop(_bd_rm, None)",
+        "",
         '_result = {"ok": True, "error": None, "state": None, "passed": 0, "total": 0, "details": []}',
-        'try:',
-        '    exec(' + code_json + ', _ns)',
+        "try:",
+        "    exec(" + code_json + ", _ns)",
     ]
 
     if should_capture_state:
         lines.extend([
-            '    _state = {}',
-            '    for _k, _v in _ns.items():',
+            "    _state = {}",
+            "    for _k, _v in _ns.items():",
             "        if _k.startswith('_') or _k == '__builtins__':",
-            '            continue',
-            '        try:',
-            '            _state[_k] = repr(_v)',
-            '        except Exception:',
-            '            _state[_k] = str(type(_v))',
+            "            continue",
+            "        try:",
+            "            _state[_k] = repr(_v)",
+            "        except Exception:",
+            "            _state[_k] = str(type(_v))",
             '    _result["state"] = _state',
         ])
 
     if tests is not None:
         test_items = _json.dumps(tests)
         lines.extend([
-            '    _test_items = ' + test_items,
-            '    _test_results = []',
-            '    for _ti, _test in enumerate(_test_items):',
-            '        try:',
-            '            exec(_test, _ns)',
+            "    _test_items = " + test_items,
+            "    _test_results = []",
+            "    for _ti, _test in enumerate(_test_items):",
+            "        try:",
+            "            exec(_test, _ns)",
             '            _test_results.append({"index": _ti, "passed": True})',
-            '        except Exception as _te:',
+            "        except Exception as _te:",
             '            _test_results.append({"index": _ti, "passed": False, "error": str(_te)})',
             '    _passed_cnt = sum(1 for _r in _test_results if _r["passed"])',
-            '    _total_cnt = len(_test_results)',
+            "    _total_cnt = len(_test_results)",
             '    _result["ok"] = True',
             '    _result["error"] = None',
             '    _result["passed"] = _passed_cnt',
@@ -1264,34 +1269,34 @@ def _build_sandbox_script(code_string: str, should_capture_state: bool = False, 
         ])
 
     lines.extend([
-        'except Exception as _e:',
+        "except Exception as _e:",
         '    _result = {"ok": False, "error": str(_e), "state": None, "passed": 0, "total": 0, "details": []}',
-        '',
-        '_print_data = _js.dumps(_result)',
+        "",
+        "_print_data = _js.dumps(_result)",
         'print("__SANDBOX__" + _print_data)',
     ])
 
-    return '\n'.join(lines)
+    return "\n".join(lines)
 
 
 def _run_sandbox(script: str, timeout: int = TIMEOUT_EXEC) -> SandboxResult:
     """Run a sandbox script as a subprocess in a temporary directory."""
-    with _tempfile.TemporaryDirectory(prefix='sandbox_') as _tmpdir:
-        tmppath = _os.path.join(_tmpdir, 'sandbox_script.py')
+    with _tempfile.TemporaryDirectory(prefix="sandbox_") as _tmpdir:
+        tmppath = _os.path.join(_tmpdir, "sandbox_script.py")
         try:
-            with _os.fdopen(_os.open(tmppath, _os.O_CREAT | _os.O_WRONLY | _os.O_TRUNC, 0o644), 'w', encoding='utf-8') as f:
+            with _os.fdopen(_os.open(tmppath, _os.O_CREAT | _os.O_WRONLY | _os.O_TRUNC, 0o644), "w", encoding="utf-8") as f:
                 f.write(script)
             result = _subprocess.run(
                 [sys.executable, tmppath],
                 capture_output=True, text=True, timeout=timeout,
-                encoding='utf-8', errors='replace',
-                env={**_os.environ, 'PYTHONIOENCODING': 'utf-8'}
+                encoding="utf-8", errors="replace",
+                env={**_os.environ, "PYTHONIOENCODING": "utf-8"}
             )
             out = result.stdout or ""
             for line in out.splitlines():
-                if line.startswith('__SANDBOX__'):
+                if line.startswith("__SANDBOX__"):
                     try:
-                        return _json.loads(line[len('__SANDBOX__'):])
+                        return _json.loads(line[len("__SANDBOX__"):])
                     except _json.JSONDecodeError:
                         continue
             if result.stderr:
@@ -1308,7 +1313,7 @@ def exec_sandboxed(code: str, timeout: int = TIMEOUT_EXEC) -> tuple[bool, str | 
     return res["ok"], (res["error"] if not res["ok"] else None)
 
 
-DS1000_DIR = _os.path.join(_os.path.dirname(_os.path.dirname(__file__)), 'ds1000_official')
+DS1000_DIR = _os.path.join(_os.path.dirname(_os.path.dirname(__file__)), "ds1000_official")
 _TIMEOUT_DS1000 = 120  # offizielles DS1000-Timeout
 
 def _unwrap_solution_for_insert(solution: str, setup_code: str) -> str:
@@ -1342,7 +1347,7 @@ def _unwrap_solution_for_insert(solution: str, setup_code: str) -> str:
     # Take the LAST [insert] block (innermost in nested cases)
     parts = ctx.split("[insert]")
     if len(parts) > 2:
-        # Multiple [insert] – the meaningful one is the deepest
+        # Multiple [insert] - the meaningful one is the deepest
         before = parts[-2].strip()
     else:
         before = parts[0].strip()
@@ -1388,9 +1393,7 @@ def _unwrap_solution_for_insert(solution: str, setup_code: str) -> str:
         # Unwrap: remove the def/class line, keep only the body.
         # Normalize indentation: find minimum indent of non-empty body lines,
         # dedent by that amount, then re-indent to 4 spaces.
-        raw_body = []
-        for line in sol_lines[def_idx + 1:]:
-            raw_body.append(line)
+        raw_body = list(sol_lines[def_idx + 1:])
         while raw_body and not raw_body[0].strip():
             raw_body.pop(0)
         if not raw_body:
@@ -1570,7 +1573,7 @@ def evaluate_code(generated_code: str, entry_point: str, tests_field: Any, refer
         if not res["ok"]:
             return 0.0, f"Reference error: {res['error']}"
         ref_state = res.get("state", {})
-        setup_keys = set(ref_state.keys()) | {'__builtins__'}
+        setup_keys = set(ref_state.keys()) | {"__builtins__"}
 
         gen_combined = setup_code + "\n" + generated_code
         script = _build_sandbox_script(gen_combined, capture_state=True)
@@ -1709,7 +1712,7 @@ def run_task(task: dict[str, Any], task_type: str, model_identifier: str | None 
 
 
 # Thinking-Modelle (enable_thinking=True) neigen dazu, statt Code eine
-# Erklaerung auszugeben ("No code generated" – beobachtet 2026-07-31 bei
+# Erklaerung auszugeben ("No code generated" - beobachtet 2026-07-31 bei
 # DeepSeek R1 Distill Qwen 14B). Haertung: finale Antwort = NUR Code in
 # einem ```python-Block, Erklaerungen gehoeren in die Thinking-Phase.
 _THINKING_CODE_ONLY_SUFFIX = (
@@ -1836,7 +1839,7 @@ class _TaskProgress:
     Auf dem Bildschirm laeuft nur dieser Balken, Details gehen in die CSV.
     """
 
-    def __init__(self, total: int, enabled: bool = True):
+    def __init__(self, total: int, enabled: bool = True) -> None:
         self.total = total
         self.enabled = enabled
         self.done = 0
@@ -1901,7 +1904,7 @@ def benchmark_model(model_info: Any, tasks: list[dict[str, Any]], task_type: str
     results = []
     def _safe(text: str) -> str:
         """Sanitize a string for safe output (lossy UTF-8 round-trip)."""
-        return str(text).encode('utf-8', errors='replace').decode('utf-8')
+        return str(text).encode("utf-8", errors="replace").decode("utf-8")
     n_tasks = len(tasks)
     native_identifier = api_model or model_info.get("model_identifier", model_identifier)
     # Fortschrittsbalken statt Per-Task-Ausgabe (Punkt 2a): Details gehoeren
@@ -1923,7 +1926,7 @@ def benchmark_model(model_info: Any, tasks: list[dict[str, Any]], task_type: str
                     if result is not None and result.get("error_type") is None:
                         break
                     if result is not None and result.get("error_type"):
-                        err_detail = str(result.get('error_detail', '?'))
+                        err_detail = str(result.get("error_detail", "?"))
                         # Detect LM Studio Channel-Error (structured-output + lazy-grammar
                         # conflict, see Server-Log 12.07.2026 L58671/L94468). Print a
                         # marker the launcher can detect to trigger a retry with
@@ -2152,7 +2155,7 @@ def _parse_args() -> tuple[Any, int]:
     """
     try:
         import sys as _sys
-        _sys.stdout.reconfigure(encoding='utf-8')
+        _sys.stdout.reconfigure(encoding="utf-8")
     except (AttributeError, OSError):
         # Python <3.7 or non-reconfigurable stdout (subprocess without TTY)
         pass
@@ -2261,10 +2264,10 @@ def _run_model_loop(models: list[dict[str, Any]], benchmarks: list[dict[str, Any
     non_interactive = args.non_interactive
     api_model_override = args.api_model
     summary = []
-    for midx, model_info in enumerate(models, 1):
+    for _, model_info in enumerate(models, 1):
         model_identifier = model_info["key"]
         model_display = model_info["display"]
-        # Reasoning-Registry-Prüfung – ohne Eintrag überspringen
+        # Reasoning-Registry-Prüfung - ohne Eintrag überspringen
         r = _model_supports_reasoning(model_identifier)
         if r is None:
             error(f"{model_display}: reasoning nicht in Registry - "

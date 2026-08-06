@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Unified benchmark launcher v13 – integrates:
+Unified benchmark launcher v13 - integrates:
   [1] Custom: DS1000, CoderEval (custom_benchmark.py)
   [2] EvalPlus: HumanEval+, MBPP+ (evalplus.codegen + evalplus.evaluate)
   [3] LM-Eval: ARC, HellaSwag, TruthfulQA, IFEval, MATH-500 (lm_eval)
@@ -9,7 +9,7 @@ Unified benchmark launcher v13 – integrates:
 ── Four-Pipeline Architecture ──────────────────────────────────────
   This script is the CENTRAL ENTRY POINT. It orchestrates all
   four evaluation pipelines as subprocesses. ONLY HERE is model
-  management (load/unload) initiated – the subprocesses must
+  management (load/unload) initiated - the subprocesses must
   NOT load/unload themselves.
 
   Pipeline         Script/Tool                Data Source
@@ -42,7 +42,7 @@ Features:
   - PYTHONIOENCODING=utf-8 for ALL subprocesses (Unicode arrows)
   - Intermediate summary per model
   - Qwen3.5 system message in user prompt
-  - Reasoning timeout ×2 for reasoning models
+  - Reasoning timeout x2 for reasoning models
   - MoE detection
 """
 
@@ -70,28 +70,31 @@ import threading
 import time
 import warnings
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import psutil
 
 import csv_writer as csv_writer
 
+if TYPE_CHECKING:
+    from type_defs import AvailableModelInfo, BenchmarkDef, PipelineResult
+
 # ── Model Management from Shared Module ──────────────────────
 # Load/Unload is ONLY initiated in main() of this script.
 # The subprocesses (custom_benchmark.py, evalplus, lm_eval, tool_eval_bench)
-# must NOT load/unload themselves – they receive the model ID
+# must NOT load/unload themselves - they receive the model ID
 # via model_info["_api_model"] and only call the API.
 #
 # API reference (LM Studio REST / OpenAI-Compat):
 #   https://lmstudio.ai/docs/developer/rest
 #
 # Important endpoints:
-#   /api/v1/models              GET  – native: model list
-#   /api/v1/models/load         POST – native: load model (streamed events)
-#   /api/v1/models/unload       POST – native: unload model
-#   /api/v1/chat                POST – native: chat inference
-#   /v1/chat/completions        POST – OpenAI-Compat: chat inference
-#   /v1/models                  GET  – OpenAI-Compat: model list
+#   /api/v1/models              GET  - native: model list
+#   /api/v1/models/load         POST - native: load model (streamed events)
+#   /api/v1/models/unload       POST - native: unload model
+#   /api/v1/chat                POST - native: chat inference
+#   /v1/chat/completions        POST - OpenAI-Compat: chat inference
+#   /v1/models                  GET  - OpenAI-Compat: model list
 #
 from benchmark_config import (
     AGENTIC_SAFETY_SCENARIO_IDS,
@@ -109,7 +112,6 @@ from model_manager import (
     load_model_via_lms,
     parse_selection,
 )
-from type_defs import AvailableModelInfo, BenchmarkDef, PipelineResult
 from utils.terminal import (
     cyan,
     green,
@@ -143,7 +145,7 @@ def _is_reasoning_model(model_identifier: str) -> bool:
                 return True
             if reasoning_val == "instruct":
                 return False
-        print(f"  [WARN] {model_identifier}: reasoning nicht in Registry – "
+        print(f"  [WARN] {model_identifier}: reasoning nicht in Registry - "
               "`python registry_tool.py sync` ausführen.", file=sys.stderr)
     except (ImportError, KeyError, OSError):
         pass
@@ -188,7 +190,7 @@ def _is_gemma_model(model_identifier: str) -> bool:
 # Root cause of IFEval HTTP 500 "does not match the expected peg-native format"
 # (llama.cpp post-generation PEG parser, see ggml-org/llama.cpp #20260):
 # ifeval.yaml ships `until: []`, so no stop string is sent to the engine and
-# the model generates freely until its own EOS – at extreme quants (e.g. Jamba2
+# the model generates freely until its own EOS - at extreme quants (e.g. Jamba2
 # IQ2_XXS) this frequently produces output that violates the model's chat
 # template format. Other lm_eval tasks define `until` in their YAML and are
 # unaffected. Fix: resolve the model's EOS token from the GGUF header and send
@@ -222,7 +224,7 @@ def _get_model_eos_string(model_identifier: str) -> str | None:
 
     Reads tokenizer.ggml.eos_token_id + the interleaved string-array vocab
     (GGUF v3: header parts, then per string [uint64 length, uint8 data]).
-    Returns None on any parse failure – callers must keep the previous behaviour.
+    Returns None on any parse failure - callers must keep the previous behaviour.
     """
     with _GGUF_EOS_LOCK:
         if model_identifier in _GGUF_EOS_CACHE:
@@ -291,8 +293,11 @@ def _task_yaml_has_until_sequence(task_name: str) -> bool:
     for p in candidates:
         if os.path.isfile(p):
             try:
-                with open(p, "r", encoding="utf-8") as fh:
-                    data = yaml.load(fh, Loader=_NoopLoader)
+                with open(p, encoding="utf-8") as fh:
+                    # _NoopLoader ersetzt alle `!tag`-Konstruktionen durch sichere
+                    # No-Op-Konstruktoren (Scalar/Sequence/Mapping); yaml.safe_load
+                    # scheitert an lm_eval-`!function`-Tags und wuerde das Verhalten aendern.
+                    data = yaml.load(fh, Loader=_NoopLoader)  # noqa: S506 - _NoopLoader ist bewusst sicher (s. o.)
                 gen = data.get("generation_kwargs") or {}
                 until = gen.get("until")
                 return bool(until)
@@ -341,7 +346,7 @@ def _start_lmeval_proxy() -> None:
     if _proxy_is_running():
         return
     if not os.path.isfile(LMEVAL_PROXY_SCRIPT):
-        print(f"  [WARN] lmeval_proxy.py not found at {LMEVAL_PROXY_SCRIPT} – proxy disabled")
+        print(f"  [WARN] lmeval_proxy.py not found at {LMEVAL_PROXY_SCRIPT} - proxy disabled")
         return
     try:
         _lmeval_proxy_proc = subprocess.Popen(
@@ -382,7 +387,7 @@ def _stop_lmeval_proxy() -> None:
 
 # ── Single-Instance Lock ─────────────────────────────────────────
 # Prevents parallel launcher instances: concurrent runs load/unload
-# models against each other (VRAM first, then system RAM – observed
+# models against each other (VRAM first, then system RAM - observed
 # 2026-07-31 with 3 parallel runs: 32 GB system RAM exhausted, hang).
 LOCK_PATH = os.path.join(RESULTS_DIR, ".benchmark.lock")
 
@@ -397,7 +402,7 @@ def _acquire_single_instance_lock(lock_path: str | None = None) -> str | None:
     lock_path = lock_path or LOCK_PATH
     if os.path.exists(lock_path):
         try:
-            with open(lock_path, "r", encoding="utf-8") as f:
+            with open(lock_path, encoding="utf-8") as f:
                 data = json.load(f)
             pid = int(data.get("pid", -1))
             started = data.get("started", "?")
@@ -426,7 +431,7 @@ def _release_single_instance_lock(lock_path: str | None = None) -> None:
     lock_path = lock_path or LOCK_PATH
     try:
         if os.path.exists(lock_path):
-            with open(lock_path, "r", encoding="utf-8") as f:
+            with open(lock_path, encoding="utf-8") as f:
                 data = json.load(f)
             if int(data.get("pid", -1)) == os.getpid():
                 os.remove(lock_path)
@@ -487,7 +492,7 @@ LMEVAL_BENCHMARKS = [
     {"key": "9", "name": "MATH-500",        "category": "math",      "task": "minerva_math500", "timeout_mult": 3},
 ]
 
-# MMLU-Pro 14 Subsets (lm_eval individual tasks) – removed in v13: too expensive
+# MMLU-Pro 14 Subsets (lm_eval individual tasks) - removed in v13: too expensive
 # Agentic: tool-eval-bench mit 69 Szenarien
 # (TOOL_EVAL_SCENARIO_IDS in benchmark_config.py)
 AGENTIC_BENCHMARKS = [
@@ -531,7 +536,7 @@ def _load_registry_for_context() -> tuple[dict[str, Any], dict[str, str]]:
         from ruamel.yaml.error import YAMLError
         y = YAML()
         y.preserve_quotes = True
-        with open(rpath, "r", encoding="utf-8") as f:
+        with open(rpath, encoding="utf-8") as f:
             data = y.load(f) or {}
     except (YAMLError, OSError, UnicodeDecodeError) as e:
         print(f"  [WARN] model_registry.yaml fehlerhaft: {e}", file=sys.stderr)
@@ -950,7 +955,7 @@ def _ensure_model_still_loaded(model_identifier: str, model_load_key: str, bench
             is_ok = True
     if not is_ok:
         label = f" after {bench_name}" if bench_name else ""
-        print(f"  [WARN] Model{label} no longer loaded – reloading...")
+        print(f"  [WARN] Model{label} no longer loaded - reloading...")
         load_model_via_lms(model_load_key)
         if not is_model_ready(timeout=60):
             print("  [WARN] Model readiness check timed out")
@@ -1019,7 +1024,7 @@ def run_custom_benchmark(model_info: AvailableModelInfo, bench: BenchmarkDef, sa
     # when error_detail contains "Cannot combine structured output" /
     # "Channel Error" (see custom_benchmark.py run benchmark loop).
     if not is_structured_output_disabled and "[CHANNEL-ERROR]" in (result.stdout or ""):
-        print("  [INFO] Channel-Error detected – retrying with --no-structured-output")
+        print("  [INFO] Channel-Error detected - retrying with --no-structured-output")
         return run_custom_benchmark(model_info, bench, sample_size=sample_size,
                                    seed=seed, is_structured_output_disabled=True,
                                    should_keep_response=should_keep_response, num_parallel=num_parallel)
@@ -1137,16 +1142,16 @@ def run_evalplus(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_siz
 
     def _gen_one_task(task_id: str, task: dict) -> None:
         prompt = task["prompt"].strip() + "\n"
-        outputs = model_obj.codegen(
+        outputs = model_obj.codegen(  # noqa: F821 - closure variable from enclosing scope
             prompt,
             do_sample=gen_temp != 0.0,
             num_samples=1,
         )
         assert outputs, f"No outputs from model for {task_id}"
         impl = outputs[0]
-        solution = prompt + impl if model_obj.is_direct_completion() else impl
+        solution = prompt + impl if model_obj.is_direct_completion() else impl  # noqa: F821 - closure variable from enclosing scope
         sanitized_solution = _evalplus_sanitize(solution, entrypoint=task["entry_point"])
-        print(f"Codegen: {task_id} @ {model_obj}")
+        print(f"Codegen: {task_id} @ {model_obj}")  # noqa: F821 - closure variable from enclosing scope
         with _write_lock:
             with open(samples_path, "a", encoding="utf-8") as f:
                 f.write(json.dumps({"task_id": task_id, "solution": sanitized_solution}) + "\n")
@@ -1167,7 +1172,7 @@ def run_evalplus(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_siz
             else:
                 evalplus_codegen(
                     target_path=samples_path,
-                    model=model_obj,  # noqa: F821 – closure variable from enclosing scope
+                    model=model_obj,  # noqa: F821 - closure variable from enclosing scope
                     dataset=filtered_tasks,
                     greedy=gen_temp == 0.0,
                     n_samples=1,
@@ -1267,7 +1272,7 @@ def run_lmeval(model_info: AvailableModelInfo, bench: BenchmarkDef, limit: int =
 
     print(f"\n  >>> LM-Eval: {bench['name']} / {model_display}")
     t0 = time.time()
-    evaluation_parameters = _get_evaluation_parameters(model_identifier, bench_name=bench['name'])
+    evaluation_parameters = _get_evaluation_parameters(model_identifier, bench_name=bench["name"])
     #
     # Split params: constructor-level (--model_args) vs. generation-level (--generation_parameters).
     #
@@ -1284,7 +1289,7 @@ def run_lmeval(model_info: AvailableModelInfo, bench: BenchmarkDef, limit: int =
     # IMPORTANT: The model parameter MUST correspond to the exact load ID from lms ps,
     #           otherwise LM Studio responds with HTTP 400 "model not found".
     #           A test with "model=check" (invalid name) causes the request to HANG
-    #           (no timeout, no error response) – therefore ALWAYS use api_model.
+    #           (no timeout, no error response) - therefore ALWAYS use api_model.
     # Use proxy only when explicitly started (e.g. for custom base_url routing)
     use_proxy = _proxy_is_running()
     lm_base_url = f"http://127.0.0.1:{LMEVAL_PROXY_PORT}/v1/chat/completions" if use_proxy else f"{API_BASE}/chat/completions"
@@ -1352,7 +1357,7 @@ def run_lmeval(model_info: AvailableModelInfo, bench: BenchmarkDef, limit: int =
         stderr_lines = []
         def _stream_stdout() -> None:
             import re as _re
-            progress_re = _re.compile(r'(\d+)/(\d+)')
+            progress_re = _re.compile(r"(\d+)/(\d+)")
             last_bar_len = [0]
             for line in iter(proc.stdout.readline, ""):
                 stdout_lines.append(line)
@@ -1361,9 +1366,9 @@ def run_lmeval(model_info: AvailableModelInfo, bench: BenchmarkDef, limit: int =
                     done, total = int(m.group(1)), int(m.group(2))
                     bar_w = min(total, 50)
                     filled = int(bar_w * done / total) if total > 0 else 0
-                    bar = '#' * filled + '.' * (bar_w - filled)
+                    bar = "#" * filled + "." * (bar_w - filled)
                     progress_str = f"  [{bar}] {done}/{total}"
-                    pad = ' ' * max(0, last_bar_len[0] - len(progress_str))
+                    pad = " " * max(0, last_bar_len[0] - len(progress_str))
                     print(f"\r{progress_str}{pad}", end="", flush=True)
                     last_bar_len[0] = len(progress_str)
                     if done >= total:
@@ -1374,7 +1379,7 @@ def run_lmeval(model_info: AvailableModelInfo, bench: BenchmarkDef, limit: int =
                         print(f"  {stripped}")
         def _collect_stderr() -> None:
             for line in iter(proc.stderr.readline, ""):
-                stderr_lines.append(line)
+                stderr_lines.append(line)  # noqa: PERF402 - false positive: kein list-Copy-Muster
         tout = threading.Thread(target=_stream_stdout, daemon=True)
         terr = threading.Thread(target=_collect_stderr, daemon=True)
         tout.start()
@@ -1428,7 +1433,7 @@ def run_lmeval(model_info: AvailableModelInfo, bench: BenchmarkDef, limit: int =
             candidates = [f for f in os.listdir(sdir) if f.startswith("results_") and f.endswith(".json")]
             candidates.sort(key=lambda f: os.path.getmtime(os.path.join(sdir, f)), reverse=True)
             for fname in candidates:
-                with open(os.path.join(sdir, fname), "r", encoding="utf-8") as f:
+                with open(os.path.join(sdir, fname), encoding="utf-8") as f:
                     data = json.load(f)
                 task_data = data.get("results", {}).get(task_name, {})
                 if task_data:
@@ -1457,7 +1462,7 @@ def run_lmeval(model_info: AvailableModelInfo, bench: BenchmarkDef, limit: int =
 
 # ── MMLU-Pro (ARCHIVIERT 12.07.2026) ──
 # Die spezielle MMLU-Pro-Auswertung wurde aus Performance-Gründen
-# (12,032 Tasks × ~25s/call = >50h pro Modell auf 16-GB-VRAM) aus
+# (12,032 Tasks x ~25s/call = >50h pro Modell auf 16-GB-VRAM) aus
 # dem aktiven Launcher entfernt. Die Logik ist in
 # `Archiv/run_mmlupro_benchmark.py` self-contained ausgelagert
 # und kann bei Bedarf aufgerufen werden mit:
@@ -1540,7 +1545,7 @@ def run_agentic(model_info: AvailableModelInfo, limit: int = 5, mode: str = "ran
             if proc.stderr is None:
                 return
             for line in iter(proc.stderr.readline, ""):
-                err_list.append(line)
+                err_list.append(line)  # noqa: PERF402 - false positive: kein list-Copy-Muster
 
         tout = threading.Thread(target=_stream_stdout, args=(stdout_lines,), daemon=True)
         terr = threading.Thread(target=_collect_stderr, args=(stderr_lines,), daemon=True)
@@ -1559,7 +1564,7 @@ def run_agentic(model_info: AvailableModelInfo, limit: int = 5, mode: str = "ran
                 for line in stderr_lines[-5:]:
                     print(f"    | {line.rstrip()}")
 
-        # Parse JSON result – tool-eval-bench envelope format
+        # Parse JSON result - tool-eval-bench envelope format
         if os.path.exists(json_path):
             with open(json_path, encoding="utf-8") as f:
                 data = json.load(f)
@@ -1588,7 +1593,7 @@ def run_agentic(model_info: AvailableModelInfo, limit: int = 5, mode: str = "ran
 def save_summary_csv(results: list[dict[str, Any]], model_info: dict[str, Any] | None = None,
                      sample_size: int = 5, seed: str = "", exclude_benchmarks: str = "",
                      no_structured_output: str = "", no_unload_between: str = "") -> Any:
-    """Legacy – forwards to csv_writer."""
+    """Legacy - forwards to csv_writer."""
     return csv_writer.write_accumulative_summary(
         results, model_info or {},
         sample_size=sample_size, seed=seed, exclude_benchmarks=exclude_benchmarks,
@@ -1628,7 +1633,7 @@ _RUN_SPEC_BOOL_KEYS = {"thinking", "unload_between", "unload-between",
                        "no_structured_output", "no-structured-output",
                        "keep_response", "keep-response"}
 
-# CLI-Defaults je Dest – für Precedence-Check (CLI explizit > YAML).
+# CLI-Defaults je Dest - für Precedence-Check (CLI explizit > YAML).
 RUN_SPEC_PARSER_DEFAULTS: dict[str, Any] = {
     "sample_size": 5, "model": None, "benchmarks": None, "seed": None,
     "thinking": False, "agentic_mode": "random", "exclude_benchmarks": None,
@@ -1648,7 +1653,7 @@ def _load_run_spec(path: str) -> dict[str, Any]:
         sys.exit(1)
     yaml_lib = _run_spec_yaml()
     try:
-        with open(path, "r", encoding="utf-8") as fh:
+        with open(path, encoding="utf-8") as fh:
             data = yaml_lib.safe_load(fh)
     except yaml_lib.YAMLError as e:
         print(f"[ERROR] Run-Spec-YAML-Fehler: {e}")
@@ -1662,7 +1667,7 @@ def _load_run_spec(path: str) -> dict[str, Any]:
 
     known = set(RUN_SPEC_DEST_MAP)
     for key in sorted(set(data) - known):
-        print(f"  [WARN] Run-Spec: unbekannter Schlüssel '{key}' – wird ignoriert")
+        print(f"  [WARN] Run-Spec: unbekannter Schlüssel '{key}' - wird ignoriert")
 
     spec: dict[str, Any] = {}
     for key, value in data.items():
@@ -1673,7 +1678,7 @@ def _load_run_spec(path: str) -> dict[str, Any]:
             value = ",".join(str(v).strip() for v in value if str(v).strip())
         if key in _RUN_SPEC_BOOL_KEYS:
             if not isinstance(value, bool):
-                print(f"  [WARN] Run-Spec '{key}': erwartet bool, bekam {type(value).__name__} – ignoriert")
+                print(f"  [WARN] Run-Spec '{key}': erwartet bool, bekam {type(value).__name__} - ignoriert")
                 continue
         spec[dest] = value
 
@@ -1685,7 +1690,7 @@ def _load_run_spec(path: str) -> dict[str, Any]:
                 raise ValueError
             spec["sample_size"] = ss
         except (ValueError, TypeError):
-            print("  [WARN] Run-Spec sample_size muss positive int sein – ignoriert")
+            print("  [WARN] Run-Spec sample_size muss positive int sein - ignoriert")
             spec.pop("sample_size")
     if "seed" in spec:
         try:
@@ -1694,10 +1699,10 @@ def _load_run_spec(path: str) -> dict[str, Any]:
                 raise ValueError
             spec["seed"] = sd
         except (ValueError, TypeError):
-            print("  [WARN] Run-Spec seed muss positive int sein – ignoriert")
+            print("  [WARN] Run-Spec seed muss positive int sein - ignoriert")
             spec.pop("seed")
     if "agentic_mode" in spec and spec["agentic_mode"] not in ("random", "safety"):
-        print("  [WARN] Run-Spec agentic_mode muss 'random'/'safety' sein – ignoriert")
+        print("  [WARN] Run-Spec agentic_mode muss 'random'/'safety' sein - ignoriert")
         spec.pop("agentic_mode")
 
     return spec
@@ -1838,7 +1843,7 @@ def _parse_args(argv: list[str] | None = None) -> tuple[Any, str]:
     _version = "13.0.0-p7"
     _version_file = os.path.join(PROJECT_ROOT, "VERSION")
     if os.path.isfile(_version_file):
-        with open(_version_file, "r", encoding="utf-8") as _vf:
+        with open(_version_file, encoding="utf-8") as _vf:
             for _line in _vf:
                 if _line.startswith("__version__"):
                     _version = _line.split("=", 1)[1].strip().strip("'\"")
@@ -1905,14 +1910,14 @@ def _check_registry_for_model(model_identifier: str, model_display: str) -> bool
         base_key = normalized_key.split("@")[0]
 
         if normalized_key not in rnorm and base_key not in rnorm:
-            print(f"\n  [ERROR] {model_display}: nicht in Registry – "
+            print(f"\n  [ERROR] {model_display}: nicht in Registry - "
                   "`python registry_tool.py sync` ausführen. Überspringe.")
             return None
 
         matched_key = rnorm.get(normalized_key) or rnorm.get(base_key)
         reasoning_val = registry[matched_key].get("reasoning")
         if reasoning_val is None:
-            print(f"\n  [ERROR] {model_display}: reasoning-Feld fehlt – "
+            print(f"\n  [ERROR] {model_display}: reasoning-Feld fehlt - "
                   "`python registry_tool.py sync` ausführen. Überspringe.")
             return None
 
@@ -1924,17 +1929,17 @@ def _check_registry_for_model(model_identifier: str, model_display: str) -> bool
 
         caps = registry[matched_key].get("capabilities")
         if not caps:
-            print(f"\n  [ERROR] {model_display}: capabilities-Feld fehlt – Überspringe.")
+            print(f"\n  [ERROR] {model_display}: capabilities-Feld fehlt - Überspringe.")
             return None
 
         bp = registry[matched_key].get("blueprint")
         if not bp or bp == "none":
-            print(f"\n  [ERROR] {model_display}: blueprint-Feld fehlt oder 'none' – Überspringe.")
+            print(f"\n  [ERROR] {model_display}: blueprint-Feld fehlt oder 'none' - Überspringe.")
             return None
 
         trunc = registry[matched_key].get("truncation")
         if trunc not in ("full", "medium", "minimal"):
-            print(f"\n  [WARN] {model_display}: truncation-Feld fehlt – setze default='full'.")
+            print(f"\n  [WARN] {model_display}: truncation-Feld fehlt - setze default='full'.")
             registry[matched_key]["truncation"] = "full"
 
         # Check assembled systemPrompt in Config JSON
@@ -1950,7 +1955,7 @@ def _check_registry_for_model(model_identifier: str, model_display: str) -> bool
                     sys_prompt = next((_f.get("value", "") for _f in _data.get("operation", {}).get("fields", [])
                                       if _f.get("key") == "llm.prediction.systemPrompt"), "")
                     if not sys_prompt:
-                        print(f"\n  [WARN] {model_display}: systemPrompt in Config JSON ist leer – "
+                        print(f"\n  [WARN] {model_display}: systemPrompt in Config JSON ist leer - "
                               "`assemble_blueprint.py assemble` ausführen.")
                     break
         except (ImportError, KeyError, OSError, ValueError):
@@ -1958,7 +1963,7 @@ def _check_registry_for_model(model_identifier: str, model_display: str) -> bool
 
         return (reasoning_val == "thinking") or _is_qwen3_6_model(model_identifier)
     except (ImportError, KeyError, OSError, ValueError):
-        print("\n  [WARN] Registry nicht lesbar – ohne Reasoning-Info fortfahren.")
+        print("\n  [WARN] Registry nicht lesbar - ohne Reasoning-Info fortfahren.")
         return False
 
 
@@ -1973,9 +1978,9 @@ def _load_model(model_info: AvailableModelInfo, model_load_key: str, args: Any) 
         mk = model_info["key"].lower()
         if mk in li or mk in lk or li in mk or lk in mk:
             api_model = loaded["identifier"]
-            print(f"  [OK] '{model_info['display']}' already loaded – ID: {api_model}")
+            print(f"  [OK] '{model_info['display']}' already loaded - ID: {api_model}")
         else:
-            print(f"  [INFO] Different model loaded ({loaded['display_name']}) – unloading...")
+            print(f"  [INFO] Different model loaded ({loaded['display_name']}) - unloading...")
             has_unloaded_all_models()
             ok, api_model = load_model_via_lms(model_load_key)
             if not ok:
@@ -1987,7 +1992,7 @@ def _load_model(model_info: AvailableModelInfo, model_load_key: str, args: Any) 
 
     print("  [INFO] Waiting for API readiness...")
     if not is_model_ready(timeout=60):
-        print("  [WARN] Model readiness check timed out – continuing anyway")
+        print("  [WARN] Model readiness check timed out - continuing anyway")
 
     model_info["_api_model"] = api_model
 
@@ -2020,7 +2025,7 @@ def _run_benchmarks_for_model(model_info: AvailableModelInfo, benchmarks: list[B
                 continue
             print("  [INFO] Waiting for API re-initialization...")
             if not is_model_ready(timeout=60):
-                print("  [WARN] Model readiness check timed out – continuing anyway")
+                print("  [WARN] Model readiness check timed out - continuing anyway")
             model_info["_api_model"] = api_model
 
         bname = bench["name"]
@@ -2074,7 +2079,7 @@ def _write_intermediate_summary(model_results: list[dict], model_info: Available
             seed=str(args.seed or ""),
             exclude_benchmarks=args.exclude_benchmarks or "",
             no_structured_output=str(args.no_structured_output or ""),
-            no_unload_between='True' if not args.unload_between else '',
+            no_unload_between="True" if not args.unload_between else "",
             base_dir=PROJECT_ROOT,
         )
 
@@ -2098,7 +2103,7 @@ def _write_consolidated_overview(all_summary: list[dict], models: list, args: An
             seed=str(args.seed or ""),
             exclude_benchmarks=args.exclude_benchmarks or "",
             no_structured_output=str(args.no_structured_output or ""),
-            no_unload_between='True' if not args.unload_between else '',
+            no_unload_between="True" if not args.unload_between else "",
             base_dir=PROJECT_ROOT,
         )
 
@@ -2134,7 +2139,7 @@ def main() -> None:
         print(f"\n{'=' * 60}")
         print(f"  Model {midx}/{len(models)}: {model_display}")
         if is_reasoning_model:
-            print("  * Reasoning model (detected) – timeout ×2")
+            print("  * Reasoning model (detected) - timeout x2")
         if _is_moe_model(model_identifier):
             print("  * MoE model (detected)")
         print(f"{'=' * 60}")
@@ -2151,7 +2156,7 @@ def main() -> None:
     _stop_lmeval_proxy()
     _print_final_summary(all_summary)
 
-    print("\n  [INFO] Cleaning up – unloading model(s)...")
+    print("\n  [INFO] Cleaning up - unloading model(s)...")
     has_unloaded_all_models()
 
     _write_consolidated_overview(all_summary, models, args)

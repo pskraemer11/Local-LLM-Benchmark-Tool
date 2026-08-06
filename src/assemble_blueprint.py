@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-assemble_blueprint.py – Prompt-Standardisierung per Blueprint-System
+assemble_blueprint.py - Prompt-Standardisierung per Blueprint-System
 
 Phases:
   Phase 1: Klassifikation in model_registry.yaml (reasoning, capabilities, blueprint)
   Phase 2: Textbaustein-Bibliothek definieren (blueprint_definitions.yaml)
-  Phase 3: Assembly – System-Prompts aus Blueprints generieren
-  Phase 4: Validierung – Syntax-Check, Regression-Prüfung
+  Phase 3: Assembly - System-Prompts aus Blueprints generieren
+  Phase 4: Validierung - Syntax-Check, Regression-Prüfung
 
 Usage:
   python assemble_blueprint.py classify   -> Phase 1: Klassifikation
@@ -69,17 +69,17 @@ _ARCH_REASONING_MAP = {
 def normalize_model_name(name: str) -> str:
     """Normalize a model name for matching between registry and directory names."""
     s = name.lower()
-    s = re.sub(r'\.gguf$', '', s)
-    s = re.sub(r'-(gguf|mxfp4)$', '', s)
+    s = re.sub(r"\.gguf$", "", s)
+    s = re.sub(r"-(gguf|mxfp4)$", "", s)
     # Strip -gguf-/-mxfp4- also from middle (Intel/JetBrains naming convention)
-    s = re.sub(r'[-_](gguf|mxfp4)[-_]', r'-', s)
+    s = re.sub(r"[-_](gguf|mxfp4)[-_]", r"-", s)
     # Strip publisher prefix (e.g., "mradermacher/", "unsloth/")
-    s = re.sub(r'^[^/]+/', '', s)
+    s = re.sub(r"^[^/]+/", "", s)
     # Normalize separators: dots and underscores become hyphens
-    s = s.replace('.', '-').replace('_', '-')
+    s = s.replace(".", "-").replace("_", "-")
     # Collapse multiple hyphens
-    while '--' in s:
-        s = s.replace('--', '-')
+    while "--" in s:
+        s = s.replace("--", "-")
     return s
 
 
@@ -100,7 +100,7 @@ def normalize_for_config(name: str) -> str:
     """
     s = normalize_model_name(name)
     # Strip @quant suffix (e.g. @iq4_nl, @q4_k_s, @q5_0)
-    idx = s.find('@')
+    idx = s.find("@")
     if idx > 0:
         s = s[:idx]
     # Strip variant suffixes
@@ -177,15 +177,15 @@ def _find_all_configs_for_registry_key(
 
     # Level 3: registry key is prefix of config name
     matched: list[dict] = []
-    for cn, raw, cfg in cfg_raw:
-        if cn.startswith(rn + '-'):
+    for cn, _, cfg in cfg_raw:
+        if cn.startswith(rn + "-"):
             matched.append(cfg)
     if matched:
         return matched
 
     # Level 4: config name is prefix of registry key
-    for cn, raw, cfg in sorted(cfg_raw, key=lambda x: -len(x[0])):
-        if rn.startswith(cn + '-') or rn_broad.startswith(cn + '-'):
+    for cn, _, cfg in sorted(cfg_raw, key=lambda x: -len(x[0])):
+        if rn.startswith(cn + "-") or rn_broad.startswith(cn + "-"):
             matched.append(cfg)
     return matched
 
@@ -206,10 +206,10 @@ def find_registry_key_for_config(
         if config_norm == rn2:
             return rnk
     for rn2, rnk in registry_sorted:
-        if config_norm.startswith(rn2 + '-'):
+        if config_norm.startswith(rn2 + "-"):
             return rnk
     for rn2, rnk in registry_sorted:
-        if rn2.endswith('-' + config_norm):
+        if rn2.endswith("-" + config_norm):
             return rnk
     # Broad match: strip quant from registry keys and retry
     for rn2, rnk in registry_sorted:
@@ -407,7 +407,7 @@ def has_custom_template(entry: dict) -> bool:
 
 def extract_params(model_name: str) -> str | None:
     """Extract parameter count from model name (e.g. '14B', '32B', '3.8b')."""
-    m = re.search(r'(?:^|[-])(\d+\.?\d*)[BMK]', model_name, re.IGNORECASE)
+    m = re.search(r"(?:^|[-])(\d+\.?\d*)[BMK]", model_name, re.IGNORECASE)
     if m:
         val = m.group(0)  # e.g. "14B", "32B"
         # Clean up leading hyphen
@@ -477,7 +477,7 @@ def render_role(entry: dict, model_name: str, role_template: str | None, static_
     try:
         rendered = role_template.format(**vars_dict)
         # Collapse multiple spaces
-        rendered = re.sub(r'  +', ' ', rendered).strip()
+        rendered = re.sub(r"  +", " ", rendered).strip()
         return rendered
     except KeyError as e:
         print(f"[WARN] Template key not found: {e} for {model_name}, using static role")
@@ -541,7 +541,7 @@ def read_lms_configs(config_root: Path) -> list:
                 data = None
                 for enc in ("utf-8", "utf-8-sig"):
                     try:
-                        with open(json_path, "r", encoding=enc) as f:
+                        with open(json_path, encoding=enc) as f:
                             data = json.load(f)
                         break
                     except (json.JSONDecodeError, UnicodeDecodeError):
@@ -605,7 +605,7 @@ def classify_registry() -> None:
     yaml_ruamel.preserve_quotes = True
     yaml_ruamel.indent(mapping=2, sequence=4, offset=2)
 
-    with open(REGISTRY_PATH, "r", encoding="utf-8") as f:
+    with open(REGISTRY_PATH, encoding="utf-8") as f:
         registry = yaml_ruamel.load(f)
 
     if not registry:
@@ -652,7 +652,7 @@ def classify_registry() -> None:
         if custom_tpl:
             entry["custom_template"] = True
 
-        # Remove context from registry if it exists – truth is in JSON configs
+        # Remove context from registry if it exists - truth is in JSON configs
         if "context" in entry:
             del entry["context"]
 
@@ -838,11 +838,11 @@ def assemble_prompts(preview_only: bool = False) -> None:
     # Read registry
     yaml_ruamel = YAML()
     yaml_ruamel.preserve_quotes = True
-    with open(REGISTRY_PATH, "r", encoding="utf-8") as f:
+    with open(REGISTRY_PATH, encoding="utf-8") as f:
         registry = yaml_ruamel.load(f)
 
     # Read blueprint definitions
-    with open(BLUEPRINT_PATH, "r", encoding="utf-8") as f:
+    with open(BLUEPRINT_PATH, encoding="utf-8") as f:
         bp_defs = yaml_ruamel.load(f)
 
     blueprints = bp_defs.get("blueprints", {})
@@ -935,9 +935,9 @@ def assemble_prompts(preview_only: bool = False) -> None:
                             continue
                     else:
                         # search_key in ck: exclude variant-suffixed configs not matching
-                        suffix = ck[len(search_key):].lstrip('-')
+                        suffix = ck[len(search_key):].lstrip("-")
                         for vs in _VARIANT_SUFFIXES:
-                            vs_clean = vs.lstrip('-')
+                            vs_clean = vs.lstrip("-")
                             if suffix.startswith(vs_clean) and not search_key.endswith(vs_clean):
                                 break
                         else:
@@ -977,7 +977,7 @@ def assemble_prompts(preview_only: bool = False) -> None:
             for pub, info in candidates:
                 json_path = info["json_path"]
                 try:
-                    with open(json_path, "r", encoding="utf-8-sig") as f:
+                    with open(json_path, encoding="utf-8-sig") as f:
                         data = json.load(f)
 
                     tpl_name = entry.get("template")
@@ -1025,7 +1025,7 @@ def validate_prompts() -> None:
 
     # Read blueprint module content for expected patterns
     yaml_ruamel = YAML()
-    with open(BLUEPRINT_PATH, "r", encoding="utf-8") as f:
+    with open(BLUEPRINT_PATH, encoding="utf-8") as f:
         yaml_ruamel.load(f)
 
     for info in lms_configs:
@@ -1036,9 +1036,9 @@ def validate_prompts() -> None:
 
         # 1. Check XML-like tags are balanced
         open_tags = []
-        for m in re.finditer(r'</?(\w+)>', prompt):
+        for m in re.finditer(r"</?(\w+)>", prompt):
             tag = m.group(1)
-            if prompt[m.start():m.start()+2] == '</':
+            if prompt[m.start():m.start()+2] == "</":
                 if open_tags and open_tags[-1] == tag:
                     open_tags.pop()
                 else:
@@ -1049,7 +1049,7 @@ def validate_prompts() -> None:
             issues.append(f"{info['dir_name']}: Unclosed tag(s): {open_tags}")
 
         # 2. Check for Jinja template remnants ({{ or }} without valid syntax)
-        if re.search(r'\{\{|\}\}', prompt) and not re.search(r'\{\{.*?\}\}', prompt):
+        if re.search(r"\{\{|\}\}", prompt) and not re.search(r"\{\{.*?\}\}", prompt):
             issues.append(f"{info['dir_name']}: Suspicious Jinja syntax")
 
         # 3. Check prompt length is reasonable
@@ -1091,7 +1091,7 @@ def _interactive_menu() -> None:
         ("validate", "Check all system prompts for XML balance, length, Jinja remnants"),
     ]
     print("\n" + "=" * 60)
-    print("  assemble_blueprint.py – Interactive Menu")
+    print("  assemble_blueprint.py - Interactive Menu")
     print("=" * 60)
     for i, (cmd, desc) in enumerate(cmds, 1):
         print(f"  {i:2d}. {cmd:12s} {desc}")

@@ -7,8 +7,8 @@ Imported by:
   - tests/test_scores.py        (CAT_WEIGHTS, OVERALL_WEIGHTS)
 
 Source priority for QUANT_MAP:
-  1. QUANT_MAP (statisch, hier unten) – zuverlaessig, auch fuer geloeschte Modelle
-  2. lms ls --json (dynamisch) – nur installierte Modelle
+  1. QUANT_MAP (statisch, hier unten) - zuverlaessig, auch fuer geloeschte Modelle
+  2. lms ls --json (dynamisch) - nur installierte Modelle
   3. LM Studio Config-Dateien
   4. GGUF-Metadaten-Cache
 
@@ -22,12 +22,13 @@ import os
 import re
 import time
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from type_defs import ModelConfig
+if TYPE_CHECKING:
+    from type_defs import ModelConfig
 from utils.terminal import warn
 
-# Static quantization map – manually maintained.
+# Static quantization map - manually maintained.
 # Source: lms ls --json + LM Studio configs + GGUF cache
 # Conflicts resolved: Steckbrief > Config > GGUF-Cache > Filename
 QUANT_MAP = {
@@ -184,7 +185,7 @@ def _load_quant_registry() -> dict[str, Any]:
         from ruamel.yaml.error import YAMLError
 
         y = YAML()
-        with open(registry_path, "r", encoding="utf-8") as f:
+        with open(registry_path, encoding="utf-8") as f:
             _QUANT_REGISTRY_CACHE = y.load(f) or {}
     except (YAMLError, OSError, UnicodeDecodeError) as _e:
         warn(f"model_registry.yaml fehlerhaft: {_e}")
@@ -198,7 +199,7 @@ def _load_quant_registry() -> dict[str, Any]:
 # Auswertung auf 16-GB-VRAM-Hardware zu zeitaufwändig war (siehe
 # Code-Review_2026-07-12.md §3.1 D4).
 #
-# Für Re-Aktivierung: siehe `Archiv/run_mmlupro_benchmark.py` – dort ist
+# Für Re-Aktivierung: siehe `Archiv/run_mmlupro_benchmark.py` - dort ist
 # die vollständige Logik als self-contained Skript ausgelagert.
 # Aufzurufen mit:
 #     python Archiv/run_mmlupro_benchmark.py --model gemma-4-26b-a4b-it
@@ -578,7 +579,7 @@ def _load_lms_json(json_path: Path) -> dict[str, Any] | None:
     data: dict[str, Any] | None = None
     for enc in ("utf-8", "utf-8-sig"):
         try:
-            with open(json_path, "r", encoding=enc) as f:
+            with open(json_path, encoding=enc) as f:
                 loaded = json.load(f)
             if isinstance(loaded, dict):
                 data = loaded
@@ -770,14 +771,14 @@ def get_model_config(model_identifier: str, category: str = "coding", is_thinkin
     """Generations-Parameter fuer Benchmarks (Sampling-Design 2026-08-06).
 
     Priority:
-      1. MODEL_CATEGORY_SAMPLING[row][category] – temperature/top_p als
+      1. MODEL_CATEGORY_SAMPLING[row][category] - temperature/top_p als
          Ausnahme-Tabelle (Modell x Kategorie, Research 06.08.2026); gilt fuer
          Instruct- UND Thinking-Laeufe (dokumentierte Thinking-Ausnahmen wie
          GPT-OSS 1.0/1.0, Gemma-4 1.0/0.95, Nemotron-3-Reasoning 1.0/1.0)
       2. BENCHMARK_THINKING_DEFAULTS (0.6/0.95) fuer Reasoning-Modelle im
          --thinking-Lauf, sonst BENCHMARK_CATEGORY_DEFAULTS[category]
       3. LM Studio JSON-Config: NUR Nicht-Temperatur-Felder (top_k, min_p,
-         enable_thinking, reasoning_effort) – temperature/top_p der GUI werden
+         enable_thinking, reasoning_effort) - temperature/top_p der GUI werden
          IGNORIERT (ein Einzelwert pro Modell kann die Kategorie-Differenzierung
          nicht ausdruecken; JSON-Werte gelten seit 2026-08-06 nur noch fuer die
          GUI-Nutzung, nicht fuer Benchmarks)

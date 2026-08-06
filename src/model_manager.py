@@ -40,11 +40,13 @@ import re
 import subprocess
 import time
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from benchmark_config import is_support_file
-from type_defs import AvailableModelInfo, LoadedModelInfo
 from utils.terminal import error, info, ok, warn
+
+if TYPE_CHECKING:
+    from type_defs import AvailableModelInfo, LoadedModelInfo
 
 API_BASE = os.environ.get("LLM_API_BASE", "http://127.0.0.1:1234/v1")
 # REST API base (without /v1 suffix) for model management endpoints
@@ -58,7 +60,7 @@ TIMEOUT_UNLOAD_WAIT = 2
 
 # Magic strings (Code-Review 2026-07-18 §5.3): sentinel model name for
 # the readiness health-check. Not a valid LM Studio model, so the server
-# responds with HTTP 400 (no model loaded) – exactly the signal we
+# responds with HTTP 400 (no model loaded) - exactly the signal we
 # need to know that the server is reachable but no model is loaded yet.
 HEALTH_CHECK_SENTINEL_MODEL = "check"
 
@@ -71,8 +73,8 @@ HEALTH_CHECK_SENTINEL_MODEL = "check"
 #   Key                     Default  Usage
 #   ─────────────────────── ──────── ──────────────────────────────
 #   custom_subprocess        3600    Subprocess timeout (DS1000, CoderEval)
-#   evalplus_base             600    Base timeout codegen+evaluate (×2 for reasoning)
-#   lmeval_base               600    Base timeout lm_eval (×2 for reasoning, ×3 for MathQA)
+#   evalplus_base             600    Base timeout codegen+evaluate (x2 for reasoning)
+#   lmeval_base               600    Base timeout lm_eval (x2 for reasoning, x3 for MathQA)
 #   mmlupro_per_subset        300    Timeout per MMLU-Pro subset
 #   agentic_subprocess        3600    Total runtime timeout tool_eval_bench
 #   agentic_scenario          600    Timeout per scenario (--timeout passed to tool_eval_bench)
@@ -164,7 +166,7 @@ def get_current_loaded_model() -> LoadedModelInfo | None:
         }
     except (json.JSONDecodeError, subprocess.TimeoutExpired, OSError, KeyError) as e:
         # KeyError deckt den Fall ab, dass `lms ps --json` ein dict (statt Liste)
-        # liefert – siehe test_handles_dict_format. Vertrag: Optional[LoadedModelInfo].
+        # liefert - siehe test_handles_dict_format. Vertrag: Optional[LoadedModelInfo].
         warn(f"lms ps --json fehlgeschlagen: {type(e).__name__}: {e}")
         return None
 
@@ -240,7 +242,7 @@ def _load_registry_data() -> dict:
     try:
         y = YAML()
         y.preserve_quotes = True
-        with open(rpath, "r", encoding="utf-8") as f:
+        with open(rpath, encoding="utf-8") as f:
             data = y.load(f) or {}
     except (YAMLError, OSError, UnicodeDecodeError) as e:
         warn(f"model_registry.yaml fehlerhaft: {e}")
@@ -316,7 +318,7 @@ def get_available_models(exclude_keywords: list[str] | None = None, registry_onl
                             display = display.split("@")[0]
                         else:
                             # displayName enthält den Quant ggf. als
-                            # Leerzeichen-Variante ("TQ2 0") – entfernen.
+                            # Leerzeichen-Variante ("TQ2 0") - entfernen.
                             space_form = quant_name.replace("_", " ")
                             display = display.removesuffix(" " + space_form)
                         display = f"{display}@{quant_name}"
@@ -414,7 +416,7 @@ def _is_lmstudio_running() -> bool:
     """Ensure LM Studio server is reachable, starting it if necessary.
 
     Order of operations (each step is a no-op if the previous succeeded):
-      1. Check whether /v1/models responds – if yes, return True.
+      1. Check whether /v1/models responds - if yes, return True.
       2. Try `lms server start` directly. Modern LMS versions manage the
          underlying daemon themselves.
       3. Fall back to finding the latest installed `llmster.exe` under
@@ -435,8 +437,8 @@ def _is_lmstudio_running() -> bool:
     except (URLError, OSError, TimeoutError):
         pass
 
-    # 2. Try `lms server start` (preferred – LMS handles daemon internally)
-    print("  [INFO] LM Studio-Server nicht erreichbar – versuche 'lms server start'...")
+    # 2. Try `lms server start` (preferred - LMS handles daemon internally)
+    print("  [INFO] LM Studio-Server nicht erreichbar - versuche 'lms server start'...")
     try:
         r = subprocess.run(["lms", "server", "start"],
                            capture_output=True, text=True, timeout=30,
@@ -467,7 +469,7 @@ def _is_lmstudio_running() -> bool:
         candidates = sorted(
             (p for p in llmster_root.iterdir() if p.is_dir()),
             key=lambda p: p.name,
-            reverse=True,  # newest version first (lexicographic – works for semver)
+            reverse=True,  # newest version first (lexicographic - works for semver)
         )
         for ver_dir in candidates:
             exe = ver_dir / "llmster.exe"
@@ -506,7 +508,7 @@ def _is_lmstudio_running() -> bool:
 # (typos, copy-paste errors, etc.) and to provide a clearer error
 # message than the underlying subprocess errors.
 # '?' ist LM Studios Platzhalter für nicht parsebare Quant-Namen
-# (z.B. TQ2_0, ternär) – der modelKey ist dann z.B. "...@?".
+# (z.B. TQ2_0, ternär) - der modelKey ist dann z.B. "...@?".
 _VALID_MODEL_KEY_RE = re.compile(r"^[A-Za-z0-9._/\-@:+=#?]{1,256}$")
 
 

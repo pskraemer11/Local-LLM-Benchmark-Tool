@@ -1,6 +1,10 @@
-# pytest-Konfiguration (Ruff/pylint/mypy siehe .ruff.toml und .pyproject.toml).
-# pytest erkennt NUR unversteckte Konfigurationsdateien (pyproject.toml, pytest.ini,
-# tox.ini, setup.cfg) - deshalb wird dieser Block hier gefuehrt.
+# Zentrale Tool-Konfiguration (ruff, pytest, mypy, pylint).
+# Konsolidiert am 06.08.2026 aus .ruff.toml + .pyproject.toml + pyproject.toml:
+# - Versteckte Konfigdateien (.ruff.toml, .pyproject.toml) werden von ruff/pytest/mypy
+#   NICHT bzw. nur falsch erkannt ("unknown field `tool`").
+# - Alle Tools erkennen ausschliesslich unversteckte Dateien: pyproject.toml, ruff.toml,
+#   mypy.ini, pylintrc, etc. - deshalb wird alles hier gefuehrt.
+# Quelle der Regelauswahl: Mistral/Vibe https://chat.mistral.ai/work/e4dd489b-946d-412d-9538-ec17a803c108
 
 [tool.pytest.ini_options]
 minversion = "8.0"
@@ -8,3 +12,144 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 addopts = "-v --tb=short"
+
+[tool.ruff]
+line-length = 120
+target-version = "py314"
+cache-dir = ".ruff_cache"
+
+# Don't lint the Archiv, Bibliotheken, etc. folder (legacy code)
+extend-exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".github",
+    ".git-rewrite",
+    ".hg",
+    ".ipynb_checkpoints",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pyenv",
+    ".pytest_cache",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".vscode",
+    "__pycache__",
+    "__pypackages__",
+    "_build",
+    ".devin",
+    ".venv",
+    "*.md",
+    "*.yaml",
+    "*.json",
+    "Archiv",
+    "backups",
+    "build",
+    "data",
+    "dist",
+    "doc-git",
+    "Doku-intern",
+    "ds1000_official",
+    "embedding-eval",
+    "ergebnisse",
+    "human_eval_plus",
+    "human-eval",
+    "lm_eval_tasks",
+    "logs",
+    "runs",
+    "simple_evals",
+    "tests",
+]
+
+[tool.ruff.lint]
+# Lenient default: catch F (pyflakes) und relevante Gruppen, style bleibt ruhig.
+# Nur relevante Regelgruppen aktivieren
+select = [
+    "F",     # Pyflakes (Syntaxfehler, ungenutzte Imports)
+    "B",     # flake8-bugbear (logische Fehler, z. B. unsichere Defaults)
+    "S",     # Bandit (Sicherheitsluecken, z. B. eval(), pickle)
+    "ANN",   # Type annotations (fehlende Typen)
+    "PERF",  # Performance-Probleme (kritisch fuer Benchmark-Tool)
+    "I",     # Isort (Import-Sortierung)
+    "UP",    # Pyupgrade (veraltete Syntax)
+    "C4",    # Comprehensions (List/Dict/Set Comprehensions)
+    "TCH",   # Type checking imports
+    "FBT",   # Booleans (z. B. `if x == True:` -> `if x:`)
+    "Q",     # Quotes (String-Quotes Konsistenz)
+    "RUF",   # Ruff-spezifische Regeln
+]
+
+# Regeln ignorieren, die fuer dieses Projekt nicht relevant sind
+ignore = [
+    "ANN401", # Dynamically typed expressions (manchmal noetig fuer Benchmarks)
+    "B008",   # Function calls in argument defaults (manchmal noetig)
+    "B011",   # `assert False` (kann in Tests sinnvoll sein)
+    "S101",   # Use of `assert` (kann in Tests/Benchmarks noetig sein)
+    "S311",   # Use of `random` (fuer Benchmarks oft noetig)
+    "PERF203", # `try`-`except` within a loop (manchmal unvermeidbar)
+    "PERF401", # Use `list` comprehension instead of `for` loop (Lesbarkeit > Performance)
+    # FBT (Boolean-Trap): Legacy-Code mit bool-Positional-Parametern ueber viele
+    # Aufrufer hinweg; keyword-only-Umbau wuerde alle Aufrufer brechen
+    # (Entscheidung 06.08.2026, Review-Prozess).
+    "FBT001",
+    "FBT002",
+    "FBT003",
+    # Bandit-Audits auf LOKALE LM-Studio-Aufrufe (127.0.0.1, feste URL aus
+    # API_BASE, kein Nutzer-Input) - keine echten Sicherheitsluecken.
+    # Entscheidung 06.08.2026, Review-Prozess.
+    "S310",   # urlopen
+    "S603",   # subprocess call
+    "S607",   # subprocess partial path
+]
+
+# Autofix fuer sichere Regeln (nicht fuer ANN/S/PERF)
+fixable = ["F", "B", "E", "W", "I", "UP", "C4", "Q"]
+unfixable = ["ANN", "S", "PERF", "TCH", "FBT", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["E402"]
+"**/{tests,docs,tools}" = ["E402"]
+
+[tool.ruff.lint.flake8-quotes]
+docstring-quotes = "double"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+docstring-code-format = false
+docstring-code-line-length = "dynamic"
+
+# Ergänzung zu Ruff-Luecken, aber viele disables gegen False-Positiv-Meldungen:
+[tool.pylint.main]
+disable = ["all"]
+enable = ["R0902", "R0903", "R0913", "R0914", "R0801"]
+
+[tool.mypy]
+# Lenient settings: legacy research codebase with gradual typing.
+python_version = "3.14"
+ignore_missing_imports = true
+strict = true
+warn_unused_ignores = false
+warn_redundant_casts = false
+# Legacy-Ordner ausschliessen (wie in ruff extend-exclude):
+# simple_evals/types.py schattet das stdlib-Modul `types` und blockiert sonst alle Checks.
+exclude = [
+    "^simple_evals/",
+    "^Archiv/",
+    "^Doku-intern/",
+    "^doc-git/",
+    "^backups/",
+    "^lm_eval_tasks/",
+    "^human[-_]eval",
+    "^ds1000_official/",
+    "^ergebnisse/",
+    "^runs/",
+    "^logs/",
+    "^tests/",
+]

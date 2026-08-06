@@ -30,7 +30,7 @@ async def _patched_chat_completion(self: Any, **kwargs: Any) -> Any:
     response_format = kwargs.get("response_format")
     if response_format and tools:
         print(
-            "[CHANNEL-ERROR] response_format + tools kombiniert – "
+            "[CHANNEL-ERROR] response_format + tools kombiniert - "
             "structured output verworfen (llama.cpp lazy-grammar-Konflikt)",
             file=sys.stderr,
         )

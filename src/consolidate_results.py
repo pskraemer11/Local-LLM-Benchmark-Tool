@@ -21,7 +21,6 @@ Computes weighted category scores + efficiency.
 """
 from __future__ import annotations
 
-import argparse
 import csv
 import itertools
 import json
@@ -32,7 +31,10 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime
 from statistics import mean, median
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    import argparse
 
 SRC_DIR = os.path.dirname(os.path.abspath(__file__))
 # Make `src` importable regardless of the working directory
@@ -144,7 +146,7 @@ def _normalize_model_keys(model_keys: list[str]) -> list[str]:
 
     result: list[str] = []
     seen: set[str] = set()
-    for (base, v_lower), originals in groups.items():
+    for (base, v_lower) in groups:
         normalized = f"{base}@{v_lower}" if v_lower else base
         if normalized not in seen:
             result.append(normalized)
@@ -170,7 +172,7 @@ def _get_display_name(model_key: str) -> str:
         if dn:
             return f"{dn}@{variant}" if variant else dn
     # Search by stored modelKey field (variant-aware)
-    for mk, meta in model_info.items():
+    for meta in model_info.values():
         if meta.get("modelKey") == model_key:
             dn = meta.get("displayName")
             if dn:
@@ -193,23 +195,23 @@ def _lookup_vram(model_key: str) -> dict[str, Any] | None:
     """Try to find VRAM + quant for a model_key.
 
     Priority for quant: QUANT_MAP (static) > lms ls --json (dynamic)
-    Priority for vram_gb: lms ls --json only (dynamic – deleted models have no file)
+    Priority for vram_gb: lms ls --json only (dynamic - deleted models have no file)
     """
     # Step 1: Get quant from QUANT_MAP via variant-aware get_quant() (primary
-    # – works for deleted models too). This prevents the previous behaviour
+    # - works for deleted models too). This prevents the previous behaviour
     # where `QUANT_MAP.get(model_key)` returned None for `gpt-oss-20b` if the
     # caller passed `lmstudio-community/gpt-oss-20b`, leading to a wrong
     # quant from lms_match.
     quant_from_map = get_quant(model_key) or None
 
-    # Step 2: Get VRAM + quant from lms ls --json (dynamic – only installed models)
+    # Step 2: Get VRAM + quant from lms ls --json (dynamic - only installed models)
     model_info = _get_model_info()
     lms_match = None
     if model_key in model_info:
         lms_match = model_info[model_key]
     elif not lms_match:
         # Search by stored modelKey field (variant-aware)
-        for mk, meta in model_info.items():
+        for meta in model_info.values():
             if meta.get("modelKey") == model_key:
                 lms_match = meta
                 break
@@ -253,7 +255,7 @@ def _lookup_vram(model_key: str) -> dict[str, Any] | None:
                     best_match = model_info[mk]
         lms_match = best_match
 
-    # Step 3: Merge – QUANT_MAP wins for quant, lms wins for vram_gb
+    # Step 3: Merge - QUANT_MAP wins for quant, lms wins for vram_gb
     if lms_match:
         return {
             "vram_gb": lms_match.get("vram_gb", ""),
@@ -305,12 +307,12 @@ def bootstrap_ci(scores: list[float], n_resamples: int = 10000, alpha: float = 0
     Falls back to pure Python if NumPy is unavailable.
     """
     if len(scores) < 2:
-        return (float('nan'), float('nan'))
+        return (float("nan"), float("nan"))
     try:
         import numpy as np
         arr = np.asarray(scores, dtype=np.float64)
         n = arr.shape[0]
-        # Sampling with replacement: n_resamples × n indices
+        # Sampling with replacement: n_resamples x n indices
         idx = np.random.randint(0, n, size=(n_resamples, n))
         means = arr[idx].mean(axis=1)
         lo_idx = int(n_resamples * alpha / 2)
@@ -345,7 +347,7 @@ def paired_bootstrap_ci(scores_a: list[float], scores_b: list[float],
     Falls back to pure Python if NumPy is unavailable.
     """
     if len(scores_a) != len(scores_b) or len(scores_a) < 2:
-        return (float('nan'), float('nan'), float('nan'))
+        return (float("nan"), float("nan"), float("nan"))
     try:
         import numpy as np
         if seed is not None:
@@ -385,11 +387,11 @@ def read_paired_scores(path_a: str, path_b: str) -> tuple[list[float], list[floa
     the same --seed so they contain the same tasks in the same order.
     Unmatched rows are dropped.
     """
-    def _read_scores_by_index(path):
+    def _read_scores_by_index(path: str) -> dict[int, float]:
         """Read a benchmark CSV into {task_index: score} for pairing."""
         out = {}
         delim = _auto_delimiter(path)
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             for row in csv.DictReader(f, delimiter=delim):
                 idx = row.get("task_index", "").strip()
                 sc = row.get("score", "").strip()
@@ -419,9 +421,9 @@ def compare_two_quants(name_a: str, name_b: str,
     n = len(scores_a)
     if n < 2:
         return {
-            "mean_a": float('nan'), "mean_b": float('nan'),
-            "mean_diff": float('nan'), "ci_lo": float('nan'), "ci_hi": float('nan'),
-            "sign": "~", "n_items": n, "p_value": float('nan'),
+            "mean_a": float("nan"), "mean_b": float("nan"),
+            "mean_diff": float("nan"), "ci_lo": float("nan"), "ci_hi": float("nan"),
+            "sign": "~", "n_items": n, "p_value": float("nan"),
         }
     mean_a = sum(scores_a) / n
     mean_b = sum(scores_b) / n
@@ -454,7 +456,7 @@ def compare_two_quants(name_a: str, name_b: str,
 
 def _auto_delimiter(path: str) -> str:
     """Detect the CSV delimiter (";" vs ",") from the first line."""
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         first = f.readline()
     if ";" in first:
         return ";"
@@ -481,7 +483,7 @@ def read_custom_csv(path: str, out_scores: list[float] | None = None) -> tuple[f
         print(f"  [WARN] {os.path.basename(path)}: {e}", file=sys.stderr)
         return None, None, None, {}
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             reader = csv.DictReader(f, delimiter=delim)
             for row in reader:
                 sc = row.get("score", "").strip()
@@ -616,7 +618,7 @@ def find_latest_csvs(min_sample_size: int = 0, since: str | None = None,
         model_key_from_csv = None
         file_sample_size = 0
         try:
-            with open(fpath, "r", encoding="utf-8") as f:
+            with open(fpath, encoding="utf-8") as f:
                 reader = csv.DictReader(f, delimiter=";")
                 for row in reader:
                     mk = row.get("model_key", "")
@@ -731,7 +733,7 @@ def _find_newest_by_mtime(prefix: str, model_key: str) -> str | None:
             candidates.append((os.path.getmtime(dpath), dpath))
             seen.add(dname.lower())
 
-    # Fallback: ohne @variant – nur EXAKTE Base-Matches oder Base@variant.
+    # Fallback: ohne @variant - nur EXAKTE Base-Matches oder Base@variant.
     # Fix 2026-07-31: Vorher matchte `startswith(base)` auch Modelle mit
     # gleichem Präfix und anderem Suffix (z.B. "qwen3-30b-a3b-instruct-2507"
     # matchte "qwen3-30b-a3b-instruct-2507-q2ks-mixed-autoround@Q2_K_S").
@@ -787,7 +789,7 @@ def try_read_evalplus(model_key: str) -> dict[str, float] | None:
         if eval_file is None:
             continue
         try:
-            with open(eval_file, "r", encoding="utf-8") as f:
+            with open(eval_file, encoding="utf-8") as f:
                 data = json.load(f)
         except Exception:
             print(f"  [WARN] Skipping corrupt eval file: {os.path.basename(eval_file)}", file=sys.stderr)
@@ -810,7 +812,7 @@ def _read_results_json(search_dir: str, task_name: str, metric_priority: list[st
         if not (fname.startswith("results_") and fname.endswith(".json")):
             continue
         try:
-            with open(os.path.join(search_dir, fname), "r", encoding="utf-8") as f:
+            with open(os.path.join(search_dir, fname), encoding="utf-8") as f:
                 data = json.load(f)
         except Exception:
             print(f"  [WARN] _read_results_json: skipping corrupt {fname}", file=sys.stderr)
@@ -855,7 +857,7 @@ def read_lmeval_per_model(model_key: str) -> dict[str, float] | None:
     json_files.sort(key=lambda p: os.path.getmtime(p), reverse=True)
     for fpath in json_files:
         try:
-            with open(fpath, "r", encoding="utf-8") as f:
+            with open(fpath, encoding="utf-8") as f:
                 data = json.load(f)
         except Exception:
             print(f"  [WARN] Skipping corrupt JSON: {os.path.basename(fpath)}", file=sys.stderr)
@@ -905,7 +907,7 @@ def read_agentic(model_key: str) -> float | None:
     all_json.sort(key=_agentic_ts_from_filename, reverse=True)
     latest = all_json[0]
     try:
-        with open(latest, "r", encoding="utf-8") as f:
+        with open(latest, encoding="utf-8") as f:
             data = json.load(f)
         raw = data.get("final_score") if isinstance(data, dict) else None
         if raw is not None:
@@ -949,10 +951,10 @@ def _collect_pipeline_sample_sizes(model_keys: list[str]) -> dict[str, set[int]]
                 if not eval_file:
                     continue
                 try:
-                    with open(eval_file, "r", encoding="utf-8") as f:
+                    with open(eval_file, encoding="utf-8") as f:
                         data = json.load(f)
                     n = len(data.get("eval", {}))
-                except Exception:
+                except Exception:  # noqa: S112 - kaputte/fehlende Ergebnisdateien ueberspringen
                     continue
                 if n:
                     sizes.setdefault("EvalPlus", set()).add(n)
@@ -972,14 +974,14 @@ def _collect_pipeline_sample_sizes(model_keys: list[str]) -> dict[str, set[int]]
             if candidates:
                 candidates.sort(key=lambda x: x[0], reverse=True)
                 try:
-                    with open(candidates[0][1], "r", encoding="utf-8") as f:
+                    with open(candidates[0][1], encoding="utf-8") as f:
                         data = json.load(f)
                     for td in data.get("results", {}).values():
                         n = td.get("sample_len") if isinstance(td, dict) else None
                         if n:
                             sizes.setdefault("LM-Eval", set()).add(n)
                             break
-                except Exception:
+                except Exception:  # noqa: S110 - kaputte Ergebnisdateien ueberspringen
                     pass
 
         # Agentic: total_scenarios from the newest JSON
@@ -993,7 +995,7 @@ def _collect_pipeline_sample_sizes(model_keys: list[str]) -> dict[str, set[int]]
             if all_json:
                 all_json.sort(key=_agentic_ts_from_filename, reverse=True)
                 try:
-                    with open(all_json[0], "r", encoding="utf-8") as f:
+                    with open(all_json[0], encoding="utf-8") as f:
                         data = json.load(f)
                     n = data.get("total_scenarios") if isinstance(data, dict) else None
                 except Exception:
@@ -1200,7 +1202,7 @@ def read_data(model_keys: list[str] | None = None, min_sample_size: int = 0,
         tok_speeds = {}
         latencies = []
 
-        # DS1000 – match by model_key (handle missing @variant in CSV)
+        # DS1000 - match by model_key (handle missing @variant in CSV)
         ds_scores: list[float] = []
         for mk, fn in ds1000_files.items():
             if mk == model_key or ("@" not in mk and mk.split("@")[0] == model_key.split("@")[0]):
@@ -1216,7 +1218,7 @@ def read_data(model_keys: list[str] | None = None, min_sample_size: int = 0,
             ds_score = ds_tps = None
             ds_m = {}
 
-        # CoderEval – match by model_key (handle missing @variant in CSV)
+        # CoderEval - match by model_key (handle missing @variant in CSV)
         ce_scores: list[float] = []
         for mk, fn in codereval_files.items():
             if mk == model_key or ("@" not in mk and mk.split("@")[0] == model_key.split("@")[0]):
@@ -1255,8 +1257,7 @@ def read_data(model_keys: list[str] | None = None, min_sample_size: int = 0,
         # LM-Eval per model
         lmev = read_lmeval_per_model(model_key)
         if lmev:
-            for k, v in lmev.items():
-                bench_scores[k] = v
+            bench_scores.update(lmev)
 
         # Agentic (tool-eval-bench)
         agentic_score = read_agentic(model_key)
@@ -1285,14 +1286,14 @@ def read_data(model_keys: list[str] | None = None, min_sample_size: int = 0,
         agentic_v = bench_scores.get("Agentic")
         if agentic_v is not None:
             print(f"    {'Agentic':20s} {agentic_v:.1%}")
-        print(f"    {'Coding':20s} {cats['coding']:.1%}" if cats.get('coding') is not None else "")
-        print(f"    {'Knowledge':20s} {cats['knowledge']:.1%}" if cats.get('knowledge') is not None else "")
-        print(f"    {'Math':20s} {cats['math']:.1%}" if cats.get('math') is not None else "")
-        print(f"    {'Overall':20s} {cats['overall']:.1%}" if cats.get('overall') is not None else "")
+        print(f"    {'Coding':20s} {cats['coding']:.1%}" if cats.get("coding") is not None else "")
+        print(f"    {'Knowledge':20s} {cats['knowledge']:.1%}" if cats.get("knowledge") is not None else "")
+        print(f"    {'Math':20s} {cats['math']:.1%}" if cats.get("math") is not None else "")
+        print(f"    {'Overall':20s} {cats['overall']:.1%}" if cats.get("overall") is not None else "")
         rt_min = runtime_h * 60 if runtime_h else None
         runtime_str = f"{rt_min:.1f} min" if rt_min else "—"
         print(f"    {'Runtime':20s} {runtime_str}")
-        eff_str = f"{cats['overall']/runtime_h:.1f}" if cats.get('overall') is not None and runtime_h else "—"
+        eff_str = f"{cats['overall']/runtime_h:.1f}" if cats.get("overall") is not None and runtime_h else "—"
         print(f"    {'Eff (Score/h)':20s} {eff_str} %p/h")
 
         def pct(val: float | None) -> float | None:
@@ -1307,7 +1308,7 @@ def read_data(model_keys: list[str] | None = None, min_sample_size: int = 0,
         if len(ce_scores) > 1:
             ce_ci_lo, ce_ci_hi = bootstrap_ci(ce_scores)
 
-        coding_eff = f"{cats['coding']/runtime_h:.1f}" if cats.get('coding') is not None and runtime_h else ""
+        coding_eff = f"{cats['coding']/runtime_h:.1f}" if cats.get("coding") is not None and runtime_h else ""
         vram = _lookup_vram(model_key)
         rows.append(ModelData(
             name=display,
@@ -1317,20 +1318,20 @@ def read_data(model_keys: list[str] | None = None, min_sample_size: int = 0,
             codereval=pct(ce_score),
             codereval_ci_lo=pct(ce_ci_lo),
             codereval_ci_hi=pct(ce_ci_hi),
-            humaneval=pct(bench_scores.get('HumanEval+_plus')),
-            mbpp=pct(bench_scores.get('MBPP+_plus')),
-            arc=pct(bench_scores.get('ARC-Challenge')),
-            hellaswag=pct(bench_scores.get('HellaSwag')),
-            truthfulqa=pct(bench_scores.get('TruthfulQA')),
-            ifeval=pct(bench_scores.get('IFEval')),
-            math500=pct(bench_scores.get('MATH-500')),
+            humaneval=pct(bench_scores.get("HumanEval+_plus")),
+            mbpp=pct(bench_scores.get("MBPP+_plus")),
+            arc=pct(bench_scores.get("ARC-Challenge")),
+            hellaswag=pct(bench_scores.get("HellaSwag")),
+            truthfulqa=pct(bench_scores.get("TruthfulQA")),
+            ifeval=pct(bench_scores.get("IFEval")),
+            math500=pct(bench_scores.get("MATH-500")),
             agentic=pct(agentic_score),
-            coding=pct(cats.get('coding')),
-            knowledge=pct(cats.get('knowledge')),
-            math=pct(cats.get('math')),
-            overall=pct(cats.get('overall')),
+            coding=pct(cats.get("coding")),
+            knowledge=pct(cats.get("knowledge")),
+            math=pct(cats.get("math")),
+            overall=pct(cats.get("overall")),
             runtime_min=f"{rt_min:.1f}" if rt_min else "",
-            eff_score_h=f"{cats['overall']/runtime_h:.1f}" if cats.get('overall') is not None and runtime_h else "",
+            eff_score_h=f"{cats['overall']/runtime_h:.1f}" if cats.get("overall") is not None and runtime_h else "",
             coding_eff_score_h=coding_eff,
             tok_s=f"{avg_tps:.1f}" if avg_tps else "",
             vram_gb=vram["vram_gb"] if vram else "",
@@ -1408,11 +1409,11 @@ def _render_complete_table(rows: list[dict[str, Any]], header_names: list[str],
 
     lines: list[str] = []
     parts = [_md_cell(header_names[0], widths[0], True)]
-    parts += [_md_cell(h, w) for h, w in zip(header_names[1:], widths[1:])]
+    parts += [_md_cell(h, w) for h, w in zip(header_names[1:], widths[1:], strict=True)]
     lines.append("| " + " | ".join(parts) + " |")
 
     parts = [_md_cell(header_units[0], widths[0], True)]
-    parts += [_md_cell(u, w) for u, w in zip(header_units[1:], widths[1:])]
+    parts += [_md_cell(u, w) for u, w in zip(header_units[1:], widths[1:], strict=True)]
     lines.append("| " + " | ".join(parts) + " |")
 
     lines.append("| " + " | ".join("-" * max(3, w) for w in widths) + " |")
@@ -1462,14 +1463,14 @@ def _write_tbl(f: Any, title: str, headers: list[str], sorted_rows: list[dict[st
     if pct_flags is None:
         pct_flags = [True] * len(keys)
     f.write(f"\n### {title}\n")
-    all_h = ["Rang"] + headers
+    all_h = ["Rang", *headers]
 
     # Content-driven widths: longest header or data cell per column,
     # numeric cells aligned on their decimal point.
     data_rows = []
     for i, r in enumerate(sorted_rows, 1):
-        vals = [str(i), r['Model']]
-        for key, pct_flag in zip(keys, pct_flags):
+        vals = [str(i), r["Model"]]
+        for key, pct_flag in zip(keys, pct_flags, strict=True):
             vals.append(_val(key, r, pct=pct_flag))
         data_rows.append(vals)
     ws = []
@@ -1734,7 +1735,7 @@ def _write_markdown(rows: list[dict[str, Any]], args: Any,
     str_rows.sort(key=lambda x: x["Model"])
 
     with open(md_path, "w", encoding="utf-8") as f:
-        f.write("# Consolidated Results – Dense Run (15+ Models)\n")
+        f.write("# Consolidated Results - Dense Run (15+ Models)\n")
         if args.sample_size:
             ss_display = str(args.sample_size)
             ss_note = " (DS1000/CoderEval CSVs only)"
@@ -1743,7 +1744,7 @@ def _write_markdown(rows: list[dict[str, Any]], args: Any,
             ss_note = ""
         f.write(f"\nAs of: {datetime.now().strftime('%Y-%m-%d %H:%M')}, SampleSize={ss_display}{ss_note}\n\n")
         f.write("** New Weighting Total Score: Coding 35%, Math 25%, Agentic & Instruction 25%, Knowledge 15% **\n")
-        f.write("**Efficiency = Score / Runtime (in hours)** – Runtime based on measured DS1000+CoderEval latency.\n\n")
+        f.write("**Efficiency = Score / Runtime (in hours)** - Runtime based on measured DS1000+CoderEval latency.\n\n")
 
         # Complete results table (two-line header: Name + Unit)
         f.write("## Complete Results Table\n\n")
@@ -1774,7 +1775,7 @@ def _write_markdown(rows: list[dict[str, Any]], args: Any,
         f.write("- Agentic & Instruction (25%): Agentic (50%), IFEval (50%)\n")
         f.write("- Knowledge (15%): ARC-Challenge (1/3), HellaSwag (1/3), TruthfulQA (1/3)\n")
         f.write("- Efficiency = Score / Runtime (h). Values in %p/h.\n")
-        f.write("- System metrics: a=arithmetic mean, m=median, d=maximum, p=90th percentile – for CPU/GPU/RAM. In the table: m (median) and p (90th percentile). Tp = GPU temperature P90.\n")
+        f.write("- System metrics: a=arithmetic mean, m=median, d=maximum, p=90th percentile - for CPU/GPU/RAM. In the table: m (median) and p (90th percentile). Tp = GPU temperature P90.\n")
 
         # ── TOP 5 tables ──
         def _t5_named(title: str, sort_key: str, headers: list[str], keys: list[str], pct_flags: list[bool] | None = None) -> None:
@@ -1796,17 +1797,17 @@ def _write_markdown(rows: list[dict[str, Any]], args: Any,
             b5 = sorted(valid, key=lambda x: float(x.get(sort_key, 0)), reverse=False)[:5]
             _write_tbl(f, title, headers, b5, keys, pct_flags)
 
-        _t5_named("TOP 5 – Overall Score", "Overall",
+        _t5_named("TOP 5 - Overall Score", "Overall",
             ["Model", "Overall", "Coding", "Knowledge", "Math", "Runtime", "Eff."],
             ["Overall", "Coding", "Knowledge", "Math", "Runtime (min)", "Eff (Score/h)"],
             [True, True, True, True, False, False])
 
-        _b5_named("BOTTOM 5 – Overall Score", "Overall",
+        _b5_named("BOTTOM 5 - Overall Score", "Overall",
             ["Model", "Overall", "Coding", "Knowledge", "Math", "Runtime", "Eff."],
             ["Overall", "Coding", "Knowledge", "Math", "Runtime (min)", "Eff (Score/h)"],
             [True, True, True, True, False, False])
 
-        _t5_named("TOP 5 – Efficiency (Overall / Runtime)", "Eff (Score/h)",
+        _t5_named("TOP 5 - Efficiency (Overall / Runtime)", "Eff (Score/h)",
             ["Model", "Efficiency", "Overall", "Runtime"],
             ["Eff (Score/h)", "Overall", "Runtime (min)"],
             [False, True, False])
@@ -1819,13 +1820,13 @@ def _write_markdown(rows: list[dict[str, Any]], args: Any,
 
         coding_top = _threshold_filtered(rows, "Coding", 60.0)
         coding_top_display = coding_top[:7]
-        _write_tbl(f, f"TOP {len(coding_top_display)} – Coding (≥60%)",
+        _write_tbl(f, f"TOP {len(coding_top_display)} - Coding (≥60%)",
             ["Model", "Coding", "DS1000", "CoderEval", "HEval+", "MBPP+", "Runtime", "Eff."],
             coding_top_display,
             ["Coding", "DS1000", "CoderEval", "HumanEval+", "MBPP+", "Runtime (min)", "Coding Eff (Score/h)"],
             [True, True, True, True, True, False, False])
 
-        _t5_named("TOP 5 – Efficiency_Coding (Coding / Runtime)", "Coding Eff (Score/h)",
+        _t5_named("TOP 5 - Efficiency_Coding (Coding / Runtime)", "Coding Eff (Score/h)",
             ["Model", "Efficiency", "Coding", "Runtime"],
             ["Coding Eff (Score/h)", "Coding", "Runtime (min)"],
             [False, True, False])
@@ -1836,17 +1837,17 @@ def _write_markdown(rows: list[dict[str, Any]], args: Any,
         f.write("\n----  \n")
 
         t5_math = _top(rows, "Math")
-        _write_tbl(f, "TOP 5 – Math", ["Model", "Math", "MATH-500", "tok/s"],
+        _write_tbl(f, "TOP 5 - Math", ["Model", "Math", "MATH-500", "tok/s"],
                    t5_math, ["Math", "MATH-500", "tok/s"],
                    [True, True, False])
 
         t5_speed = _top(rows, "tok/s")
-        _write_tbl(f, "TOP 5 – Speed (tok/s)", ["Model", "tok/s", "Overall"],
+        _write_tbl(f, "TOP 5 - Speed (tok/s)", ["Model", "tok/s", "Overall"],
                    t5_speed, ["tok/s", "Overall"],
                    [False, True])
 
         t5_agentic = _top(rows, "Agentic")
-        _write_tbl(f, "TOP 5 – Agentic & Instruction", ["Model", "Agentic", "IFEval", "HumanEval+", "MBPP+", "Coding"],
+        _write_tbl(f, "TOP 5 - Agentic & Instruction", ["Model", "Agentic", "IFEval", "HumanEval+", "MBPP+", "Coding"],
                    t5_agentic, ["Agentic", "IFEval", "HumanEval+", "MBPP+", "Coding"],
                    [True, True, True, True, True])
     return md_path
@@ -1872,12 +1873,12 @@ def main() -> None:
         return
 
     rows, ss_ctx = _read_all_data(args, model_keys, exclude)
-    csv_path, ts = _write_csv(rows)
+    _, ts = _write_csv(rows)
     md_path = _write_markdown(rows, args, ss_ctx, ts)
 
     print(f"  MD:  {md_path}")
     print(f"\n{'=' * 60}")
-    print(f"  Done – {len(rows)} Models")
+    print(f"  Done - {len(rows)} Models")
     print(f"{'=' * 60}")
 
 
