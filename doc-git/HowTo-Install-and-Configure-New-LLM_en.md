@@ -41,8 +41,8 @@ Internally: `compare` → `sync` → `classify`.
 | For the **full run incl. prompt assembly + validation**:  `python src\registry_tool.py pipeline full`|
  ====================================================================================================== 
 
-> ℹ **CWD-unabhängig (03.08., F4):** Alle Einstiegspunkte haben einen sys.path-Bootstrap –
-> `python -m src.registry_tool sync` funktioniert aus jedem Verzeichnis.
+> ℹ **CWD-independent (03.08., F4):** All entry points have a sys.path bootstrap –
+> `python -m src.registry_tool sync` works from any directory.
 
 or Manual:
 `doc-git\model_registry.yaml` – insert entry (alphabetical position):
@@ -63,7 +63,7 @@ My-New-Model-8B:
 
 Then call:
 ```
-python src\registry_tool.py sync     # Full maintenance – erledigt ALLES automatisch:
+python src\registry_tool.py sync     # Full maintenance – does EVERYTHING automatically:
                                         #   add:           new models from LMS into registry (incl. GGUF architecture + reasoning data)
                                         #   fill-arch:     n_layers\hidden_dim from GGUF headers for existing entries
                                         #   fill-reasoning: reasoning (thinking\instruct) from GGUF chat_template
@@ -72,9 +72,9 @@ python src\registry_tool.py sync     # Full maintenance – erledigt ALLES autom
                                         #   sync-ctx:      context_length from JSON configs (missing only)
                                         #   fill-ctx:      remaining context_length via formula
                                         #   fmt:           normalize blank lines
-                                        #   classify:      reasoning, capabilities, blueprint, truncation setzen
-                                        #   assemble:      Prompt in JSON-Configs schreiben
-                                        #   validate:      Syntax-Prüfung
+                                        #   classify:      set reasoning, capabilities, blueprint, truncation
+                                        #   assemble:      write prompt into JSON configs
+                                        #   validate:      syntax check
 ```
 
 **All info that classify + registry_tool.py determine automatically:**
@@ -82,7 +82,7 @@ python src\registry_tool.py sync     # Full maintenance – erledigt ALLES autom
 | Field                  | Source                                                      | Example                                                       |
 |------------------------|-------------------------------------------------------------|---------------------------------------------------------------|
 | `reasoning`\`thinking` | **GGUF `tokenizer.chat_template`** via `read_gguf_arch()`   | Patterns: `enable_thinking`, `<think>`, `reasoning_effort`, … |    
-|    \ `instruct`        |  –> kein Keyword-Fallback mehr. Modell wird ohne Eintrag übersprungen.                                                      |
+|    \ `instruct`        |  –> no more keyword fallback. Model is skipped without an entry.                                                      |
 | `capabilities`         | Model name (vl\vision\ocr, coder\code)                     | `qwen2.5-coder-14b` → `[coding, text]`                         |
 | `blueprint`            | From reasoning + capabilities                               | `thinking` → `reasoning_assistant`                            |
 | `truncation`           | contextLength from JSON config                              | `16384` (≥8192) → `medium`                                    |
@@ -136,7 +136,7 @@ mkdir -p ~\.lmstudio\hub\models\{publisher}\{model-name}\
 ```
 1. Delete GGUF                                  # Config is preserved
 2. Re-import GGUF                               # Old config is recognized again
-3. python src\registry_tool.py sync             # Registry + classify + assemble + validate in einem Schritt
+3. python src\registry_tool.py sync             # Registry + classify + assemble + validate in one step
 ```
 → Done. The old `model.yaml` (if present) is updated on `lms clone`\`lms get`, not on manual import.
 
@@ -176,12 +176,12 @@ Re-adding the model later is automatic via `registry_tool.py sync` \ `pipeline`.
 
 ### Cheat Sheet
 
-# DER EINE Befehl für alles (nach neuem Modell oder Änderungen)
+# THE ONE command for everything (after a new model or changes)
 ```bash
 python src\registry_tool.py pipeline full
 ```
 
-# Status-Report ohne Änderungen
+# Status report without changes
 `python src\registry_tool.py pipeline`
 
 # Fill in architecture data from GGUF headers (n_layers, hidden_dim)

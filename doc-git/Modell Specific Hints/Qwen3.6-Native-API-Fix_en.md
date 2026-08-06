@@ -1,33 +1,33 @@
 # Qwen3.6 / REAP: Native-API-Fix (Stop-Tokens + Reasoning)
 
 ## Problem
-Qwen3.6 27B und Qwen3.6 28B REAP liefen in v13 schlechter als vorher.
+Qwen3.6 27B and Qwen3.6 28B REAP performed worse in v13 than before.
 
 ## Root Cause
-Alle Qwen3.6-Modelle haben in `benchmark_config.py` den Override `enable_thinking: False`. Seit v13 führt das zur Route über **`_generate_answer_native()`** (LM Studio Native API `/api/v1/chat`) statt der OpenAI-kompatiblen API (`/v1/chat/completions`). Die Native API hatte drei Defizite:
+All Qwen3.6 models have the override `enable_thinking: False` in `benchmark_config.py`. Since v13 this routes through **`_generate_answer_native()`** (LM Studio Native API `/api/v1/chat`) instead of the OpenAI-compatible API (`/v1/chat/completions`). The Native API had three deficiencies:
 
-### 1. Keine Stop-Tokens ❌
-`_generate_answer_native()` akzeptierte/sendete keinen `stop`-Parameter. Qwen-Modelle benötigen `<|im_end|>` als Stop-Token, sonst generieren sie weit über die Code-Grenzen hinaus → verschwendetes Token-Budget, niedrige Scores.
+### 1. No stop tokens ❌
+`_generate_answer_native()` did not accept/send a `stop` parameter. Qwen models need `<|im_end|>` as stop token, otherwise they generate far beyond the code boundaries → wasted token budget, low scores.
 
 **Fix (24.07.2026):**
-- `_generate_answer_native()` um `stop: Optional[list[str]]` erweitert
-- Body baut `stop`-Feld wenn `stop` gesetzt
-- Fallback: Falls Native API `stop` nicht unterstützt → Retry ohne `stop`
+- `_generate_answer_native()` extended with `stop: Optional[list[str]]`
+- Body builds the `stop` field when `stop` is set
+- Fallback: If the Native API does not support `stop` → retry without `stop`
 
-### 2. `reasoning: "off"` nur für Thinking-Modelle ❌
-`reasoning: "off"` wurde nur gesetzt wenn `_model_supports_reasoning()` → True (d.h. `reasoning: thinking` im Registry). REAP-Modelle haben `reasoning: instruct` → kein `reasoning: "off"` → Thinking blieb eingeschaltet → Token-Budget aufgebraucht.
+### 2. `reasoning: "off"` only for thinking models ❌
+`reasoning: "off"` was only set when `_model_supports_reasoning()` → True (i.e. `reasoning: thinking` in the registry). REAP models have `reasoning: instruct` → no `reasoning: "off"` → thinking stayed enabled → token budget exhausted.
 
-**Fix:** `reasoning: "off"` wird jetzt **immer** gesetzt, da die Native-API-Route nur eingeschlagen wird wenn `enable_thinking=False` ist. Der bestehende Fallback (Retry ohne reasoning) fängt Modelle ab, die den Parameter nicht unterstützen.
+**Fix:** `reasoning: "off"` is now **always** set, because the Native API route is only taken when `enable_thinking=False`. The existing fallback (retry without reasoning) catches models that do not support the parameter.
 
-### 3. Kein Fallback für Stop-Token-Fehler ❌
-Die Native-API-Retry-Logik behandelte nur `reasoning`-Fehler, nicht `stop`-Fehler.
+### 3. No fallback for stop-token errors ❌
+The Native API retry logic only handled `reasoning` errors, not `stop` errors.
 
-**Fix:** Neue Hilfsfunktion `_retry_native()` extrahiert. Retry-Kette: stop → reasoning.
+**Fix:** New helper function `_retry_native()` extracted. Retry chain: stop → reasoning.
 
-## Geänderte Datei
+## Changed file
 `custom_benchmark.py`:
-- `_retry_native()` – neue Hilfsfunktion (Z. 760)
-- `_generate_answer_native()` – `stop`-Parameter + `reasoning: "off"` immer (Z. 789)
-- `generate_answer()` – `stop=stop` an Native API übergeben (Z. 720)
+- `_retry_native()` – new helper function (line 760)
+- `_generate_answer_native()` – `stop` parameter + `reasoning: "off"` always (line 789)
+- `generate_answer()` – `stop=stop` passed to Native API (line 720)
 
-Siehe auch: `GPT-OSS-20b_Harmony-Template-Injection.md` (top_k=0 Fix) – ähnliche API-Problematik.
+See also: `GPT-OSS-20b_Harmony-Template-Injection.md` (top_k=0 fix) – similar API issue.

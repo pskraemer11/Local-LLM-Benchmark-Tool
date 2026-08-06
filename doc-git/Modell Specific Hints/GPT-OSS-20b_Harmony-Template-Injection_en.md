@@ -1,21 +1,21 @@
 # GPT-OSS-20b: Harmony-Jinja-Template-Injection in LM Studio Config JSONs
 
 ## Problem
-GPT-OSS-20b **benötigt zwingend** das Harmony-Jinja-Template (`llm.prediction.promptTemplate`)
-im LM-Studio-Config-JSON. Ohne dieses Template verwendet LM Studio sein Default-ChatML-Template
-(`<|im_start|>`, `<|im_end|>`). Das Modell versteht ChatML nicht (erwartet Harmony-Format
-`<|start|>channel<|message|>...<|end|>`) und produziert leeren Output.
+GPT-OSS-20b **strictly requires** the Harmony-Jinja template (`llm.prediction.promptTemplate`)
+in the LM Studio config JSON. Without this template, LM Studio uses its default ChatML template
+(`<|im_start|>`, `<|im_end|>`). The model does not understand ChatML (expects Harmony format
+`<|start|>channel<|message|>...<|end|>`) and produces empty output.
 
-## Ursache
-LM Studio schreibt bei Updates die Config-JSONs ueber. Die Template-Injektion vom 09.07.2026
-und 24.07.2026 wurde dadurch mehrfach ueberschrieben.
-**Zuletzt erneut ueberschrieben bei unbekanntem LM-Studio-Update vor dem 28.07.2026.**
+## Root Cause
+LM Studio overwrites the config JSONs during updates. The template injection from 09.07.2026
+and 24.07.2026 was thereby overwritten several times.
+**Most recently overwritten again by an unknown LM Studio update before 28.07.2026.**
 
 ## Fix (28.07.2026) — Alle bekannten Bugs behoben
 
-### Bug 1: Fehlendes Harmony-Template
-Template `doc-git/Jinja-Chat-Templates/gpt-oss-20b_harmony.jinja` (17221 Zeichen)
-wurde in alle Configs injiziert:
+### Bug 1: Missing Harmony template
+Template `doc-git/Jinja-Chat-Templates/gpt-oss-20b_harmony.jinja` (17221 characters)
+was injected into all configs:
 
 | Config | Vorher | Nachher |
 |---|---|---|
@@ -24,11 +24,11 @@ wurde in alle Configs injiziert:
 | `unsloth/.../Q6_K.gguf.json` | vorhanden, falscher Prompt | Template korrekt + Prompt aktualisiert |
 | `unsloth/.../Q8_0.gguf.json` | vorhanden, falscher Prompt | Template korrekt + Prompt aktualisiert |
 
-### Bug 2: Falscher System-Prompt (XML-Tags statt Markdown)
-Die `systemPrompt` enthielt `<role>`, `<reasoning>`, `<coding>`, `<output>` XML-Tags.
-Diese sind **nicht** Harmony-kompatibel. Der Prompt wurde umgestellt auf Markdown-Headings:
+### Bug 2: Wrong system prompt (XML tags instead of Markdown)
+The `systemPrompt` contained `<role>`, `<reasoning>`, `<coding>`, `<output>` XML tags.
+These are **not** Harmony-compatible. The prompt was switched to Markdown headings:
 
-**Vorher:**
+**Before:**
 ```
 <role>
 You are GPT-OSS, an AI software engineering assistant.
@@ -39,7 +39,7 @@ You are GPT-OSS, an AI software engineering assistant.
 </reasoning>
 ```
 
-**Nachher:**
+**After:**
 ```
 You are gpt-oss-20b, a GPT-OSS MoE model with 20B parameters...
 
@@ -50,40 +50,39 @@ You are gpt-oss-20b, a GPT-OSS MoE model with 20B parameters...
 ...
 ```
 
-Der Fix erfolgte in `assemble_blueprint.py`: neue Funktion `_harmonify_prompt()`
-konvertiert XML-Tag-Prompts in Harmony-Markdown. Nur fuer `gptoss_reasoning`-Blueprint.
+The fix was implemented in `assemble_blueprint.py`: new function `_harmonify_prompt()`
+converts XML-tag prompts to Harmony Markdown. Only for the `gptoss_reasoning` blueprint.
 
-### Bug 3: `chat_template_kwargs` wurde fälschlich an gpt-oss gesendet
-`run_benchmarks.py:_get_evaluation_parameters()` schickte `chat_template_kwargs`
-mit `enable_thinking: False` fuer alle Modelle mit `enable_thinking` im Config.
-Dieser Parameter ist nur fuer Qwen-Modelle gueltig. Fix: `chat_template_kwargs`
-wird nur noch fuer Nicht-gpt-oss-Modelle gesetzt.
+### Bug 3: `chat_template_kwargs` was mistakenly sent to gpt-oss
+`run_benchmarks.py:_get_evaluation_parameters()` sent `chat_template_kwargs`
+with `enable_thinking: False` for all models with `enable_thinking` in the config.
+This parameter is only valid for Qwen models. Fix: `chat_template_kwargs`
+is now only set for non-gpt-oss models.
 
-### Bug 4: `max_thinking_tokens` fehlte — Reasoning-Token-Budget unbegrenzt
-**Kritischster Bug.** Ohne `max_thinking_tokens` denkt gpt-oss bis `max_tokens`
-(4096 bei MATH-500) und produziert `content=""`. Der Parameter musste in 3 Dateien
-hinzugefuegt werden:
+### Bug 4: `max_thinking_tokens` missing — reasoning token budget unlimited
+**Most critical bug.** Without `max_thinking_tokens`, gpt-oss thinks up to `max_tokens`
+(4096 for MATH-500) and produces `content=""`. The parameter had to be added in 3 files:
 
-| Datei | Aenderung |
+| File | Change |
 |---|---|
-| `benchmark_config.py` Zeile 283 | `"max_thinking_tokens": 200` in gpt-oss-Override |
-| `run_benchmarks.py` Zeilen 625, 996 | `"max_thinking_tokens"` in `generation_parameters_keys` |
-| `custom_benchmark.py` Zeilen 763, 779 | `body["max_thinking_tokens"] = 200` fuer gpt-oss |
+| `benchmark_config.py` line 283 | `"max_thinking_tokens": 200` in gpt-oss override |
+| `run_benchmarks.py` lines 625, 996 | `"max_thinking_tokens"` in `generation_parameters_keys` |
+| `custom_benchmark.py` lines 763, 779 | `body["max_thinking_tokens"] = 200` for gpt-oss |
 
-### Bug 5: `reasoning` statt `reasoning_effort` im API-Body
+### Bug 5: `reasoning` instead of `reasoning_effort` in the API body
 `squashed in earlier session (24.07.2026)`
 
-## Wirkung der Fixes (Testlauf 3, 28.07.2026)
+## Effect of the fixes (test run 3, 28.07.2026)
 
-| Benchmark | Vor Fixes (ChatML, kein Budget) | Nach Fixes (Harmony + max_thinking_tokens=200) |
+| Benchmark | Before fixes (ChatML, no budget) | After fixes (Harmony + max_thinking_tokens=200) |
 |---|---|---|
 | DS1000 | 0% (leerer Output) | ~33% (sample-size 3, echter Code) |
 | MATH-500 | 0% (leerer Output) | 20% (sample-size 5) |
 | IFEVAL | 40%/62.5% | 40%/62.5% (stabil) |
 
-## Verifikation
+## Verification
 ```bash
-# Config-JSON auf Template und Prompt pruefen
+# Check config JSON for template and prompt
 python -c "import json; d=json.load(open(r'C:\Users\pskra\.lmstudio\.internal\user-concrete-model-default-config\openai\gpt-oss-20b.json')); fields={f['key']: f['value'] for f in d['operation']['fields']}; print('Has template:', 'promptTemplate' in str(list(fields.keys()))); print('Prompt starts:', repr(fields['llm.prediction.systemPrompt'][:80]))"
 
 # Template-Validierung (registry_tool.py)
@@ -95,14 +94,14 @@ python assemble_blueprint.py assemble
 python assemble_blueprint.py validate
 ```
 
-## Stabilitaet
-Das Template wird bei LM-Studio-Updates ueberschrieben. Nach jedem Update:
-1. `python assemble_blueprint.py assemble` (stellt Prompt + Template wieder her)
-2. Modell neu laden: `lms unload --all && lms load openai/gpt-oss-20b`
+## Stability
+The template is overwritten by LM Studio updates. After every update:
+1. `python assemble_blueprint.py assemble` (restores prompt + template)
+2. Reload the model: `lms unload --all && lms load openai/gpt-oss-20b`
 
 ## Template-Quelle
 `doc-git/Jinja-Chat-Templates/gpt-oss-20b_harmony.jinja`
-(identisch mit `gpt-oss-20b-template_unsloth.jinja`, SHA256 bestaetigt)
+(identical to `gpt-oss-20b-template_unsloth.jinja`, SHA256 confirmed)
 
 ## Quellen
 - https://developers.openai.com/cookbook/articles/openai-harmony
