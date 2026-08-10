@@ -82,14 +82,14 @@ python src\registry_tool.py sync     # Full maintenance – does EVERYTHING auto
 | Field                  | Source                                                      | Example                                                       |
 |------------------------|-------------------------------------------------------------|---------------------------------------------------------------|
 | `reasoning`\`thinking` | **GGUF `tokenizer.chat_template`** via `read_gguf_arch()`   | Patterns: `enable_thinking`, `<think>`, `reasoning_effort`, … |    
-|    \ `instruct`        |  –> no more keyword fallback. Model is skipped without an entry.                                                      |
-| `capabilities`         | Model name (vl\vision\ocr, coder\code)                     | `qwen2.5-coder-14b` → `[coding, text]`                         |
+|    \ `instruct`        |  –> no more keyword fallback. Model is skipped without an entry.                                                            |
+| `capabilities`         | Model name (vl\vision\ocr, coder\code)                      | `qwen2.5-coder-14b` → `[coding, text]`                        |
 | `blueprint`            | From reasoning + capabilities                               | `thinking` → `reasoning_assistant`                            |
 | `truncation`           | contextLength from JSON config                              | `16384` (≥8192) → `medium`                                    |
 | `offload`              | Default 1 (full GPU offload) at `add` \ `fill-ctx`          | `1`                                                           |
 | `num_parallel`         | MoE=4 (except ERNIE→1), Dense=1, GPT-OSS=4                  | `4` (MoE) \ `1` (Dense) \ `1` (ERNIE)                         |
-| `k_cache`              | `q8_0` (default), Gemma-4\GPT-OSS = `f16`                  | `q8_0`, `f16`                                                  |
-| `v_cache`              | `iq4_nl` (default), Gemma-4\GPT-OSS = `f16`                | `iq4_nl`, `q5_1`, `f16`                                        |
+| `k_cache`              | `q8_0` (default), Gemma-4\GPT-OSS = `f16`                   | `q8_0`, `f16`                                                 |
+| `v_cache`              | `iq4_nl` (default), Gemma-4\GPT-OSS = `f16`                 | `iq4_nl`, `q5_1`, `f16`                                       |
 | `n_layers`             | **Automatically from GGUF header** via `add`\`fill-arch`    | `49` (North Mini Code), `64` (Qwen3.6-27B)                    |
 | `hidden_dim`           | **Automatically from GGUF header** via `add`\`fill-arch`    | `2048` \ `5120`                                               |
 | `context_length`       | Formula from `file_size_bytes`, `num_parallel`, KV quant    | `16384` (default when size is missing)                        |
@@ -173,6 +173,15 @@ Re-adding the model later is automatic via `registry_tool.py sync` \ `pipeline`.
 - `status` (default): LMS model count + `compare` report (writes nothing)
 - `sync`: + full `sync` + blueprint classification
 - `full`: + prompt assembly + validation
+
+**Quarantine registry entries of uninstalled models (NEW 10.08.):**
+`python src\registry_tool.py quarantine-missing [--dry-run]`
+Finds registry entries whose models are NOT installed in LM Studio and moves them out
+**reversibly** (configs → `_quarantine_missing_<ts>\` under `CONFIG_ROOT`, entries →
+backup YAML under `doc-git/Review-Artifacts/`, nothing is hard-deleted).
+`pipeline full` runs this automatically as step [2b]. Exit codes: 0 = nothing to do,
+1 = no LMS data, 2 = done, but some candidates were only **reported** (GGUF file
+physically present → index problem, e.g. GLM-4.6V — check manually, no auto-removal).
 
 ### Cheat Sheet
 

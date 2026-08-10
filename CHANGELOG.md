@@ -6,6 +6,14 @@ Hinweise:
 - Stand: 06.08.2026 — umgezogen aus §20 der `doc-git/Architecture, Flow & ChangeLog_en.md` (dort nur noch Verweis).
 - Commit-Hashes beziehen sich auf `main`.
 
+## Registry-Wartung (10.08.2026)
+
+| Date | File | Change |
+|------|------|--------|
+| 10.08. | `src/registry_tool.py` | **validate-Performance-Fix:** `_gguf_drift_errors` (und `cmd_sync_from_gguf`) lasen jede GGUF **zweimal** — parallel via `_read_gguf_arch`, danach sequenziell via `_gguf_has_experts` (gguf-Bibliothek, öffnet jede Datei komplett) → `validate` hing 240s+. `_read_gguf_arch` liefert jetzt `expert_count` als 5. Rückgabewert (mitgelesen aus dem GGUF-Header), MoE-Erkennung erfolgt direkt im parallelen ThreadPool → `validate` in **6s** (38× schneller), 0 Registry-Drifts. `_gguf_has_experts` bleibt nur für `_classify_arch` (Z. 841). +3 Tests angepasst auf 5-Tupel |
+| 10.08. | `doc-git/model_registry.yaml` | `crucible-labs/gemma4-26b-a4b-reap-25`: `context_length` 24576 → 65536 (Config-Feld-Owner ist Quelle) — 1. `validate`-Drift nach dem Fix |
+| 10.08. | `src/registry_tool.py` + `tests/test_registry_tool.py` | **`quarantine-missing`-Kommando:** entfernt Registry-Einträge nicht-installierter Modelle reversibel (Configs nach `_quarantine_missing_<ts>` verschieben, Einträge als YAML-Backup unter `doc-git/Review-Artifacts/`, nichts hart gelöscht). Strenge @-Quant-Erkennung (x@iq4_nl nur installiert, wenn LMS exakt diese Variante führt; `normalize_variants` strippt @-Suffixe → Basis-Varianten maskieren keine fehlenden Quants). Sicherheitsnetz `_gguf_for_key_exists`: GGUF physisch vorhanden → nur melden (Index-Problem wie GLM-4.6V), kein Auto-Entfernen. Config-Verschiebung nur, wenn kein anderer verbleibender Registry-Key sie beansprucht (`_config_claimed_by_other`, verhindert Mitnahme z.B. `google/gemma-4-26b-a4b-it-qat` → unsloth-Config). Eingebunden in `pipeline full` als Schritt [2b]; `--dry-run`-Flag; Exit-Code 2 wenn nur gemeldet. **Lauf 10.08.:** 9 Modelle quarantänt (u.a. `mradermacher/nemotron-cascade-14b-thinking`, `mistralai/codestral-22b-v0.1`, `intel/mirothinker-v1.5-30b-q2ks-mixed-autoround`, 8× fehlende GGUF-Dateien verifiziert), 9 nur gemeldet (physisch vorhanden, z.B. `unsloth/ernie-4.5-21b-a3b-pt@iq4_nl`); `pipeline full` danach: `missing: 0`, 56 assembled, Validation 74/74. +6 Tests (TestCmdQuarantineMissing), ruff 0 |
+
 ## Review-Gate & Cleanup (06.08.2026)
 
 | Date | File | Change |
