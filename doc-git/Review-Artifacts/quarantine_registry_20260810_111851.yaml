@@ -1,0 +1,198 @@
+gabriellarson/mamba-codestral-7b-v0.1:
+  publisher: gabriellarson
+  hf_url: https://huggingface.co/mistralai/Mamba-Codestral-7B-v0.1
+  pub_url: https://mistral.ai/news/codestral-mamba/
+  arch: dense
+  k_cache: q5_1
+  v_cache: iq4_nl
+  offload: 1.0
+  num_parallel: 4
+  notes: 'Architektur: Mamba 2'
+  file_size_bytes: 7753534528
+  context_length: 1048576
+  n_layers: 64
+  hidden_dim: 4096
+  useUnifiedKvCache: false
+  reasoning: instruct
+  capabilities: coding, text
+  blueprint: coding_agent
+  truncation: full
+  max_context_length: 1048576
+  quants: Q8_0
+
+google/gemma-4-26b-a4b-it-qat:
+  publisher: google
+  hf_url: https://huggingface.co/google/gemma-4-26B-A4B-it-qat-q4_0-gguf
+  arch: moe
+  quants: Q4_0
+  k_cache: q8_0
+  v_cache: iq4_nl
+  offload: 1.0
+  num_parallel: 4
+  notes: 'Architektur: MoE | max. 256K Kontext | Text, Image'
+  context_length: 32768
+  n_layers: 30
+  hidden_dim: 2816
+  reasoning: thinking
+  useUnifiedKvCache: false
+  capabilities: coding, vision, text
+  blueprint: gemma_reasoning
+  truncation: full
+  max_context_length: 262144
+
+intel/mirothinker-v1.5-30b-q2ks-mixed-autoround:
+  publisher: Intel
+  hf_url: https://huggingface.co/intel/mirothinker-v1.5-30b-q2ks-mixed-autoround
+  arch: moe
+  quants: Q2_K_S
+  k_cache: q8_0
+  v_cache: iq4_nl
+  offload: 1.0
+  num_parallel: 4
+  notes: 'Architektur: Qwen3 MoE'
+  file_size_bytes: 10740660704
+  context_length: 32768
+  n_layers: 48
+  hidden_dim: 2048
+  reasoning: thinking
+  max_context_length: 262144
+  capabilities: text
+  blueprint: reasoning_assistant
+  truncation: full
+  useUnifiedKvCache: true
+
+lmstudio-community/deepseek-coder-v2-lite-instruct:
+  publisher: lmstudio-community
+  hf_url: https://huggingface.co/lmstudio-community/deepseek-coder-v2-lite-instruct
+  arch: moe
+  quants: Q5_K_M
+  k_cache: q8_0
+  v_cache: iq4_nl
+  offload: 1.0
+  num_parallel: 4
+  notes: 'Architektur: DeepSeek 2 MoE'
+  file_size_bytes: 11851313920
+  context_length: 32768
+  n_layers: 27
+  hidden_dim: 2048
+  reasoning: instruct
+  useUnifiedKvCache: false
+  capabilities: coding, text
+  blueprint: coding_agent
+  truncation: full
+  max_context_length: 163840
+
+lmstudio-community/deepseek-r1-distill-qwen-14b:
+  publisher: lmstudio-community
+  hf_url: https://huggingface.co/lmstudio-community/DeepSeek-R1-Distill-Qwen-14B-GGUF
+  pub_url: https://github.com/deepseek-ai/DeepSeek-V3
+  quants: Q6_K
+  arch: dense
+  k_cache: q8_0
+  v_cache: q5_1
+  notes: 'Architektur: DeepSeek R1 Distill | fine-tuned dense base model: qwen-3-14b'
+  reasoning: instruct
+  capabilities: text
+  blueprint: default_chat
+  truncation: full
+  context_length: 49152
+  offload: 1.0
+  num_parallel: 4
+  file_size_bytes: 12124683392
+  useUnifiedKvCache: true
+  n_layers: 48
+  hidden_dim: 5120
+  max_context_length: 131072
+
+mistralai/codestral-22b-v0.1:
+  publisher: mistralai
+  hf_url: https://huggingface.co/mistralai/mistralai/codestral-22b-v0.1
+  pub_url: https://mistral.ai
+  arch: dense
+  quants: IQ4_XS
+  k_cache: q5_1
+  v_cache: iq4_nl
+  offload: 1.0
+  notes: 'Architektur: Llama Dense | 22B Parameter | Kein Structured Output (Grammar-400er:
+    "Failed to initialize samplers: Unexpected empty grammar stack after accepting
+    piece (29515)", Server-Log 2026-08-03) – mit --no-structured-output oder ohne
+    response_format benutzen'
+  reasoning: instruct
+  capabilities: coding, text
+  blueprint: coding_agent
+  truncation: full
+  num_parallel: 4
+  useUnifiedKvCache: true
+  context_length: 32768
+  file_size_bytes: 11935315327
+  n_layers: 56
+  hidden_dim: 6144
+  max_context_length: 32768
+
+mradermacher/deepseek-coder-33b-instruct:
+  publisher: mradermacher
+  hf_url: https://huggingface.co/mradermacher/deepseek-coder-33b-instruct-GGUF
+  pub_url: https://github.com/deepseek-ai/deepseek-coder
+  quants: Q3_K_S
+  arch: dense
+  k_cache: q8_0
+  v_cache: iq4_nl
+  offload: 1.0
+  notes: 'Architektur: DeepSeek Dense (Coder)'
+  reasoning: instruct
+  capabilities: coding, text
+  blueprint: coding_agent
+  truncation: medium
+  context_length: 16384
+  num_parallel: 4
+  useUnifiedKvCache: true
+  file_size_bytes: 14421773824
+  n_layers: 62
+  hidden_dim: 7168
+  max_context_length: 16384
+
+mradermacher/nemotron-cascade-14b-thinking:
+  publisher: mradermacher
+  hf_url: https://huggingface.co/mradermacher/Nemotron-Cascade-14B-Thinking-GGUF
+  pub_url: https://build.nvidia.com/nvidia/nemotron-cascade-14b-thinking
+  arch: dense
+  quants: Q5_K_M
+  k_cache: q8_0
+  v_cache: q5_1
+  offload: 1.0
+  notes: 14B Parameter; [THINK-Token-basiertes Reasoning
+  reasoning: thinking
+  capabilities: coding, text
+  blueprint: nemotron_reasoning
+  truncation: full
+  num_parallel: 4
+  context_length:
+  file_size_bytes: 10514571040
+  useUnifiedKvCache: true
+  n_layers: 40
+  hidden_dim: 5120
+  max_context_length: 131072
+
+tiiuae/falcon3-mamba-7b-instruct:
+  publisher: tiiuae
+  hf_url: https://huggingface.co/tiiuae/falcon3-mamba-7b-instruct
+  pub_url: https://falconllm.tii.ae
+  arch: dense
+  quants: Q8_0
+  k_cache: q8_0
+  v_cache: iq4_nl
+  offload: 1.0
+  num_parallel: 4
+  notes: 'Architektur: pre- and posttrained causal decoder only architecture trained
+    on a causal language'
+  file_size_bytes: 7765735136
+  context_length: 1048576
+  n_layers: 64
+  hidden_dim: 4096
+  useUnifiedKvCache: false
+  reasoning: instruct
+  capabilities: coding, text
+  blueprint: coding_agent
+  truncation: full
+  max_context_length: 1048576
+

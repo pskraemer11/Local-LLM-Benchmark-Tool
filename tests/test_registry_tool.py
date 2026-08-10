@@ -17,6 +17,7 @@ import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
+import yaml
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
@@ -628,22 +629,23 @@ class TestReadGgufArchReasoning:
     def test_reasoning_detected_when_template_after_arch(self, tmp_path):
         p = tmp_path / "model.gguf"
         p.write_bytes(_make_mini_gguf(48, 5120, "{% if enable_thinking %}<think>{% endif %}"))
-        nl, hd, is_reasoning, ctx = rt._read_gguf_arch(str(p))
+        nl, hd, is_reasoning, ctx, exp = rt._read_gguf_arch(str(p))
         assert nl == 48
         assert hd == 5120
         assert is_reasoning is True
         assert ctx == 16384
+        assert exp is None  # kein expert_count-Key in Mini-GGUF
 
     def test_no_template_yields_false(self, tmp_path):
         p = tmp_path / "model.gguf"
         p.write_bytes(_make_mini_gguf(48, 5120, None))
-        nl, hd, is_reasoning, ctx = rt._read_gguf_arch(str(p))
+        nl, hd, is_reasoning, ctx, exp = rt._read_gguf_arch(str(p))
         assert (nl, hd, is_reasoning, ctx) == (48, 5120, False, 16384)
 
     def test_corrupt_file_yields_none(self, tmp_path):
         p = tmp_path / "broken.gguf"
         p.write_bytes(b"not a gguf file")
-        assert rt._read_gguf_arch(str(p)) == (None, None, None, None)
+        assert rt._read_gguf_arch(str(p)) == (None, None, None, None, None)
 
 
 class TestDetectReasoningFromTemplate:
@@ -735,6 +737,118 @@ class TestCmdRm:
         assert rt.load_registry(reg_path) == {}
 
 
+class TestCmdQuarantineMissing:
+    """registry_tool.py quarantine-missing – nicht-installierte Modelle in Quarantäne."""
+
+    def _setup(self, tmp_path, monkeypatch, lms_models, entries, with_config=True):
+        reg_path = tmp_path / "registry.yaml"
+        with open(reg_path, "w", encoding="utf-8") as f:
+            rt.y.dump(entries, f)
+        cfg_root = tmp_path / "configs"
+        if with_config:
+            cfg_dir = cfg_root / "mradermacher" / "Nemotron-Cascade-14B-Thinking-MXFP4-GGUF"
+            cfg_dir.mkdir(parents=True)
+            cfg_file = cfg_dir / "Nemotron-Cascade-14B-Thinking-MXFP4.gguf.json"
+            cfg_file.write_text(json.dumps({"operation": {"fields": []}}), encoding="utf-8")
+        monkeypatch.setattr(rt, "REGISTRY_PATH", reg_path)
+        monkeypatch.setattr(rt, "CONFIG_ROOT", cfg_root)
+        monkeypatch.setattr(rt, "MODELS_CACHE", tmp_path / "models")
+        monkeypatch.setattr(rt, "_run_lms_ls", lambda: lms_models)
+        monkeypatch.setattr(rt, "_gguf_for_key_exists", lambda key: False)
+        return reg_path
+
+    def test_missing_entry_quarantined(self, tmp_path, monkeypatch):
+        reg_path = self._setup(
+            tmp_path, monkeypatch,
+            lms_models=[{"modelKey": "openai/gpt-oss-20b"}],
+            entries={
+                "mradermacher/nemotron-cascade-14b-thinking": {"reasoning": "thinking", "blueprint": "full"},
+                "openai/gpt-oss-20b": {"reasoning": "thinking", "blueprint": "full"},
+            },
+        )
+        assert rt.cmd_quarantine_missing() == 0
+        reg = rt.load_registry(reg_path)
+        assert "mradermacher/nemotron-cascade-14b-thinking" not in reg
+        assert "openai/gpt-oss-20b" in reg
+        moved = list((tmp_path / "configs").glob("_quarantine_missing_*/**/*.json"))
+        assert len(moved) == 1
+        assert "Nemotron-Cascade-14B-Thinking-MXFP4.gguf.json" in str(moved[0])
+
+    def test_missing_kept_when_gguf_exists(self, tmp_path, monkeypatch):
+        reg_path = self._setup(
+            tmp_path, monkeypatch,
+            lms_models=[{"modelKey": "openai/gpt-oss-20b"}],
+            entries={
+                "mradermacher/nemotron-cascade-14b-thinking": {"reasoning": "thinking", "blueprint": "full"},
+            },
+            with_config=False,
+        )
+        monkeypatch.setattr(rt, "_gguf_for_key_exists", lambda key: True)
+        assert rt.cmd_quarantine_missing() == 2
+        assert "mradermacher/nemotron-cascade-14b-thinking" in rt.load_registry(reg_path)
+        assert not list((tmp_path / "configs").glob("_quarantine_missing_*"))
+
+    def test_dry_run_writes_nothing(self, tmp_path, monkeypatch):
+        reg_path = self._setup(
+            tmp_path, monkeypatch,
+            lms_models=[{"modelKey": "openai/gpt-oss-20b"}],
+            entries={
+                "mradermacher/nemotron-cascade-14b-thinking": {"reasoning": "thinking", "blueprint": "full"},
+            },
+        )
+        assert rt.cmd_quarantine_missing(dry_run=True) == 0
+        assert "mradermacher/nemotron-cascade-14b-thinking" in rt.load_registry(reg_path)
+        assert not list((tmp_path / "configs").glob("_quarantine_missing_*"))
+
+    def test_no_lms_data_aborts(self, tmp_path, monkeypatch):
+        reg_path = self._setup(
+            tmp_path, monkeypatch,
+            lms_models=[],
+            entries={
+                "mradermacher/nemotron-cascade-14b-thinking": {"reasoning": "thinking", "blueprint": "full"},
+            },
+        )
+        assert rt.cmd_quarantine_missing() == 1
+        assert "mradermacher/nemotron-cascade-14b-thinking" in rt.load_registry(reg_path)
+        assert not list((tmp_path / "configs").glob("_quarantine_missing_*"))
+
+    def test_quant_variant_quarantined_when_not_installed(self, tmp_path, monkeypatch):
+        reg_path = self._setup(
+            tmp_path, monkeypatch,
+            lms_models=[{"modelKey": "unsloth/ernie-4.5-21b-a3b-pt"}],
+            entries={
+                "unsloth/ernie-4.5-21b-a3b-pt@iq4_nl": {"reasoning": "thinking", "blueprint": "full"},
+                "unsloth/ernie-4.5-21b-a3b-pt": {"reasoning": "thinking", "blueprint": "full"},
+            },
+            with_config=False,
+        )
+        assert rt.cmd_quarantine_missing() == 0
+        reg = rt.load_registry(reg_path)
+        assert "unsloth/ernie-4.5-21b-a3b-pt" in reg
+        assert "unsloth/ernie-4.5-21b-a3b-pt@iq4_nl" not in reg
+        assert not list((tmp_path / "configs").glob("_quarantine_missing_*"))
+
+    def test_config_shared_with_survivor_stays(self, tmp_path, monkeypatch):
+        reg_path = self._setup(
+            tmp_path, monkeypatch,
+            lms_models=[{"modelKey": "unsloth/gemma-4-26b-a4b-it@iq3_s"}],
+            entries={
+                "google/gemma-4-26b-a4b-it-qat": {"reasoning": "thinking", "blueprint": "full"},
+                "unsloth/gemma-4-26b-a4b-it@iq3_s": {"reasoning": "thinking", "blueprint": "full"},
+            },
+            with_config=False,
+        )
+        cfg_dir = tmp_path / "configs" / "unsloth" / "gemma-4-26B-A4B-it-GGUF"
+        cfg_dir.mkdir(parents=True)
+        cfg_file = cfg_dir / "gemma-4-26B-A4B-it-UD-IQ3_S.gguf.json"
+        cfg_file.write_text(json.dumps({"operation": {"fields": []}}), encoding="utf-8")
+        assert rt.cmd_quarantine_missing() == 0
+        reg = rt.load_registry(reg_path)
+        assert "google/gemma-4-26b-a4b-it-qat" not in reg
+        assert "unsloth/gemma-4-26b-a4b-it@iq3_s" in reg
+        assert cfg_file.exists()
+
+
 # ─────────────────────────────────────────────────────────────────────
 # MTP-Drafter / mmproj: Zusatzdateien ≠ eigenständige Modelle
 # ─────────────────────────────────────────────────────────────────────
@@ -821,3 +935,144 @@ class TestCmdAddSkipsSupportFiles:
         reg = rt.load_registry(reg_path)
         assert "unsloth/qwen3.6-27b-mtp" in reg
         assert result["added"] == ["unsloth/qwen3.6-27b-mtp"]
+
+
+# ─────────────────────────────────────────────────────────────────────
+# cmd_sync_from_gguf: Auto-Fix aus GGUF-Headern (Feld-Ownership)
+# ─────────────────────────────────────────────────────────────────────
+
+def _write_registry(tmp_path, data):
+    path = tmp_path / "registry.yaml"
+    path.write_text(yaml.dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    return path
+
+
+class TestFindGgufArchForKey:
+    def test_exact_normalized_match(self):
+        gguf = {"glm-4-7-flash": (61, 5120, True, 131072)}
+        assert rt._find_gguf_arch_for_key("unsloth/glm-4.7-flash", gguf) == (61, 5120, True, 131072)
+
+    def test_quant_strip_match(self):
+        gguf = {"qwen3-14b": (40, 5120, True, 32768)}
+        assert rt._find_gguf_arch_for_key("qwen/qwen3-14b@q4_0", gguf) == (40, 5120, True, 32768)
+
+    def test_no_match_returns_none(self):
+        assert rt._find_gguf_arch_for_key("unknown/model", {"other": (1, 2, False, 3)}) is None
+
+
+class TestCmdSyncFromGguf:
+    """Auto-Fix-Verhalten: Abweichungen werden korrigiert, Konformität bleibt stehen."""
+
+    def _run(self, tmp_path, registry, lms_models, gguf_data, gguf_moe):
+        path = _write_registry(tmp_path, registry)
+        models_dir = tmp_path / "models"
+        with (
+            patch.object(rt, "REGISTRY_PATH", path),
+            patch.object(rt, "_run_lms_ls", return_value=lms_models),
+            patch.object(rt, "MODELS_CACHE", models_dir),
+            patch.object(rt, "_read_gguf_arch") as read,
+        ):
+            read.side_effect = lambda p: (
+                *gguf_data.get(p, (None, None, None, None)),
+                gguf_moe.get(p, False),
+            )
+            rt.cmd_sync_from_gguf()
+        return rt.load_registry(path)
+
+    def _lms(self, model_key, path):
+        return {"modelKey": model_key, "path": path}
+
+    def _gguf_path(self, tmp_path, rel):
+        full = tmp_path / "models" / rel
+        full.parent.mkdir(parents=True, exist_ok=True)
+        full.write_bytes(b"x")
+        return str(full)
+
+    def test_fixes_drift_from_gguf(self, tmp_path):
+        reg = {"unsloth/glm-4.7-flash": {
+            "arch": "dense", "n_layers": 60, "hidden_dim": 5000,
+            "max_context_length": 65536, "reasoning": "instruct",
+        }}
+        gguf_path = self._gguf_path(tmp_path, "unsloth/GLM-4.7-Flash-GGUF/x.gguf")
+        lms = [self._lms("GLM-4.7-Flash", "unsloth/GLM-4.7-Flash-GGUF/x.gguf")]
+        gguf = {gguf_path: (61, 5120, True, 131072)}
+        out = self._run(tmp_path, reg, lms, gguf, {gguf_path: True})
+        e = out["unsloth/glm-4.7-flash"]
+        assert e["n_layers"] == 61
+        assert e["hidden_dim"] == 5120
+        assert e["max_context_length"] == 131072
+        assert e["arch"] == "moe"
+        assert e["reasoning"] == "instruct"  # gesetzt -> unangetastet
+
+    def test_conformant_entries_untouched(self, tmp_path):
+        reg = {"unsloth/glm-4.7-flash": {
+            "arch": "moe", "n_layers": 61, "hidden_dim": 5120,
+            "max_context_length": 131072, "reasoning": "thinking",
+        }}
+        gguf_path = self._gguf_path(tmp_path, "unsloth/GLM-4.7-Flash-GGUF/x.gguf")
+        lms = [self._lms("GLM-4.7-Flash", "unsloth/GLM-4.7-Flash-GGUF/x.gguf")]
+        gguf = {gguf_path: (61, 5120, True, 131072)}
+        out = self._run(tmp_path, reg, lms, gguf, {gguf_path: True})
+        assert out["unsloth/glm-4.7-flash"] == {
+            "arch": "moe", "n_layers": 61, "hidden_dim": 5120,
+            "max_context_length": 131072, "reasoning": "thinking",
+        }
+
+    def test_models_without_gguf_match_untouched(self, tmp_path):
+        reg = {"unsloth/glm-4.7-flash": {"arch": "dense", "n_layers": 60}}
+        self._gguf_path(tmp_path, "unsloth/GLM-4.7-Flash-GGUF/x.gguf")
+        lms = [self._lms("GLM-4.7-Flash", "unsloth/GLM-4.7-Flash-GGUF/x.gguf")]
+        out = self._run(tmp_path, reg, lms, {}, {})
+        assert out["unsloth/glm-4.7-flash"]["n_layers"] == 60
+
+    def test_empty_registry_exits_with_error(self, tmp_path):
+        path = _write_registry(tmp_path, {})
+        with (
+            patch.object(rt, "REGISTRY_PATH", path),
+            patch.object(rt, "_run_lms_ls", return_value=[]),
+            pytest.raises(SystemExit),
+        ):
+            rt.cmd_sync_from_gguf()
+
+
+# ─────────────────────────────────────────────────────────────────────
+# pipeline full: Exit-Code-Logik bei offenen Melde-Konflikten
+# ─────────────────────────────────────────────────────────────────────
+
+class TestPipelineDriftExitCode:
+    """pipeline full endet mit Exit 1, wenn Melde-Konflikte (Feld-Ownership)
+    offen sind; mit --ignore-drift bzw. konvergiertem Zustand Exit 0."""
+
+    def _run_pipeline(self, validate_errors, ignore_drift=False):
+        with (
+            patch.object(rt, "_run_lms_ls", return_value=[]),
+            patch.object(rt, "cmd_compare"),
+            patch.object(rt, "cmd_sync"),
+            patch.object(rt, "classify_registry"),
+            patch.object(rt, "assemble_prompts"),
+            patch.object(rt, "cmd_patch_glm_configs"),
+            patch.object(rt, "validate_prompts"),
+            patch.object(rt, "cmd_validate", return_value=validate_errors),
+        ):
+            return rt.cmd_pipeline("full", ignore_drift=ignore_drift)
+
+    def test_drift_checks_constant(self):
+        assert "config_context_drift" in rt._DRIFT_CHECKS
+        assert "config_np_ukv_drift" in rt._DRIFT_CHECKS
+        assert "config_context_too_small" in rt._DRIFT_CHECKS
+        assert "gguf_header_drift" in rt._DRIFT_CHECKS
+
+    def test_no_drift_exits_0(self):
+        assert self._run_pipeline({"config_np_ukv_drift": [], "gguf_header_drift": []}) is None
+
+    def test_open_drift_exits_1(self):
+        with pytest.raises(SystemExit) as exc:
+            self._run_pipeline({"config_np_ukv_drift": ["unsloth/x: np=1 != 4"]})
+        assert exc.value.code == 1
+
+    def test_ignore_drift_exits_0(self):
+        assert self._run_pipeline({"config_np_ukv_drift": ["unsloth/x: np=1 != 4"]}, ignore_drift=True) is None
+
+    def test_non_drift_errors_do_not_exit(self):
+        # template_missing_file etc. sind keine Melde-Konflikte -> kein Exit
+        assert self._run_pipeline({"template_missing_file": ["unsloth/x: fehlt"]}) is None
