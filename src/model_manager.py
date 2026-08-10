@@ -64,6 +64,115 @@ TIMEOUT_UNLOAD_WAIT = 2
 # need to know that the server is reachable but no model is loaded yet.
 HEALTH_CHECK_SENTINEL_MODEL = "check"
 
+
+# ── TabbyAPI-Fallback (exllamav3-Backend) ─────────────────────────
+# Die Modell-Verwaltung (Laden/Entladen/Status) spricht standardmaessig
+# LM Studio an (lms CLI bzw. /api/v1/*-Endpunkte). TabbyAPI stellt das
+# Modell-Management unter /v1/model/* bereit. Diese Helfer greifen nur,
+# wenn der LM-Studio-Pfad fehlschlaegt (Server nicht erreichbar/404).
+
+def _tabbyapi_request(endpoint: str, method: str = "GET", data: dict | None = None,
+                      timeout: int = 30, read_body: bool = True) -> dict | None:
+    """Low-level request gegen TabbyAPI-Endpunkte (/v1/model/*).
+
+    read_body=False: Antwort nicht lesen (SSE-Streams wie /model/load laufen
+    bis Load-Ende weiter). Der Load laeuft in TabbyAPI als Detached-Task,
+    der Client-Disconnect ueberlebt. Jeder 2xx-Status gilt als Erfolg.
+    """
+    from urllib.error import HTTPError, URLError
+    from urllib.request import Request, urlopen
+    body = None if data is None else json.dumps(data).encode("utf-8")
+    headers = {"Content-Type": "application/json"} if body is not None else {}
+    try:
+        req = Request(f"{API_BASE}{endpoint}", data=body, headers=headers, method=method)
+        with urlopen(req, timeout=timeout) as resp:
+            if not read_body:
+                resp.read(1)
+                return {}
+            raw = resp.read().decode("utf-8")
+            if not raw:
+                return {}
+            try:
+                return json.loads(raw)
+            except json.JSONDecodeError:
+                # Erfolgreicher 2xx, aber kein JSON (z.B. SSE vom
+                # /model/load-Stream) - als Erfolg werten.
+                return {}
+    except (HTTPError, URLError, OSError):
+        return None
+
+
+def _tabbyapi_loaded_name() -> str | None:
+    """Name des in TabbyAPI aktuell geladenen Modells (oder None).
+
+    Waehrend eines Loads antwortet /v1/model mit 503 ("No models are
+    currently loaded") -> wird als None gewertet, Polling laeuft weiter.
+    """
+    data = _tabbyapi_request("/model")
+    if data is None:
+        return None
+    name = data.get("id")
+    return name if name else None
+
+
+def _tabbyapi_config_load_args() -> dict:
+    """cache_size/max_seq_len aus der tabbyAPI config.yml lesen (Fallback-Defaults).
+
+    Ohne cache_size wuerde TabbyAPI 262144 Tokens als KV-Cache ansetzen und
+    an 16 GB VRAM (RTX 5060 Ti) mit OOM scheitern. Beim Laden via API werden
+    die config.yml-Werte naemlich NICHT uebernommen (nur beim Serverstart).
+    """
+    cfg_paths = [
+        Path(os.environ.get("TABBYAPI_CONFIG", "")) if os.environ.get("TABBYAPI_CONFIG") else None,
+        Path(__file__).resolve().parents[1] / "tabbyAPI" / "config.yml",
+    ]
+    for p in cfg_paths:
+        if p is None or not p.is_file():
+            continue
+        try:
+            import re as _re
+            text = p.read_text(encoding="utf-8")
+
+            def _find(key: str, default: int, _text: str = text) -> int:
+                m = _re.search(rf"^\s*{key}\s*:\s*(\d+)", _text, _re.MULTILINE)
+                return int(m.group(1)) if m else default
+            return {
+                "cache_size": _find(r"cache_size", 8192),
+                "max_seq_len": _find(r"max_seq_len", 16384),
+            }
+        except OSError:
+            continue
+    return {"cache_size": 8192, "max_seq_len": 16384}
+
+
+def _tabbyapi_load_model(model_identifier: str, timeout: int = TIMEOUT_LOAD_MODEL) -> str | None:
+    """Modell in TabbyAPI laden (Name = Ordner-/Modellname) und auf Load warten."""
+    if _tabbyapi_loaded_name() == model_identifier:
+        return model_identifier
+    payload = {"model_name": model_identifier, **_tabbyapi_config_load_args()}
+    if _tabbyapi_request("/model/load", method="POST", data=payload,
+                         timeout=10, read_body=False) is None:
+        return None
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        time.sleep(2)
+        name = _tabbyapi_loaded_name()
+        if name == model_identifier:
+            return name
+    return None
+
+
+def _tabbyapi_unload(timeout: int = TIMEOUT_MODEL_READY) -> bool:
+    """Alle Modelle in TabbyAPI entladen."""
+    _tabbyapi_request("/model/unload", method="POST", data={})
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        time.sleep(2)
+        if _tabbyapi_loaded_name() is None:
+            return True
+    return False
+
+
 # ── Pipeline-specific timeouts ──────────────────────────────────
 # These values are imported by run_benchmarks.py and used as
 # subprocess/scenario timeouts in each pipeline function.
@@ -147,15 +256,30 @@ def is_api_available() -> bool:
         return False
 
 
+def _loaded_from_tabbyapi() -> dict | None:
+    """Geladenes Modell aus TabbyAPI (oder None)."""
+    name = _tabbyapi_loaded_name()
+    if name:
+        return {
+            "identifier": name,
+            "model_identifier": name,
+            "display_name": name,
+            "status": "loaded",
+            "context_length": 0,
+        }
+    return None
+
+
 def get_current_loaded_model() -> LoadedModelInfo | None:
     try:
         r = subprocess.run(["lms", "ps", "--json"], capture_output=True, text=True,
                            timeout=15, encoding="utf-8", errors="replace")
         if r.returncode != 0:
-            return None
+            # Fallback: TabbyAPI (z.B. LM Studio läuft, aber CLI antwortet nicht).
+            return _loaded_from_tabbyapi()
         entries = safe_json_loads(r.stdout)
         if not entries:
-            return None
+            return _loaded_from_tabbyapi()
         entry = entries[0]
         return {
             "identifier": entry.get("identifier", ""),
@@ -168,6 +292,10 @@ def get_current_loaded_model() -> LoadedModelInfo | None:
         # KeyError deckt den Fall ab, dass `lms ps --json` ein dict (statt Liste)
         # liefert - siehe test_handles_dict_format. Vertrag: Optional[LoadedModelInfo].
         warn(f"lms ps --json fehlgeschlagen: {type(e).__name__}: {e}")
+        # Fallback: TabbyAPI (geladenes Modell direkt vom /v1/model).
+        loaded = _loaded_from_tabbyapi()
+        if loaded:
+            return loaded
         return None
 
 
@@ -182,6 +310,10 @@ def has_unloaded_all_models() -> bool:
     # Get list of loaded models
     models_data = _rest_request("/api/v1/models", method="GET")
     if models_data is None:
+        # Fallback: TabbyAPI - entladen ohne Modellliste.
+        if _tabbyapi_unload():
+            ok("All models unloaded (TabbyAPI)")
+            return True
         warn("Could not fetch model list")
         return False
     
@@ -570,15 +702,22 @@ def load_model_via_lms(model_identifier: str, gpu_offload: float | None = None) 
             return True, model_identifier
         
         # Handle specific errors
-        if attempt == 0:
-            # Check if LM Studio is running, retry if needed
-            if _is_lmstudio_running():
-                warn("Load failed - retrying...")
-                time.sleep(3)
-                continue
-            else:
-                warn("LM Studio not running")
-        
+        if result is None:
+            # Fallback: TabbyAPI (Modellname = Modell-/Ordnername).
+            # Wird zuerst versucht, unabhaengig vom LM-Studio-Status.
+            loaded = _tabbyapi_load_model(model_identifier)
+            if loaded:
+                ok(f"Loaded via TabbyAPI: {loaded}")
+                return True, loaded
+            if attempt == 0:
+                # Check if LM Studio is running, retry if needed
+                if _is_lmstudio_running():
+                    warn("Load failed - retrying...")
+                    time.sleep(3)
+                    continue
+                else:
+                    warn("LM Studio not running")
+
         warn(f"Load failed (attempt {attempt+1}/2)")
         return False, None
     
@@ -598,6 +737,10 @@ def is_model_ready(timeout: int = TIMEOUT_MODEL_READY) -> bool:
     while time.time() - start < timeout:
         time.sleep(2)
         print(".", end="", flush=True)
+        # TabbyAPI: bereit, sobald /v1/model/status ein Modell meldet.
+        if _tabbyapi_loaded_name() is not None:
+            print(" OK (TabbyAPI)")
+            return True
         try:
             req = Request(f"{API_BASE}/chat/completions", method="POST",
                           data=json.dumps({
