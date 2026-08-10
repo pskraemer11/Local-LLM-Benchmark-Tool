@@ -25,6 +25,11 @@ from typing import Any
 from ruamel.yaml import YAML
 
 from benchmark_config import BLACKLIST, GPTOSS_REASONING_EFFORT
+from model_identity import (
+    _arch_reasoning_map,
+    normalize_for_config,
+    normalize_model_name,
+)
 
 # === Pfade ===
 _SRC_DIR = Path(__file__).parent
@@ -53,75 +58,18 @@ NON_REASONING_MODELS = [
 # Qwen3.6 (qwen35, qwen35moe): Dual-Mode, Default = Thinking.
 # Qwen3 (qwen3, qwen3moe): Default = Instruct. Nur explizites "thinking" im Namen → thinking.
 # Exception: "qwen3-30b-a3b-thinking-2507" → thinking
-_ARCH_REASONING_MAP = {
-    "qwen35moe": "thinking",        # Qwen3.6 MoE → dual, Default Thinking
-    "qwen35": "thinking",           # Qwen3.6 → dual, Default Thinking
-    "qwen3moe": "instruct",         # Qwen3 MoE (Coder/Instruct) → Instruct
-    "qwen3": "instruct",            # Qwen3 (Instruct/Coder) → Instruct
-    "deepseek2": "thinking",
-    "kimi-linear": "thinking",
-    "gpt-oss": "thinking",
-    "nomic-bert": "none",
-    "flux": "none",
-}
+# Zentrale Quelle ist seit 2026-08-09 model_identity.MODEL_FAMILIES.
+_ARCH_REASONING_MAP = _arch_reasoning_map()
 
 
-def normalize_model_name(name: str) -> str:
-    """Normalize a model name for matching between registry and directory names."""
-    s = name.lower()
-    s = re.sub(r"\.gguf$", "", s)
-    s = re.sub(r"-(gguf|mxfp4)$", "", s)
-    # Strip -gguf-/-mxfp4- also from middle (Intel/JetBrains naming convention)
-    s = re.sub(r"[-_](gguf|mxfp4)[-_]", r"-", s)
-    # Strip publisher prefix (e.g., "mradermacher/", "unsloth/")
-    s = re.sub(r"^[^/]+/", "", s)
-    # Normalize separators: dots and underscores become hyphens
-    s = s.replace(".", "-").replace("_", "-")
-    # Collapse multiple hyphens
-    while "--" in s:
-        s = s.replace("--", "-")
-    return s
-
-
+# Normalisierung konsolidiert in model_identity.py (Fix 2026-08-09):
+# normalize_model_name / normalize_for_config werden von dort importiert.
+# _VARIANT_SUFFIXES bleibt als Alias fuer bestehende Nutzungsstellen.
 _VARIANT_SUFFIXES = (
     "-ud",          # Unsloth distilled
     "-qat",         # Quantization-aware training variant: wird "qat" geschrieben, nicht "quat"!
     "-imatrix",     # Importance-matrix quant
 )
-
-
-def normalize_for_config(name: str) -> str:
-    """Broader normalization for config matching.
-
-    Like normalize_model_name but also strips:
-    - Quantization suffixes (@q4_0, @iq4_nl, etc.)
-    - Variant suffixes (-ud, -quat, -imatrix)
-    - Quant/format suffixes in directory names (-mxfp4, -gguf, -q4_0, -q8_0, etc.)
-    """
-    s = normalize_model_name(name)
-    # Strip @quant suffix (e.g. @iq4_nl, @q4_k_s, @q5_0)
-    idx = s.find("@")
-    if idx > 0:
-        s = s[:idx]
-    # Strip variant suffixes
-    for suffix in _VARIANT_SUFFIXES:
-        if s.endswith(suffix):
-            s = s[:-len(suffix)]
-            break
-    # Strip common quant/format suffixes in directory names
-    for suffix in ("-mxfp4", "-gguf", "-mxpr4", "-q4-0", "-q4-k", "-q5-0", "-q5-k", "-q6-k", "-q8-0", "-q2-k", "-q3-k", "-q1-0"):
-        if s.endswith(suffix):
-            s = s[:-len(suffix)]
-            break
-    # Strip -gguf-* patterns (e.g., -gguf-mxfp4-moe, -gguf-q4-k-m)
-    if "-gguf" in s:
-        idx = s.find("-gguf")
-        s = s[:idx]
-    # Strip -mxfp4-* patterns (e.g., -mxfp4-moe) -> preserve trailing hyphen
-    if "-mxfp4-" in s:
-        idx = s.find("-mxfp4-")
-        s = s[:idx] + "-" + s[idx+len("-mxfp4-"):]
-    return s
 
 
 def find_config_for_registry_key(
@@ -770,15 +718,15 @@ def create_blueprint_definitions() -> None:
     modules = {
         "safety_block": {
             "description": "Safety constraints",
-            "full": "<safety>\n- Do not execute code without explicit user confirmation.\n- Do not fabricate information or pretend to have capabilities you lack.\n- Respect user privacy and data security.\n</safety>",
-            "medium": "<safety>Do not execute code without user confirmation. Do not fabricate information.</safety>",
-            "minimal": "<safety>Do not execute code without user confirmation. Do not fabricate information.</safety>",
+            "full": "<safety>\n-Never introduce secrets or credentials into code, logs, or commits.\n- Do not execute code without explicit user confirmation.\n- Do not fabricate information or pretend to have capabilities you lack.\n- Respect user privacy and data security.\n</safety>",
+            "medium": "<safety>Never introduce secrets or credentials into code, logs, or commits. Do not execute code without user confirmation. Do not fabricate information.</safety>",
+            "minimal": "<safety>Never introduce secrets or credentials into code, logs, or commits. Do not execute code without user confirmation. Do not fabricate information.</safety>",
         },
         "coding_principles": {
             "description": "Code quality rules",
-            "full": "<coding>\n\n<code_quality>\n- Write clean, efficient code with minimal comments\n- Comment only where logic is not self-explanatory; avoid redundancy\n- Make minimal changes — no unprompted refactoring\n- Understand the codebase thoroughly before implementing\n- Break extensive new code into smaller units\n</code_quality>\n\n<file_system>\n- Verify file paths; do not assume relative to cwd\n- Edit files in place; never create renamed copies\n- Use sed for global search/replace\n</file_system>\n\n<testing>\n- For bug fixes: write a test that reproduces the issue first\n- For new features: test-driven development where appropriate\n- Consult user if testing infra is missing or costly to set up\n</testing>\n\n<troubleshooting>\n- On repeated failures: list 5-7 possible causes, assess likelihood, address systematically\n- On major obstacles: propose a new plan and seek confirmation\n</troubleshooting>\n\n</coding>",
-            "medium": "<coding>Write clean, minimal code. Understand codebase first. Edit in place; verify paths. Reproduce bugs with tests before fixing. On failure, consider root causes systematically.</coding>",
-            "minimal": "",
+            "full": "\n<coding>\n1. GitHub: Never commit unless explicitly asked. Never push unless explicitly asked.\n2. Never introduce secrets or credentials into code, logs, or commits.\n3. Don't refactor surrounding code unless asked.\n\n<Code_changes>\n- Understand existing conventions before editing\n- Read surrounding code, imports, and neighboring files\n- Mimic existing style. Use the same libraries and patterns\n- Never assume a library is available — verify it's used\n- Make minimal changes\n- When running a non-trivial bash command that changes the system, briefly state what it does and why\n- After completing a task, run lint and typecheck. If tools are unknown, ask the user and suggest adding to `AGENTS.md`\n</Code_changes>\n\n<code_quality>\n- Write clean, efficient code with minimal comments\n- Comment only where logic is not self-explanatory; avoid redundancy\n- Understand the codebase thoroughly before implementing\n- Break extensive new code into smaller units\n</code_quality>\n\n<file_system>\n- Verify file paths; do not assume relative to cwd\n- Edit files in place; never create renamed copies\n- Use sed for global search/replace\n</file_system>\n\n<testing>\n- For bug fixes: write a test that reproduces the issue first\n- For new features: test-driven development where appropriate\n- Consult user if testing infra is missing or costly to set up\n</testing>\n\n<troubleshooting>\n- On failure, consider root causes systematically\n- On repeated failures: list 5-7 possible causes, assess likelihood, address systematically\n- On major obstacles: propose a new plan and seek confirmation\n</troubleshooting>\n\n</coding>\n</coding>",
+            "medium": "<coding>Understand existing conventions before editing. Read surrounding code, imports, and neighboring files. Mimic existing style. Use the same libraries and patterns. Never assume a library is available — verify it's used. Make minimal changes. Don't refactor surrounding code unless asked. After completing a task, run lint and typecheck. If unknown, ask the user and suggest adding to AGENTS.md. When running a non-trivial bash command that changes the system, briefly state what it does and why. Edit in place; verify paths. Reproduce bugs with tests before fixing. On failure, consider root causes systematically.</coding>",
+            "minimal": "<coding>Write clean, minimal code. Understand codebase first. Edit in place; verify paths. Reproduce bugs with tests before fixing. On failure, consider root causes systematically.</coding>",
         },
         "output_style_default": {
             "description": "General output style",
@@ -853,15 +801,21 @@ def assemble_prompts(preview_only: bool = False) -> None:
     lms_configs = read_lms_configs(CONFIG_ROOT)
 
     # Build reverse lookup: normalized config name -> list of (publisher, info)
+    # Zusaetzlich Broad-Keys (ohne @quant/Variant-Suffix) einfuegen, damit
+    # Registry-Keys mit Quant-Suffix (z.B. "...@iq4_nl") matchen koennen.
     config_lookup = {}
     for info in lms_configs:
         name = info.get("dir_name", "")
         key = normalize_model_name(name)
         config_lookup.setdefault(key, []).append((info["publisher"], info))
+        key_broad = normalize_for_config(name)
+        config_lookup.setdefault(key_broad, []).append((info["publisher"], info))
         pub = info.get("publisher", "")
         if pub:
             key2 = normalize_model_name(f"{pub}-{name}")
             config_lookup.setdefault(key2, []).append((info["publisher"], info))
+            key2_broad = normalize_for_config(f"{pub}-{name}")
+            config_lookup.setdefault(key2_broad, []).append((info["publisher"], info))
 
     stats = {"assembled": 0, "skipped": 0, "not_found": 0, "errors": 0, "total_configs_written": 0}
 
@@ -906,47 +860,55 @@ def assemble_prompts(preview_only: bool = False) -> None:
         assembled_prompt = "\n\n".join(prompt_parts)
 
         # Find all matching JSON configs (all publisher variants, exact + fuzzy)
-        search_key = normalize_model_name(model_name)
+        # @quant-Suffixe (z.B. @iq4_nl) bleiben in normalize_model_name erhalten und
+        # verhindern den Match. Deshalb zusaetzlich den Broad-Key (ohne Quant/
+        # Variant-Suffix) pruefen. Fix 2026-08-07: NOT FOUND fuer @quant-Keys.
+        search_keys = [normalize_model_name(model_name)]
+        broad_key = normalize_for_config(model_name)
+        if broad_key != search_keys[0]:
+            search_keys.append(broad_key)
         candidates = []
         seen_paths = set()
 
         # Exact match
-        if search_key in config_lookup:
-            for pub, info in config_lookup[search_key]:
-                p = str(info.get("json_path", ""))
-                if p not in seen_paths:
-                    candidates.append((pub, info))
-                    seen_paths.add(p)
+        for search_key in search_keys:
+            if search_key in config_lookup:
+                for pub, info in config_lookup[search_key]:
+                    p = str(info.get("json_path", ""))
+                    if p not in seen_paths:
+                        candidates.append((pub, info))
+                        seen_paths.add(p)
 
         # Fuzzy match all keys (not just fallback)
-        for ck, ci_list in config_lookup.items():
-            if ck == search_key:
-                continue
-            if search_key in ck or ck in search_key:
-                for pub, info in ci_list:
-                    p = str(info.get("json_path", ""))
-                    if p in seen_paths:
-                        continue
-                    if ck in search_key:
-                        # Config key is shorter: verify file name has distinguishing suffix
-                        file_stem = info.get("file_name", "")
-                        file_stem = file_stem.removesuffix(".json")
-                        file_key = normalize_model_name(file_stem)
-                        if search_key not in file_key:
+        for search_key in search_keys:
+            for ck, ci_list in config_lookup.items():
+                if ck == search_key:
+                    continue
+                if search_key in ck or ck in search_key:
+                    for pub, info in ci_list:
+                        p = str(info.get("json_path", ""))
+                        if p in seen_paths:
                             continue
-                    else:
-                        # search_key in ck: exclude variant-suffixed configs not matching
-                        suffix = ck[len(search_key):].lstrip("-")
-                        for vs in _VARIANT_SUFFIXES:
-                            vs_clean = vs.lstrip("-")
-                            if suffix.startswith(vs_clean) and not search_key.endswith(vs_clean):
-                                break
+                        if ck in search_key:
+                            # Config key is shorter: verify file name has distinguishing suffix
+                            file_stem = info.get("file_name", "")
+                            file_stem = file_stem.removesuffix(".json")
+                            file_key = normalize_model_name(file_stem)
+                            if search_key not in file_key:
+                                continue
                         else:
-                            candidates.append((pub, info))
-                            seen_paths.add(p)
-                        continue
-                    candidates.append((pub, info))
-                    seen_paths.add(p)
+                            # search_key in ck: exclude variant-suffixed configs not matching
+                            suffix = ck[len(search_key):].lstrip("-")
+                            for vs in _VARIANT_SUFFIXES:
+                                vs_clean = vs.lstrip("-")
+                                if suffix.startswith(vs_clean) and not search_key.endswith(vs_clean):
+                                    break
+                            else:
+                                candidates.append((pub, info))
+                                seen_paths.add(p)
+                            continue
+                        candidates.append((pub, info))
+                        seen_paths.add(p)
 
         if not candidates:
             stats["not_found"] += 1

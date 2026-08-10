@@ -19,13 +19,13 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from type_defs import ModelConfig
+from model_identity import normalize_lms_model_name, normalized_lms_key
 from utils.terminal import warn
 
 BLACKLIST = [
@@ -551,17 +551,11 @@ _LMS_OP_KEY_MAP = {
 
 
 def _normalize_lms_model_name(name: str) -> str:
-    """Normalize a model/config name for matching (mirror of assemble_blueprint)."""
-    s = str(name).lower()
-    s = re.sub(r"@[a-z0-9_?]+$", "", s)  # @quant-Suffixe (Registry-Key) entfernen
-    s = re.sub(r"\.gguf$", "", s)
-    s = re.sub(r"-(gguf|mxfp4)$", "", s)
-    s = re.sub(r"[-_](gguf|mxfp4)[-_]", "-", s)
-    s = re.sub(r"^[^/]+/", "", s)  # Publisher-Prefix entfernen
-    s = s.replace(".", "-").replace("_", "-")
-    while "--" in s:
-        s = s.replace("--", "-")
-    return s
+    """Normalize a model/config name for matching (mirror of assemble_blueprint).
+
+    Konsolidiert in model_identity.py (Fix 2026-08-09).
+    """
+    return normalize_lms_model_name(name)
 
 
 def _lms_index() -> list[dict[str, Any]]:
@@ -643,9 +637,11 @@ def _unwrap_lms_value(value: Any) -> Any:
 
 
 def _normalized_lms_key(model_identifier: str) -> str:
-    """Normalisierter Matching-Key eines Modellnamens (Registry-Key-Form)."""
-    key = _normalize_lms_model_name(model_identifier)
-    return re.sub(r"-(ud|qat|imatrix)$", "", key)  # Variant-Suffixe (Registry-Key)
+    """Normalisierter Matching-Key eines Modellnamens (Registry-Key-Form).
+
+    Konsolidiert in model_identity.py (Fix 2026-08-09).
+    """
+    return normalized_lms_key(model_identifier)
 
 
 def _model_sampling_row(model_identifier: str) -> dict[str, tuple[float, float]] | None:
