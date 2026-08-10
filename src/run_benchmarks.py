@@ -883,7 +883,7 @@ def _build_lmeval_cmd(model_identifier: str, api_model: str, subset_task: str, p
             model_settings["eos_string"] = eos_str
     # Generation params go to --generation_parameters (overrides YAML generation_parameters via merge)
     generation_parameters_keys = {"max_tokens", "temperature", "top_p", "top_k", "min_p",
-                       "until", "chat_template_kwargs", "reasoning", "reasoning_effort", "max_thinking_tokens"}
+                       "until", "chat_template_kwargs", "reasoning", "reasoning_effort"}
     generation_parameters = {k: v for k, v in evaluation_parameters.items()
                   if k in generation_parameters_keys and v is not None}
     model_args = json.dumps(model_settings, ensure_ascii=False)
@@ -1314,7 +1314,7 @@ def run_lmeval(model_info: AvailableModelInfo, bench: BenchmarkDef, limit: int =
             print(f"  [CFG] eos_string={eos_str!r} (Task {task_name} hat keine until-Stops)")
     # Gen_kwargs keys that should override YAML generation_kwargs per request.
     generation_parameters_keys = {"max_tokens", "temperature", "top_p", "top_k", "min_p",
-                       "until", "chat_template_kwargs", "reasoning", "reasoning_effort", "max_thinking_tokens"}
+                       "until", "chat_template_kwargs", "reasoning", "reasoning_effort"}
     generation_parameters = {k: v for k, v in evaluation_parameters.items()
                   if k in generation_parameters_keys and v is not None}
     print(f"  {_evaluation_summary(model_identifier, _derive_category(bench['name']))}")
