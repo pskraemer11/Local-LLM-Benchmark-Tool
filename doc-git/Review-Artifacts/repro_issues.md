@@ -1,6 +1,6 @@
 # Repro-Issues: model_registry.yaml vs. LM Studio Hub
 
-Generated automatically: 2026-08-11 11:16:45
+Generated automatically: 2026-08-11 11:18:44
 
 Source of truth for model facts are the GGUF files (immutable).
 The `model_registry.yaml` is editable (python programs/manual) and is

@@ -360,8 +360,8 @@ mradermacher/kimi-linear-reap-35b-a3b-instruct.i1:
   arch: moe
   quants: IQ3_XXS
   experts: 18
-  k_cache: q8_0
-  v_cache: q5_1
+  k_cache: fp16
+  v_cache: fp16
   offload: 1.0
   notes: 'REAP-pruned version of base model Kimi-Linear-48B-A3B-Instruct; max 180
     Experts; Activated: 8 per token + 1 shared'
@@ -418,7 +418,7 @@ unsloth/qwen3-30b-a3b-instruct-2507:
   truncation: full
   context_length: 43690
   num_parallel: 4
-  useUnifiedKvCache: false
+  useUnifiedKvCache: true
   file_size_bytes: 13292468640
   n_layers: 48
   hidden_dim: 2048
@@ -442,7 +442,7 @@ unsloth/qwen3-coder-30b-a3b-instruct:
   truncation: full
   context_length: 32768
   num_parallel: 4
-  useUnifiedKvCache: false
+  useUnifiedKvCache: true
   file_size_bytes: 13292471456
   n_layers: 48
   hidden_dim: 2048
@@ -626,7 +626,7 @@ unsloth/qwen3.6-27b:
   context_length: 32768
   num_parallel: 4
   file_size_bytes: 14201668384
-  useUnifiedKvCache: false
+  useUnifiedKvCache: true
   n_layers: 64
   hidden_dim: 5120
   max_context_length: 262144
@@ -652,7 +652,7 @@ unsloth/qwen3.6-27b-mtp:
   file_size_bytes: 14417428160
   n_layers: 65
   hidden_dim: 5120
-  useUnifiedKvCache: false
+  useUnifiedKvCache: true
   max_context_length: 262144
 
 mradermacher/qwen3.6-27b-i1:
@@ -796,8 +796,8 @@ google/gemma-4-12b-it-qat:
   hf_url: https://huggingface.co/google/gemma-4-12b-it-qat
   arch: dense
   quants: Q4_0
-  k_cache: q8_0
-  v_cache: iq4_nl
+  k_cache: f16
+  v_cache: f16
   offload: 1.0
   num_parallel: 4
   notes: 'Architektur: ? | Vision'
@@ -957,7 +957,7 @@ noctrex/lfm2-24b-a2b_moe:
   capabilities: text
   blueprint: default_chat
   truncation: full
-  useUnifiedKvCache: false
+  useUnifiedKvCache: true
   max_context_length: 128000
 
 unsloth/glm-4.7-flash:
@@ -978,7 +978,7 @@ unsloth/glm-4.7-flash:
   reasoning: thinking
   blueprint: reasoning_coding
   capabilities: coding, text
-  useUnifiedKvCache: false
+  useUnifiedKvCache: true
   truncation: full
 
 unsloth/glm-4.7-flash-reap-23b-a3b:
@@ -999,7 +999,7 @@ unsloth/glm-4.7-flash-reap-23b-a3b:
   reasoning: thinking
   blueprint: reasoning_coding
   capabilities: coding, text
-  useUnifiedKvCache: false
+  useUnifiedKvCache: true
   truncation: full
 
 noctrex/ernie-4.5-21b-a3b-pt_moe:
@@ -1044,8 +1044,8 @@ mradermacher/gemma-4-19b-a4b-it-reap-i1:
   publisher: mradermacher
   hf_url: https://huggingface.co/mradermacher/gemma-4-19b-a4b-it-reap-i1
   arch: moe
-  k_cache: q8_0
-  v_cache: iq4_nl
+  k_cache: f16
+  v_cache: f16
   offload: 1.0
   num_parallel: 4
   notes: 'Architektur: moe'
@@ -1085,8 +1085,8 @@ mradermacher/gemma-4-26b-a4b-it-i1:
   publisher: mradermacher
   hf_url: https://huggingface.co/mradermacher/gemma-4-26b-a4b-it-i1
   arch: moe
-  k_cache: q8_0
-  v_cache: iq4_nl
+  k_cache: f16
+  v_cache: f16
   offload: 1.0
   num_parallel: 4
   notes: 'Architektur: moe'
@@ -1105,8 +1105,8 @@ bartowski/google_gemma-4-26b-a4b-it:
   publisher: bartowski
   hf_url: https://huggingface.co/bartowski/google_gemma-4-26b-a4b-it
   arch: moe
-  k_cache: q8_0
-  v_cache: iq4_nl
+  k_cache: f16
+  v_cache: f16
   offload: 1.0
   num_parallel: 4
   notes: 'Architektur: moe | Vision'
@@ -1125,8 +1125,8 @@ unsloth/gemma-4-26b-a4b-it:
   publisher: unsloth
   hf_url: https://huggingface.co/unsloth/gemma-4-26b-a4b-it
   arch: moe
-  k_cache: q8_0
-  v_cache: iq4_nl
+  k_cache: f16
+  v_cache: f16
   offload: 1.0
   num_parallel: 4
   notes: 'Architektur: moe | Vision'
@@ -1165,8 +1165,8 @@ unsloth/gemma-4-12b-it-qat@q4_k_xl:
   publisher: unsloth
   hf_url: https://huggingface.co/unsloth/gemma-4-12b-it-qat@q4_k_xl
   arch: dense
-  k_cache: q8_0
-  v_cache: iq4_nl
+  k_cache: f16
+  v_cache: f16
   offload: 1
   num_parallel: 4
   notes: 'Architektur: dense | Vision | MTP-fähig: Drafter mtp-gemma-4-12B-it-Q8_0.gguf

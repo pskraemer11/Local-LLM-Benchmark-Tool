@@ -763,6 +763,21 @@ def _word_boundary_match(pattern: str, text: str) -> bool:
     return False
 
 
+def should_use_unified_kv_cache(model_name: str, model_size_gb: float) -> bool:
+    """Determine UKV for a model based on size threshold and special cases.
+
+    Rules:
+      1. Models in UKV_DISABLE_MODELS -> always False (architektur-bedingt)
+      2. Models >= USE_UNIFIED_KV_CACHE_THRESHOLD_GB (12 GB) -> True
+      3. Smaller models -> False
+    """
+    name_lower = model_name.lower()
+    for pattern in UKV_DISABLE_MODELS:
+        if pattern in name_lower:
+            return False
+    return model_size_gb >= USE_UNIFIED_KV_CACHE_THRESHOLD_GB
+
+
 def get_model_config(model_identifier: str, category: str = "coding", is_thinking_enabled: bool = False) -> ModelConfig:
     """Generations-Parameter fuer Benchmarks (Sampling-Design 2026-08-06).
 
@@ -858,7 +873,18 @@ def is_support_file(
 # run_benchmarks.py (in-line magic numbers). All VRAM-related
 # thresholds now live here as the single source of truth.
 USABLE_VRAM_GB = 15.3  # RTX 5070 Ti 16 GB minus driver overhead
-USE_UNIFIED_KV_CACHE_THRESHOLD_GB = 14.0  # When total_gb >= this, UKV activates (legacy, kept for reference)
+USE_UNIFIED_KV_CACHE_THRESHOLD_GB = 12.0  # When model_size_gb >= this, UKV=True (empirically determined)
+
+# Modelle, die KEINE KV-Quantisierung vertragen -> immer UKV=False
+# Gemma-4: KV-Quant fuehrt zu massiven Qualitaetsverlusten
+# Kimi Linear: Architektur kompatibel mit UKV, aber empfohlen wird False
+# Devstral: funktioniert mit UKV, aber ohne bessere Ergnisse, deshalb UKV=False
+UKV_DISABLE_MODELS = {
+    "gemma-4",      # Gemma-4 Familie
+    "kimi-linear",  # Kimi Linear REAP
+    "devstral",     # Devstral Small
+    "mellum",       # Mellum2 (MoE, kleine Experten)
+}
 LEGACY_MODEL_GB_THRESHOLD_GB = 9.0  # Fallback for entries without n_layers/hd
 KV_QUANT_REFERENCE_BYTES = 1.5  # Reference (q8_0 + iq4_nl) for ctx scaling
 MIN_CONTEXT_LENGTH = 32768  # Minimum ctx for np/UKV priority algorithm (32k tokens)
