@@ -676,18 +676,20 @@ def load_model_via_lms(model_identifier: str, gpu_offload: float | None = None) 
     info(f"Loading '{model_identifier}'...")
     
     # Build load request payload
-    payload = {"model": model_identifier}
+    payload = {"model": model_identifier, "echo_load_config": True}
     if gpu_offload is not None:
         payload["gpu_offload"] = gpu_offload
-    
+
     for attempt in range(2):
         result = _rest_request("/api/v1/models/load", method="POST", data=payload,
                               timeout=TIMEOUT_LOAD_MODEL)
-        
+
         if result is not None and result.get("status") == "loaded":
             instance_id = result.get("instance_id", model_identifier)
             load_time = result.get("load_time_seconds", 0)
-            ok(f"Loaded in {load_time:.1f}s")
+            load_cfg = result.get("load_config", {})
+            parallel = load_cfg.get("parallel", "?")
+            ok(f"Loaded in {load_time:.1f}s (np={parallel})")
             info(f"Instance ID: {instance_id}")
             return True, instance_id
         
