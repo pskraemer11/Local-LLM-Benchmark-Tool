@@ -40,15 +40,24 @@ Status: 2026-08-11. Legend: [ ] open, [~] in progress, [x] done/checked.
   - Alle Modelle: `num_parallel=4` (explizit via API, nicht via JSON-Config)
   - 99 LMS-Configs korrigiert: `numParallelSessions=4` in `load.fields` (nicht `operation.fields`)
   - UKV: `USE_UNIFIED_KV_CACHE_THRESHOLD_GB = 12.0` (war 14.0)
-  - Spezialfälle `UKV_DISABLE_MODELS = {gemma-4, kimi-linear, gpt-oss}` (keine KV-Quantisierung vertragen)
+  - Spezialfälle `UKV_FORCE_TRUE_MODELS = {gemma-4, kimi-linear, gpt-oss}` (immer UKV=True, keine KV-Quant vertragen)
   - `validate`: np/ukv-Drift-Check entfernt (Configs irrelevant, Registry ist SSOT)
   - GitHub Push: `6cb86492`
 
 - [x] **25. Compaction Skill + Workflow** — **COMPLETED (11.08.)**:
-  - Skill-Datei: `~/.agents/skills/compaction/SKILL.md` (Auto-Trigger bei ~80% Kontext oder `/compaction`)
+  - Skill-Datei: `~/.agents/skills/compaction/SKILL.md` (Event-basiert: commit/push, Entscheidungen, ~20-30 msgs)
   - Workflow-Doku: `doc-git/Developer-Docs/Compaction-Workflow.md`
   - CHANGELOG = *was* (Datei-Ebene), Compaction = *warum* (Session-Ebene) — keine Redundanz
   - CHANGELOG.md + Compaction für 11.08. erstellt
+
+- [x] **26. Review-Findings I1 + I2 + imatrix/MTP-Blacklist** — **COMPLETED (11.08.)**:
+  - **I1:** `cmd_sync_from_configs` — np/UKV/offload-Drift-Checks entfernt (Registry ist SSOT)
+  - **I2:** `is_support_file`-Filter in `_gguf_drift_errors` + `cmd_sync_from_gguf` (MTP-Drafter-Filter)
+  - **imatrix:** 7 imatrix-Dateien (39-147 MB) als Begleitdateien → `BLACKLIST` Pattern "imatrix" hinzugefügt
+  - **MTP:** 2 Drafter-Dateien (mtp-gemma-4-*) bereits durch `is_support_file` gefiltert
+  - `validate`: **0 Probleme** nach Fixes
+  - Review-Agent + Pre-Review-Script aktualisiert
+  - GitHub Push: `720cc62f`
 
 - [x] **21. Feld-Ownership-Verifikation nach Testreihen-Ende** — **COMPLETED (10.08.)**: `pipeline full` (Teil A–C: Feld-Ownership + sync + validate-Drift-Gate) am 10.08. ausgeführt (nach Quarantäne-Lauf): Assembly 56/56 (0 skipped/not found/errors), Validierung 74/74 passed, **Exit-Gate konvergiert (keine offenen Melde-Konflikte, keine Config-Writes)**; Quarantäne-Schritt [2b] idempotent. `[6a]`-Schritt (LMS-Drift-Vergleich) hing am lms-Server-Timeout in `_is_lmstudio_running()` (bekanntes Umgebungsproblem, keine Code-Fehlfunktion; 09.08.-Lauf lieferte 0 Drifts). Rest wie Item 20/19: nach LM-Studio-Neustart `lms ls | grep -i glm` für GLM-4.6V + GLM-Verifikationslauf.
 - [ ] **19. GLM-Verifikationslauf mit sauberem Setup** — geplant 09.08.: nach Fix 1 (`@quant`-NOT-FOUND in `assemble_blueprint.py`, Broad-Keys) + Fix 4 (`patch-glm-configs` verankert in `pipeline full` 5a: `reasoning.parsing: disabled`, kein `structured`, stopStrings leer, JSON-Zeilen aus SystemPrompt entfernt; verifiziert: 64 assembled / 0 not found / GLM-Configs nach `pipeline full` unverändert). Lauf: GLM-4.7-Flash@Q3_K_S + GLM-4.7-Flash-REAP@Q4_K_S, DS1000 SS=10 np=4, Ergebnis gegen 07.08. halten (Flash 30%, REAP 0% — REAP-Budget-Frage offen, max_tokens=2000 → Content kam). Warten bis laufende Testreihe fertig ist.
