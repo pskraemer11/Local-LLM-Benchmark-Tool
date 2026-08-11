@@ -2326,9 +2326,6 @@ def cmd_validate(verbose: bool = False, repro: bool = False) -> dict[str, Any]:
         }
 
         cfg_ctx = load_fields.get("llm.load.contextLength")
-        cfg_np = load_fields.get("llm.load.numParallelSessions")
-        cfg_ukv = load_fields.get("llm.load.useUnifiedKvCache")
-        cfg_offload = load_fields.get("llm.load.llama.acceleration.offloadRatio")
 
         # context_length: Config-Wert kleiner als Registry-Erwartung → Altlast?
         reg_ctx = entry.get("context_length")

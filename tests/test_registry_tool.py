@@ -1058,7 +1058,7 @@ class TestPipelineDriftExitCode:
 
     def test_drift_checks_constant(self):
         assert "config_context_drift" in rt._DRIFT_CHECKS
-        assert "config_np_ukv_drift" in rt._DRIFT_CHECKS
+        # config_np_ukv_drift removed (11.08.2026): Registry is SSOT, configs irrelevant
         assert "config_context_too_small" in rt._DRIFT_CHECKS
         assert "gguf_header_drift" in rt._DRIFT_CHECKS
 
@@ -1067,11 +1067,11 @@ class TestPipelineDriftExitCode:
 
     def test_open_drift_exits_1(self):
         with pytest.raises(SystemExit) as exc:
-            self._run_pipeline({"config_np_ukv_drift": ["unsloth/x: np=1 != 4"]})
+            self._run_pipeline({"config_context_drift": ["unsloth/x: ctx=1 != 2"]})
         assert exc.value.code == 1
 
     def test_ignore_drift_exits_0(self):
-        assert self._run_pipeline({"config_np_ukv_drift": ["unsloth/x: np=1 != 4"]}, ignore_drift=True) is None
+        assert self._run_pipeline({"config_context_drift": ["unsloth/x: ctx=1 != 2"]}, ignore_drift=True) is None
 
     def test_non_drift_errors_do_not_exit(self):
         # template_missing_file etc. sind keine Melde-Konflikte -> kein Exit
