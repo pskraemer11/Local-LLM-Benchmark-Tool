@@ -7,15 +7,16 @@ Two complementary documentation processes prevent context loss and maintain proj
 1. **Compaction** — Session-level context preservation (narrative, decisions, next moves)
 2. **Changelog** — File-level change tracking (technical, granular, reference)
 
-## Trigger Matrix
+## Trigger Matrix (Event-Based)
 
 | Event | Compaction | Changelog |
 |-------|-----------|-----------|
-| Chat reaches ~80% context | ✅ Create | — |
+| `git commit` / `git push` | ✅ Create | ✅ Update |
+| Architecture decision / Bug root cause | ✅ Create | ✅ If files changed |
+| ~20-30 messages threshold | ✅ Create | ✅ If substantive |
+| ≥2x per active day | ✅ Create | — |
 | `/compaction` command | ✅ Create | — |
-| `git commit` | — | ✅ Update if substantive changes |
-| `git push` | — | ✅ Verify entry exists |
-| Session end (user request) | ✅ Create | ✅ Update |
+| Short routine session (< 10 msgs) | ❌ | — |
 
 ## Compaction Format
 
