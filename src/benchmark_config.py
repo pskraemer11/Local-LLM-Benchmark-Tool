@@ -468,7 +468,7 @@ MODEL_CATEGORY_SAMPLING: dict[str, dict[str, tuple[float, float]]] = {
     "glm-4-7": {
         "coding": (0.7, 1.0),
         "knowledge": (1.0, 0.95),
-        "agentic": (0.0, 0.95),
+        "agentic": (0.7, 0.95),
         "math": (1.0, 0.95),
     },
     "glm-4-6v": {
@@ -610,7 +610,7 @@ def _load_lms_json(json_path: Path) -> dict[str, Any] | None:
             if isinstance(loaded, dict):
                 data = loaded
             break
-        except OSError, json.JSONDecodeError, UnicodeDecodeError:
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
             continue
     _LMS_JSON_CACHE[key] = (now, data)
     return data

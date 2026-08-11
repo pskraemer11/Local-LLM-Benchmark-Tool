@@ -26,7 +26,7 @@ Official thinking values are 0.6/0.95 everywhere, not 0.2:**
 - DeepSeek-R1-Distill: **0.6/0.95** ("0.6 is recommended", range 0.5–0.7)
 - Qwen3-14B Thinking: **0.6/0.95** (card explicitly warns: *"DO NOT use greedy"*)
 - Qwen3.6-27B Coding/WebDev in thinking mode: **0.6/0.95**
-- Nemotron-Cascade: **0.6/0.95** · Kimi-K2: **0.6** · GLM-4.7 SWE-bench: **0.7/1.0**
+- Nemotron-Cascade: **0.6/0.95** · Kimi-K2: **0.6** · GLM-4.7 SWE-bench, Tool-Calling: **0.7/1.0** 
 
 The coding value of 0.2 from the proposal applies to **instruct coders** (Qwen2.5-Coder, Codestral, Devstral) — vendors explicitly run thinking models at 0.6 for coding. 
 Low temperature/greedy is even counterproductive for thinking models (repetition collapse in the reasoning path, hence the "DO NOT use greedy" warning).
@@ -105,38 +105,38 @@ Many registry entries are not vendor models but **quantizations/repacks** (unslo
 or **subsequent fine-tunes/REAPs**. These repacks usually have no model card of their own with sampling recommendations. 
 The research was therefore **always done on the base model on the actual vendor page**; the values in the table apply to all quants of a base model.
 
-| Registry entry (processor)                                        | Processor               | Base model (vendor)                  | Note                            |
-|-------------------------------------------------------------------|-------------------------|---------------------------------------|----------------------------------|
-| `unsloth/qwen3-coder-30b-a3b-instruct`                                | Unsloth (GGUF)            | Qwen3-Coder-30B-A3B-Instruct              | official best practices 0.7/0.8  |
-| `mradermacher/qwen3-coder-reap-25b-a3b(-i1)`                          | MRadermacher (GGUF)       | cerebras/Qwen3-Coder-REAP-25B-A3B         | inherits Qwen3-Coder values             |
-| `qwen/qwen2.5-coder-14b-instruct@*`                                   | Qwen (official quants)    | Qwen2.5-Coder-14B-Instruct                | family default 0.7/0.8           |
-| `unsloth/qwen3-30b-a3b-instruct-2507`, `intel/qwen3-30b-…-autoround`  | Unsloth / Intel AutoRound | Qwen3-30B-A3B-Instruct-2507               | 0.7/0.8                            |
-| `Qwen/Qwen3.5-9B-GGUF`, `qwen/qwen3.5-9b`                             | Qwen                      | Qwen3.5-9B                                | Thinking 1.0/0.95, Coding 0.6/0.95 |
-| `unsloth/qwen3.6-27b`, `-mtp`; `mradermacher/qwen3.6-27b-i1`,         | Unsloth / MRadermacher    | Qwen3.6-27B (REAP variants: cerebras)    | Thinking 1.0/0.95, Coding 0.6/0.95 |
+| Registry entry (processor)                                            | Processor                 | Base model (vendor)                        | Note                               |
+|-----------------------------------------------------------------------|---------------------------|--------------------------------------------|------------------------------------|
+| `unsloth/qwen3-coder-30b-a3b-instruct`                                | Unsloth (GGUF)            | Qwen3-Coder-30B-A3B-Instruct               | official best practices 0.7/0.8    |
+| `mradermacher/qwen3-coder-reap-25b-a3b(-i1)`                          | MRadermacher (GGUF)       | cerebras/Qwen3-Coder-REAP-25B-A3B          | inherits Qwen3-Coder values        |
+| `qwen/qwen2.5-coder-14b-instruct@*`                                   | Qwen (official quants)    | Qwen2.5-Coder-14B-Instruct                 | family default 0.7/0.8             |
+| `unsloth/qwen3-30b-a3b-instruct-2507`, `intel/qwen3-30b-…-autoround`  | Unsloth / Intel AutoRound | Qwen3-30B-A3B-Instruct-2507                | 0.7/0.8                            |
+| `Qwen/Qwen3.5-9B-GGUF`, `qwen/qwen3.5-9b`                             | Qwen                      | Qwen3.5-9B                                 | Thinking 1.0/0.95, Coding 0.6/0.95 |
+| `unsloth/qwen3.6-27b`, `-mtp`; `mradermacher/qwen3.6-27b-i1`,         | Unsloth / MRadermacher    | Qwen3.6-27B (REAP variants: cerebras)      | Thinking 1.0/0.95, Coding 0.6/0.95 |
 |        `qwen3.6-28b-reap-i1@*`                                        |
-| `intel/mirothinker-v1.5-30b-…`                                        | Intel AutoRound           | miromind-ai/MiroThinker-v1.5-30B          | 1.0/0.95                           |
-| `unsloth/phi-4`                                                       | Unsloth (GGUF)            | microsoft/phi-4                           | 0.0                                |
-| `unsloth/gemma-4-26b-a4b-it`, `bartowski/google_gemma-4-26b-a4b-it@*`,| Unsloth/Bartowski/...     |google/gemma-4-12B-it or -19B/-26B-A4B-it| 1.0/0.95, top_k 64                 |
+| `intel/mirothinker-v1.5-30b-…`                                        | Intel AutoRound           | miromind-ai/MiroThinker-v1.5-30B           | 1.0/0.95                           |
+| `unsloth/phi-4`                                                       | Unsloth (GGUF)            | microsoft/phi-4                            | 0.0                                |
+| `unsloth/gemma-4-26b-a4b-it`, `bartowski/google_gemma-4-26b-a4b-it@*`,| Unsloth/Bartowski/...     |google/gemma-4-12B-it or -19B/-26B-A4B-it   | 1.0/0.95, top_k 64                 |
 |    `mradermacher/gemma-4-26b-a4b-it-i1@*`, `gemma-4-19b-a4b-it-reap-i1@*`,| ...MRadermacher/Google|
 |    `google/gemma-4-*-qat`                                             |
-| `unsloth/ernie-4.5-21b-a3b-pt`, `noctrex/ernie-4.5-21b-a3b-pt_moe@*`  | Unsloth / Noctrex         | baidu/ERNIE-4.5-21B-A3B-PT                | Qianfan 0.8/1.0                    |
-| `unsloth/devstral-small-2-24b-instruct-2512`                          | Unsloth (GGUF)            | mistralai/Devstral-Small-2-24B-Instruct-2512 | 0.15                            |
-| `bartowski/mistralai_magistral-small-2509`                            | Bartowski (GGUF)          | mistralai/Magistral-Small-2509            | 0.7/0.95                           |
-| `lmstudio-community/ministral-3-14b-instruct-2512`                    | LM Studio                 | mistralai/Ministral-3-14B-Instruct-2512   | <0.1                               |
-| `gabriellarson/mamba-codestral-7b-v0.1`                               | Gabriellarson (GGUF)      | mistralai/Mamba-Codestral-7B-v0.1         | no value, Mistral range         |
-| `unsloth/januscoder-14b`                                              | Unsloth (GGUF)            | internlm/JanusCoder-14B (base Qwen3-14B) | no value → Qwen3                  |
-| `unsloth/north-mini-code-1.0`                                         | Unsloth (GGUF)            | CohereLabs/North-Mini-Code-1.0            | 1.0/0.95                           |
-| `nerdsking/nerdsking-python-coder-7b-i`                               | Nerdsking (Fine-Tune)     | Nerdsking-Python-Coder-7B-i               | 0.1 (Eval)                         |
-| `mradermacher/deepseek-coder-33b-instruct`                            | MRadermacher (GGUF)       | deepseek-ai/deepseek-coder-33b-instruct   | greedy                             |
-| `lmstudio-community/deepseek-coder-v2-lite-instruct`                  | LM Studio                 | deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct | 0.3 (vLLM)                       |
-| `lmstudio-community/deepseek-r1-distill-qwen-14b`                     | LM Studio                 | deepseek-ai/DeepSeek-R1-Distill-Qwen-14B  | 0.6/0.95                           |
-| `lmstudio-community/internlm2-math-plus-20b`                          | LM Studio                 | internlm/internlm2-math-plus-20b          | greedy + CoT                       |
-| `mradermacher/kimi-linear-reap-35b-a3b-instruct.i1`                   | MRadermacher (GGUF)       | moonshotai/Kimi-Linear (REAP: cerebras)   | Kimi-K2: 0.6                       |
-| `mradermacher/nemotron-cascade-14b-thinking`                          | MRadermacher (GGUF)       | nvidia/Nemotron-Cascade-14B-Thinking      | 0.6/0.95                           |
-| `quietimpostor/nemotron-3-nano-reap-21b-a3b`                          | QuietImpostor (REAP)      | nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16 | Reasoning 1.0/1.0, Tool 0.6/0.95  |
-| `noctrex/lfm2-24b-a2b_moe`                                            | Noctrex (MXFP4)           | LiquidAI/LFM2-24B-A2B                     | 0.1                                |
-| `unsloth/glm-4.7-flash`, `-reap-23b-a3b`                              | Unsloth                   | zai-org/glm-4.7-flash (REAP: cerebras)    | 1.0/0.95, SWE 0.7/1.0              |
-| `essentialai/essentialai/rnj-1`                                       | (registry name)           | EssentialAI/rnj-1                         | [0, 0.6]                           |
+| `unsloth/ernie-4.5-21b-a3b-pt`, `noctrex/ernie-4.5-21b-a3b-pt_moe@*`  | Unsloth / Noctrex         | baidu/ERNIE-4.5-21B-A3B-PT                 | Qianfan 0.8/1.0                    |
+| `unsloth/devstral-small-2-24b-instruct-2512`                          | Unsloth (GGUF)            | mistralai/Devstral-Small-2-24B-Instruct-2512 | 0.15                             |
+| `bartowski/mistralai_magistral-small-2509`                            | Bartowski (GGUF)          | mistralai/Magistral-Small-2509             | 0.7/0.95                           |
+| `lmstudio-community/ministral-3-14b-instruct-2512`                    | LM Studio                 | mistralai/Ministral-3-14B-Instruct-2512    | <0.1                               |
+| `gabriellarson/mamba-codestral-7b-v0.1`                               | Gabriellarson (GGUF)      | mistralai/Mamba-Codestral-7B-v0.1          | no value, Mistral range            |
+| `unsloth/januscoder-14b`                                              | Unsloth (GGUF)            | internlm/JanusCoder-14B (base Qwen3-14B)   | no value → Qwen3                   |
+| `unsloth/north-mini-code-1.0`                                         | Unsloth (GGUF)            | CohereLabs/North-Mini-Code-1.0             | 1.0/0.95                           |
+| `nerdsking/nerdsking-python-coder-7b-i`                               | Nerdsking (Fine-Tune)     | Nerdsking-Python-Coder-7B-i                | 0.1 (Eval)                         |
+| `mradermacher/deepseek-coder-33b-instruct`                            | MRadermacher (GGUF)       | deepseek-ai/deepseek-coder-33b-instruct    | greedy                             |
+| `lmstudio-community/deepseek-coder-v2-lite-instruct`                  | LM Studio                 | deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct | 0.3 (vLLM)                        |
+| `lmstudio-community/deepseek-r1-distill-qwen-14b`                     | LM Studio                 | deepseek-ai/DeepSeek-R1-Distill-Qwen-14B   | 0.6/0.95                           |
+| `lmstudio-community/internlm2-math-plus-20b`                          | LM Studio                 | internlm/internlm2-math-plus-20b           | greedy + CoT                       |
+| `mradermacher/kimi-linear-reap-35b-a3b-instruct.i1`                   | MRadermacher (GGUF)       | moonshotai/Kimi-Linear (REAP: cerebras)    | Kimi-K2: 0.6                       |
+| `mradermacher/nemotron-cascade-14b-thinking`                          | MRadermacher (GGUF)       | nvidia/Nemotron-Cascade-14B-Thinking       | 0.6/0.95                           |
+| `quietimpostor/nemotron-3-nano-reap-21b-a3b`                          | QuietImpostor (REAP)      | nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16 | Reasoning 1.0/1.0, Tool 0.6/0.95   |
+| `noctrex/lfm2-24b-a2b_moe`                                            | Noctrex (MXFP4)           | LiquidAI/LFM2-24B-A2B                      | 0.1                                |
+| `unsloth/glm-4.7-flash`, `-reap-23b-a3b`                              | Unsloth                   | zai-org/glm-4.7-flash (REAP: cerebras)     | 1.0/0.95, SWE+Tool Calling 0.7/1.0 |
+| `essentialai/essentialai/rnj-1`                                       | (registry name)           | EssentialAI/rnj-1                          | [0, 0.6]                           |
 
 **Corrected registry links** (repo names deviate): `essentialai/essentialai/rnj-1` → `EssentialAI/rnj-1`; `google/gemma-4-12b-it-qat` (BF16) does not exist → only QAT-q4_0 repos; 
         `mradermacher/qwen3.6-27b-i1` does not exist as a repo (only i1 repacks of fine-tunes, base Qwen3.6-27B).

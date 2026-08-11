@@ -22,14 +22,15 @@ essentialai/rnj-1:
 openai/gpt-oss-20b:
   publisher: openai
   hf_url: https://huggingface.co/openai/gpt-oss-20b
-  pub_url: https://openai.com/index/introducing-gpt-oss/, https://github.com/openai/gpt-oss/tree/main?tab=readme-ov-file#harmony-format--tools
+  pub_url: https://openai.com/index/introducing-gpt-oss/, 
+    https://github.com/openai/gpt-oss/tree/main?tab=readme-ov-file#harmony-format--tools
   arch: moe
   experts: 32
   k_cache: f16
   v_cache: f16
   offload: 1.0
-  notes: 32×2.4B MoE | 131K Kontext | Tool-Use | Configurable Reasoning Effort (low/medium/high)
-    | Harmony Response Format
+  notes: 32×2.4B MoE | 131K Kontext | Tool-Use | Configurable Reasoning Effort 
+    (low/medium/high) | Harmony Response Format
   template: gpt-oss-20b_harmony.jinja
   reasoning: thinking
   capabilities: coding, text
@@ -58,7 +59,7 @@ unsloth/phi-4:
   capabilities: coding, text
   blueprint: reasoning_coding
   truncation: medium
-  num_parallel: 1
+  num_parallel: 4
   useUnifiedKvCache: false
   context_length: 16384
   file_size_bytes: 10412707392
@@ -305,7 +306,8 @@ unsloth/januscoder-14b:
 
 jetbrains/mellum2-12b-a2.5b-instruct:
   publisher: JetBrains
-  hf_url: https://huggingface.co/JetBrains/Mellum2-12B-A2.5B-Instruct-GGUF-Q4_K_M
+  hf_url: 
+    https://huggingface.co/JetBrains/Mellum2-12B-A2.5B-Instruct-GGUF-Q4_K_M
   pub_url: https://www.jetbrains.com
   quants: Q4_K_M
   arch: moe
@@ -328,15 +330,16 @@ jetbrains/mellum2-12b-a2.5b-instruct:
 
 lmstudio-community/ministral-3-14b-instruct-2512:
   publisher: lmstudio-community
-  hf_url: https://huggingface.co/lmstudio-community/Ministral-3-14B-Instruct-2512-GGUF
+  hf_url: 
+    https://huggingface.co/lmstudio-community/Ministral-3-14B-Instruct-2512-GGUF
   pub_url: https://mistral.ai/news/ministral/
   quants: Q6_K
   arch: dense
   k_cache: q5_1
   v_cache: iq4_nl
   offload: 1.0
-  notes: max. 262K Kontext | Text+Vision Multimodal | Code- & Tool-Calling-Faehigkeiten
-    | np=4 (sonst zu langsam)
+  notes: max. 262K Kontext | Text+Vision Multimodal | Code- & 
+    Tool-Calling-Faehigkeiten | np=4 (sonst zu langsam)
   reasoning: thinking
   capabilities: vision, coding, text
   blueprint: reasoning_coding
@@ -351,7 +354,8 @@ lmstudio-community/ministral-3-14b-instruct-2512:
 
 mradermacher/kimi-linear-reap-35b-a3b-instruct.i1:
   publisher: mradermacher
-  hf_url: https://huggingface.co/mradermacher/Kimi-Linear-REAP-35B-A3B-Instruct-i1-GGUF
+  hf_url: 
+    https://huggingface.co/mradermacher/Kimi-Linear-REAP-35B-A3B-Instruct-i1-GGUF
   pub_url: https://www.moonshot.cn
   arch: moe
   quants: IQ3_XXS
@@ -405,8 +409,9 @@ unsloth/qwen3-30b-a3b-instruct-2507:
   k_cache: q5_1
   v_cache: iq4_nl
   offload: 1.0
-  notes: MoE Experts max 128 total, 8 activ. capabilities including instruction following,
-    logical reasoning, text comprehension, mathematics, science, coding and tool usage.
+  notes: MoE Experts max 128 total, 8 activ. capabilities including instruction 
+    following, logical reasoning, text comprehension, mathematics, science, 
+    coding and tool usage.
   reasoning: instruct
   capabilities: coding, vision, text
   blueprint: coding_agent
@@ -501,8 +506,8 @@ unsloth/north-mini-code-1.0:
   k_cache: q8_0
   v_cache: iq4_nl
   offload: 1.0
-  notes: MoE Experts 128 total, 8 aktiv | Params 30B total, 3B aktiv | max 256K Kontext  |
-    Agentic Software Engineering
+  notes: MoE Experts 128 total, 8 aktiv | Params 30B total, 3B aktiv | max 256K 
+    Kontext  | Agentic Software Engineering
   reasoning: instruct
   capabilities: coding, agentic, text
   blueprint: coding_agent
@@ -530,11 +535,12 @@ qwen/qwen2.5-coder-14b-instruct@q5_0:
   blueprint: coding_agent
   truncation: full
   context_length: 32768
-  num_parallel: 1
+  num_parallel: 4
   file_size_bytes: 10266553792
   n_layers: 48
   hidden_dim: 5120
   max_context_length: 131072
+  useUnifiedKvCache: true
 
 qwen/qwen2.5-coder-14b-instruct@q5_k_m:
   publisher: Qwen
@@ -573,11 +579,12 @@ qwen/qwen2.5-coder-14b-instruct@q6_k:
   blueprint: coding_agent
   truncation: full
   context_length: 32768
-  num_parallel: 1
+  num_parallel: 4
   file_size_bytes: 12124683712
   n_layers: 48
   hidden_dim: 5120
   max_context_length: 131072
+  useUnifiedKvCache: true
 
 Qwen/Qwen3.5-9B-GGUF@q6_k:
   publisher: qwen
@@ -594,7 +601,7 @@ Qwen/Qwen3.5-9B-GGUF@q6_k:
   truncation: full
   context_length: 32768
   offload: 1.0
-  num_parallel: 1
+  num_parallel: 4
   useUnifiedKvCache: true
   n_layers: 32
   hidden_dim: 4096
@@ -771,7 +778,7 @@ lmstudio-community/internlm2-math-plus-20b:
   k_cache: q8_0
   v_cache: iq4_nl
   offload: 1.0
-  num_parallel: 1
+  num_parallel: 4
   notes: 'Architektur: ?'
   file_size_bytes: 11984469440
   context_length: 8192
@@ -828,7 +835,8 @@ quietimpostor/nemotron-3-nano-reap-21b-a3b:
 
 intel/qwen3-30b-a3b-instruct-2507-q2ks-mixed-autoround:
   publisher: Intel
-  hf_url: https://huggingface.co/intel/qwen3-30b-a3b-instruct-2507-q2ks-mixed-autoround
+  hf_url: 
+    https://huggingface.co/intel/qwen3-30b-a3b-instruct-2507-q2ks-mixed-autoround
   arch: moe
   quants: Q2_K_S
   k_cache: q8_0
@@ -849,7 +857,8 @@ intel/qwen3-30b-a3b-instruct-2507-q2ks-mixed-autoround:
 
 intel/qwen3-30b-a3b-thinking-2507-q2ks-mixed-autoround:
   publisher: Intel
-  hf_url: https://huggingface.co/intel/qwen3-30b-a3b-thinking-2507-q2ks-mixed-autoround
+  hf_url: 
+    https://huggingface.co/intel/qwen3-30b-a3b-thinking-2507-q2ks-mixed-autoround
   arch: moe
   quants: Q2_K_S
   k_cache: q8_0
@@ -870,7 +879,8 @@ intel/qwen3-30b-a3b-thinking-2507-q2ks-mixed-autoround:
 
 intel/qwen3-coder-30b-a3b-instruct-q2ks-mixed-autoround:
   publisher: Intel
-  hf_url: https://huggingface.co/intel/qwen3-coder-30b-a3b-instruct-q2ks-mixed-autoround
+  hf_url: 
+    https://huggingface.co/intel/qwen3-coder-30b-a3b-instruct-q2ks-mixed-autoround
   arch: moe
   quants: Q2_K_S
   k_cache: q8_0
@@ -950,35 +960,16 @@ noctrex/lfm2-24b-a2b_moe:
   useUnifiedKvCache: true
   max_context_length: 128000
 
-zai-org/glm-4.6v-flash:
-  publisher: zai-org
-  hf_url: https://huggingface.co/zai-org/glm-4.6v-flash
-  pub_url: https://z.ai/blog/glm-4.6v
-  arch: dense
-  k_cache: q8_0
-  v_cache: q5_1
-  offload: 1.0
-  num_parallel: 4
-  notes: 'Architektur: dense | Vision | Tool-Use | GLM-4.6 hybrid thinking (auto)'
-  file_size_bytes: 10053623788
-  context_length: 32768
-  max_context_length: 131072
-  reasoning: thinking
-  blueprint: reasoning_assistant
-  capabilities: vision, text
-  useUnifiedKvCache: false
-  truncation: full
-
 unsloth/glm-4.7-flash:
   publisher: unsloth
   hf_url: https://huggingface.co/unsloth/glm-4.7-flash
   pub_url: https://z.ai/blog/glm-4.7
   arch: moe
   k_cache: q8_0
-  v_cache: q5_1
+  v_cache: q8_0
   offload: 1.0
   num_parallel: 4
-  notes: 'Architektur: moe | Tool-Use | GLM-4.7 forced thinking'
+  notes: 'Architektur: DeepSeek2 moe | Tool-Use | GLM-4.7 forced thinking'
   file_size_bytes: 13288618336
   context_length: 32768
   max_context_length: 202752
@@ -996,10 +987,10 @@ unsloth/glm-4.7-flash-reap-23b-a3b:
   pub_url: https://z.ai/blog/glm-4.7
   arch: moe
   k_cache: q8_0
-  v_cache: q5_1
+  v_cache: q8_0
   offload: 1.0
   num_parallel: 4
-  notes: 'Architektur: moe | REAP streaming-usage | GLM-4.7 forced thinking'
+  notes: 'Architektur: DeepSeek2 moe | REAP streaming-usage | GLM-4.7 forced thinking'
   file_size_bytes: 13328455392
   context_length: 32768
   max_context_length: 202752
@@ -1177,7 +1168,7 @@ unsloth/gemma-4-12b-it-qat@q4_k_xl:
   k_cache: q8_0
   v_cache: iq4_nl
   offload: 1
-  num_parallel: 1
+  num_parallel: 4
   notes: 'Architektur: dense | Vision | MTP-fähig: Drafter mtp-gemma-4-12B-it-Q8_0.gguf
     (MTP/ Ordner) als Zusatzmodul, nicht einzeln testbar'
   file_size_bytes: 6716356800
@@ -1226,3 +1217,16 @@ crucible-labs/gemma4-26b-a4b-reap-25:
   capabilities: text
   blueprint: reasoning_assistant
   truncation: full
+
+zai-org/glm-4.6v-flash:
+  publisher: zai-org
+  hf_url: https://huggingface.co/zai-org/glm-4.6v-flash
+  arch: dense
+  k_cache: q8_0
+  v_cache: iq4_nl
+  offload: 1
+  num_parallel: 4
+  notes: 'Architektur: dense | Vision'
+  file_size_bytes: 10053622727
+  context_length: 98304
+  useUnifiedKvCache: true

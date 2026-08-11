@@ -806,10 +806,16 @@ def cmd_quarantine_missing(dry_run: bool = False) -> int:
             moved_configs += 1
             print(f"  {key}: Config verschoben -> {dest.relative_to(CONFIG_ROOT)}")
 
-        backup_entries[key] = reg.get(key)
+        entry = reg.get(key)
+        is_partial = isinstance(entry, dict) and set(entry.keys()) <= {"reasoning", "blueprint"}
+        if not is_partial:
+            backup_entries[key] = entry
         del reg[key]
         quarantined.append(key)
-        print(f"  {key}: Registry-Eintrag entfernt (Backup: {backup_path.name})")
+        if is_partial:
+            print(f"  {key}: Registry-Eintrag entfernt (kein Backup: partieller Eintrag)")
+        else:
+            print(f"  {key}: Registry-Eintrag entfernt (Backup: {backup_path.name})")
 
     if not dry_run and quarantined:
         save_registry(reg)
@@ -1527,7 +1533,7 @@ def _read_gguf_arch(
                     break
         is_reasoning = _detect_reasoning_from_template(chat_template) if chat_template else False
         return block_count, embedding_length, is_reasoning, context_length, expert_count
-    except OSError, ValueError, struct.error:
+    except (OSError, ValueError, struct.error):
         # GGUF header parse failures (corrupt file, unsupported version, etc.)
         return None, None, None, None, None
 
@@ -2551,7 +2557,7 @@ def find_gptoss_configs() -> list[str]:
                 data = json.load(f)
             if "operation" in data and "fields" in data.get("operation", {}):
                 configs.append(str(path))
-        except OSError, json.JSONDecodeError:
+        except (OSError, json.JSONDecodeError):
             continue
     return configs
 
@@ -2709,7 +2715,7 @@ def _pre_lock_held_by_live_process() -> int | None:
     try:
         with open(_PRE_LOCK_PATH, encoding="utf-8") as f:
             pid = int(json.load(f).get("pid", -1))
-    except OSError, ValueError, KeyError:
+    except (OSError, ValueError, KeyError):
         return None
     if pid > 0 and psutil.pid_exists(pid):
         try:
@@ -2886,7 +2892,7 @@ def _interactive_menu() -> None:
                 _print_menu(cmds)
             else:
                 print(f"[ERROR] Invalid choice: {choice}")
-        except EOFError, KeyboardInterrupt:
+        except (EOFError, KeyboardInterrupt):
             print("\n[OK] Bye")
             sys.exit(0)
         except ValueError:
