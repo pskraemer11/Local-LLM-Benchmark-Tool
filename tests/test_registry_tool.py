@@ -395,15 +395,14 @@ class TestCmdSuggestIntegration:
 # ─────────────────────────────────────────────────────────────────────
 
 class TestFixNp:
-    """cmd_fix_np nach Verschärfung 2026-07-31.
+    """cmd_fix_np — filesystem-based (framework-independent).
 
-    Früher genügte der Besitz von ≥2 signifikanten Wörtern (Fuzz-Match),
-    wodurch Phantom-Varianten (-ud, -mxfp4, -imatrix, doppelte Publisher)
-    und Duplikate in der Registry überlebten. Jetzt gilt:
-    - exakter normalize-Match gegen die lms-Key-Varianten, oder
-    - eigene GGUF-Datei, oder
-    - Auflösung auf eine Datei, die einem lms-Modell gehört → Duplikat
-    Mehrere Registry-Keys auf dasselbe Ziel → nur der beste bleibt.
+    Source of Truth: GGUF files on disk (filesystem scan via _get_all_ggufs).
+    Behaviors:
+    - Phantoms (no GGUF file) are removed
+    - Base entries (without @quant) are removed when @quant variant exists
+    - Multiple @quant variants are preserved
+    - Reclassifies survivors from GGUF headers
     """
 
     def _run(self, registry, lms_models, tmp_path, resolve="", gguf_experts=False):
@@ -431,111 +430,69 @@ class TestFixNp:
         assert rt._normalize_variants("qwen3.6-27b@q5_0") == {"qwen3-6-27b"}
 
     def test_quant_suffixed_keys_stay_distinct(self, tmp_path):
-        # lms unterscheidet Quants; @-Keys dürfen NICHT als Duplikate
-        # voneinander gelöscht werden (ehemalige Kollision: base-Variante
-        # ist für alle Quants identisch).
-        (tmp_path / "q").mkdir(parents=True)
-        for f in ("q5_0.gguf", "q6_k.gguf"):
-            (tmp_path / "q" / f).write_bytes(b"x")
-        lms = [
-            {"modelKey": "qwen2.5-coder-14b-instruct@q5_0", "path": "q/q5_0.gguf"},
-            {"modelKey": "qwen2.5-coder-14b-instruct@q6_k", "path": "q/q6_k.gguf"},
-        ]
+        # Multiple @quant variants of same model coexist (not collapsed)
+        p = tmp_path / "qwen" / "coder"
+        p.mkdir(parents=True)
+        (p / "qwen2.5-coder-14b-instruct-Q5_0.gguf").write_bytes(b"x")
+        (p / "qwen2.5-coder-14b-instruct-Q6_K.gguf").write_bytes(b"x")
         registry = {
-            "qwen2.5-coder-14b-instruct@q5_0": {"file_size_bytes": 1},
-            "qwen2.5-coder-14b-instruct@q6_k": {"file_size_bytes": 2},
+            "qwen/qwen2.5-coder-14b-instruct@q5_0": {"file_size_bytes": 1},
+            "qwen/qwen2.5-coder-14b-instruct@q6_k": {"file_size_bytes": 2},
         }
-        saved = self._run(registry, lms, tmp_path)
+        saved = self._run(registry, [], tmp_path)
         assert set(saved) == {
-            "qwen2.5-coder-14b-instruct@q5_0",
-            "qwen2.5-coder-14b-instruct@q6_k",
+            "qwen/qwen2.5-coder-14b-instruct@q5_0",
+            "qwen/qwen2.5-coder-14b-instruct@q6_k",
         }
 
     def test_duplicate_publisher_keys_collapse_keeping_best(self, tmp_path):
-        # unsloth/phi-4 (Publisher im lms-Key enthalten → Score-Bonus)
-        # gewinnt gegen ['microsoft', 'unsloth']/phi-4.
+        # When multiple keys resolve to same GGUF, keep the canonical one
         p = tmp_path / "unsloth" / "phi-4"
         p.mkdir(parents=True)
         (p / "phi-4-Q5_K_M.gguf").write_bytes(b"x")
-        lms = [{"modelKey": "unsloth/phi-4", "path": "unsloth/phi-4/phi-4-Q5_K_M.gguf"}]
+        registry = {
+            "unsloth/phi-4@q5_k_m": {"file_size_bytes": 1},
+            "microsoft/unsloth/phi-4": {"file_size_bytes": 1},  # duplicate base
+        }
+        saved = self._run(registry, [], tmp_path)
+        assert set(saved) == {"unsloth/phi-4@q5_k_m"}
+
+    def test_phantom_without_gguf_is_removed(self, tmp_path):
+        # Entries with no matching GGUF file are phantoms -> removed
+        p = tmp_path / "unsloth" / "phi-4"
+        p.mkdir(parents=True)
+        (p / "phi-4-Q5_K_M.gguf").write_bytes(b"x")
+        registry = {
+            "unsloth/phi-4@q5_k_m": {"file_size_bytes": 1},
+            "bartowski/gpt-oss-20b": {"file_size_bytes": 1},  # no GGUF file -> phantom
+        }
+        saved = self._run(registry, [], tmp_path)
+        assert set(saved) == {"unsloth/phi-4@q5_k_m"}
+
+    def test_base_entry_removed_when_quant_variant_exists(self, tmp_path):
+        # Base entry (no @quant) is removed when @quant variant exists
+        p = tmp_path / "unsloth" / "phi-4"
+        p.mkdir(parents=True)
+        (p / "phi-4-Q5_K_M.gguf").write_bytes(b"x")
         registry = {
             "unsloth/phi-4": {"file_size_bytes": 1},
-            "['microsoft', 'unsloth']/phi-4": {"file_size_bytes": 1},
+            "unsloth/phi-4@q5_k_m": {"file_size_bytes": 1},
         }
-        saved = self._run(registry, lms, tmp_path)
-        assert set(saved) == {"unsloth/phi-4"}
+        saved = self._run(registry, [], tmp_path)
+        assert set(saved) == {"unsloth/phi-4@q5_k_m"}
 
-    def test_phantom_without_lms_and_without_file_is_removed(self, tmp_path):
-        lms = [{"modelKey": "unsloth/phi-4", "path": "unsloth/phi-4/phi-4-Q5_K_M.gguf"}]
-        registry = {
-            "unsloth/phi-4": {"file_size_bytes": 1},
-            "bartowski/gpt-oss-20b": {"file_size_bytes": 1},          # kein lms, keine Datei
-            "unsloth/qwen3.6-27b-ud": {"file_size_bytes": 1},         # Varianten-Phantom
-            "google/gemma-4-26b-a4b-it-quat@q4_0": {"file_size_bytes": 1},
-        }
-        saved = self._run(registry, lms, tmp_path)
-        assert set(saved) == {"unsloth/phi-4"}
-
-    def test_duplicate_via_file_resolution_is_removed(self, tmp_path):
-        # mistralai/magistral-small-2509 hat KEINEN exakten Key-Match,
-        # löst aber auf die Datei von lms 'mistralai_magistral-small-2509'
-        # auf → Duplikat. Der exakt passende bartowski-Key bleibt.
-        p = tmp_path / "bartowski" / "mistralai_Magistral-Small-2509-GGUF"
+    def test_multiple_quant_variants_preserved(self, tmp_path):
+        # Multiple @quant variants of same model coexist
+        p = tmp_path / "unsloth" / "phi-4"
         p.mkdir(parents=True)
-        mag = p / "mistralai_Magistral-Small-2509-Q3_K_M.gguf"
-        mag.write_bytes(b"x")
-
-        lms = [{
-            "modelKey": "mistralai_magistral-small-2509",
-            "path": "bartowski/mistralai_Magistral-Small-2509-GGUF/mistralai_Magistral-Small-2509-Q3_K_M.gguf",
-        }]
+        (p / "phi-4-Q5_K_M.gguf").write_bytes(b"x")
+        (p / "phi-4-Q8_0.gguf").write_bytes(b"x")
         registry = {
-            "bartowski/mistralai_magistral-small-2509": {"file_size_bytes": 1},
-            "mistralai/magistral-small-2509": {"file_size_bytes": 1},
-            "mistralai/magistral-small": {"file_size_bytes": 1},
+            "unsloth/phi-4@q5_k_m": {"file_size_bytes": 1},
+            "unsloth/phi-4@q8_0": {"file_size_bytes": 2},
         }
-        saved = self._run(registry, lms, tmp_path)
-        assert set(saved) == {"bartowski/mistralai_magistral-small-2509"}
-
-    def test_ud_entry_resolving_to_base_file_is_duplicate(self, tmp_path):
-        # unsloth/qwen3.6-27b-ud besitzt keine eigene Datei; die Auflösung
-        # landet auf der Datei des MTP-Modells → Duplikat, Basismodelle
-        # bleiben beide erhalten.
-        p = tmp_path / "unsloth" / "qwen3.6-27b-mtp"
-        p.mkdir(parents=True)
-        ud_file = p / "Qwen3.6-27B-UD-IQ3_XXS.gguf"
-        ud_file.write_bytes(b"x")
-        lms = [
-            {"modelKey": "qwen3.6-27b", "path": "unsloth/qwen3.6-27b/Qwen3.6-27B-Q3_K_S.gguf"},
-            {"modelKey": "qwen3.6-27b-mtp", "path": "unsloth/qwen3.6-27b-mtp/Qwen3.6-27B-UD-IQ3_XXS.gguf"},
-        ]
-        registry = {
-            "unsloth/qwen3.6-27b": {"file_size_bytes": 1},
-            "unsloth/qwen3.6-27b-mtp": {"file_size_bytes": 1},
-            "unsloth/qwen3.6-27b-ud": {"file_size_bytes": 1},
-        }
-
-        def fake_resolve(key):
-            if key == "unsloth/qwen3.6-27b-ud":
-                return str(ud_file)
-            return ""
-
-        with patch.object(rt, "_resolve_model_path_multi", side_effect=fake_resolve):
-            saved = self._run(registry, lms, tmp_path)
-        assert set(saved) == {"unsloth/qwen3.6-27b", "unsloth/qwen3.6-27b-mtp"}
-
-    def test_directory_models_keep_best_publisher_key(self, tmp_path):
-        # openai/gpt-oss-20b ist ein Verzeichnis-Modell (kein GGUF).
-        # Alle drei Registry-Keys matchen exakt; der mit dem Publisher,
-        # der im lms-Key vorkommt, gewinnt.
-        lms = [{"modelKey": "openai/gpt-oss-20b", "path": "openai/gpt-oss-20b"}]
-        registry = {
-            "openai/gpt-oss-20b": {"file_size_bytes": 1},
-            "lmstudio-community/gpt-oss-20b": {"file_size_bytes": 1},
-            "unsloth/gpt-oss-20b": {"file_size_bytes": 1},
-        }
-        saved = self._run(registry, lms, tmp_path)
-        assert set(saved) == {"openai/gpt-oss-20b"}
+        saved = self._run(registry, [], tmp_path)
+        assert set(saved) == {"unsloth/phi-4@q5_k_m", "unsloth/phi-4@q8_0"}
 
     def test_classification_applied_to_survivors(self, tmp_path):
         p = tmp_path / "unsloth" / "qwen3.6-27b"

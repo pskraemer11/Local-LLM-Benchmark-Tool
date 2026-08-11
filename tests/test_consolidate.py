@@ -27,7 +27,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import consolidate_results as cr
-from benchmark_config import CAT_WEIGHTS, OVERALL_WEIGHTS, QUANT_MAP
+from benchmark_config import CAT_WEIGHTS, OVERALL_WEIGHTS, extract_quant_from_key
 from consolidate_results import (
     _align_decimal_cells,
     _auto_delimiter,
@@ -306,20 +306,22 @@ class TestNormalizeModelKeys:
         assert "model_a" in result
         assert "model_b" in result
 
-    def test_uses_quant_map_for_missing_variant(self):
-        # If a key has no @variant but QUANT_MAP knows its quant.
-        # The actual key in QUANT_MAP is "mistralai/codestral-22b-v0.1"
-        # (the publisher-prefixed form used by `lms ls --json`).
-        # _normalize_model_keys also converts "/" to "_" in the output.
+    def test_base_entry_without_quant_stays_unchanged(self):
+        # Since QUANT_MAP removal: base entries without @quant are NOT
+        # auto-enriched. They stay as-is (invalid per identity principle).
         result = _normalize_model_keys(["mistralai/codestral-22b-v0.1"])
-        # QUANT_MAP says IQ4_XS for that key
-        assert "mistralai_codestral-22b-v0.1@iq4_xs" in result
+        assert "mistralai_codestral-22b-v0.1" in result
+        # No @quant was added
+        assert not any("@" in k for k in result if k.startswith("mistralai"))
 
-    def test_quant_map_priority_for_exact_match(self):
-        # If a key is in QUANT_MAP, that's the source of truth
-        result = _normalize_model_keys(["devstral-small-2-24b-instruct-2512"])
-        # QUANT_MAP has Q3_K_S for this key -> normalized to @q3_k_s
-        assert "devstral-small-2-24b-instruct-2512@q3_k_s" in result
+    def test_quant_variant_preserved(self):
+        # @quant variants should be preserved as separate entries
+        result = _normalize_model_keys([
+            "mradermacher/gemma-4-26b-a4b-it@q3_k_m",
+            "mradermacher/gemma-4-26b-a4b-it@q6_k",
+        ])
+        assert "mradermacher_gemma-4-26b-a4b-it@q3_k_m" in result
+        assert "mradermacher_gemma-4-26b-a4b-it@q6_k" in result
 
 
 # ─────────────────────────────────────────────────────────────────────

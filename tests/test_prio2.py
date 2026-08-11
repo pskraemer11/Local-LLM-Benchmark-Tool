@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import pytest
 
-from benchmark_config import QUANT_MAP, GPTOSS_REASONING_EFFORT, GPTOSS_REASONING_BUDGET, get_model_config, get_quant
+from benchmark_config import GPTOSS_REASONING_EFFORT, GPTOSS_REASONING_BUDGET, get_model_config, get_quant
 from custom_benchmark import _uses_qwen_template, strip_thinking_tokens, _can_use_structured_output
 from csv_writer import _truncate_response
 
@@ -31,29 +31,20 @@ FAKE_QUANT_REG = {
 
 
 class TestGetQuant:
-    """K1: variant-aware QUANT_MAP lookup with explicit priority."""
+    """K1: quant extracted from model key (no static map)."""
 
-    def test_exact_match(self):
-        # bare name (no publisher): picks first registry match
-        with patch("benchmark_config._load_quant_registry", return_value=FAKE_QUANT_REG):
-            assert get_quant("gpt-oss-20b") == "MXFP4"
-
-    def test_exact_match_with_publisher(self):
-        with patch("benchmark_config._load_quant_registry", return_value=FAKE_QUANT_REG):
-            assert get_quant("lmstudio-community/gpt-oss-20b") == "MXFP4"
-
-    def test_exact_match_unsloth(self):
-        with patch("benchmark_config._load_quant_registry", return_value=FAKE_QUANT_REG):
-            assert get_quant("unsloth/gpt-oss-20b") == "Q6_K"
+    def test_quant_from_key(self):
+        # Quant extracted directly from @quant in key
+        assert get_quant("unsloth/phi-4@q5_k_m") == "Q5_K_M"
+        assert get_quant("qwen/qwen3-14b@q6_k") == "Q6_K"
 
     def test_different_quants_distinct(self):
-        # devstral base name -> QUANT_MAP entry (Q3_K_S)
-        # @q3_k_s variant -> self-evident from @variant
-        assert get_quant("devstral-small-2-24b-instruct-2512") == "Q3_K_S"
+        # Different @quant variants are distinct
         assert get_quant("devstral-small-2-24b-instruct-2512@q3_k_s") == "Q3_K_S"
+        assert get_quant("devstral-small-2-24b-instruct-2512@q4_k_s") == "Q4_K_S"
 
     def test_qwen_coder_reap_distinct_quants(self):
-        assert get_quant("qwen3-coder-reap-25b-a3b-i1") == "Q3_K_M"
+        assert get_quant("qwen3-coder-reap-25b-a3b-i1@q3_k_m") == "Q3_K_M"
         assert get_quant("qwen3-coder-reap-25b-a3b-i1@q4_k_s") == "Q4_K_S"
 
     def test_unknown_returns_question_mark(self):
@@ -176,34 +167,24 @@ def _bootstrap_py(scores, n_resamples, alpha, seed):
 class TestLookupVramFuzzyFix:
     """D1: fuzzy match with length-ratio guard prevents false positives."""
 
-    def test_quant_distinct_short_vs_long(self):
-        """The D1 fix: short keys must not match longer keys via the old
-        substring heuristic (e.g. 'gpt-oss-20b' in 'lmstudio-community/gpt-oss-20b'
-        would have caused wrong fuzzy matches). The new logic requires
-        length-ratio >= 0.85 for substring matches.
-        """
-        with patch("benchmark_config._load_quant_registry", return_value=FAKE_QUANT_REG):
-            # gpt-oss-20b is a base/short key
-            # lmstudio-community/gpt-oss-20b is the longer publisher-prefixed key
-            # The exact-match lookup should return DIFFERENT quants for these.
-            q1 = get_quant("gpt-oss-20b")           # MXFP4 (bare name, first reg match)
-            q2 = get_quant("lmstudio-community/gpt-oss-20b")  # MXFP4 (same publisher entry)
-            q3 = get_quant("unsloth/gpt-oss-20b")   # Q6_K (different publisher)
-            assert q1 != q3, f"q1={q1} q3={q3}"
-            assert q1 == "MXFP4"
-            assert q2 == "MXFP4"
-            assert q3 == "Q6_K"
+    def test_quant_from_key_distinct(self):
+        """Different @quant variants resolve to different quants."""
+        q1 = get_quant("unsloth/phi-4@q5_k_m")
+        q2 = get_quant("unsloth/phi-4@q8_0")
+        q3 = get_quant("unsloth/phi-4@mxfp4")
+        assert q1 == "Q5_K_M"
+        assert q2 == "Q8_0"
+        assert q3 == "MXFP4"
+        assert q1 != q2
 
-    def test_quant_does_not_collapse_devstral_variants(self):
-        """Q3_K_S (base) and Q3_K_S (@q3_k_s) both resolve to Q3_K_S."""
-        base = get_quant("devstral-small-2-24b-instruct-2512")
-        q3 = get_quant("devstral-small-2-24b-instruct-2512@q3_k_s")
-        assert base == "Q3_K_S"
-        assert q3 == "Q3_K_S"
+    def test_base_key_without_quant_returns_question_mark(self):
+        """Base keys (no @quant) are invalid per identity principle."""
+        assert get_quant("devstral-small-2-24b-instruct-2512") == "?"
+        assert get_quant("qwen3-coder-reap-25b-a3b-i1") == "?"
 
-    def test_quant_does_not_collapse_qwen_reap_variants(self):
-        """Q3_K_M (default) and Q4_K_S (custom) must remain distinct."""
-        default = get_quant("qwen3-coder-reap-25b-a3b-i1")
+    def test_qwen_reap_distinct_quants(self):
+        """Q3_K_M and Q4_K_S must remain distinct."""
+        default = get_quant("qwen3-coder-reap-25b-a3b-i1@q3_k_m")
         custom = get_quant("qwen3-coder-reap-25b-a3b-i1@q4_k_s")
         assert default == "Q3_K_M"
         assert custom == "Q4_K_S"

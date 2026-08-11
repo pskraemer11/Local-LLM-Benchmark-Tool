@@ -1,4 +1,0 @@
-#!/bin/sh
-# Git pre-push hook -> Review-Gate (pre_review_checks.ps1)
-# Installiert via: scripts/install-hooks.ps1  (setzt core.hooksPath)
-exec pwsh -NoProfile -ExecutionPolicy Bypass -File "$(dirname "$0")/../pre-push.ps1" "$@"

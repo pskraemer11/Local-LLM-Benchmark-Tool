@@ -3,16 +3,12 @@ Central configuration for all benchmark pipelines.
 
 Imported by:
   - run_benchmarks.py       (PIPELINE_DISCOVERY, TOOL_EVAL_SCENARIO_IDS)
-  - consolidate_results.py  (QUANT_MAP, CAT_WEIGHTS, ...)
+  - consolidate_results.py  (extract_quant_from_key, CAT_WEIGHTS, ...)
   - tests/test_scores.py        (CAT_WEIGHTS, OVERALL_WEIGHTS)
 
-Source priority for QUANT_MAP:
-  1. QUANT_MAP (statisch, hier unten) - zuverlaessig, auch fuer geloeschte Modelle
-  2. lms ls --json (dynamisch) - nur installierte Modelle
-  3. LM Studio Config-Dateien
-  4. GGUF-Metadaten-Cache
-
-Bei neuen Modellen: QUANT_MAP manuell in dieser Datei ergaenzen.
+Model identity: publisher/model@quant (3 entities, always unique).
+Quant is extracted from the key — no static QUANT_MAP needed.
+Fallback: GGUF filename (Source of Truth).
 """
 
 from __future__ import annotations
@@ -146,143 +142,64 @@ REASONING_PATTERNS = {
 GPTOSS_REASONING_EFFORT = "medium"
 GPTOSS_REASONING_BUDGET = 4096
 
-# Static quantization map - manually maintained.
-# Source: lms ls --json + LM Studio configs + GGUF cache
-# Conflicts resolved: Steckbrief > Config > GGUF-Cache > Filename
-QUANT_MAP = {
-    "datagemma-rig-27b-it": "Q3_K_S",  # datagemma-rig-27b-it
-    "deepseek-coder-33b-instruct": "Q3_K_S",  # deepseek-coder-33b-instruct
-    "deepseek-coder-v2-lite-instruct": "Q5_K_M",  # deepseek-coder-v2-lite-instruct
-    "deepseek-r1-distill-qwen-14b": "Q6_K",  # deepseek-r1-distill-qwen-14b
-    "devstral-small-2-24b-instruct-2512": "Q3_K_S",  # devstral-small-2-24b-instruct-2512
-    "em_german_13b_v01": "Q6_K",  # em_german_13b_v01
-    "em_german_leo_mistral": "Q4_K_M",  # em_german_leo_mistral
-    "ernie-4.5-21b-a3b-pt": "IQ4_NL",  # ernie-4.5-21b-a3b-pt
-    "essentialai/rnj-1": "Q8_0",  # essentialai/rnj-1
-    "f2llm-v2-1.7b": "Q8_0",  # f2llm-v2-1.7b
-    "f2llm-v2-4b": "Q6_K",  # f2llm-v2-4b
-    "falcon3-10b-instruct": "Q8_0",  # falcon3-10b-instruct
-    "falcon3-mamba-7b-instruct": "Q8_0",  # falcon3-mamba-7b-instruct
-    "gemma-4-12b-it-qat": "Q4_0",  # gemma-4-12b-it-qat
-    "gemma-4-19b-a4b-it-reap-i1": "Q4_K_M",  # gemma-4-19b-a4b-it-reap-i1
-    "gemma-4-26b-a4b-it": "IQ3_S",  # gemma-4-26b-a4b-it
-    "gemma-4-26b-a4b-it-i1": "IQ4_XS",  # gemma-4-26b-a4b-it-i1
-    "german-ocr-3.1": "Q8_0",  # german-ocr-3.1
-    "google_gemma-4-26b-a4b-it": "Q3_K_S",  # google_gemma-4-26b-a4b-it
-    "gpt-oss-20b-q4ks-autoround": "Q4_K_S",  # gpt-oss-20b-q4ks-autoround
-    "granite-4.0-h-tiny": "Q8_0",  # granite-4.0-h-tiny
-    "granite-4.1-30b": "Q3_K_S",  # granite-4.1-30b
-    "granite-4.1-8b": "Q6_K",  # granite-4.1-8b
-    "internlm2-math-plus-20b": "Q4_K_M",  # internlm2-math-plus-20b
-    "internlm2_5-20b-chat": "Q4_K_M",  # internlm2_5-20b-chat
-    "januscoder-14b": "Q6_K",  # januscoder-14b
-    "jina-embeddings-v3": "Q8_0",  # jina-embeddings-v3
-    "kimi-linear-reap-35b-a3b-instruct-i1": "IQ3_XXS",  # kimi-linear-reap-35b-a3b-instruct-i1
-    "mamba-codestral-7b-v0.1": "Q8_0",  # mamba-codestral-7b-v0.1
-    "mellum2-12b-a2.5b-instruct": "Q4_K_M",  # mellum2-12b-a2.5b-instruct
-    "ministral-3-14b-instruct-2512": "Q6_K",  # ministral-3-14b-instruct-2512
-    "mistralai/codestral-22b-v0.1": "IQ4_XS",  # mistralai/codestral-22b-v0.1
-    "mistralai_magistral-small-2509": "Q3_K_M",  # mistralai_magistral-small-2509
-    "nerdsking-python-coder-7b-i": "Q8_0",  # nerdsking-python-coder-7b-i
-    "north-mini-code-1.0": "IQ3_S",  # north-mini-code-1.0
-    "openai/gpt-oss-20b": "MXFP4",  # openai/gpt-oss-20b
-    "qwen2.5-coder-14b-instruct@q5_0": "Q5_0",  # qwen2.5-coder-14b-instruct@q5_0
-    "qwen2.5-coder-14b-instruct@q5_k_m": "Q5_K_M",  # qwen2.5-coder-14b-instruct@q5_k_m
-    "qwen2.5-coder-14b-instruct@q6_k": "Q6_K",  # qwen2.5-coder-14b-instruct@q6_k
-    "qwen3-30b-a3b-instruct-2507": "Q3_K_S",  # qwen3-30b-a3b-instruct-2507
-    "qwen3-coder-30b-a3b-instruct": "Q3_K_S",  # qwen3-coder-30b-a3b-instruct
-    "qwen3-coder-reap-25b-a3b": "Q3_K_M",  # qwen3-coder-reap-25b-a3b
-    "qwen3-coder-reap-25b-a3b-i1": "Q3_K_M",  # qwen3-coder-reap-25b-a3b-i1
-    "qwen3.6-27b": "Q3_K_S",  # qwen3.6-27b
-    "qwen3.6-27b-i1": "Q3_K_S",  # qwen3.6-27b-i1
-    "qwen3.6-27b-mtp": "IQ3_XXS",  # qwen3.6-27b-mtp
-    "qwen3.6-28b-reap-i1@iq3_s": "IQ3_S",  # qwen3.6-28b-reap-i1@iq3_s
-    "qwen3.6-28b-reap-i1@q3_k_s": "Q3_K_S",  # qwen3.6-28b-reap-i1@q3_k_s
-    "text-embedding-bge-m3": "Q8_0",  # text-embedding-bge-m3
-    "text-embedding-deepset-mxbai-embed-de-large-v1": "Q8_0",  # text-embedding-deepset-mxbai-embed-de-large-v1
-    "text-embedding-embeddinggemma-300m": "Q8_0",  # text-embedding-embeddinggemma-300m
-    "text-embedding-granite-embedding-278m-multilingual": "Q8_0",  # text-embedding-granite-embedding-278m-multilingual
-    "text-embedding-multilingual-e5-large-instruct": "Q6_K",  # text-embedding-multilingual-e5-large-instruct
-    "text-embedding-multilingual-e5-small": "Q8_0",  # text-embedding-multilingual-e5-small
-    "text-embedding-nomic-embed-text-v1.5@q4_k_m": "Q4_K_M",  # text-embedding-nomic-embed-text-v1.5@q4_k_m
-    "text-embedding-nomic-embed-text-v1.5@q8_0": "Q8_0",  # text-embedding-nomic-embed-text-v1.5@q8_0
-    "text-embedding-nomic-embed-text-v2-moe": "Q6_K",  # text-embedding-nomic-embed-text-v2-moe
-    "unsloth/phi-4": "Q5_K_M",  # unsloth/phi-4
-}
+# ── Quantization extraction from model key (canonical identity) ──
+# The quant is ALWAYS part of the key: publisher/model@quant.
+# No static map needed — extract directly from the key.
+# Fallback: read from GGUF filename (Source of Truth).
+
+_KNOWN_QUANTS = (
+    "q1_0", "q2_k", "q2_k_s", "q3_k_xs", "q3_k_s", "q3_k_m", "q3_k_l",
+    "q4_0", "q4_1", "q4_k_s", "q4_k_m", "q4_k_xl",
+    "q5_0", "q5_1", "q5_k_s", "q5_k_m",
+    "q6_k", "q8_0", "q8_1",
+    "iq1_s", "iq1_m",
+    "iq2_xxs", "iq2_xs", "iq2_s", "iq2_m",
+    "iq3_xxs", "iq3_xs", "iq3_s", "iq3_m", "iq3_nl",
+    "iq4_xs", "iq4_nl",
+    "mxfp4", "mxpr4", "fp16", "f16",
+    "bf16",
+)
+
+
+def extract_quant_from_key(model_key: str) -> str:
+    """Extract the quant suffix from a model key.
+
+    Key format: publisher/model@quant
+    Returns the quant in UPPERCASE (e.g. "Q3_K_S") or "" if no @quant present.
+    """
+    if "@" not in model_key:
+        return ""
+    _, quant = model_key.split("@", 1)
+    return quant.upper()
+
+
+def guess_quant_from_filename(filename: str) -> str:
+    """Guess quant from GGUF filename when key has no @quant.
+
+    Uses known quant patterns. Returns quant in UPPERCASE or "".
+    """
+    name = filename.lower().removesuffix(".gguf")
+    for quant in _KNOWN_QUANTS:
+        if quant.replace("_", "-") in name or quant in name:
+            return quant.upper()
+    # Fallback: last hyphen-separated part if it looks like a quant
+    parts = name.rsplit("-", 1)
+    if len(parts) == 2 and parts[1] and parts[1][0] in ("q", "i", "f", "m", "b"):
+        return parts[1].upper()
+    return ""
 
 
 def get_quant(model_identifier: str) -> str:
-    """Variant-aware quantization lookup with explicit priority.
+    """Get the quant of a model from its key (canonical identity).
 
-    Priority (highest first):
-      1. Exact match in QUANT_MAP (preserves publisher prefix and @quant suffix)
-      2. Suffix-only match (strip publisher prefix, keep @quant)
-      3. Base-only match (strip publisher prefix AND @quant)
-      4. @variant self-evident: if input has an explicit @variant, return it
-      5. Registry-based fallback (model_registry.yaml:quants first entry)
-
-    This is the canonical way to look up a model quant and prevents the
-    old `_lookup_vram` from picking the wrong quant when a model has
-    multiple entries (e.g. GPT-OSS 20B has MXFP4, Q6_K, and Q8_0).
-
-    Returns "?" when no entry matches.
+    The key format is ALWAYS publisher/model@quant — the @quant is part of the
+    unique identity. No static map, no fallback. Base entries without @quant
+    are invalid and return "?".
     """
     if not model_identifier:
         return "?"
-    import re as _re
-
-    # 1. Exact match
-    if model_identifier in QUANT_MAP:
-        return QUANT_MAP[model_identifier]
-    # Strip publisher prefix for further matching
-    stripped = _re.sub(r"^[a-z0-9_-]+[/\\]", "", model_identifier)
-    # 2. Stripped match (keep @quant)
-    if stripped in QUANT_MAP:
-        return QUANT_MAP[stripped]
-    # 3. If input has an explicit @variant, it is self-evident: the variant
-    # string IS the quantization identifier. This takes priority over the
-    # base-only QUANT_MAP match because an explicit @variant is more specific.
-    if "@" in stripped:
-        variant = stripped.split("@")[-1]
-        if variant:
-            return variant.upper()
-    # 4. Base-only match (strip @quant)
-    base = _re.sub(r"@.*$", "", stripped)
-    if base in QUANT_MAP:
-        return QUANT_MAP[base]
-    # 5. Registry fallback (Code-Review 2026-07-18 §1.2): take the first
-    # entry from the registry's `quants` list. This makes
-    # model_registry.yaml the single source of truth for new models:
-    # when a model is added there with `quants: [Q4_K_M]`, get_quant()
-    # returns Q4_K_M without needing a manual QUANT_MAP update.
-    # Uses cached YAML data to avoid re-parsing on every call.
-    data = _load_quant_registry()
-    pub_match = None
-    fallback_match = None
-    for key, entry in data.items():
-        if not isinstance(entry, dict):
-            continue
-        quants_list = entry.get("quants") or []
-        if not quants_list:
-            continue
-        q0 = quants_list[0]
-        q0_str = q0.upper() if isinstance(q0, str) else str(q0)
-        key_stripped = _re.sub(r"^[a-z0-9_-]+[/\\]", "", key)
-        if base == key_stripped or base == key:
-            # Publisher-prefixed match: input publisher matches entry publisher
-            if "/" in model_identifier:
-                inp_pub = model_identifier.split("/")[0]
-                key_pub = key.split("/")[0] if "/" in key else ""
-                if inp_pub == key_pub:
-                    pub_match = q0_str
-            # First fallback match (preserves original order for bare names)
-            if fallback_match is None:
-                fallback_match = q0_str
-    if pub_match:
-        return pub_match
-    if fallback_match:
-        return fallback_match
-    return "?"
+    quant = extract_quant_from_key(model_identifier)
+    return quant if quant else "?"
 
 
 # Registry cache for get_quant() step 5 (avoids re-parsing YAML on every call)

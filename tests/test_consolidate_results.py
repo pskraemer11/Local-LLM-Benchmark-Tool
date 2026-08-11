@@ -11,7 +11,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 
 import consolidate_results as cr
-from benchmark_config import CAT_WEIGHTS, OVERALL_WEIGHTS, QUANT_MAP
+from benchmark_config import CAT_WEIGHTS, OVERALL_WEIGHTS, extract_quant_from_key
 from consolidate_results import (
     _auto_delimiter,
     _find_newest_by_mtime,
@@ -515,19 +515,17 @@ class TestReadCustomCsv:
 
 
 # ======================================================================
-# get_quant (variant-aware lookup)
+# get_quant (key-based extraction)
 # ======================================================================
 
 class TestGetQuant:
-    def test_exact_match_returns_quant(self):
-        # Pick any key from QUANT_MAP
-        sample_key = next(iter(QUANT_MAP))
-        expected = QUANT_MAP[sample_key]
-        result = cr.get_quant(sample_key)
-        assert result == expected
+    def test_quant_from_key(self):
+        # Quant extracted directly from key (no static map)
+        result = cr.get_quant("unsloth/phi-4@q5_k_m")
+        assert result == "Q5_K_M"
 
     def test_unknown_returns_question_mark(self):
-        assert cr.get_quant("definitely-not-in-the-map-xyz") == "?"
+        assert cr.get_quant("model-without-quant") == "?"
 
     def test_empty_returns_question_mark(self):
         assert cr.get_quant("") == "?"

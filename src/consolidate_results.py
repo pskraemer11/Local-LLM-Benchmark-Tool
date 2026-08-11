@@ -49,7 +49,7 @@ from benchmark_config import (
     CAT_WEIGHTS,
     MMLU_PRO_SUBSETS,
     OVERALL_WEIGHTS,
-    QUANT_MAP,
+    extract_quant_from_key,
     get_quant,
 )
 from utils.terminal import error, warn
@@ -118,15 +118,11 @@ def _normalize_model_keys(model_keys: list[str]) -> list[str]:
 
     1. Lowercase the @variant part consistently
     2. If a base model appears both with and without @variant (same variant),
-       keep only the version with @variant (use QUANT_MAP to infer missing quant)
+       keep only the version with @variant (use extract_quant_from_key)
     3. Keep multiple quant variants as separate entries (e.g. @q3_k_m vs @q4_k_s)
     """
     groups: dict[tuple[str, str], list[str]] = {}
     for mk in model_keys:
-        # Look up QUANT_MAP BEFORE the "/" → "_" replacement because
-        # the keys in QUANT_MAP use the publisher-prefixed form
-        # (e.g. "mistralai/codestral-22b-v0.1"), not the normalized form.
-        # Fixed 12.07.2026 as part of the test-coverage expansion (Prio 4.16).
         if "@" in mk:
             parts = mk.split("@")
             if len(parts) > 2:
@@ -135,9 +131,7 @@ def _normalize_model_keys(model_keys: list[str]) -> list[str]:
             variant_lower = variant.lower()
         else:
             base_pre = mk
-            # Try both: original (with /) and normalized (with _)
-            variant_lower = QUANT_MAP.get(mk, "").lower() or \
-                QUANT_MAP.get(mk.replace("/", "_"), "").lower()
+            variant_lower = ""
         # Normalize publisher/key separator: "/" → "_" (directory convention)
         mk = mk.replace("/", "_")
         base = base_pre.replace("/", "_")
@@ -194,15 +188,14 @@ def _get_display_name(model_key: str) -> str:
 def _lookup_vram(model_key: str) -> dict[str, Any] | None:
     """Try to find VRAM + quant for a model_key.
 
-    Priority for quant: QUANT_MAP (static) > lms ls --json (dynamic)
+    Priority for quant: model key (@quant) > GGUF filename > lms ls --json
     Priority for vram_gb: lms ls --json only (dynamic - deleted models have no file)
     """
-    # Step 1: Get quant from QUANT_MAP via variant-aware get_quant() (primary
-    # - works for deleted models too). This prevents the previous behaviour
-    # where `QUANT_MAP.get(model_key)` returned None for `gpt-oss-20b` if the
-    # caller passed `lmstudio-community/gpt-oss-20b`, leading to a wrong
-    # quant from lms_match.
-    quant_from_map = get_quant(model_key) or None
+    # Step 1: Get quant from model key (@quant suffix) - canonical identity
+    # Format: publisher/model@quant — always unique, no static map needed
+    quant_from_key = extract_quant_from_key(model_key)
+    if not quant_from_key:
+        quant_from_key = get_quant(model_key) or None
 
     # Step 2: Get VRAM + quant from lms ls --json (dynamic - only installed models)
     model_info = _get_model_info()
@@ -255,15 +248,15 @@ def _lookup_vram(model_key: str) -> dict[str, Any] | None:
                     best_match = model_info[mk]
         lms_match = best_match
 
-    # Step 3: Merge - QUANT_MAP wins for quant, lms wins for vram_gb
+    # Step 3: Merge - key @quant wins, then GGUF, then lms for vram_gb
     if lms_match:
         return {
             "vram_gb": lms_match.get("vram_gb", ""),
             "params": lms_match.get("params", "?"),
-            "quant": quant_from_map or lms_match.get("quant", "?"),
+            "quant": quant_from_key or lms_match.get("quant", "?"),
         }
-    elif quant_from_map:
-        return {"vram_gb": "", "params": "?", "quant": quant_from_map}
+    elif quant_from_key:
+        return {"vram_gb": "", "params": "?", "quant": quant_from_key}
     return None
 
 # (CAT_WEIGHTS, OVERALL_WEIGHTS in benchmark_config.py)

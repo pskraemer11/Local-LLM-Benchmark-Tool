@@ -298,33 +298,64 @@ def cmd_fix_ctx() -> None:
 
 
 def cmd_fill_size() -> None:
-    """Look up file_size_bytes from LMS for registry entries missing it."""
+    """Fill file_size_bytes from filesystem (GGUF files), LMS as fallback.
+
+    Source of Truth: the actual GGUF file on disk. LMS is only used if the
+    file is not directly accessible (e.g., not in MODELS_CACHE).
+    """
     reg = load_registry()
-    lms_models = _run_lms_ls()
-    if not lms_models:
-        print("[WARN] LMS nicht verfuegbar. Keine Aenderungen.")
-        return
-    # Build LMS lookup: normalized name -> sizeBytes
-    lms_sizes: dict[str, int] = {}
-    for m in lms_models:
-        normalized_key = normalize_model_name(m.get("modelKey", ""))
-        sb = m.get("sizeBytes", 0)
-        if sb and sb > 0:
-            if normalized_key not in lms_sizes:
-                lms_sizes[normalized_key] = int(sb)
     updated = 0
+
+    # Primary: read from filesystem directly
     for key, entry in reg.items():
         if not isinstance(entry, dict):
             continue
         if entry.get("file_size_bytes"):
             continue
-        normalized_key = normalize_model_name(key)
-        if normalized_key in lms_sizes:
-            entry["file_size_bytes"] = lms_sizes[normalized_key]
-            updated += 1
+        # Find the GGUF file for this key
+        ggu = _find_gguf_for_key(key)
+        if ggu is not None:
+            try:
+                size = ggu.stat().st_size
+                if size > 0:
+                    entry["file_size_bytes"] = size
+                    updated += 1
+                    continue
+            except OSError:
+                pass
+
+    # Fallback: LMS for entries still missing size
+    lms_models = _run_lms_ls()
+    if lms_models:
+        lms_sizes: dict[str, int] = {}
+        for m in lms_models:
+            mk = normalize_model_name(m.get("modelKey", ""))
+            sb = m.get("sizeBytes", 0)
+            if sb and sb > 0 and mk not in lms_sizes:
+                lms_sizes[mk] = int(sb)
+        for key, entry in reg.items():
+            if not isinstance(entry, dict) or entry.get("file_size_bytes"):
+                continue
+            if normalize_model_name(key) in lms_sizes:
+                entry["file_size_bytes"] = lms_sizes[normalize_model_name(key)]
+                updated += 1
+
     if updated:
         save_registry(reg)
-    print(f"[OK] {updated} entries got file_size_bytes from LMS")
+    print(f"[OK] {updated} entries got file_size_bytes (filesystem primary, LMS fallback)")
+
+
+def _find_gguf_for_key(key: str) -> Path | None:
+    """Find the GGUF file for a registry key by scanning MODELS_CACHE.
+
+    Returns the Path or None if not found.
+    """
+    from model_identity import normalize_model_name
+    base = normalize_model_name(key).split("@")[0]
+    for g in _get_all_ggufs():
+        if g.is_file() and base.replace("-", "_") in g.name.replace("-", "_"):
+            return g
+    return None
 
 
 _GGUF_FILE_CACHE: list[Path] | None = None
@@ -452,132 +483,103 @@ def _resolve_exact(reg_key: str, lms_path_map: dict[str, str]) -> str:
 def cmd_fix_np() -> None:
     """Recompute arch classification + num_parallel, remove stale entries.
 
-    - Reads ``expert_count`` from GGUF header as single source of truth
-      for MoE detection.
-    - Drops entries that have **neither** an exactly matching ``lms``
-      entry **nor** a GGUF file on disk (stale / uninstalled models).
-    - Collapses duplicate registry entries that resolve to the same
-      installed model, keeping the best-matching key. This only runs
-      when ``lms ls`` returned data — without it, resolution would
-      degrade to fuzzy word matching and legit entries (e.g. quant
-      variants) could be collapsed into each other.
+    Source of Truth: GGUF headers (architecture) + filesystem (deployment).
+    LMS is NOT required — the tool is framework-independent.
+
+    - Reads ``expert_count`` from GGUF header for MoE detection.
+    - Drops entries whose GGUF file no longer exists on disk.
+    - Collapses duplicate entries resolving to the same GGUF file.
     """
     reg = load_registry()
-    lms_models = _run_lms_ls()
-    if not lms_models:
-        print("[WARN] lms ls lieferte keine Daten - Duplikat-Kollaps übersprungen, nur Phantome werden gelöscht.")
 
-    # ── build lookup maps from lms ls ──
-    lms_path_map: dict[str, str] = {}
-    lms_variants: dict[str, str] = {}  # normalized variant → lms key
-    lms_quant: dict[str, str] = {}  # normalized quant form → lms key
-    lms_file_map: dict[str, str] = {}  # normcased file path → lms key
-    for m in lms_models:
-        mk = str(m.get("modelKey", "")).lower()
-        rp = m.get("path", "")
-        full_path = str(MODELS_CACHE / rp) if rp else ""
-        lms_path_map[mk] = full_path
-        lms_path_map[normalize_model_name(mk)] = full_path
-        for i, ch in enumerate(mk):
-            if ch == "/":
-                lms_path_map[mk[i + 1 :]] = full_path
-                lms_path_map[normalize_model_name(mk[i + 1 :])] = full_path
-                break
-        for variant in _normalize_variants(mk):
-            lms_variants.setdefault(variant, mk)
-        if "@" in mk:
-            lms_quant.setdefault(_quant_variant(mk), mk)
-        if full_path and os.path.isfile(full_path):
-            lms_file_map.setdefault(os.path.normcase(full_path), mk)
+    # ── Build filesystem-based lookup: normalized base -> GGUF path ──
+    fs_lookup: dict[str, Path] = {}  # normalized base key -> GGUF path
+    for g in _get_all_ggufs():
+        if not g.is_file():
+            continue
+        base = normalize_model_name(g.name).split("@")[0]
+        if base not in fs_lookup:
+            fs_lookup[base] = g
 
-    def _exact_lms_match(reg_key: str) -> str | None:
-        """Return the lms key whose normalized form **exactly** matches a
-        normalized spelling of the registry key (no word-substring fuzz).
-
-        Quant-suffixed keys compare with their quant form first, so
-        ``x@q5_0`` only matches ``x@q5_0``, not ``x@q6_k``.
-        """
-        if "@" in reg_key:
-            lmk = lms_quant.get(_quant_variant(reg_key))
-            if lmk is not None:
-                return lmk
-        for variant in _normalize_variants(reg_key):
-            lmk = lms_variants.get(variant)
-            if lmk is not None:
-                return lmk
+    def _gguf_for_key(reg_key: str) -> Path | None:
+        """Find GGUF file for a registry key via filesystem scan."""
+        base = normalize_model_name(reg_key).split("@")[0]
+        # Direct match
+        if base in fs_lookup:
+            return fs_lookup[base]
+        # Fuzzy: check if any GGUF base matches
+        for gbase, gpath in fs_lookup.items():
+            if base == gbase or base in gbase or gbase in base:
+                return gpath
         return None
-
-    def _resolve_path(reg_key: str) -> str:
-        model_path = lms_path_map.get(reg_key.lower()) or lms_path_map.get(normalize_model_name(reg_key), "")
-        if "/" in reg_key:
-            suffix = reg_key.split("/", 1)[1].lower()
-            mp = lms_path_map.get(suffix) or lms_path_map.get(normalize_model_name(suffix), "")
-            if mp:
-                model_path = mp
-        if not model_path or not os.path.isfile(model_path):
-            found = _resolve_model_path_multi(reg_key)
-            if found:
-                model_path = found
-        return model_path
 
     updated = 0
     removed = 0
     keys = list(reg.keys())  # snapshot to allow deletion during iteration
 
-    # ── pass 1: drop phantoms, group survivors by resolved target ──
-    groups: dict[str, list[tuple[str, int, int]]] = {}  # target id → [(key, score, idx)]
-    for idx, key in enumerate(keys):
+    # ── pass 1: match registry entries to GGUF files, drop phantoms ──
+    # Group by (publisher, model_base, quant) — the unique identity triple
+    groups: dict[tuple[str, str, str], list[str]] = {}  # identity → [keys]
+    for key in keys:
         entry = reg[key]
         if not isinstance(entry, dict):
             continue
-        lmk = _exact_lms_match(key)
-        exact = _resolve_exact(key, lms_path_map) if lmk is None else ""
-        has_file = bool(exact)
-
-        # ── remove stale entries (no exact lms match + no GGUF) ──
-        if lmk is None and not has_file:
+        ggu = _gguf_for_key(key)
+        if ggu is None:
+            # No GGUF file found → phantom, remove
             del reg[key]
             removed += 1
-            print(f"  {key}: gelöscht (nicht installiert)")
+            print(f"  {key}: gelöscht (kein GGUF gefunden)")
             continue
+        # Group by identity triple for dedup
+        pub, model, quant = _identity_triple_from_key(key)
+        groups.setdefault((pub, model, quant), []).append(key)
 
-        if lmk is not None:
-            gid = "lms:" + lmk
-            score = 2
-            pub = key.split("/", 1)[0].lower() if "/" in key else ""
-            if pub and pub in lmk:
-                score += 1
-        elif lms_models:
-            if os.path.normcase(exact) in lms_file_map:
-                gid = "lms:" + lms_file_map[os.path.normcase(exact)]
-                score = 0
-            else:
-                gid = "file:" + os.path.normcase(exact)
-                score = 0
-        else:
-            # no lms data → keep every survivor isolated (no collapse)
-            gid = "key:" + key
-            score = 0
-        groups.setdefault(gid, []).append((key, score, idx))
+    # ── pass 2: remove base entries when @quant variant exists ──
+    # Group by (publisher, model) without quant to find base vs quant conflicts
+    by_base: dict[tuple[str, str], list[str]] = {}
+    for key in list(reg.keys()):
+        pub, model, quant = _identity_triple_from_key(key)
+        by_base.setdefault((pub, model), []).append(key)
 
-    # ── pass 2: collapse duplicates per target, keep best match ──
-    for members in groups.values():
+    for (pub, model), members in by_base.items():
+        has_quant = any("@" in k for k in members)
+        if has_quant:
+            # Remove base entries (without @quant) when @quant variant exists
+            for key in members:
+                if "@" not in key:
+                    del reg[key]
+                    removed += 1
+                    print(f"  {key}: gelöscht (Quant-Variante existiert)")
+
+    # ── pass 3: collapse duplicates per identity, keep best match ──
+    groups.clear()
+    for key in reg:
+        if not isinstance(reg[key], dict):
+            continue
+        pub, model, quant = _identity_triple_from_key(key)
+        groups.setdefault((pub, model, quant), []).append(key)
+
+    for (pub, model, quant), members in groups.items():
         if len(members) < 2:
             continue
-        members.sort(key=lambda t: (-t[1], t[2]))
-        keeper = members[0][0]
-        for key, _, _ in members[1:]:
+        # Prefer key with @quant, then by original order
+        members.sort(key=lambda k: (0 if "@" in k else 1, keys.index(k)))
+        keeper = members[0]
+        for key in members[1:]:
             del reg[key]
             removed += 1
             print(f"  {key}: gelöscht (Duplikat von {keeper})")
 
-    # ── pass 3: reclassify survivors ──
+    # ── pass 3: reclassify survivors from GGUF headers ──
     for key in list(reg.keys()):
         entry = reg[key]
         if not isinstance(entry, dict):
             continue
-        model_path = _resolve_path(key)
-        classification = _classify_arch(key, model_path)
+        ggu = _gguf_for_key(key)
+        if ggu is None:
+            continue
+        classification = _classify_arch(key, str(ggu))
         old_arch = entry.get("arch", "")
         old_np = entry.get("num_parallel")
         new_np = 4  # since 2026-08-11: all models use np=4 (Registry is SSOT)
@@ -591,6 +593,23 @@ def cmd_fix_np() -> None:
     if updated or removed:
         save_registry(reg)
     print(f"[OK] {updated} aktualisiert, {removed} gelöscht")
+
+
+def _identity_triple_from_key(key: str) -> tuple[str, str, str]:
+    """Extract (publisher, model, quant) from a registry key.
+
+    Key format: publisher/model@quant
+    Returns: (publisher, model_base, quant_or_empty)
+    """
+    if "@" in key:
+        base, quant = key.split("@", 1)
+    else:
+        base, quant = key, ""
+    if "/" in base:
+        pub, model = base.split("/", 1)
+    else:
+        pub, model = "", base
+    return pub.lower(), model.lower(), quant.lower()
 
 
 # ── compare command ────────────────────────────────────────────────
