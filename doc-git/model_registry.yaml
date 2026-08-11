@@ -183,31 +183,6 @@ mradermacher/gemma-4-26b-a4b-it-i1@iq4_xs:
   hidden_dim: 2816
   max_context_length: 262144
 
-bartowski/google_gemma-4-26b-a4b-it@q3_k_s:
-  publisher: bartowski
-  hf_url: https://huggingface.co/bartowski/google_gemma-4-26B-A4B-it-GGUF
-  pub_url: https://ai.google.dev/gemma/docs/core/model_card_4?hl=de
-  quants: Q3_K_S
-  arch: moe
-  template: gemma4-26b-template_minijinja.jinja
-  experts: 18
-  k_cache: f16
-  v_cache: f16
-  offload: 1.0
-  notes: 'Architektur: MoE | Experts: 128 total, 8 active + 1 shared | max. 256K Kontext
-    | Text, Image'
-  reasoning: thinking
-  capabilities: coding, vision, text
-  blueprint: gemma_reasoning
-  truncation: full
-  custom_template: true
-  num_parallel: 4
-  useUnifiedKvCache: true
-  context_length: 32768
-  n_layers: 30
-  hidden_dim: 2816
-  max_context_length: 262144
-
 unsloth/gemma-4-26b-a4b-it@iq3_s:
   publisher: unsloth
   hf_url: https://huggingface.co/unsloth/gemma-4-26b-a4b-it
@@ -877,28 +852,6 @@ intel/qwen3-30b-a3b-thinking-2507-q2ks-mixed-autoround:
   truncation: full
   useUnifiedKvCache: false
 
-intel/qwen3-coder-30b-a3b-instruct-q2ks-mixed-autoround:
-  publisher: Intel
-  hf_url: 
-    https://huggingface.co/intel/qwen3-coder-30b-a3b-instruct-q2ks-mixed-autoround
-  arch: moe
-  quants: Q2_K_S
-  k_cache: q8_0
-  v_cache: iq4_nl
-  offload: 1.0
-  num_parallel: 4
-  notes: 'Architektur: Qwen3 MoE'
-  file_size_bytes: 10740661760
-  context_length: 32768
-  n_layers: 48
-  hidden_dim: 2048
-  reasoning: instruct
-  max_context_length: 262144
-  capabilities: coding, vision, text
-  blueprint: coding_agent
-  truncation: full
-  useUnifiedKvCache: false
-
 noctrex/ernie-4.5-21b-a3b-pt_moe@mxfp4:
   publisher: noctrex
   hf_url: https://huggingface.co/noctrex/ernie-4.5-21b-a3b-pt_moe
@@ -971,27 +924,6 @@ unsloth/glm-4.7-flash:
   num_parallel: 4
   notes: 'Architektur: DeepSeek2 moe | Tool-Use | GLM-4.7 forced thinking'
   file_size_bytes: 13288618336
-  context_length: 32768
-  max_context_length: 202752
-  n_layers: 47
-  hidden_dim: 2048
-  reasoning: thinking
-  blueprint: reasoning_coding
-  capabilities: coding, text
-  useUnifiedKvCache: true
-  truncation: full
-
-unsloth/glm-4.7-flash-reap-23b-a3b:
-  publisher: unsloth
-  hf_url: https://huggingface.co/unsloth/glm-4.7-flash-reap-23b-a3b
-  pub_url: https://z.ai/blog/glm-4.7
-  arch: moe
-  k_cache: q8_0
-  v_cache: q8_0
-  offload: 1.0
-  num_parallel: 4
-  notes: 'Architektur: DeepSeek2 moe | REAP streaming-usage | GLM-4.7 forced thinking'
-  file_size_bytes: 13328455392
   context_length: 32768
   max_context_length: 202752
   n_layers: 47
@@ -1097,26 +1029,6 @@ mradermacher/gemma-4-26b-a4b-it-i1:
   reasoning: thinking
   useUnifiedKvCache: true
   capabilities: coding, vision, text
-  blueprint: gemma_reasoning
-  truncation: full
-  max_context_length: 262144
-
-bartowski/google_gemma-4-26b-a4b-it:
-  publisher: bartowski
-  hf_url: https://huggingface.co/bartowski/google_gemma-4-26b-a4b-it
-  arch: moe
-  k_cache: f16
-  v_cache: f16
-  offload: 1.0
-  num_parallel: 4
-  notes: 'Architektur: moe | Vision'
-  file_size_bytes: 13746291840
-  context_length: 28672
-  n_layers: 30
-  hidden_dim: 2816
-  reasoning: thinking
-  useUnifiedKvCache: true
-  capabilities: vision, coding, text
   blueprint: gemma_reasoning
   truncation: full
   max_context_length: 262144
@@ -1233,6 +1145,237 @@ zai-org/glm-4.6v-flash:
   useUnifiedKvCache: false
   max_context_length: 131072
   reasoning: thinking
-  capabilities: text, vision
+  capabilities: vision, text
   blueprint: reasoning_assistant
+  truncation: full
+
+originalgeek/qwen3.6-27b-unsloth-mtp-head-only:
+  publisher: originalGeek
+  hf_url: https://huggingface.co/originalgeek/qwen3.6-27b-unsloth-mtp-head-only
+  arch: mtp
+  k_cache: q8_0
+  v_cache: iq4_nl
+  offload: 1
+  num_parallel: 4
+  notes: 'Architektur: mtp | Multi-Token Prediction'
+  file_size_bytes: 451321504
+  context_length: 65536
+  n_layers: 65
+  hidden_dim: 5120
+  max_context_length: 262144
+  reasoning: instruct
+  capabilities: coding, vision, text
+  blueprint: coding_agent
+  truncation: full
+
+mradermacher/qwen3.6-28b-reap-i1@?:
+  publisher: mradermacher
+  hf_url: https://huggingface.co/mradermacher/qwen3.6-28b-reap-i1@?
+  arch: moe
+  k_cache: q8_0
+  v_cache: iq4_nl
+  offload: 1
+  num_parallel: 4
+  notes: 'Architektur: dense'
+  file_size_bytes: 154599584
+  context_length: 65536
+  reasoning: instruct
+  max_context_length: 262144
+  n_layers: 40
+  hidden_dim: 2048
+  capabilities: coding, vision, text
+  blueprint: coding_agent
+  truncation: full
+
+mradermacher/kimi-linear-reap-35b-a3b-instruct-i1@iq3_xxs:
+  publisher: mradermacher
+  hf_url: 
+    https://huggingface.co/mradermacher/kimi-linear-reap-35b-a3b-instruct-i1@iq3_xxs
+  arch: moe
+  k_cache: q8_0
+  v_cache: iq4_nl
+  offload: 1
+  num_parallel: 4
+  notes: 'Architektur: dense'
+  file_size_bytes: 13620633088
+  context_length: 16384
+  n_layers: 27
+  hidden_dim: 2304
+  max_context_length: 1048576
+  reasoning: instruct
+  capabilities: coding, vision, text
+  blueprint: coding_agent
+  truncation: full
+
+mradermacher/kimi-linear-reap-35b-a3b-instruct-i1@?:
+  publisher: mradermacher
+  hf_url: 
+    https://huggingface.co/mradermacher/kimi-linear-reap-35b-a3b-instruct-i1@?
+  arch: moe
+  k_cache: q8_0
+  v_cache: iq4_nl
+  offload: 1
+  num_parallel: 4
+  notes: 'Architektur: dense'
+  file_size_bytes: 108702496
+  context_length: 65536
+  reasoning: instruct
+  max_context_length: 1048576
+  n_layers: 27
+  hidden_dim: 2304
+  capabilities: coding, vision, text
+  blueprint: coding_agent
+  truncation: full
+
+mradermacher/qwen3.6-27b-i1@q3_k_s:
+  publisher: mradermacher
+  hf_url: https://huggingface.co/mradermacher/qwen3.6-27b-i1@q3_k_s
+  arch: dense
+  k_cache: q8_0
+  v_cache: iq4_nl
+  offload: 1
+  num_parallel: 4
+  notes: 'Architektur: dense'
+  file_size_bytes: 12073953248
+  context_length: 16384
+  n_layers: 64
+  hidden_dim: 5120
+  max_context_length: 262144
+  reasoning: thinking
+  capabilities: coding, vision, text
+  blueprint: reasoning_coding
+  truncation: full
+
+mradermacher/qwen3.6-27b-i1@?:
+  publisher: mradermacher
+  hf_url: https://huggingface.co/mradermacher/qwen3.6-27b-i1@?
+  arch: dense
+  k_cache: q8_0
+  v_cache: iq4_nl
+  offload: 1
+  num_parallel: 4
+  notes: 'Architektur: dense'
+  file_size_bytes: 13642624
+  context_length: 65536
+  reasoning: instruct
+  max_context_length: 262144
+  n_layers: 64
+  hidden_dim: 5120
+  capabilities: coding, vision, text
+  blueprint: coding_agent
+  truncation: full
+
+mradermacher/qwen3-coder-reap-25b-a3b-i1@q3_k_m:
+  publisher: mradermacher
+  hf_url: https://huggingface.co/mradermacher/qwen3-coder-reap-25b-a3b-i1@q3_k_m
+  arch: moe
+  k_cache: q8_0
+  v_cache: iq4_nl
+  offload: 1
+  num_parallel: 4
+  notes: 'Architektur: dense'
+  file_size_bytes: 12003574816
+  context_length: 16384
+  n_layers: 48
+  hidden_dim: 2048
+  max_context_length: 262144
+  reasoning: instruct
+  capabilities: coding, vision, text
+  blueprint: coding_agent
+  truncation: full
+
+mradermacher/qwen3-coder-reap-25b-a3b-i1@?:
+  publisher: mradermacher
+  hf_url: https://huggingface.co/mradermacher/qwen3-coder-reap-25b-a3b-i1@?
+  arch: moe
+  k_cache: q8_0
+  v_cache: iq4_nl
+  offload: 1
+  num_parallel: 4
+  notes: 'Architektur: dense'
+  file_size_bytes: 98668288
+  context_length: 65536
+  reasoning: instruct
+  max_context_length: 262144
+  n_layers: 48
+  hidden_dim: 2048
+  capabilities: coding, vision, text
+  blueprint: coding_agent
+  truncation: full
+
+mradermacher/gemma-4-19b-a4b-it-reap-i1@?:
+  publisher: mradermacher
+  hf_url: https://huggingface.co/mradermacher/gemma-4-19b-a4b-it-reap-i1@?
+  arch: moe
+  k_cache: q8_0
+  v_cache: iq4_nl
+  offload: 1
+  num_parallel: 4
+  notes: 'Architektur: dense'
+  file_size_bytes: 40882656
+  context_length: 65536
+  reasoning: instruct
+  max_context_length: 262144
+  n_layers: 30
+  hidden_dim: 2816
+  capabilities: coding, vision, text
+  blueprint: gemma_assistant
+  truncation: full
+
+mradermacher/gemma-4-26b-a4b-it-i1@?:
+  publisher: mradermacher
+  hf_url: https://huggingface.co/mradermacher/gemma-4-26b-a4b-it-i1@?
+  arch: moe
+  k_cache: q8_0
+  v_cache: iq4_nl
+  offload: 1
+  num_parallel: 4
+  notes: 'Architektur: dense'
+  file_size_bytes: 56941536
+  context_length: 65536
+  reasoning: instruct
+  max_context_length: 262144
+  n_layers: 30
+  hidden_dim: 2816
+  capabilities: coding, vision, text
+  blueprint: gemma_assistant
+  truncation: full
+
+mradermacher/gemma-4-26b-a4b-it-heretic-i1@iq3_m:
+  publisher: mradermacher
+  hf_url: 
+    https://huggingface.co/mradermacher/gemma-4-26b-a4b-it-heretic-i1@iq3_m
+  arch: moe
+  k_cache: q8_0
+  v_cache: iq4_nl
+  offload: 1
+  num_parallel: 4
+  notes: 'Architektur: dense'
+  file_size_bytes: 12392563936
+  context_length: 16384
+  n_layers: 30
+  hidden_dim: 2816
+  max_context_length: 262144
+  reasoning: thinking
+  capabilities: coding, vision, text
+  blueprint: gemma_reasoning
+  truncation: full
+
+mradermacher/gemma-4-26b-a4b-it-heretic-i1@?:
+  publisher: mradermacher
+  hf_url: https://huggingface.co/mradermacher/gemma-4-26b-a4b-it-heretic-i1@?
+  arch: moe
+  k_cache: q8_0
+  v_cache: iq4_nl
+  offload: 1
+  num_parallel: 4
+  notes: 'Architektur: dense'
+  file_size_bytes: 56941536
+  context_length: 65536
+  reasoning: instruct
+  max_context_length: 262144
+  n_layers: 30
+  hidden_dim: 2816
+  capabilities: coding, vision, text
+  blueprint: gemma_assistant
   truncation: full

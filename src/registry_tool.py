@@ -1838,7 +1838,7 @@ def cmd_fill_reasoning() -> None:
         sys.exit(1)
 
     print("[2] LM Studio-Modelle scannen ...")
-    lms = _run_lms_ls()
+    lms_models = _run_lms_ls()
     unique: dict[str, str] = {}
     for m in lms_models:
         rp = m.get("path", "")
