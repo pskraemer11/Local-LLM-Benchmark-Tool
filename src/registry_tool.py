@@ -2349,28 +2349,9 @@ def cmd_validate(verbose: bool = False, repro: bool = False) -> dict[str, Any]:
                 f"{match}: Config contextLength={cfg_ctx} <= 0 (invalid, {cfg['json_path']})"
             )
 
-        # np/UKV/offload: Registry-Werte nur warnen, wenn sie von der Config abweichen
-        # (die Config ist die Quelle - Registry sollte der Config folgen)
-        if isinstance(cfg_np, int) and entry.get("num_parallel") is not None and int(entry["num_parallel"]) != cfg_np:
-            errors["config_np_ukv_drift"].append(
-                f"{match}: Registry num_parallel={entry['num_parallel']} != Config {cfg_np}"
-            )
-        if (
-            isinstance(cfg_ukv, bool)
-            and entry.get("useUnifiedKvCache") is not None
-            and bool(entry["useUnifiedKvCache"]) != cfg_ukv
-        ):
-            errors["config_np_ukv_drift"].append(
-                f"{match}: Registry useUnifiedKvCache={entry['useUnifiedKvCache']} != Config {cfg_ukv}"
-            )
-        if (
-            isinstance(cfg_offload, (int, float))
-            and entry.get("offload") is not None
-            and float(entry["offload"]) != float(cfg_offload)
-        ):
-            errors["config_np_ukv_drift"].append(
-                f"{match}: Registry offload={entry['offload']} != Config {cfg_offload}"
-            )
+        # np/UKV/offload: Registry ist SSOT (Stand 11.08.2026).
+        # JSON-Configs werden ignoriert — Benchmark überschreibt alle Parameter
+        # explizit via API. Drift-Check entfernt, da Configs irrelevant.
 
     # ── Check 9: GGUF-Header vs. Registry (Feld-Ownership) ──────────
     # auto_fix-Felder (n_layers/hidden_dim/max_context_length/arch) aus den
@@ -2404,7 +2385,7 @@ def cmd_validate(verbose: bool = False, repro: bool = False) -> dict[str, Any]:
 
 # Drift-Kategorien, die beim pipeline full zu Exit-Code != 0 führen (CI-fähig).
 # Das sind die Feld-Ownership-Melde-Felder (Config-Felder + GGUF-Header-Drift).
-_DRIFT_CHECKS = ("config_context_drift", "config_np_ukv_drift", "config_context_too_small", "gguf_header_drift")
+_DRIFT_CHECKS = ("config_context_drift", "config_context_too_small", "gguf_header_drift")
 
 
 # ── sync command (full) ────────────────────────────────────────────

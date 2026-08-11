@@ -1,6 +1,6 @@
 # GGUF-Issues: model_registry.yaml vs. GGUF-Header
 
-Generated automatically: 2026-08-06 23:28:34
+Generated automatically: 2026-08-11 10:37:00
 
 Source of truth: the GGUF files (immutable model facts). The
 registry is checked here against the GGUF headers (n_layers, hidden_dim,
