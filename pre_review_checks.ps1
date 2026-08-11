@@ -252,23 +252,65 @@ print(f"[GGUF] {len(errors)} deviations, {len(hits)} entries checked.")
     }
 }
 
+# ── 6. CHANGELOG + Config-np Verifikation (advisory) ──────────────
+Write-Host "`n[6/6] CHANGELOG + Config-np Verifikation (advisory) ..." -ForegroundColor Cyan
+
+# CHANGELOG: Gibt es seit letztem Commit neue CHANGELOG-Einträge?
+$changelog = Join-Path $projectPath "CHANGELOG.md"
+if (-not (Test-Path -LiteralPath $changelog)) {
+    Write-Host "  [WARN] CHANGELOG.md fehlt im Projekt-Root." -ForegroundColor Yellow
+    $warnings++
+} else {
+    # Prüfe ob heute ein CHANGELOG-Eintrag erstellt wurde
+    $today = Get-Date -Format "dd.MM.yyyy"
+    $changelogContent = Get-Content $changelog -Raw -Encoding utf8
+    if ($changelogContent -notlike "*$today*") {
+        Write-Host "  [HINWEIS] Kein CHANGELOG-Eintrag für heute ($today) — bei substanziellen Änderungen ergänzen." -ForegroundColor Yellow
+        $warnings++
+    } else {
+        Write-Host "  CHANGELOG: Eintrag für heute gefunden." -ForegroundColor Green
+    }
+}
+
+# Config-np: Alle aktiven Configs sollten np=4 haben
+$cfgRoot = Join-Path $env:USERPROFILE ".lmstudio\.internal\user-concrete-model-default-config"
+$npWarnings = 0
+if (Test-Path $cfgRoot) {
+    Get-ChildItem $cfgRoot -Recurse -Filter "*.json" | ForEach-Object {
+        if ($_.Name -like "*.bak*") { return }
+        try {
+            $data = Get-Content $_.FullName -Raw | ConvertFrom-Json
+            $loadFields = $data.load.fields
+            foreach ($f in $loadFields) {
+                if ($f.key -eq "llm.load.numParallelSessions" -and $f.value -ne 4) {
+                    Write-Host "  [WARN] np=$($f.value) (nicht 4): $($_.Name)" -ForegroundColor Yellow
+                    $npWarnings++
+                }
+            }
+        } catch { }
+    }
+}
+if ($npWarnings -eq 0) {
+    Write-Host "  Config-np: Alle Configs haben np=4." -ForegroundColor Green
+} else {
+    Write-Host "  [WARN] $npWarnings Configs mit np!=4 gefunden (sollten auf 4 gesetzt werden)." -ForegroundColor Yellow
+    $warnings++
+}
+
 # ── Zusammenfassung ───────────────────────────────────────────────
 Write-Host "`n=== Zusammenfassung ===" -ForegroundColor Cyan
 Write-Host "Artefakte: $((Get-ChildItem -LiteralPath $artifactsDir -Filter *.md -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name) -join ', ')" -ForegroundColor DarkGray
 Write-Host "Warnungen (nicht blockierend): $warnings" -ForegroundColor Yellow
 
-$changelog = Join-Path $projectPath "CHANGELOG.md"
-if (-not (Test-Path -LiteralPath $changelog)) {
-    Write-Host "[HINWEIS] CHANGELOG.md fehlt im Projekt-Root - geplantes Artefakt aus dem Review-Konzept." -ForegroundColor Yellow
-} else {
-    Write-Host "[HINWEIS] CHANGELOG.md-Eintrag fuer diese Aenderungen ergaenzt?" -ForegroundColor Yellow
-}
-
 if ($blockingFails -gt 0) {
     Write-Host "`n[BLOCKIERT] $blockingFails blockierende(n) Check(s) fehlgeschlagen." -ForegroundColor Red
+    Write-Host "  Bekannte pre-existente Fehler (nicht blockierend wenn nur diese):" -ForegroundColor Yellow
+    Write-Host "  - tests/test_model_manager.py::TestUnloadAllModels, TestWaitForModelReady, TestValidateModelKey" -ForegroundColor DarkGray
+    Write-Host "    (API-Pfad /v1/model vs /v1/chat/completions — wird separat gefixt)" -ForegroundColor DarkGray
     if (-not $NoTranscript) { Stop-Transcript }
     exit 1
 }
 Write-Host "`n=== Alle blockierenden Checks bestanden ===" -ForegroundColor Green
+Write-Host "[HINWEIS] Nach Push: Compaction + CHANGELOG-Eintrag nicht vergessen (Trigger: commit/push)." -ForegroundColor Cyan
 if (-not $NoTranscript) { Stop-Transcript }
 exit 0
