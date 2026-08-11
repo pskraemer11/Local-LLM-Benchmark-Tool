@@ -20,6 +20,8 @@ Hinweise:
 | 11.08. | `doc-git/Developer-Docs/LM-Studio-API-References.md` | **Neue Doku**: LM Studio REST API (Load + Chat Completions), TypeScript SDK (`LLMLoadModelConfig`, `LLMPredictionConfigInput`). Kritischer Fund: `numParallelSessions` + `useUnifiedKvCache` sind **nicht in der API** — nur via JSON-Config setzbar |
 | 11.08. | `scripts/run-pass2-after-pass1.ps1` | **Auto-Sequencing**: Wartet auf Pass 1, startet Pass 2 automatisch |
 | 11.08. | `run-qwen-rerun-both-passes.bat` | **Verbessert**: Per-Pass-Logging mit Zeitstempel |
+| 11.08. | `~/.agents/skills/compaction/SKILL.md` | **Neuer Skill**: Auto-Compaction bei ~80% Kontext (Token-Einsparung). Format + Workflow in `doc-git/Developer-Docs/Compaction-Workflow.md` |
+| 11.08. | `~/.agents/skills/*/SKILL.md` | **Gekürzt**: Alle Skills < 1.3KB (waren bis 9.3KB) — weniger Token-Verbrauch pro Prompt |
 
 ## Registry-Wartung (10.08.2026)
 
