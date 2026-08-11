@@ -19,10 +19,16 @@ Hardware: AMD Ryzen 7 (8 cores) | NVIDIA RTX 5070 Ti (16 GB VRAM) | Windows 11
 | **✅ OK**      | Suitable for local LLM benchmarks                             |
 | **⚠️ OK**     | Conditionally suitable (e.g. only with specific quantization)  |
 
-**Conservative KV-cache formula (per slot):**
+# Calculation of possible context length
+
+The possible Context length depends on available VRAM (and CPU-RAM, but this is slow), model size, KV-Cache, KV quantisation, 
+number of parallel slots in combination with Unified KV Cache =true/false and model architectural parameters. 
+
+**theoretical KV-cache size formula (per slot!):**
 `context_len × layers × KV_heads × head_dim × (bytes_per_K + bytes_per_V) / 1024²` (result in MB).
-LM Studio shows lower values because it applies auto KV-quantization (Q8/Q4 ≈ 1.5 bytes
-vs FP16 = 4 bytes), especially for VRAM-critical models.
+Here, cache quantisation factor (bytes_per_K + bytes_per_V) applies quantization of K- and V-cache (e.g. Q8/Q4 ≈ 1.5 bytes vs FP16 = 4 bytes).
+
+But: correlation of formula with empirical proofed reality ist very weak! Better approax: rules of thumb, see downwards.
 
 **Note:** `i1` in filenames = Importance Matrix quantization (not iMatrix-quant).
 
@@ -31,10 +37,11 @@ vs FP16 = 4 bytes), especially for VRAM-critical models.
 ## Context Length Guidelines (16 GB VRAM, np=1)
 
 > ⚠️ These are **approximate guidelines**. Actual limits depend on:
-> - `np` (max concurrent predictions): at np=4, reduce context to ~25% of table values
->   or enable `unifiedKVcache=true` (see `Parallel-Slots-Optimization_en.md`)
-> - KV-cache quantization (Q8/Q4 reduces VRAM significantly)
-> - Model-specific VRAM overhead
+> - `np` (max concurrent predictions, or used number of parallel slots) in combination with UKV ("unified KV cache"): 
+>           at np=4 and UKV=false, reduce context length to 1/4 = 25% of table values
+>   or enable `unifiedKVcache=true` (see `Parallel-Slots-Optimization_en.md`) to save memory
+> - KV-cache quantization factor (Q8/Q4 or Q5_1/Q4_NL reduces VRAM significantly vs. FP16/FP16)
+> - Model-specific VRAM (reserved GPU memory) overhead
 
 | Model VRAM     | Approx. context length |
 |----------------|-----------------------:|
@@ -46,10 +53,12 @@ vs FP16 = 4 bytes), especially for VRAM-critical models.
 | 9–10 GB        |       131k             |
 | < 9 GB         |       262k             |
 
-**1st Rule of thumb:** Model weights size should be less then VRAM (reserved GPU memory) minus 2 GB (reserve for KV-cache + overhead).
-**2nd Rule of thumb:** Models greater 12GB need Unified KV Cache = true (activated) to use 4 parallel slots (normally faster)
-**3rd Rule of thumb:** some models can't use KV quantisation (e.g. Gemma-4, Kimi Linear). They need Unified KV Cache = true and allow less context length to fit into VRAM. 
-                        Otherwise their perfomance slow down dramatically (use of shared CPU memory).
+**1st Rule of thumb**: use Model weights size less then (VRAM minus 2 GB) because of reserves for KV-cache + overhead.
+**2nd Rule of thumb**: Model weights greater 12 GB need Unified KV Cache = true (activated) to use 4 parallel slots (normally faster). 
+                         Vice versa: models smaller then 12GB can user Unified KV Cache = false, if and only if they can use sufficent KV quantisation (or usable context length shrinks dramtically).
+**3rd Rule of thumb**: Exception from rule 2: some models like GPT-OSS, Gemma-4 and KimiLinear cannot use KV quantisation!
+                         They need Unified KV Cache = true and allow less context length to fit into VRAM. 
+                         Otherwise their perfomance slow down dramatically (use of shared CPU memory).
 ---
 
 ## Context Length Regression (log-log)
@@ -123,9 +132,7 @@ These models hit their native GGUF context limit, not VRAM:
 | Qwen3.6-27B (Q3_K_S)              |  4 |  True  | 32768 | 2GB larger than other local variants                      |
 | GLM 4.7 Flash REAP 23B A3B@Q4_K_S |  4 | *True* | 32768 | UKV=False: VRAM excited, slow => UKV=True, VRAM fit, fast |
 
-**General rule for VRAM (GPU) = 16 GB** (minus 0.5–0.7 GB overhead): 
-All models with a model size (weights) of 12 GB or larger require the unified KV cache (UKV=true) when using 4 parallel slots (np=4).
-Otherwise they slow down dramatically.
+**General rules** see Rules of Thumbs above. 
 
 ---
 

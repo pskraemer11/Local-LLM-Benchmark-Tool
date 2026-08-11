@@ -6,6 +6,21 @@ Hinweise:
 - Stand: 06.08.2026 — umgezogen aus §20 der `doc-git/Architecture, Flow & ChangeLog_en.md` (dort nur noch Verweis).
 - Commit-Hashes beziehen sich auf `main`.
 
+## Registry als SSOT + Benchmark-Infrastruktur (11.08.2026)
+
+| Date | File | Change |
+|------|------|--------|
+| 11.08. | `src/benchmark_config.py` | **UKV-Threshold 12.0** (war 14.0): `USE_UNIFIED_KV_CACHE_THRESHOLD_GB = 12.0`. Spezialfälle `UKV_DISABLE_MODELS = {gemma-4, kimi-linear, gpt-oss}` (keine KV-Quantisierung vertragen → immer UKV=False). `should_use_unified_kv_cache()` Helper mit Spezialfall-Logik |
+| 11.08. | `doc-git/model_registry.yaml` | **Registry als SSOT**: Alle Modelle `num_parallel=4` (explizit via API). UKV aus Formel (>=12GB) + Spezialfälle. `glmv-4.6v-flash` completeness (reasoning, capabilities, blueprint, max_context_length=131072). `context_length=98304` (Benchmark-Wert, nicht GGUF-Native-Max) |
+| 11.08. | `src/registry_tool.py` | **Drift-Check entfernt**: `config_np_ukv_drift` aus `_DRIFT_CHECKS` und `cmd_validate` entfernt (Configs irrelevant, Registry ist SSOT). `cmd_pipeline` ignoriert np/ukv-Drifts. Unused vars entfernt |
+| 11.08. | `src/model_manager.py` | **echo_load_config**: Load-Payload enthält `echo_load_config: True`, Log zeigt `np=<wert>` (z.B. `Loaded in 5.4s (np=4)`) — verifizierbarer Beweis für korrektes np |
+| 11.08. | `src/assemble_blueprint.py` | **99 LMS-Configs**: `numParallelSessions=4` + `useUnifiedKvCache` in `load.fields` (nicht `operation.fields`) korrigiert — `read_lms_configs` liest aus `data["load"]["fields"]` |
+| 11.08. | `pre_review_checks.ps1` | **GGUF-Check Fix**: 5-Tupel-Unpack (`nl, hd, _is_reasoning, ctx, _exp`) für geänderte `_read_gguf_arch` Signatur |
+| 11.08. | `tests/test_registry_tool.py` | **Test-Updates**: `test_drift_checks_constant` ohne `config_np_ukv_drift`, `test_open_drift_exits_1` nutzt `config_context_drift` statt `config_np_ukv_drift` |
+| 11.08. | `doc-git/Developer-Docs/LM-Studio-API-References.md` | **Neue Doku**: LM Studio REST API (Load + Chat Completions), TypeScript SDK (`LLMLoadModelConfig`, `LLMPredictionConfigInput`). Kritischer Fund: `numParallelSessions` + `useUnifiedKvCache` sind **nicht in der API** — nur via JSON-Config setzbar |
+| 11.08. | `scripts/run-pass2-after-pass1.ps1` | **Auto-Sequencing**: Wartet auf Pass 1, startet Pass 2 automatisch |
+| 11.08. | `run-qwen-rerun-both-passes.bat` | **Verbessert**: Per-Pass-Logging mit Zeitstempel |
+
 ## Registry-Wartung (10.08.2026)
 
 | Date | File | Change |
