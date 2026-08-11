@@ -45,10 +45,12 @@ Commands:
                 (--dry-run, --wait-for-lock, --effort, --budget)
   sync          Full sync: add → fill-arch → sync-from-gguf → fill-reasoning → sync-from-configs → fmt
 
-Prinzip (seit 05.08.2026): JSON-Configs sind die Quelle für Laufzeit-Parameter
-(context_length, numParallelSessions, useUnifiedKvCache, offloadRatio) - gesetzt
-über die LMS GUI. Die Registry ist die Sicht. GGUF-Header liefern Architektur-
-Daten (n_layers, hidden_dim, max_context_length). blueprint_definitions.yaml ist
+Prinzip (seit 11.08.2026): Die **Registry (model_registry.yaml) ist Single Source of Truth**
+für alle Benchmark-Parameter (num_parallel, useUnifiedKvCache, context_length).
+JSON-Configs sind Runtime-Artefakte (LM Studio liest sie beim Load, API kann sie
+nicht überschreiben). GGUF-Header liefern Architektur-Daten (n_layers, hidden_dim,
+max_context_length). Alle Modelle: np=4. UKV: >= 12 GB → True, Ausnahmen
+(gemma-4, kimi-linear, gpt-oss) → immer True. blueprint_definitions.yaml ist
 die Quelle für Systemprompts (wird von assemble_blueprint.py NICHT mehr aus dem
 Code regeneriert). Dieser Code überschreibt keine JSON-Configs mehr.
 """
@@ -576,7 +578,7 @@ def cmd_fix_np() -> None:
         classification = _classify_arch(key, model_path)
         old_arch = entry.get("arch", "")
         old_np = entry.get("num_parallel")
-        new_np = _infer_num_parallel(classification)
+        new_np = 4  # since 2026-08-11: all models use np=4 (Registry is SSOT)
         changed = (classification != old_arch) or (new_np != old_np)
         entry["arch"] = classification
         entry["num_parallel"] = new_np
@@ -949,7 +951,7 @@ def cmd_add(models: list[dict[str, Any]], interactive: bool = False) -> dict[str
             nt += " | Vision"
         if m.get("tools"):
             nt += " | Tool-Use"
-        num_p = _infer_num_parallel(classification)
+        num_p = 4  # since 2026-08-11: all models use np=4 (Registry is SSOT)
         size_bytes = m.get("size_bytes", 0) or m.get("sizeBytes", 0)
         entry = {
             "publisher": pub,

@@ -1,20 +1,22 @@
 """Feld-Ownership-Tabelle: Wer ist fuer welches Modell-Feld zustaendig?
 
-SSOT-Design (Fix 2026-08-09): Jedes Feld hat genau eine kanonische Quelle
-und eine Sync-Richtung. Die Tabelle liegt im Code (bewusst keine externe
-YAML, damit Aenderungen an Regeln immer mit Code-Tests einhergehen).
+SSOT-Design (Fix 2026-08-11): Die **Registry (model_registry.yaml) ist Single
+Source of Truth** fuer alle Benchmark-Parameter. JSON-Configs sind Runtime-
+Artefakte (LM Studio liest beim Load, API kann nicht ueberschreiben).
 
 Quellen:
   - "gguf":     GGUF-Header (unveraenderlich, architektur-bedingt)
-  - "config":   LM-Studio-Config-JSON (GUI ist die Quelle)
-  - "hub":      LM-Studio-Hub model.yaml (metadataOverrides)
-  - "lms":      lms ls --json (Dateigroessen)
-  - "registry": model_registry.yaml (menschliche Entscheidung)
+  - "registry": model_registry.yaml (SSOT seit 11.08.2026)
+  - "hub":      LM-Studio-Hub model.yaml (referenz, nie anfassen)
 
-auto_fix=True nur bei unveraenderlichen Quellen (gguf/lms): Abweichungen
-werden automatisch aus der Quelle in die Registry geschrieben. Alle anderen
-Abweichungen werden gemeldet und zur Entscheidung vorgelegt (Nutzer-Fix
-2026-08-09: "Aus Config: melden und zur Entscheidung vorlegen").
+auto_fix=True nur bei unveraenderlichen Quellen (gguf): Abweichungen werden
+automatisch aus der Quelle in die Registry geschrieben.
+
+Wichtige Felder:
+  - num_parallel: immer 4 (benchmark_policy, seit 11.08.)
+  - useUnifiedKvCache: Formel (>= 12 GB -> True) + Ausnahmen
+    (gemma-4, kimi-linear, gpt-oss -> immer True, vertragen keine KV-Quant)
+  - context_length: Registry-SSOT (Benchmark-Wert, <= GGUF-Native-Max)
 """
 
 from __future__ import annotations
@@ -59,19 +61,22 @@ FIELD_OWNERSHIP: dict[str, FieldRule] = {
         "gguf", "registry", False, checks=("arch_map", "hub"),
         description="aus GGUF chat_template + Familien-Map; Dual-Mode-Interpretation (nicht rein architektur-bedingt)",
     ),
-    # ── Config-JSON (GUI-Quelle) → Registry, nur melden ─────────────
+    # ── Registry (SSOT seit 2026-08-11) ─────────────────────────────
+    # np/UKV/context_length sind durch die Registry definiert (Single Source of
+    # Truth). JSON-Configs sind Runtime-Artefakte (LM Studio liest beim Load,
+    # API kann nicht überschreiben). Kein Drift-Check mehr — Registry gewinnt.
     "num_parallel": FieldRule(
-        "config", "registry", False, description="Config ist die Quelle (GUI)"
+        "registry", "registry", False, description="SSOT: immer 4 (benchmark_policy)"
     ),
     "useUnifiedKvCache": FieldRule(
-        "config", "registry", False, description="Config ist die Quelle (GUI)"
+        "registry", "registry", False, description="SSOT: Formel (>=12GB) + Ausnahmen (gemma-4/kimi-linear/gpt-oss immer True)"
     ),
     "offload": FieldRule(
-        "config", "registry", False, description="Config ist die Quelle (GUI)"
+        "registry", "registry", False, description="SSOT: Standard 1.0 (full GPU)"
     ),
     "context_length": FieldRule(
-        "config", "registry", False, checks=("gguf_max",),
-        description="Config-Wert; darf nativer GGUF-Grenze nicht uebersteigen",
+        "registry", "registry", False, checks=("gguf_max",),
+        description="SSOT: Benchmark-Wert; darf GGUF-Native-Max nicht uebersteigen",
     ),
     # ── Registry (menschliche Entscheidung) → Config, nur Pruefung ─
     "blueprint": FieldRule(
