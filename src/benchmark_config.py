@@ -849,7 +849,9 @@ def is_support_file(
     - ``mtp-*`` or ``*/MTP/*``: MTP draft models (speculative-decoding add-ons,
       e.g. unsloth's ``mtp-gemma-4-12B-it-Q8_0.gguf``). Legitimate standalone
       MTP models (``qwen3.6-27b-mtp``, ``...-MTP-...`` in the name) are NOT
-      affected — only the ``mtp-`` filename prefix or an ``MTP`` path segment.
+      affected - only the ``mtp-`` filename prefix or an ``MTP`` path segment.
+    - ``*imatrix*``: Importance Matrix quantization files (< 200 MB), companion
+      files to the main model, not standalone.
     - architecture ending in ``-assistant`` (e.g. ``gemma4-assistant``): MTP
       drafter architecture reported by LM Studio / GGUF header.
 
@@ -861,6 +863,8 @@ def is_support_file(
     if "mmproj" in name:
         return True
     if name.startswith("mtp-"):
+        return True
+    if "imatrix" in name:
         return True
     parts = str(path).replace("\\", "/").split("/")
     if any(seg.lower() == "mtp" for seg in parts):

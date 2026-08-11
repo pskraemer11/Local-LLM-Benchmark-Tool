@@ -922,7 +922,10 @@ def cmd_add(models: list[dict[str, Any]], interactive: bool = False) -> dict[str
         pub = str(m.get("publisher", "unknown")).strip()
         canonical = _canonical_key(mk, pub)
         sk = normalize_model_name(mk)
-        if any(sk == normalize_model_name(k) for k in reg):
+        # Base-key comparison (strip @quant) to prevent duplicates like
+        # "model@iq4_nl" vs "model" or "model@?" vs "model"
+        sk_base = sk.split("@")[0]
+        if any(sk_base == normalize_model_name(k).split("@")[0] for k in reg):
             skipped.append((mk, "bereits vorhanden"))
             continue
         if any(kw in mk.lower() for kw in BLACKLIST):
@@ -930,7 +933,7 @@ def cmd_add(models: list[dict[str, Any]], interactive: bool = False) -> dict[str
             continue
         rp = m.get("path", "")
         if rp and _is_support_file(rp, str(m.get("architecture") or "")):
-            skipped.append((mk, "Zusatzdatei (MTP-Drafter/mmproj) - kein eigenständiges Modell"))
+            skipped.append((mk, "Zusatzdatei (MTP-Drafter/mmproj/imatrix) - kein eigenständiges Modell"))
             continue
         model_path = ""
         rp = m.get("path", "")
