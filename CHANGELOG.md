@@ -6,6 +6,20 @@ Hinweise:
 - Stand: 06.08.2026 — umgezogen aus §20 der `doc-git/Architecture, Flow & ChangeLog_en.md` (dort nur noch Verweis).
 - Commit-Hashes beziehen sich auf `main`.
 
+## QUANT_MAP-Entfernung + Framework-Unabhängigkeit (11.08.2026, abends)
+
+| Date | File | Change |
+|------|------|--------|
+| 11.08. | `src/benchmark_config.py` | **QUANT_MAP entfernt** (redundant). `get_quant()` extrahiert @quant direkt aus dem Key (`publisher/model@quant`). `extract_quant_from_key()` + `guess_quant_from_filename()` als Helper. UKV-Threshold 14.0→12.0 |
+| 11.08. | `src/benchmark_config.py` | `is_support_file`: Filtert `*imatrix*` Dateien (Begleitdateien, < 200 MB) |
+| 11.08. | `src/registry_tool.py` | **fill-quant**: Neuer Command — liest @quant aus GGUF-Dateiname (Source of Truth), ergänzt Registry-Keys ohne Quant. Hilfsfunktion `_gguf_quant_from_header()` mit bekannten Quant-Patterns |
+| 11.08. | `src/registry_tool.py` | **fill-size**: Dateisystem als Primärquelle (nicht LMS), LMS als Fallback. Hilfsfunktion `_find_gguf_for_key()` |
+| 11.08. | `src/registry_tool.py` | **fix_np**: Dateisystem-basiert (kein LMS erforderlich). `_identity_triple_from_key()` für kanonische (publisher, model, quant) Extraktion. Base-Entry-Cleanup wenn @quant-Variante existiert |
+| 11.08. | `src/model_identity.py` | **model_identity_triple()**: Extrahiert (publisher, model, quant) — kanonische Identität. `UKV_FORCE_TRUE_MODELS` (gemma-4, kimi-linear, gpt-oss) |
+| 11.08. | `src/field_owner.py` | np/UKV/offload/context_length → `source="registry"` (SSOT seit 11.08.), nicht mehr "config" |
+| 11.08. | `src/consolidate_results.py` | QUANT_MAP-Referenzen entfernt, `extract_quant_from_key` stattdessen |
+| 11.08. | `tests/` | Alle Tests angepasst: QUANT_MAP-Imports entfernt, neue Test-Logik für Key-basierte Quant-Extraktion. 783 Tests grün |
+
 ## Registry als SSOT + Benchmark-Infrastruktur (11.08.2026)
 
 | Date | File | Change |

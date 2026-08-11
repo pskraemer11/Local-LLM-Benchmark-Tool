@@ -488,7 +488,7 @@ mradermacher/qwen3-coder-reap-25b-a3b-i1@q3_k_m:
   num_parallel: 4
   notes: 'Architektur: dense'
   file_size_bytes: 12003574816
-  context_length: 16384
+  context_length: 30720
   n_layers: 48
   hidden_dim: 2048
   max_context_length: 262144
