@@ -1228,5 +1228,10 @@ zai-org/glm-4.6v-flash:
   num_parallel: 4
   notes: 'Architektur: dense | Vision'
   file_size_bytes: 10053622727
-  context_length: 98304
+  context_length: 131072
   useUnifiedKvCache: true
+  max_context_length: 131072
+  reasoning: thinking
+  capabilities: text, vision
+  blueprint: reasoning_assistant
+  truncation: full

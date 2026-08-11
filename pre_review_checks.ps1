@@ -181,7 +181,7 @@ with ThreadPoolExecutor(max_workers=8) as pool:
         futures[pool.submit(_read_gguf_arch, str(path))] = path
     for fut in as_completed(futures):
         path = futures[fut]
-        nl, hd, _is_reasoning, ctx = fut.result()
+        nl, hd, _is_reasoning, ctx, _exp = fut.result()
         if not nl or not hd:
             continue
         rel = path.relative_to(MODELS_CACHE)
