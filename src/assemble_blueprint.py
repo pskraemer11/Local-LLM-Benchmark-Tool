@@ -2,15 +2,19 @@
 """
 assemble_blueprint.py - Prompt-Standardisierung per Blueprint-System
 
+Generiert System-Prompts und Jinja-Templates aus Blueprint-Definitionen
+und schreibt sie in die LM-Studio JSON-Configs.
+
 Phases:
   Phase 1: Klassifikation in model_registry.yaml (reasoning, capabilities, blueprint)
   Phase 2: Textbaustein-Bibliothek definieren (blueprint_definitions.yaml)
-  Phase 3: Assembly - System-Prompts aus Blueprints generieren
+  Phase 3: Assembly - System-Prompts aus Blueprints generieren und in
+           JSON-Configs schreiben (systemPrompt, promptTemplate)
   Phase 4: Validierung - Syntax-Check, Regression-Prüfung
 
 Usage:
   python assemble_blueprint.py classify   -> Phase 1: Klassifikation
-  python assemble_blueprint.py assemble   -> Phase 3: Assembly + Write
+  python assemble_blueprint.py assemble   -> Phase 3: Assembly + Write JSON
   python assemble_blueprint.py validate   -> Phase 4: Syntax-Check
   python assemble_blueprint.py all         -> Alle Phasen ausführen
 """

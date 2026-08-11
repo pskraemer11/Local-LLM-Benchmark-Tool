@@ -53,8 +53,10 @@ JSON-Configs sind Runtime-Artefakte (LM Studio liest sie beim Load, API kann sie
 nicht überschreiben). GGUF-Header liefern Architektur-Daten (n_layers, hidden_dim,
 max_context_length). Alle Modelle: np=4. UKV: >= 12 GB → True, Ausnahmen
 (gemma-4, kimi-linear, gpt-oss) → immer True. blueprint_definitions.yaml ist
-die Quelle für Systemprompts (wird von assemble_blueprint.py NICHT mehr aus dem
-Code regeneriert). Dieser Code überschreibt keine JSON-Configs mehr.
+die Quelle für Systemprompts; assemble_blueprint.py generiert die Prompts und
+schreibt sie in die JSON-Configs (systemPrompt, promptTemplate). Dieser Code
+überschreibt keine Benchmark-Parameter in JSON-Configs (np/UKV/ctx kommen aus
+der Registry).
 """
 
 from __future__ import annotations
