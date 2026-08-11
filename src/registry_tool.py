@@ -922,12 +922,17 @@ def cmd_add(models: list[dict[str, Any]], interactive: bool = False) -> dict[str
         pub = str(m.get("publisher", "unknown")).strip()
         canonical = _canonical_key(mk, pub)
         sk = normalize_model_name(mk)
-        # Base-key comparison (strip @quant) to prevent duplicates like
-        # "model@iq4_nl" vs "model" or "model@?" vs "model"
-        sk_base = sk.split("@")[0]
-        if any(sk_base == normalize_model_name(k).split("@")[0] for k in reg):
+        # Exact match (including @quant) — always a duplicate
+        if sk in (normalize_model_name(k) for k in reg):
             skipped.append((mk, "bereits vorhanden"))
             continue
+        # Base entry (without @quant) when a @quant variant already exists,
+        # e.g. skip "model" if "model@q3_k_s" exists. Multiple @quant variants
+        # (@q3_k_s, @q6_k) should coexist. @? variants filtered by is_support_file.
+        if "@" not in sk:
+            if any("@" in k and normalize_model_name(k).split("@")[0] == sk for k in reg):
+                skipped.append((mk, "bereits vorhanden (Quant-Variante existiert)"))
+                continue
         if any(kw in mk.lower() for kw in BLACKLIST):
             skipped.append((mk, "blacklisted"))
             continue

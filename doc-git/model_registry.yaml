@@ -128,7 +128,7 @@ tiiuae/falcon3-10b-instruct:
   offload: 1.0
   num_parallel: 4
   useUnifiedKvCache: false
-  context_length: 32768
+  context_length: 30720
   file_size_bytes: 10955241088
   n_layers: 40
   hidden_dim: 3072
