@@ -97,7 +97,7 @@ class TestVramConstants:
         assert _USABLE_VRAM_GB == 15.3
 
     def test_use_unified_threshold(self):
-        assert _USE_UNIFIED_KV_CACHE_THRESHOLD_GB == 14.0
+        assert _USE_UNIFIED_KV_CACHE_THRESHOLD_GB == 12.0
 
     def test_legacy_threshold(self):
         assert _LEGACY_MODEL_GB_THRESHOLD_GB == 9.0

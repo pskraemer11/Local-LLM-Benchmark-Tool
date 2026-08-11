@@ -200,9 +200,10 @@ class TestFieldOwnership:
         assert set(auto_fix_fields()) == {"n_layers", "hidden_dim", "max_context_length", "arch", "file_size_bytes"}
 
     def test_config_fields_report_only(self) -> None:
+        # Since 2026-08-11: Registry is SSOT, these fields have source="registry"
         for field in ("num_parallel", "useUnifiedKvCache", "offload", "context_length"):
             assert resolve(field) is not None
-            assert resolve(field).source == "config"
+            assert resolve(field).source == "registry"
             assert resolve(field).auto_fix is False
 
     def test_resolve_unknown_returns_none(self) -> None:
