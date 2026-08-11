@@ -767,14 +767,14 @@ def should_use_unified_kv_cache(model_name: str, model_size_gb: float) -> bool:
     """Determine UKV for a model based on size threshold and special cases.
 
     Rules:
-      1. Models in UKV_DISABLE_MODELS -> always False (architektur-bedingt)
+      1. Models in UKV_FORCE_TRUE_MODELS -> always True (keine KV-Quant vertragbar)
       2. Models >= USE_UNIFIED_KV_CACHE_THRESHOLD_GB (12 GB) -> True
       3. Smaller models -> False
     """
     name_lower = model_name.lower()
-    for pattern in UKV_DISABLE_MODELS:
+    for pattern in UKV_FORCE_TRUE_MODELS:
         if pattern in name_lower:
-            return False
+            return True
     return model_size_gb >= USE_UNIFIED_KV_CACHE_THRESHOLD_GB
 
 
@@ -875,15 +875,15 @@ def is_support_file(
 USABLE_VRAM_GB = 15.3  # RTX 5070 Ti 16 GB minus driver overhead
 USE_UNIFIED_KV_CACHE_THRESHOLD_GB = 12.0  # When model_size_gb >= this, UKV=True (empirically determined)
 
-# Modelle, die KEINE KV-Quantisierung vertragen -> immer UKV=False
+# Modelle, die KEINE KV-Quantisierung vertragen -> IMMER UKV=True
+# (unabhaengig von der Modellgroesse, da KV-Quant zu Qualitaetsverlusten fuehrt)
 # Gemma-4: KV-Quant fuehrt zu massiven Qualitaetsverlusten
-# Kimi Linear: Architektur kompatibel mit UKV, aber empfohlen wird False
-# Devstral: funktioniert mit UKV, aber ohne bessere Ergnisse, deshalb UKV=False
-UKV_DISABLE_MODELS = {
-    "gemma-4",      # Gemma-4 Familie
+# Kimi Linear: vertragen keine KV-Quant
+# Gpt-Oss: vertragen keine KV-Quant (nur fp16 KV-Cache)
+UKV_FORCE_TRUE_MODELS = {
+    "gemma-4",      # Gemma-4 Familie (26B, 19B, 12B)
     "kimi-linear",  # Kimi Linear REAP
-    "devstral",     # Devstral Small
-    "mellum",       # Mellum2 (MoE, kleine Experten)
+    "gpt-oss",      # GPT-OSS-20B
 }
 LEGACY_MODEL_GB_THRESHOLD_GB = 9.0  # Fallback for entries without n_layers/hd
 KV_QUANT_REFERENCE_BYTES = 1.5  # Reference (q8_0 + iq4_nl) for ctx scaling

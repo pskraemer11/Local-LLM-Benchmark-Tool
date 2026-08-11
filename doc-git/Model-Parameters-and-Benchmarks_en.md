@@ -34,11 +34,11 @@ But: correlation of formula with empirical proofed reality ist very weak! Better
 
 ---
 
-## Context Length Guidelines (16 GB VRAM, np=1)
+## Context Length Guidelines (16 GB VRAM, np=4)
 
 > ⚠️ These are **approximate guidelines**. Actual limits depend on:
 > - `np` (max concurrent predictions, or used number of parallel slots) in combination with UKV ("unified KV cache"): 
->           at np=4 and UKV=false, reduce context length to 1/4 = 25% of table values
+>          (only) if np=4 and UKV=false, reduce context length significant to 1/4 = 25% of table values
 >   or enable `unifiedKVcache=true` (see `Parallel-Slots-Optimization_en.md`) to save memory
 > - KV-cache quantization factor (Q8/Q4 or Q5_1/Q4_NL reduces VRAM significantly vs. FP16/FP16)
 > - Model-specific VRAM (reserved GPU memory) overhead
@@ -53,12 +53,16 @@ But: correlation of formula with empirical proofed reality ist very weak! Better
 | 9–10 GB        |       131k             |
 | < 9 GB         |       262k             |
 
-**1st Rule of thumb**: use Model weights size less then (VRAM minus 2 GB) because of reserves for KV-cache + overhead.
-**2nd Rule of thumb**: Model weights greater 12 GB need Unified KV Cache = true (activated) to use 4 parallel slots (normally faster). 
-                         Vice versa: models smaller then 12GB can user Unified KV Cache = false, if and only if they can use sufficent KV quantisation (or usable context length shrinks dramtically).
-**3rd Rule of thumb**: Exception from rule 2: some models like GPT-OSS, Gemma-4 and KimiLinear cannot use KV quantisation!
-                         They need Unified KV Cache = true and allow less context length to fit into VRAM. 
-                         Otherwise their perfomance slow down dramatically (use of shared CPU memory).
+**1st Rule of thumb**: use Model weights size less than (VRAM minus 2 GB) because of reserves for KV-cache + overhead.
+**2nd Rule of thumb**: Model size >= 12 GB → `useUnifiedKvCache: true` (required for np=4).
+                         Models < 12 GB → `useUnifiedKvCache: false` (if KV quantisation is supported).
+**3rd Rule of thumb (exception)**: Some models CANNOT tolerate KV quantisation (architecture limitation).
+                         These ALWAYS need `useUnifiedKvCache: true` regardless of size:
+                         - **Gemma-4** (all variants: 26B, 19B, 12B)
+                         - **Kimi-Linear** (REAP-35B-A3B)
+                         - **GPT-OSS-20B**
+                         Without UKV, these models leak into shared CPU RAM → 5-10x slower.
+                         Implemented as `UKV_FORCE_TRUE_MODELS` in `src/benchmark_config.py`.
 ---
 
 ## Context Length Regression (log-log)
@@ -217,21 +221,21 @@ GLM-4.7-Flash REAP and Nemotron-3-Nano-REAP score near 0 in DS1000/CoderEval (GL
 | Granite-4.0-h-tiny                   | 7B    | 1B     | 7:1    | 64                          | 6 (4 routed + 2 shared) | 2      | Hybrid Mamba2+Attention (9:1); 4 of 40 layers with KV-cache                |
 | LFM2.5-8b-a1b                        | 8.3B  | 1.5B   | 5.5:1  | 32                          | 4                       | No     | Hybrid Conv+GQA (3:1); Reasoning model; 6 Attention blocks                 |
 | LFM2-24b-a2b-REAP-i1                 | 24B   | 2.3B   | 10.4:1 | 32 (pruned from 64)         | 4                       | No     | Hybrid Conv+GQA (3:1); 40 layers (10 Attention); REAP-compressed           |
-| Ernie-4.5-21b-A3B-pt (MoE)          | 21B   | 3B     | 7:1    | 64 (Text) + 64 (Vision)     | 2×(6 + 1 shared) = 14  | 2      | Multimodal Heterogeneous MoE; 28 layers; Text+Vision experts separate      |
-| Qwen3.6-28B-REAP (i1)               | 28B   | ~3B    | 9.3:1  | 205 (REAP-pruned from 256)  | 8 (+1 shared) = 9      | 1      | Hybrid Gated DeltaNet + Attention; 40 layers; original 256 experts/layer   |
-| Qwen3-30B-A3B-Instruct              | 30.5B | 3.3B   | 9.2:1  | 128                         | 8                       | No     | Qwen3-MoE; 48 layers; general use; 262K context                           |
-| Qwen3-Coder-30B-A3B-Instruct        | 30.5B | 3.3B   | 9.2:1  | 128                         | 8                       | No     | Qwen3-MoE; 48 layers; Python-specialized; 262K context                    |
-| Qwen3-Coder-REAP-25B-A3B (i1)       | 25B   | ~3B    | 8.3:1  | 103 (REAP-pruned from 128)  | 8                       | No     | Qwen3 architecture; 48 layers; 262K context; REAP-pruned from 30B         |
-| Gemma-4-19B-A4B-it-REAP-i1          | 19B   | ~4B    | 4.75:1 | 90 (REAP-pruned from 128)   | 8 (+1 shared) = 9      | 1      | Hybrid Sliding/Full Attention; 30 layers; originally 128 experts/layer     |
-| Gemma-4-26B-A4B                     | 26B   | ~4B    | 4.75:1 | 128                         | 8 (+1 shared) = 9      | 1      | Hybrid Sliding/Full Attention; 30 layers                                   |
-| GLM-4.7-Flash                       | 30B   | 3B     | 10:1   | 64                          | 4 (+ 1 shared) = 5     | 1      | Glm4MoeLite; 47 layers (1 dense + 46 MoE); KV-quant sensitive (K min Q8_0)|
-| GLM-4.7-Flash-REAP-23B-A3B          | 23B   | 3B     | 7.7:1  | 48 (REAP-pruned)            | 4 (+ 1 shared) = 5     | 1      | Glm4MoeLite; REAP-compressed (30B→23B); KV-quant sensitive (K min Q8_0)   |
-| GPT-OSS-20B                         | 20.9B | 3.6B   | 5.8:1  | 32                          | 4                       | No     | MXFP4-quant MoE weights; 24 layers; Alternating Dense+Banded Sparse Attn  |
+| Ernie-4.5-21b-A3B-pt (MoE)           | 21B   | 3B     | 7:1    | 64 (Text) + 64 (Vision)     | 2×(6 + 1 shared) = 14   | 2      | Multimodal Heterogeneous MoE; 28 layers; Text+Vision experts separate      |
+| Qwen3.6-28B-REAP (i1)                | 28B   | ~3B    | 9.3:1  | 205 (REAP-pruned from 256)  | 8 (+1 shared) = 9       | 1      | Hybrid Gated DeltaNet + Attention; 40 layers; original 256 experts/layer   |
+| Qwen3-30B-A3B-Instruct               | 30.5B | 3.3B   | 9.2:1  | 128                         | 8                       | No     | Qwen3-MoE; 48 layers; general use; 262K context                            |
+| Qwen3-Coder-30B-A3B-Instruct         | 30.5B | 3.3B   | 9.2:1  | 128                         | 8                       | No     | Qwen3-MoE; 48 layers; Python-specialized; 262K context                     |
+| Qwen3-Coder-REAP-25B-A3B (i1)        | 25B   | ~3B    | 8.3:1  | 103 (REAP-pruned from 128)  | 8                       | No     | Qwen3 architecture; 48 layers; 262K context; REAP-pruned from 30B          |
+| Gemma-4-19B-A4B-it-REAP-i1           | 19B   | ~4B    | 4.75:1 | 90 (REAP-pruned from 128)   | 8 (+1 shared) = 9       | 1      | Hybrid Sliding/Full Attention; 30 layers; originally 128 experts/layer     |
+| Gemma-4-26B-A4B                      | 26B   | ~4B    | 4.75:1 | 128                         | 8 (+1 shared) = 9       | 1      | Hybrid Sliding/Full Attention; 30 layers                                   |
+| GLM-4.7-Flash                        | 30B   | 3B     | 10:1   | 64                          | 4 (+ 1 shared) = 5      | 1      | Glm4MoeLite; 47 layers (1 dense + 46 MoE); KV-quant sensitive (K min Q8_0) |
+| GLM-4.7-Flash-REAP-23B-A3B           | 23B   | 3B     | 7.7:1  | 48 (REAP-pruned)            | 4 (+ 1 shared) = 5      | 1      | Glm4MoeLite; REAP-compressed (30B→23B); KV-quant sensitive (K min Q8_0)    |
+| GPT-OSS-20B                          | 20.9B | 3.6B   | 5.8:1  | 32                          | 4                       | No     | MXFP4-quant MoE weights; 24 layers; Alternating Dense+Banded Sparse Attn   |
 |                                      |       |        |        |                             |                         |        | **No KV-quantization!** (won't load otherwise)                             |
-| Kimi-Linear-REAP-35B-A3B-Instruct-i1| 35B   | ~3B    | 11.7:1 | 180 (REAP-pruned)           | 8 (+1 shared) = 9      | 1      | Hybrid KDA+MLAS+SSM; 27 layers (26 MoE); 1M context; **no KV-quant!**     |
-| Mellum2-12B-a2.5B-Instruct          | 12B   | 2.5B   | 4.8:1  | 64                          | 8                       | No     | 2 variants: Instruct SFT / Thinking SFT                                   |
-| North-mini-code-1.0                 | 30B   | 3B     | 10:1   | 128                         | 8                       | No     | Cohere2MoE; 256K context; **no KV-cache quantization possible**            |
-| MiroThinker-v1.5-30B                | 30B   | –      | –      | –                           | –                       | –      | MoE reasoning model; 48 layers; 24K context (auto-configured)              |
+| Kimi-Linear-REAP-35B-A3B-Instruct-i1 | 35B   | ~3B    | 11.7:1 | 180 (REAP-pruned)           | 8 (+1 shared) = 9       | 1      | Hybrid KDA+MLAS+SSM; 27 layers (26 MoE); 1M context; **no KV-quant!**      |
+| Mellum2-12B-a2.5B-Instruct           | 12B   | 2.5B   | 4.8:1  | 64                          | 8                       | No     | 2 variants: Instruct SFT / Thinking SFT                                    |
+| North-mini-code-1.0                  | 30B   | 3B     | 10:1   | 128                         | 8                       | No     | Cohere2MoE; 256K context; **no KV-cache quantization possible**            |
+| MiroThinker-v1.5-30B                 | 30B   | –      | –      | –                           | –                       | –      | MoE reasoning model; 48 layers; 24K context (auto-configured)              |
 
 ---
 
