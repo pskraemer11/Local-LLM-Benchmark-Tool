@@ -62,7 +62,7 @@ But: correlation of formula with empirical proofed reality ist very weak! Better
                          - **Kimi-Linear** (REAP-35B-A3B)
                          - **GPT-OSS-20B**
                          Without UKV, these models leak into shared CPU RAM → 5-10x slower.
-                         Implemented as `UKV_FORCE_TRUE_MODELS` in `src/benchmark_config.py`.
+                         Implemented as `UKV_FORCE_TRUE_MODELS` in `src/benchmark_config.py` (return True unconditionally).
 ---
 
 ## Context Length Regression (log-log)

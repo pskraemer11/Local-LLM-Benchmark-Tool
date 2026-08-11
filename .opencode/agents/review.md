@@ -54,10 +54,10 @@ reads at load time but cannot override via API.
 
 ## UKV Logic (2026-08-11)
 - **Threshold**: Model size >= 12 GB → `useUnifiedKvCache: true`
-- **Exceptions (always False)**: gemma-4, kimi-linear, gpt-oss (do not tolerate
-  KV quantization — architecture limitation)
+- **Exceptions (always True)**: gemma-4, kimi-linear, gpt-oss (do not tolerate
+  KV quantization — must use unified KV cache regardless of size)
 - **Formula**: `should_use_unified_kv_cache(model_name, size_gb)` in
-  `src/benchmark_config.py`
+  `src/benchmark_config.py` with `UKV_FORCE_TRUE_MODELS` set
 
 ## LM Studio API Limitations
 The Load API (`POST /api/v1/models/load`) does NOT support:
