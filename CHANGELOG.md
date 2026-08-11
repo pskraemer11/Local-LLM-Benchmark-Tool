@@ -22,6 +22,7 @@ Hinweise:
 | 11.08. | `run-qwen-rerun-both-passes.bat` | **Verbessert**: Per-Pass-Logging mit Zeitstempel |
 | 11.08. | `~/.agents/skills/compaction/SKILL.md` | **Neuer Skill**: Auto-Compaction bei ~80% Kontext (Token-Einsparung). Format + Workflow in `doc-git/Developer-Docs/Compaction-Workflow.md` |
 | 11.08. | `~/.agents/skills/*/SKILL.md` | **Gekürzt**: Alle Skills < 1.3KB (waren bis 9.3KB) — weniger Token-Verbrauch pro Prompt |
+| 11.08. | `compaction/SKILL.md` + `Compaction-Workflow.md` | **Trigger geändert**: Nicht mehr Token-Länge (1M ctx irrelevant), stattdessen Event-basiert: commit/push, Architekturentscheidungen, Bug-Fixes, ~20-30 Messages, mind. 2x/Tag |
 
 ## Registry-Wartung (10.08.2026)
 
