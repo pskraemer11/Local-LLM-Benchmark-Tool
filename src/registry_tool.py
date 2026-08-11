@@ -25,6 +25,8 @@ Commands:
   fix-ctx       Recompute context_length for ALL entries (size-based formula)
   fix-np        Recompute num_parallel for ALL entries (architecture-based)
   fill-size     Look up file_size_bytes from LMS for registry entries missing it
+  fill-quant    Read @quant from GGUF filename for registry entries missing
+                quant suffix (Source of Truth: GGUF, not LMS)
   fmt           Normalize blank lines in registry YAML (no blanks within entries,
                 one blank between entries)
   migrate-keys  Re-key entries without publisher prefix to publisher/model-name
@@ -933,6 +935,15 @@ def cmd_add(models: list[dict[str, Any]], interactive: bool = False) -> dict[str
             if any("@" in k and normalize_model_name(k).split("@")[0] == sk for k in reg):
                 skipped.append((mk, "bereits vorhanden (Quant-Variante existiert)"))
                 continue
+        else:
+            # @quant variant: remove existing base entry (without @) if present.
+            # The base entry is ambiguous; the @quant entry is specific and has a
+            # unique file_size_bytes.
+            base_key = sk.split("@")[0]
+            base_entry = next((k for k in reg if normalize_model_name(k) == base_key), None)
+            if base_entry is not None:
+                print(f"  [CLEANUP] Entferne Base-Eintrag '{base_key}' (ersetzt durch {mk})")
+                del reg[base_entry]
         if any(kw in mk.lower() for kw in BLACKLIST):
             skipped.append((mk, "blacklisted"))
             continue
@@ -1540,6 +1551,42 @@ _REASONING_TOKEN_RE = re.compile(
 )
 
 
+_KNOWN_QUANTS = (
+    "q1_0", "q2_k", "q3_k_s", "q3_k_m", "q3_k_l", "q4_0", "q4_k_s", "q4_k_m",
+    "q5_0", "q5_k_s", "q5_k_m", "q6_k", "q8_0", "iq2_xxs", "iq2_xs", "iq2_s",
+    "iq2_m", "iq3_xxs", "iq3_xs", "iq3_s", "iq3_m", "iq4_xs", "iq4_nl",
+    "q2_k_s", "q3_k_xs", "q4_k_xl", "mxfp4", "fp16", "f16",
+)
+
+
+def _gguf_quant_from_header(gguf_path: str) -> str | None:
+    """Extract quantization type from GGUF filename.
+
+    The GGUF header does not store the quant type directly, but the filename
+    follows conventions like ``model-name-Q3_K_S.gguf``. This function parses
+    the filename to extract the quant suffix.
+
+    Returns the quant string (e.g. "Q3_K_S") or None if not determinable.
+    """
+    from model_identity import normalize_model_name
+
+    fname = os.path.basename(gguf_path).lower()
+    fname = fname.removesuffix(".gguf")
+
+    # Try to find a known quant suffix in the filename
+    for quant in _KNOWN_QUANTS:
+        if quant in fname:
+            # Return in uppercase convention
+            return quant.upper()
+
+    # Fallback: try to extract after the last hyphen if it looks like a quant
+    parts = fname.rsplit("-", 1)
+    if len(parts) == 2 and parts[1] and parts[1][0] in ("q", "i", "f", "m"):
+        return parts[1].upper()
+
+    return None
+
+
 def _detect_reasoning_from_template(template: str) -> bool:
     """Check if a GGUF chat_template supports reasoning/thinking mode.
 
@@ -1711,6 +1758,83 @@ def cmd_fill_arch() -> None:
 
     if updated or reasoning_updated:
         save_registry(reg)
+
+
+def cmd_fill_quant() -> None:
+    """Fill missing @quant in registry keys from GGUF headers (Source of Truth).
+
+    For registry entries without @quant (base entries), reads the installed
+    GGUF header to determine the actual quantization. Renames the key to
+    publisher/model@quant and sets the quants field.
+
+    Source of Truth: GGUF header (via lms ls path -> file -> header parse).
+    Base entries without @quant are ambiguous — the triple
+    (publisher, model, quant) is the unique identity.
+    """
+    reg = load_registry()
+    if not reg:
+        print("[ERROR] Leere Registry")
+        sys.exit(1)
+
+    lms_models = _run_lms_ls()
+    if not lms_models:
+        print("[WARN] lms ls lieferte keine Modelle - fill-quant übersprungen")
+        return
+
+    # Build lookup: normalized base key -> GGUF path
+    lms_by_base: dict[str, str] = {}
+    lms_pub_base: dict[str, str] = {}
+    for m in lms_models:
+        mk = str(m.get("modelKey", "")).lower()
+        rp = m.get("path", "")
+        if not rp:
+            continue
+        full_path = str(MODELS_CACHE / rp)
+        if not os.path.isfile(full_path):
+            continue
+        base = normalize_model_name(mk).split("@")[0]
+        if base not in lms_by_base:
+            lms_by_base[base] = full_path
+            pub = str(m.get("publisher", "")).strip().lower()
+            lms_pub_base[base] = pub
+
+    updated = 0
+    for key in list(reg.keys()):
+        if not isinstance(reg[key], dict):
+            continue
+        if "@" in key:
+            continue  # already has quant
+
+        base = normalize_model_name(key)
+        gguf_path = lms_by_base.get(base)
+        if gguf_path is None:
+            print(f"  [SKIP] {key}: kein installiertes GGUF gefunden")
+            continue
+
+        # Read GGUF header to get quant (Source of Truth)
+        quant = _gguf_quant_from_header(gguf_path)
+        if not quant:
+            print(f"  [SKIP] {key}: Quant konnte nicht aus GGUF-Header gelesen werden")
+            continue
+
+        pub = lms_pub_base.get(base, key.split("/")[0] if "/" in key else "")
+        model_part = base.split("/", 1)[1] if "/" in base else base
+        new_key = f"{pub}/{model_part}@{quant.lower()}" if pub else f"{model_part}@{quant.lower()}"
+
+        # Don't overwrite if new key already exists
+        if new_key in reg and new_key != key:
+            print(f"  [SKIP] {key}: Ziel-Key {new_key} existiert bereits")
+            continue
+
+        entry = reg.pop(key)
+        entry["quants"] = quant.upper()
+        reg[new_key] = entry
+        updated += 1
+        print(f"  [FIX] {key} -> {new_key} (quants={quant.upper()})")
+
+    if updated:
+        save_registry(reg)
+    print(f"[OK] fill-quant: {updated} Keys mit @quant ergänzt (Quelle: GGUF-Header)")
 
 
 # ── sync-from-gguf command (Auto-Fix, Feld-Ownership) ───────────────
@@ -2255,6 +2379,21 @@ def cmd_validate(verbose: bool = False, repro: bool = False) -> dict[str, Any]:
             errors["missing_capabilities"].append(model_key)
         if not entry.get("blueprint"):
             errors["missing_blueprint"].append(model_key)
+
+    # ── Check 4b: Modell-Identität = Publisher + Modellname + Quantisierung ──
+    # Jeder Registry-Key MUSS die Form publisher/modelname@quant haben.
+    # Base-Entries ohne @quant sind nicht eindeutig und gehören entfernt.
+    from model_identity import model_identity_triple
+    for model_key in reg:
+        pub, model, quant = model_identity_triple(model_key)
+        if not pub:
+            errors.setdefault("missing_publisher", []).append(
+                f"{model_key}: kein Publisher-Prefix (MUSS publisher/model@quant sein)"
+            )
+        if not quant:
+            errors.setdefault("missing_quant", []).append(
+                f"{model_key}: keine @quant (MUSS publisher/model@quant sein)"
+            )
 
     # ── Check 5: Registry name findet Config JSON (mit fallback matching) ──
     for model_key, entry in reg.items():
@@ -2848,6 +2987,7 @@ def _interactive_menu() -> None:
         ("fill-reasoning", "Read reasoning from GGUF chat_template"),
         ("fill-ctx", "Add default context_length to missing entries"),
         ("fill-size", "Look up file_size_bytes from LMS"),
+        ("fill-quant", "Read @quant from GGUF filename (Source of Truth)"),
         ("sync-ctx", "Sync context_length from JSON configs into registry"),
         ("sync-from-configs", "Config-Felder abgleichen (Melde-Modus, schreibt NICHTS)"),
         ("migrate-keys", "Re-key entries without publisher prefix"),
@@ -2925,6 +3065,8 @@ def main() -> None:
         cmd_sync_from_gguf()
     elif cmd == "fill-reasoning":
         cmd_fill_reasoning()
+    elif cmd == "fill-quant":
+        cmd_fill_quant()
     elif cmd == "fmt":
         cmd_fmt()
     elif cmd == "migrate-keys":

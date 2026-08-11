@@ -22,6 +22,27 @@ if TYPE_CHECKING:
 # ── Normalisierung (exakt wie assemble_blueprint.normalize_model_name) ──
 
 
+def model_identity_triple(key: str) -> tuple[str, str, str]:
+    """Extract the canonical identity triple (publisher, model, quant) from a registry key.
+
+    A valid registry key ALWAYS has the form ``publisher/modelname@quant``.
+    The triple is the unique identity — no model is fully identified without all three parts.
+
+    Returns:
+        (publisher, model_name, quant) where quant is the @-suffix (without @) or "" if absent.
+    """
+    key = key.strip()
+    if "@" in key:
+        base, quant = key.split("@", 1)
+    else:
+        base, quant = key, ""
+    if "/" in base:
+        publisher, model = base.split("/", 1)
+    else:
+        publisher, model = "", base
+    return publisher.lower(), model.lower(), quant.lower()
+
+
 def normalize_model_name(name: str) -> str:
     """Normalize a model name for matching between registry and directory names.
 
