@@ -1,13 +1,12 @@
 """Tests for registry_tool.py (Code-Review 2026-07-18 §5: test coverage).
 
 The registry tool is the most logic-dense file in the project
-(VRAM formula, match cascades, _infer_num_parallel rules). The
-test coverage was the largest gap in the review.
+(VRAM formula, match cascades). The test coverage was the largest
+gap in the review.
 
 Targets:
   5.1  _max_ctx_from_vram() and VRAM constants
   5.2  Match cascade in cmd_configs (registry ↔ JSON config)
-  5.3  _infer_num_parallel() classification rules (post-refactoring)
 """
 from __future__ import annotations
 
@@ -24,7 +23,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 import registry_tool as rt
 from registry_tool import (
     _classify_arch,
-    _infer_num_parallel,
     _max_ctx_from_vram,
     _KV_BYTES,
     _USABLE_VRAM_GB,
@@ -149,8 +147,8 @@ class TestMatchCascade:
             json.dump(data, f)
         return json_path
 
-    def test_no_arch_data_falls_back_to_legacy_threshold(self, fake_config, capsys):
-        # Model with no n_layers/hidden_dim, model_gb >= 9 → UKV on (Empfehlung)
+    def test_no_arch_data_falls_back_to_benchmark_threshold(self, fake_config, capsys):
+        # Model with no n_layers/hidden_dim, model_gb >= 12 → UKV on (Empfehlung)
         sub = fake_config / "publisher"
         json_path = self._make_config(
             sub, sub / "m.json",
@@ -158,7 +156,7 @@ class TestMatchCascade:
         )
         registry = {
             "publisher/m": {
-                "file_size_bytes": 10_000_000_000,  # 10 GB
+                "file_size_bytes": 14_000_000_000,  # 14 GB (>= 12 GB threshold)
                 # No n_layers, no hidden_dim
                 "context_length": 16384,
                 "num_parallel": 1,
@@ -351,30 +349,6 @@ class TestClassifyArch:
 
     def test_empty_input_returns_dense(self):
         assert _classify_arch("") == "dense"
-
-
-class TestInferNumParallel:
-    """Rules (nach Refactoring 2026-07-31): ``"moe"`` / ``"mtp"`` → 4, sonst → 1.
-
-    Die alte Heuristik (ERNIE→1, GPT-OSS→4, MTP→2, a3b/a4b-Keywords) wurde
-    entfernt: MoE-Erkennung kommt jetzt aus dem GGUF-``expert_count``
-    (Single Source of Truth, siehe ``_classify_arch``).
-    """
-
-    def test_moe_returns_4(self):
-        assert _infer_num_parallel("moe") == 4
-
-    def test_mtp_returns_4(self):
-        assert _infer_num_parallel("mtp") == 4
-
-    def test_dense_returns_1(self):
-        assert _infer_num_parallel("dense") == 1
-
-    def test_unknown_classification_returns_1(self):
-        assert _infer_num_parallel("unknown-arch") == 1
-
-    def test_empty_returns_1(self):
-        assert _infer_num_parallel("") == 1
 
 
 # ─────────────────────────────────────────────────────────────────────

@@ -853,20 +853,13 @@ def _classify_arch(
     return "dense"
 
 
-def _infer_num_parallel(classification: str) -> int:
-    """Determine num_parallel from a classification string.
-
-    ``"moe"`` / ``"mtp"`` → 4, everything else → 1.
-    """
-    return 4 if classification in ("moe", "mtp") else 1
-
-
 def _compute_np_ukv(
     model_gb: float,
     kv_per_slot_gb: float,
     native_ctx: int,
     vram_available: float = _USABLE_VRAM_GB,
     min_ctx: int = _MIN_CONTEXT_LENGTH,
+    model_name: str = "",
 ) -> tuple[int, bool, int]:
     """Compute optimal num_parallel and useUnifiedKvCache based on VRAM budget.
 
@@ -877,19 +870,23 @@ def _compute_np_ukv(
       4. np=1, UKV=True   →  minimum parallelism
       5. np=1, UKV=False  →  last resort (reduce ctx)
 
+    UKV determination uses the benchmark formula (>= 12 GB or special cases).
+
     Args:
         model_gb: Model file size in GB.
         kv_per_slot_gb: KV-cache cost per slot (nl x hd x 2 x kv_bytes / 1e9).
         native_ctx: Native max context length from GGUF header.
         vram_available: Usable VRAM in GB (default: 15.3).
         min_ctx: Minimum acceptable context length (default: 32768).
+        model_name: Model identifier for UKV special case lookup (optional).
 
     Returns:
         (num_parallel, use_unified_kv_cache, context_length)
     """
     if kv_per_slot_gb <= 0:
-        # No arch data → fallback: np=4, UKV based on model size, native ctx
-        is_ukv = model_gb >= _LEGACY_MODEL_GB_THRESHOLD_GB
+        # No arch data → fallback: np=4, UKV based on benchmark formula
+        from benchmark_config import should_use_unified_kv_cache
+        is_ukv = should_use_unified_kv_cache(model_name or "unknown", model_gb)
         return 4, is_ukv, native_ctx
 
     # Estimate max ctx from VRAM (for models without max_context_length in registry)
@@ -1073,6 +1070,7 @@ def cmd_suggest() -> dict[str, Any]:
                 native_ctx,
                 vram_available=_USABLE_VRAM_GB,
                 min_ctx=_MIN_CONTEXT_LENGTH,
+                model_name=match,
             )
 
             offload = entry.get("offload")
@@ -1227,8 +1225,8 @@ def cmd_sync_from_configs() -> None:
     )
     if drifts:
         print(
-            "[HINWEIS] Keine Aenderung: num_parallel/useUnifiedKvCache/offload sind Registry-SSOT. "
-            "Nur context_length-Drift wird gemeldet."
+            "[HINWEIS] Keine Aenderung: num_parallel/useUnifiedKvCache/offload sind Registry-SSOT "
+            "(seit 11.08.2026). Nur context_length-Drift wird gemeldet."
         )
 
 
