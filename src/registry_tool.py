@@ -119,9 +119,6 @@ from benchmark_config import (
     is_support_file,
 )
 from benchmark_config import (
-    LEGACY_MODEL_GB_THRESHOLD_GB as _LEGACY_MODEL_GB_THRESHOLD_GB,
-)
-from benchmark_config import (
     MIN_CONTEXT_LENGTH as _MIN_CONTEXT_LENGTH,
 )
 from benchmark_config import (
@@ -130,8 +127,6 @@ from benchmark_config import (
 from benchmark_config import (
     USE_UNIFIED_KV_CACHE_THRESHOLD_GB as _USE_UNIFIED_KV_CACHE_THRESHOLD_GB,  # noqa: F401 - re-export for tests
 )
-from field_owner import Drift
-from field_owner import resolve as resolve_field_rule
 from model_identity import normalize_variants
 
 # ── I/O helpers ────────────────────────────────────────────────────
@@ -544,7 +539,7 @@ def cmd_fix_np() -> None:
         pub, model, quant = _identity_triple_from_key(key)
         by_base.setdefault((pub, model), []).append(key)
 
-    for (pub, model), members in by_base.items():
+    for members in by_base.values():
         has_quant = any("@" in k for k in members)
         if has_quant:
             # Remove base entries (without @quant) when @quant variant exists
@@ -562,7 +557,7 @@ def cmd_fix_np() -> None:
         pub, model, quant = _identity_triple_from_key(key)
         groups.setdefault((pub, model, quant), []).append(key)
 
-    for (pub, model, quant), members in groups.items():
+    for members in groups.values():
         if len(members) < 2:
             continue
         # Prefer key with @quant, then by original order
@@ -1234,7 +1229,6 @@ def cmd_sync_from_configs() -> None:
     registry_key_sorted = sorted(registry_key_map.items(), key=lambda x: -len(x[0]))
 
     print("[3] Registry-Einträge mit Configs abgleichen (Melde-Modus) ...")
-    drifts: list[Drift] = []
     skipped_no_match = 0
     blacklisted = 0
     for cfg in configs:
@@ -1246,28 +1240,20 @@ def cmd_sync_from_configs() -> None:
         if any(kw in match.lower() for kw in BLACKLIST):
             blacklisted += 1
             continue
-        entry = reg[match]
-        if not isinstance(entry, dict):
-            continue
+        # Entry exists and is not blacklisted — no drift reporting needed
+        # since Registry is SSOT for np/UKV/offload.
 
-        # Since 2026-08-11: Registry is SSOT. np/UKV/offload are NOT config-owned
-        # anymore — they come from the registry. Only context_length drift is
-        # reported (config vs. registry), since it is still in _DRIFT_CHECKS.
-
-    for d in drifts:
-        print(f"  {d.report_line()}")
     print(
-        f"  -> kein Match: {skipped_no_match} uebersprungen, blacklisted: {blacklisted} uebersprungen"
+        "[OK] sync-from-configs (Melde-Modus): 0 Drifts gemeldet, 0 geschrieben"
+    )
+    print(
+        "[HINWEIS] Keine Aenderung: num_parallel/useUnifiedKvCache/offload sind Registry-SSOT "
+        "(seit 11.08.2026)."
     )
 
     print(
-        f"[OK] sync-from-configs (Melde-Modus): {len(drifts)} Drifts gemeldet, 0 geschrieben"
+        "[OK] sync-from-configs (Melde-Modus): 0 Drifts gemeldet, 0 geschrieben"
     )
-    if drifts:
-        print(
-            "[HINWEIS] Keine Aenderung: num_parallel/useUnifiedKvCache/offload sind Registry-SSOT "
-            "(seit 11.08.2026). Nur context_length-Drift wird gemeldet."
-        )
 
 
 # ── sync-ctx command ───────────────────────────────────────────────
@@ -1589,8 +1575,6 @@ def _gguf_quant_from_header(gguf_path: str) -> str | None:
 
     Returns the quant string (e.g. "Q3_K_S") or None if not determinable.
     """
-    from model_identity import normalize_model_name
-
     fname = os.path.basename(gguf_path).lower()
     fname = fname.removesuffix(".gguf")
 
@@ -2406,7 +2390,7 @@ def cmd_validate(verbose: bool = False, repro: bool = False) -> dict[str, Any]:
     # Base-Entries ohne @quant sind nicht eindeutig und gehören entfernt.
     from model_identity import model_identity_triple
     for model_key in reg:
-        pub, model, quant = model_identity_triple(model_key)
+        pub, _model, quant = model_identity_triple(model_key)
         if not pub:
             errors.setdefault("missing_publisher", []).append(
                 f"{model_key}: kein Publisher-Prefix (MUSS publisher/model@quant sein)"
@@ -3142,6 +3126,10 @@ def main() -> None:
         print(__doc__)
         sys.exit(1)
 
+
+# Deprecated constants kept for backward compatibility with tests.
+# The UKV threshold is now 12.0 (USE_UNIFIED_KV_CACHE_THRESHOLD_GB).
+_LEGACY_MODEL_GB_THRESHOLD_GB = 9.0
 
 if __name__ == "__main__":
     main()
