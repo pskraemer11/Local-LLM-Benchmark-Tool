@@ -50,6 +50,7 @@ BLACKLIST = [
     # Rest
     "rag",
     "f2llm",                # F2LLM-v2-Familie = reine Embedding-Modelle (Feature Extraction, kein Chat; 80M-14B)
+    "imatrix",              # Importance Matrix GGUF files (< 200 MB) — companion files, not standalone models
 ]
 
 EXCLUDE_KEYWORDS = BLACKLIST

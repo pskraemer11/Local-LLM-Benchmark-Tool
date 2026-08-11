@@ -1212,23 +1212,9 @@ def cmd_sync_from_configs() -> None:
         if not isinstance(entry, dict):
             continue
 
-        off = cfg.get("offload")
-        if off is not None and entry.get("offload") != float(off):
-            drifts.append(
-                Drift("offload", entry.get("offload"), float(off), resolve_field_rule("offload"), f"Config {cfg['dir_name']}")
-            )
-
-        np_val = cfg.get("num_parallel")
-        if np_val is not None and entry.get("num_parallel") != int(np_val):
-            drifts.append(
-                Drift("num_parallel", entry.get("num_parallel"), int(np_val), resolve_field_rule("num_parallel"), f"Config {cfg['dir_name']}")
-            )
-
-        ukv = cfg.get("use_unified_kv")
-        if ukv is not None and entry.get("useUnifiedKvCache") != bool(ukv):
-            drifts.append(
-                Drift("useUnifiedKvCache", entry.get("useUnifiedKvCache"), bool(ukv), resolve_field_rule("useUnifiedKvCache"), f"Config {cfg['dir_name']}")
-            )
+        # Since 2026-08-11: Registry is SSOT. np/UKV/offload are NOT config-owned
+        # anymore — they come from the registry. Only context_length drift is
+        # reported (config vs. registry), since it is still in _DRIFT_CHECKS.
 
     for d in drifts:
         print(f"  {d.report_line()}")
@@ -1237,12 +1223,12 @@ def cmd_sync_from_configs() -> None:
     )
 
     print(
-        f"[OK] sync-from-configs (Melde-Modus): {len(drifts)} Drifts gemeldet, 0 geschrieben (Config-Felder nur melden, Entscheidung manuell)"
+        f"[OK] sync-from-configs (Melde-Modus): {len(drifts)} Drifts gemeldet, 0 geschrieben"
     )
     if drifts:
         print(
-            "[HINWEIS] Keine Aenderung: offload/num_parallel/useUnifiedKvCache sind Config-Feld-Owner. "
-            "Konflikte mit 'sync-from-gguf' (auto) oder manuell in der Registry aufloesen."
+            "[HINWEIS] Keine Aenderung: num_parallel/useUnifiedKvCache/offload sind Registry-SSOT. "
+            "Nur context_length-Drift wird gemeldet."
         )
 
 
@@ -1768,6 +1754,8 @@ def cmd_sync_from_gguf() -> None:
         full_path = str(MODELS_CACHE / rp)
         if not os.path.isfile(full_path):
             continue
+        if _is_support_file(rp):
+            continue
         key = normalize_model_name(m.get("modelKey", "")).lower()
         base = key.split("@")[0]
         if base not in unique:
@@ -1854,12 +1842,14 @@ def cmd_fill_reasoning() -> None:
     print("[2] LM Studio-Modelle scannen ...")
     lms = _run_lms_ls()
     unique: dict[str, str] = {}
-    for m in lms:
+    for m in lms_models:
         rp = m.get("path", "")
         if not rp:
             continue
         full_path = str(MODELS_CACHE / rp)
         if not os.path.isfile(full_path):
+            continue
+        if _is_support_file(rp):
             continue
         key = normalize_model_name(m.get("modelKey", "")).lower()
         base = key.split("@")[0]
