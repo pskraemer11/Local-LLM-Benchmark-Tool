@@ -1,6 +1,6 @@
 # Repro-Issues: model_registry.yaml vs. LM Studio Hub
 
-Generated automatically: 2026-08-11 11:52:24
+Generated automatically: 2026-08-11 16:47:37
 
 Source of truth for model facts are the GGUF files (immutable).
 The `model_registry.yaml` is editable (python programs/manual) and is
@@ -9,7 +9,7 @@ shipped by LM Studio and never touched anywhere in the process.
 
 ## Validate summary
 
-- **Total issues (validate):** 0
+- **Total issues (validate):** 3
 - `template_missing_file`: 0
 - `template_missing_config`: 0
 - `missing_reasoning`: 0
@@ -17,7 +17,7 @@ shipped by LM Studio and never touched anywhere in the process.
 - `missing_blueprint`: 0
 - `registry_no_config`: 0
 - `reasoning_arch_mismatch`: 0
-- `config_context_drift`: 0
+- `config_context_drift`: 3
 - `config_np_ukv_drift`: 0
 - `config_context_too_small`: 0
 - `gguf_header_drift`: 0
