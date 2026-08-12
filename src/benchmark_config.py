@@ -49,6 +49,18 @@ BLACKLIST = [
     "imatrix",              # Importance Matrix GGUF files (< 200 MB) — companion files, not standalone models
 ]
 
+# MTP drafter models: name contains "mtp" AND size < 1 GB.
+# These are companion files (e.g. for speculative decoding), not standalone models.
+# Regular LLMs with "mtp" in the name but > 1 GB are NOT drafters.
+def is_mtp_drafter(model_name: str, file_size_bytes: int = 0) -> bool:
+    """True if the model is an MTP drafter (companion file, not standalone).
+
+    Rule: name contains "mtp" (case-insensitive) AND size < 1 GB.
+    """
+    if "mtp" not in model_name.lower():
+        return False
+    return file_size_bytes < 1_000_000_000  # < 1 GB
+
 EXCLUDE_KEYWORDS = BLACKLIST
 
 

@@ -116,6 +116,7 @@ from benchmark_config import (
     BLACKLIST,
     GPTOSS_REASONING_BUDGET,
     GPTOSS_REASONING_EFFORT,
+    is_mtp_drafter,
     is_support_file,
 )
 from benchmark_config import (
@@ -964,6 +965,10 @@ def cmd_add(models: list[dict[str, Any]], interactive: bool = False) -> dict[str
             skipped.append((mk, "blacklisted"))
             continue
         rp = m.get("path", "")
+        size_bytes = m.get("size_bytes", 0) or m.get("sizeBytes", 0)
+        if is_mtp_drafter(mk, size_bytes):
+            skipped.append((mk, "blacklisted (MTP drafter)"))
+            continue
         if rp and _is_support_file(rp, str(m.get("architecture") or "")):
             skipped.append((mk, "Zusatzdatei (MTP-Drafter/mmproj/imatrix) - kein eigenständiges Modell"))
             continue

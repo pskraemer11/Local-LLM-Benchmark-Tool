@@ -296,26 +296,6 @@ unsloth/gemma-4-12b-it-qat@q4_k_xl:
   max_context_length: 262144
   useUnifiedKvCache: true
 
-originalgeek/qwen3.6-27b-unsloth-mtp-head-only:
-  publisher: originalGeek
-  hf_url: https://huggingface.co/originalgeek/qwen3.6-27b-unsloth-mtp-head-only
-  arch: mtp
-  k_cache: q8_0
-  v_cache: iq4_nl
-  offload: 1
-  num_parallel: 4
-  notes: 'Architektur: mtp | Multi-Token Prediction'
-  file_size_bytes: 451321504
-  context_length: 65536
-  n_layers: 65
-  hidden_dim: 5120
-  max_context_length: 262144
-  reasoning: instruct
-  capabilities: coding, vision, text
-  blueprint: coding_agent
-  truncation: full
-  useUnifiedKvCache: false
-
 mradermacher/kimi-linear-reap-35b-a3b-instruct-i1@iq3_xxs:
   publisher: mradermacher
   hf_url: 
