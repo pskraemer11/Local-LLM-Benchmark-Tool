@@ -1080,8 +1080,11 @@ def run_evalplus(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_siz
         temperature=gen_temp,
         instruction_prefix="Please provide a self-contained Python script that solves the following problem in a markdown code block:",
         response_prefix="Below is a Python script with a self-contained function that solves the problem and passes corresponding tests:",
-        max_new_tokens=max_tokens,
     )
+    # evalplus 0.3.1: make_model() forwards max_new_tokens NOT (openai
+    # backend -> OpenAIChatDecoder with default 768). Set it on the decoder
+    # directly so the configured max_tokens reaches the OpenAI request.
+    model_obj.max_new_tokens = max_tokens
 
     temp_str = f"{gen_temp:g}"
     out_dir = os.path.join(root_dir, dataset)

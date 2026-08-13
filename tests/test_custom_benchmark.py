@@ -592,3 +592,89 @@ class TestCollectSystemMetrics:
         assert metrics["gpu_mem_used_gb"] == pytest.approx(4.0)
         assert metrics["gpu_mem_total_gb"] == pytest.approx(8.0)
         assert metrics["gpu_temp"] == 70.0
+
+
+# ======================================================================
+# _resolve_models (tolerantes Key-Matching, REAP-/Mischquant-Keys)
+# ======================================================================
+
+class _Args:
+    def __init__(self, model_key=None, api_model=None, sample_size=10,
+                 benchmark="DS1000", non_interactive=True, qwen_prompt=False,
+                 thinking=False, no_structured_output=False,
+                 keep_response=False, seed=2026):
+        self.model_key = model_key
+        self.api_model = api_model
+        self.sample_size = sample_size
+        self.benchmark = benchmark
+        self.non_interactive = non_interactive
+        self.qwen_prompt = qwen_prompt
+        self.thinking = thinking
+        self.no_structured_output = no_structured_output
+        self.keep_response = keep_response
+        self.seed = seed
+
+
+def _fake_model(key, display=None):
+    return {
+        "key": key, "model_identifier": key,
+        "display": display or key, "variant": key,
+        "quant": "", "variants": [], "identifier": "",
+        "params": "", "publisher": "", "vram_gb": "",
+        "modelKey": key,
+    }
+
+
+class TestResolveModels:
+    @patch.object(cb, "get_available_models")
+    def test_exact_key_match(self, mock_get):
+        mock_get.return_value = [_fake_model("unsloth/phi-4")]
+        args = _Args(model_key="unsloth/phi-4")
+        models = cb._resolve_models(args)
+        assert len(models) == 1
+        assert models[0]["key"] == "unsloth/phi-4"
+
+    @patch.object(cb, "get_available_models")
+    def test_registry_mixed_key_matches_lms_base_key(self, mock_get):
+        # REAP-Fall: Launcher übergibt Registry-Key mit '@mixed', LMS-Key
+        # ist der Basis-Key ohne Quant (Fix 13.08.: REAP DS1000/CoderEval).
+        mock_get.return_value = [_fake_model("gemma4-26b-a4b-reap-25")]
+        args = _Args(model_key="crucible-labs/gemma4-26b-a4b-reap-25@mixed")
+        models = cb._resolve_models(args)
+        assert len(models) == 1
+        assert models[0]["key"] == "gemma4-26b-a4b-reap-25"
+
+    @patch.object(cb, "get_available_models")
+    def test_lms_quant_key_matches_registry_mixed_key(self, mock_get):
+        # Umgekehrte Richtung: LMS-Key mit Quant (@Q3_K) gegen Registry-@mixed.
+        mock_get.return_value = [_fake_model("gemma4-26b-a4b-reap-25@Q3_K")]
+        args = _Args(model_key="crucible-labs/gemma4-26b-a4b-reap-25@mixed")
+        models = cb._resolve_models(args)
+        assert len(models) == 1
+
+    @patch.object(cb, "get_available_models")
+    def test_unknown_key_errors(self, mock_get):
+        mock_get.return_value = [_fake_model("unsloth/phi-4")]
+        args = _Args(model_key="does-not-exist")
+        with pytest.raises(SystemExit):
+            cb._resolve_models(args)
+
+
+class TestModelSupportsReasoning:
+    def test_quantless_lms_key_resolves_mixed_registry_entry(self):
+        # REAP-Fall: LMS modelKey ohne Quant muss auf '@mixed'-Registry-Eintrag
+        # auflösen (Fix 13.08.). Nutzt die echte Registry.
+        assert cb._model_supports_reasoning("gemma4-26b-a4b-reap-25") is True
+
+    def test_full_registry_key_with_mixed(self):
+        assert cb._model_supports_reasoning(
+            "crucible-labs/gemma4-26b-a4b-reap-25@mixed") is True
+
+    def test_instruct_model_returns_false(self):
+        assert cb._model_supports_reasoning("qwen2-5-coder-14b-instruct") is False
+
+    def test_thinking_model_returns_true(self):
+        assert cb._model_supports_reasoning("unsloth/phi-4") is True
+
+    def test_unknown_model_returns_none(self):
+        assert cb._model_supports_reasoning("totally-unknown-model-xyz") is None

@@ -127,7 +127,13 @@ def _model_supports_reasoning(model_identifier: str) -> bool | None:
             data = load_registry()
             for key, entry in data.items():
                 if isinstance(entry, dict) and "reasoning" in entry:
-                    _REGISTRY_REASONING_CACHE[normalize_model_name(key)] = entry["reasoning"]
+                    nk = normalize_model_name(key)
+                    _REGISTRY_REASONING_CACHE[nk] = entry["reasoning"]
+                    # Basis-Key (ohne @quant) mit abbilden, damit auch
+                    # Quant-less Anfragen wie der LMS modelKey auf Mischquants
+                    # (Registry '@mixed') und reguläre Quants matchen. Analog
+                    # zum Launcher-Fix _load_registry_for_context (13.08.).
+                    _REGISTRY_REASONING_CACHE.setdefault(nk.split("@")[0], entry["reasoning"])
         except (OSError, KeyError, ValueError):
             pass
     try:
@@ -2241,7 +2247,31 @@ def _resolve_models(args: Any) -> list[dict[str, Any]]:
     """Resolve the model list for non-interactive mode (with --model-key override)."""
     available = get_available_models(exclude_keywords=EXCLUDE_KEYWORDS)
     if args.model_key:
-        models = [m for m in available if m["key"] == args.model_key]
+        target = args.model_key.strip()
+        # Tolerant match: exakte Key-Übereinstimmung ODER Basis-Key-Vergleich
+        # (ohne @quant). Registry-Keys mit '@mixed' (z.B. REAP-Modelle)
+        # unterscheiden sich vom LMS modelKey (ohne Quant); der Launcher
+        # übergibt model_info["key"] aus get_available_models().
+        try:
+            from assemble_blueprint import normalize_model_name
+            target_norm = normalize_model_name(target)
+            target_base = target_norm.split("@")[0]
+        except (ImportError, AttributeError):
+            target_norm = target.lower()
+            target_base = target_norm.split("@")[0]
+        models = []
+        for m in available:
+            key = m.get("key", "")
+            if key == target:
+                models.append(m)
+                continue
+            try:
+                from assemble_blueprint import normalize_model_name
+                m_norm = normalize_model_name(key)
+            except (ImportError, AttributeError):
+                m_norm = key.lower()
+            if m_norm == target_norm or m_norm.split("@")[0] == target_base:
+                models.append(m)
         if not models:
             error(f"Model '{args.model_key}' not found.")
             sys.exit(1)
