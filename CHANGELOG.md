@@ -6,6 +6,20 @@ Hinweise:
 - Stand: 06.08.2026 — umgezogen aus §20 der `doc-git/Architecture, Flow & ChangeLog_en.md` (dort nur noch Verweis).
 - Commit-Hashes beziehen sich auf `main`.
 
+## np-Policy-Refactor + Qwen-Nachlauf + Pass-2 + Top-Candidates (13.08.2026, abends)
+
+| Date | File | Change |
+|------|------|--------|
+| 13.08. | `src/run_benchmarks.py` | **np-Policy statt Registry-Feld:** `_resolve_num_parallel(sample_size)` — SS≥10 → 4, sonst 1 (hardcoded). CLI `--num-parallel` entfernt (Launcher + Subprozess); `run_custom_benchmark` ohne `num_parallel`-Param; `RUN_SPEC_PARSER_DEFAULTS` bereinigt |
+| 13.08. | `src/custom_benchmark.py` | `--num-parallel`-Flag entfernt; np aus `sample_size` abgeleitet am `benchmark_model()`-Aufruf |
+| 13.08. | `src/registry_tool.py` | **fix-np = deprecated Stub** (Info, schreibt nichts); `_compute_np_ukv()` → `_compute_ukv()`; `_NP_POLICY = 4` für ctx-Formel; `num_parallel` aus add/fill-ctx/fix-ctx/suggest entfernt |
+| 13.08. | `src/field_owner.py`, `src/type_defs.py`, `src/tools/correlation_export.py` | `num_parallel` aus FieldRules/`RegistryEntry` entfernt; `np_reg = 4` (Policy-Konstante) in Correlation-Export |
+| 13.08. | `doc-git/model_registry.yaml` | 49 `num_parallel`-Zeilen entfernt |
+| 13.08. | `src/model_manager.py`, `src/benchmark_config.py`, `src/run_benchmarks.py` | Registry-Auflösungs-Fixes: `registry_only`-Filter → Basis-Key-Matching; `em_german` aus BLACKLIST entfernt; `_load_registry_for_context` registriert Basis-Varianten |
+| 13.08. | `doc-git/Model-Parameters-and-Benchmarks_en.md` | **Top-Candidates-Tabelle neu (35/64 Modelle, vollständige Pipeline SS≥30), PROVISIONAL aufgelöst.** Quelle `konsolidiert_20260813_224036.md` (`--no-installed --all-runs --sample-size 30`). Qwen3-Modelle führen (Coder 30B 78%, 30B 2507 77%); Granite 4.1 8B@q8_0 überholt q6_k; Gemma 4 19B REAP@q4_k_s = Effizienz-Winner (50.2 %p/h); RNJ-1 + Qwen3.5 9B neu |
+| 13.08. | `ergebnisse/` | Pass-2-Läufe (4 Modelle, SS=10, np=4) + Konsolidierung `konsolidiert_20260813_224036.{csv,md}` |
+| 13.08. | gesamt | Verifikation: 215 betroffene Tests grün; volle Suite 786 passed / 3 pre-existing TabbyAPI-Fehler; `validate` = 0 Probleme; Commit `4ed39479` |
+
 ## Registry-Sampling (SSOT) – Plan & Migration (13.08.2026)
 
 | Date | File | Change |

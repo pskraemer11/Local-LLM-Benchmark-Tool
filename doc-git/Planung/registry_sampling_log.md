@@ -167,3 +167,13 @@ wirken auf künftige Benchmark-Läufe).
 - UKV hängt weiterhin von Speicher/Kontextlänge/KV-Quant ab — aber nicht mehr np.
 
 **Lauf gestartet 13.08. 21:01** (PID 19776, läuft): `run.qwen-re-run-pass2.yaml` (4 Modelle, SS=10, np=4, seed 2026, thinking false), Log `Doku-intern\Terminalausgabe Benchmark-Qwen-Pass2_20260813_210111.log`. MBPP+-`make_model()`-Fehler = pre-existing (auch in Pass-1-Log).
+
+## 2026-08-13 – Pass-2 abgeschlossen + C2: Konsolidierung + Top-Candidates-Tabelle
+
+**Pass-2-Lauf fertig (13.08., PID 19776):** 4 Modelle (Glm 4.6v Flash@Q6_K, Gemma4-26B-A4B-REAP-25@Q3_K, Phi-4@Q5_K_M, RNJ-1@Q8_0), alle 10 Benchmarks, SS=10, np=4, seed 2026. Modell-CSVs in `ergebnisse/modell_20260813_*.csv`. Funktionscheck-Zweck erfüllt; DS1000/CoderEval der 4 Modelle liegen als `tasks_20260813_*`-Dateien vor.
+
+**Konsolidierung (C2):**
+- **Befehl:** `python src/consolidate_results.py --no-installed --all-runs --sample-size 30` → `ergebnisse/konsolidiert_20260813_224036.{csv,md}`, **64 Modelle mit voller Pipeline** (DS1000+CoderEval+EvalPlus+LM-Eval+Agentic).
+- **Wichtig:** `latest-run`-Modus (Default) verwarf alle DS1000-Paare — der Konsolidierer behält nur Dateien mit exakt dem neuesten Timestamp, DS/CE-Paare haben aber leicht versetzte Timestamps (rnj-1: DS=21-40-05, CE=21-40-16). Erst `--all-runs` (neuestes CSV pro Modell) bzw. `--merge` liefert DS1000+CoderEval zusammen. Für künftige Konsolidierungen: **`--all-runs` bzw. `--merge` verwenden, nicht Default.**
+- **Top-Candidates-Tabelle (`Model-Parameters-and-Benchmarks_en.md`) neu übertragen (Top 35/64), PROVISIONAL aufgelöst.** Neue Spitzenreiter: Qwen3 Coder 30B A3B Instruct@q3_k_s (**78%**), Qwen3 30B A3B Instruct 2507@q3_k_s (**77%**), Gemma 4 19B A4B Instruct REAP@q4_k_s (70%, Effizienz-Winner 50.2 %p/h). Granite 4.1 8B@q8_0 (69.6%) überholt die q6_k-Variante. Pass-2-Neuzugänge in der Tabelle: RNJ-1@q8_0 (64%, Rang 18), Qwen3.5 9B@q6_k (55%, Rang 35).
+- **Verifikation:** Commit `4ed39479` (np-Refactor + Registry-Auflösung + Pass-2); 215 betroffene Tests grün, volle Suite 786 passed / 3 pre-existing TabbyAPI-Fehler; `validate` = 0 Probleme.
