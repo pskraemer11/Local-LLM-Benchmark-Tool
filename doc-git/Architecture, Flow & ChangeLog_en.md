@@ -605,12 +605,12 @@ the model stays loaded – useful for many small benchmarks, but risky for model
 | Command | Origin | Function |
 |---------|--------|----------|
 | `compare` | Previously embedded Python in `sync_model_configs.ps1` | Compare Registry vs LMS vs JSON configs |
-| `add` | Previously embedded Python in `sync_model_configs.ps1` | Add new LMS models to registry (canonical Key = `publisher/model-name`), np via `_infer_num_parallel()`, **reads n_layers/hidden_dim automatically from GGUF header**. **24.07.:** interactive prompt question when GGUF is missing (`[i]nstruct/[t]hinking/[n]one`). **03.08. (F1):** `_is_support_file()` check centralized in `benchmark_config.py` – MTP drafter (`mtp-*` files, `MTP/` folder, `-assistant` architecture) and `mmproj*` are skipped (also in `_resolve_model_path_multi`) |
+| `add` | Previously embedded Python in `sync_model_configs.ps1` | Add new LMS models to registry (canonical Key = `publisher/model-name`), **reads n_layers/hidden_dim automatically from GGUF header**. **24.07.:** interactive prompt question when GGUF is missing (`[i]nstruct/[t]hinking/[n]one`). **03.08. (F1):** `_is_support_file()` check centralized in `benchmark_config.py` – MTP drafter (`mtp-*` files, `MTP/` folder, `-assistant` architecture) and `mmproj*` are skipped (also in `_resolve_model_path_multi`) |
 | `configs` | Previously embedded Python in `sync_model_configs.ps1` | Write `load.fields` (offloadRatio, numParallelSessions, useUnifiedKvCache) to JSON configs. **useUnifiedKvCache decision via VRAM formula** (see below) |
-| `fix-np` | **NEW 17.07.** | Re-set `num_parallel` for ALL entries based on architecture + model key (`_infer_num_parallel()`) |
-| `fix-ctx` | **NEW 17.07.** | Re-calculate `context_length` for ALL entries based on current np/KV-quant values |
+| `fix-np` | **NEW 17.07.** | **DEPRECATED seit 13.08.:** np ist feste Policy (SS≥10→4, sonst 1), kein Registry-Feld – Stub zeigt nur Info, schreibt nichts |
+| `fix-ctx` | **NEW 17.07.** | Re-calculate `context_length` for ALL entries based on np policy (=4)/KV-quant values |
 | `sync-ctx` | `sync_context_length.py` | Adopt `context_length` from JSON configs into Registry |
-| `sync-from-configs` | **NEW 17.07.** | Overwrite offload, num_parallel, useUnifiedKvCache **from JSON configs into Registry** (skips context_length to preserve native model limit) |
+| `sync-from-configs` | **NEW 17.07.** | Melde-Modus: offload, useUnifiedKvCache **aus JSON configs** reporten (skips context_length to preserve native model limit; schreibt nichts) |
 | `fill-ctx` | `fmt_registry.py` | Fill missing `context_length` in the registry (size-based formula) |
 | `fill-size` | **NEW 15.07.** | Fill `file_size_bytes` from LMS cache for registry entries without size |
 | `fill-arch` | **NEW 17.07.** | Write `n_layers`/`hidden_dim` from **local GGUF files** (header reader, ~1ms/file) into registry |
@@ -656,11 +656,10 @@ python src/registry_tool.py sync-ctx      # Sync context_length only
 | Field | Type | Default | Set By | Description |
 |-------|------|---------|--------|-------------|
 | `offload` | int (0-1) | 1 | `add` / registry manual | GPU offload ratio (1 = full GPU offload) |
-| `num_parallel` | int | MoE=4, Dense=1, ERNIE=1, GPT-OSS=4 | `add` / `fix-np` | Max concurrent prediction sessions (via `_infer_num_parallel()`) |
 | `k_cache` | str | `q8_0` | registry manual | KV cache quantization (K) – Gemma-4/GPT-OSS: `f16` |
 | `v_cache` | str | `iq4_nl` | registry manual | KV cache quantization (V) – Gemma-4/GPT-OSS: `f16` |
 | `file_size_bytes` | int | – | `add` / `fill-size` | GGUF file size (for context_length formula + useUnifiedKvCache formula) |
-| `context_length` | int | Formula-based | `fill-ctx` / `sync-ctx` | Calculated from `file_size_bytes`, np, KV quant (default 16384 when size missing) |
+| `context_length` | int | Formula-based | `fill-ctx` / `sync-ctx` | Calculated from `file_size_bytes`, np policy (=4), KV quant (default 16384 when size missing) |
 | `useUnifiedKvCache` | bool | VRAM formula | `configs` | Written to JSON config via `configs` (not permanently in Registry) |
 | `n_layers` | int | – | `add` / `fill-arch` | Number of transformer layers (from GGUF header `block_count`) |
 | `hidden_dim` | int | – | `add` / `fill-arch` | Embedding dimension (from GGUF header `embedding_length`) |
@@ -669,6 +668,12 @@ python src/registry_tool.py sync-ctx      # Sync context_length only
 | `blueprint` | str | – | `classify_registry()` | Prompt blueprint name (e.g. `default_chat`, `coding_agent`, `reasoning_assistant`). From `reasoning` + `capabilities` |
 | `truncation` | str | – | `classify_registry()` | `full` / `medium` / `minimal` (depending on context_length) |
 | `custom_template` | bool | – | `classify_registry()` | `True` if YAML `template:` is set (Jinja override active) |
+
+> **`num_parallel` ist seit 13.08. KEIN Registry-Feld mehr** – feste Benchmark-Policy:
+> `_resolve_num_parallel(SS)` = 4 bei SS≥10, sonst 1 (run_benchmarks.py). Kein CLI-Override,
+> kein Registry-Lookup. Das `fix-np`-Kommando ist deprecated (zeigt nur noch Info).
+> Vom verfügbaren Speicher, der Kontextlänge und der KV-Quantisierung hängt nur noch
+> `useUnifiedKvCache` ab – nicht np.
 
 **Architecture data (n_layers, hidden_dim):** Are automatically read from the GGUF header when adding new models (`add`). Can be retroactively filled for existing models via `fill-arch`. The lightweight header reader takes ~1ms per file (no memory-mapping of the entire ~12GB model). Models without GGUF files (uninstalled) receive no architecture data.
 
@@ -1332,3 +1337,4 @@ pytest tests/ -v
 *01.08.: STOP_TOKENS_CODING fix (\n```\n) – DeepSeek DS1000 35%/CoderEval 67%; consolidate_results sample size + table formatting; IFEval GGUF-EOS fallback*
 *02.08.: v13.0.10 – P1 structure gate (classify_output/CSV columns), P4 agentic safety (--agentic-mode safety), P3 YAML run spec (--run-spec, SUPPRESS probe parser), gpt-oss reasoning logic centralized (GPTOSS_*), Bonsai overrides, registry sync +53*
 *06.08.: Sampling design v2 – MODEL_CATEGORY_SAMPLING (table > defaults, JSON temp now GUI-only); REASONING_PATTERNS extended; Bonsai models removed (registry, table, docs); registry_tool.py: +pipeline (replaces sync_model_configs.ps1), +sync-templates (replaces tools/add_missing_prompt_templates.py), +patch-reasoning-effort (ported from tools/); 9 one-off/blind-flight scripts deleted from src/tools/*
+*13.08.: **num_parallel aus der Registry entfernt** – feste Policy statt Registry-Feld: `_resolve_num_parallel(SS)` = 4 bei SS≥10, sonst 1 (run_benchmarks.py). CLI `--num-parallel` entfernt (Launcher + custom_benchmark.py Subprozess). `registry_tool.py`: fix-np deprecated (Stub), `_compute_np_ukv`→`_compute_ukv` (nur UKV/ctx), `_NP_POLICY=4` für ctx-Formel; `num_parallel` aus model_registry.yaml (49 Zeilen), field_owner.py, type_defs.py (RegistryEntry) entfernt; Tests angepasst. Vom Speicher/Kontext/KV-Quant hängt nur noch UKV ab, nicht np.*

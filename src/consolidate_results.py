@@ -52,6 +52,7 @@ from benchmark_config import (
     extract_quant_from_key,
     get_quant,
 )
+from model_identity import match_registry_key, model_identity_triple
 from utils.terminal import error, warn
 
 # --- Model info cache (from lms ls --json) ---
@@ -148,41 +149,106 @@ def _normalize_model_keys(model_keys: list[str]) -> list[str]:
     return result
 
 
-def _get_display_name(model_key: str) -> str:
-    """Resolve model_key -> human-readable display name, appending @variant if present."""
-    # Fix legacy double-quant (e.g. "model@q5_0@Q5_0" -> "model@Q5_0")
+# --- Canonical triple-key resolution (registry as SSOT) ---
+_REGISTRY_KEYS_CACHE: list[str] | None = None
+_PUBLISHER_BASE_CACHE: dict[str, list[tuple[str, str]]] | None = None
+_KNOWN_PUBLISHERS: set[str] | None = None
+
+
+def _get_registry_data() -> tuple[list[str], dict[str, list[tuple[str, str]]], set[str]]:
+    """Cached registry keys, base->(publisher, model) map and known publishers.
+
+    The registry (doc-git/model_registry.yaml) is the single source of truth
+    for the canonical identity triple (publisher, model, quant). Falls back
+    to empty data on error so consolidation still works without the file.
+    """
+    global _REGISTRY_KEYS_CACHE, _PUBLISHER_BASE_CACHE, _KNOWN_PUBLISHERS
+    if _REGISTRY_KEYS_CACHE is not None:
+        return _REGISTRY_KEYS_CACHE, _PUBLISHER_BASE_CACHE, _KNOWN_PUBLISHERS
+    reg: dict[str, Any] = {}
+    try:
+        from registry_tool import load_registry
+        reg = load_registry()
+    except Exception:
+        print("[WARN] _get_registry_data: could not load model_registry.yaml", file=sys.stderr)
+    keys = list(reg.keys())
+    base_map: dict[str, list[tuple[str, str]]] = {}
+    publishers: set[str] = set()
+    for k in keys:
+        pub, model, _ = model_identity_triple(k)
+        if not model:
+            continue
+        publishers.add(pub)
+        b = _publisherless_base(model)
+        base_map.setdefault(b, []).append((pub, model))
+    _REGISTRY_KEYS_CACHE, _PUBLISHER_BASE_CACHE, _KNOWN_PUBLISHERS = keys, base_map, publishers
+    return keys, base_map, publishers
+
+
+def _publisherless_base(name: str) -> str:
+    """Normalize a model name for base-matching: publisher stripped, separators -> '-', collapse '-'."""
+    s = re.sub(r"^[^/]+/", "", name)
+    s = s.replace(".", "-").replace("_", "-")
+    while "--" in s:
+        s = s.replace("--", "-")
+    return s
+
+
+def _strip_publisher_prefix(base_key: str) -> tuple[str, str]:
+    """Split '<publisher>_<model>' (normalized '/'-free form) when the prefix is a known publisher."""
+    _, _, publishers = _get_registry_data()
+    for pub in sorted(publishers, key=len, reverse=True):
+        prefix = f"{pub}_"
+        if base_key.lower().startswith(prefix):
+            return pub, base_key[len(prefix):]
+    return "", base_key
+
+
+def _join_triple(publisher: str, model: str, quant: str) -> str:
+    """Assemble the canonical triple-key ``publisher/model@quant`` (any part may be empty)."""
+    base = f"{publisher}/{model}" if publisher else model
+    return f"{base}@{quant}" if quant else base
+
+
+def _get_canonical_key(model_key: str) -> str:
+    """Resolve model_key -> canonical identity triple-key ``publisher/model@quant``.
+
+    Priority:
+      1. Exact registry key match (normalized, incl. @quant) -> publisher/model,
+         but the run's actual @quant is preserved (registry quants may drift).
+      2. Base-model match against the registry -> publisher/model + run quant.
+      3. Known '<publisher>_' prefix in the key -> publisher/model + run quant.
+      4. Fallback: the normalized key as-is.
+
+    Models unknown to the registry keep their normalized key (with @quant),
+    so the triple-key identity stays unique per benchmark run.
+    """
     parts = model_key.split("@")
     if len(parts) > 2:
         model_key = f"{parts[0]}@{parts[-1]}"
-    variant = ""
-    if "@" in model_key:
-        base_key, variant = model_key.split("@", 1)
-        variant = variant.lower()  # consistent lowercase
-    else:
-        base_key = model_key
-    model_info = _get_model_info()
-    if model_key in model_info:
-        dn = model_info[model_key].get("displayName")
-        if dn:
-            return f"{dn}@{variant}" if variant else dn
-    # Search by stored modelKey field (variant-aware)
-    for meta in model_info.values():
-        if meta.get("modelKey") == model_key:
-            dn = meta.get("displayName")
-            if dn:
-                return f"{dn}@{variant}" if variant else dn
-    # Fuzzy: strip publisher prefix
-    import re as _re
-    mk_norm = _re.sub(r"^[a-z0-9_-]+/", "", model_key.lower())
-    for mk, meta in model_info.items():
-        mk_stripped = _re.sub(r"^[a-z0-9_-]+/", "", mk.lower())
-        if mk_norm == mk_stripped:
-            dn = meta.get("displayName")
-            if dn:
-                return f"{dn}@{variant}" if variant else dn
-    # Fallback: prettify base_key only (without variant), then append @variant
-    display = base_key.replace("/", " ").replace("_", " ").replace("-", " ").title()
-    return f"{display}@{variant}" if variant else display
+    parts = model_key.split("@")
+    base_raw = parts[0]
+    run_q = parts[-1].lower() if len(parts) > 1 else ""
+
+    reg_keys, base_map, _ = _get_registry_data()
+    if reg_keys:
+        hit = match_registry_key(model_key, reg_keys)
+        if hit:
+            pub, model, _ = model_identity_triple(hit)
+            return _join_triple(pub, model, run_q)
+        b = _publisherless_base(base_raw)
+        cands = base_map.get(b, [])
+        if len(cands) == 1:
+            pub, model = cands[0]
+            return _join_triple(pub, model, run_q)
+        if len(cands) > 1:
+            for pub, model in cands:
+                if base_raw.lower().startswith(pub):
+                    return _join_triple(pub, model, run_q)
+    pub, rest = _strip_publisher_prefix(base_raw)
+    if pub and rest:
+        return _join_triple(pub, rest, run_q)
+    return model_key
 
 
 def _lookup_vram(model_key: str) -> dict[str, Any] | None:
@@ -1190,7 +1256,7 @@ def read_data(model_keys: list[str] | None = None, min_sample_size: int = 0,
 
     rows = []
     for model_key in model_keys:
-        display = _get_display_name(model_key) if not model_key.startswith("_dummy_") else model_key
+        display = _get_canonical_key(model_key) if not model_key.startswith("_dummy_") else model_key
         bench_scores = {}
         tok_speeds = {}
         latencies = []

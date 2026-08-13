@@ -493,14 +493,22 @@ def get_available_models(exclude_keywords: list[str] | None = None, registry_onl
                 if registry_only:
                     from assemble_blueprint import normalize_model_name
                     registry_data = _load_registry_data()
-                    registry_keys = set()
+                    registry_base_keys = set()
                     for key in registry_data:
                         if isinstance(registry_data[key], dict):
-                            registry_keys.add(normalize_model_name(key))
+                            registry_base_keys.add(
+                                normalize_model_name(key).split("@")[0])
                     filtered = []
                     for m in models:
-                        normalized_key = normalize_model_name(m["model_identifier"])
-                        if normalized_key in registry_keys:
+                        # model_identifier = LMS modelKey (ohne Quant), key =
+                        # unique_key (inkl. @quant, z.B. über selectedVariant).
+                        # Registry-Keys tragen i.d.R. den @quant-Suffix; der
+                        # Filter prüft die Modell-IDENTITÄT (Basis ohne @quant,
+                        # da Sampling-Parameter pro Modell gelten, nicht pro
+                        # Quant). Deckt auch Mischquants ab (Registry
+                        # '@mixed' vs. LMS 'Q3_K').
+                        base = normalize_model_name(m["model_identifier"]).split("@")[0]
+                        if base in registry_base_keys:
                             filtered.append(m)
                     missing = len(models) - len(filtered)
                     if missing:

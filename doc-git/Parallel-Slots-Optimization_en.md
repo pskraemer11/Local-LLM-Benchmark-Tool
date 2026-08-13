@@ -120,30 +120,27 @@ Even with np=4 configured, a sequential pipeline uses 1 slot. Proven via server 
 **Verification (05.08., HellaSwag 100 tasks, np=4, Rnj 1):** 149s, all slots active —
 server log 19:38-19:41: slot 0=12, slot 1=12, slot 2=8, slot 3=6 print_timing events.
 
-## Automatic Configuration (05.08.2026)
+## Automatic Configuration (05.08.2026, seit 13.08.: nur noch UKV)
 
-`_compute_np_ukv()` in `registry_tool.py` (priority-based, VRAM budget 15.3 GB):
+`_compute_ukv()` in `registry_tool.py` (priority-based, VRAM budget 15.3 GB):
+`num_parallel` ist seit 13.08. **kein Registry-Feld mehr** — feste Policy (SS>=10 → 4, sonst 1).
 
-| Prio | num_parallel | useUnifiedKvCache | Reason |
-|------|--------------|-------------------|--------|
-| 1    | 4            | False             | max parallelism, separate KV caches |
-| 2    | 4            | True              | save VRAM (KV scales with ctx, not np) |
-| 3    | 2            | True              | reduce KV overhead further |
-| 4    | 1            | True              | minimum parallelism |
-| 5    | 1            | False             | last resort |
+| Prio | useUnifiedKvCache | Reason |
+|------|-------------------|--------|
+| 1    | False             | max parallelism, separate KV caches |
+| 2    | True              | save VRAM (KV scales with ctx, not np) |
+| 3    | True (Fallback)   | ctx=min_ctx, last resort |
 
 Context length is **not** overwritten by the algorithm — manual GUI settings are authoritative. GGUF header is the source of truth for `max_context_length`.
 
 ### Runtime resolution (`_resolve_num_parallel()`)
 
-| Prio | Condition | num_parallel |
-|------|-----------|--------------|
-| 1 | explicit `--num-parallel N` | N (user override) |
-| 2 | SampleSize ≥ 20 | **4 for all models** |
-| 3 | registry value | 4 (all models, MoE and Dense) |
-| 4 | fallback | 1 |
+Seit 13.08. hardcoded (kein CLI-Override, kein Registry-Lookup):
 
-CLI always wins: `--num-parallel 1` forces sequential, `--num-parallel 4` forces parallel even at SS=5.
+| SampleSize | num_parallel |
+|------------|--------------|
+| ≥ 10       | **4** (all models) |
+| < 10       | 1 |
 
 ## Reproducible Prompt Selection (parallel_ab)
 

@@ -107,3 +107,117 @@ The template is overwritten by LM Studio updates. After every update:
 - https://developers.openai.com/cookbook/articles/gpt-oss/run-locally-lmstudio
 - https://github.com/openai/gpt-oss/tree/main?tab=readme-ov-file#harmony-format--tools
 - https://lmstudio.ai/blog/gpt-oss
+
+- https://lmstudio.ai/blog/lmstudio-v0.3.23 
+ebenda: 
+**"Improve openai/gpt-oss in-chat tool calling reliability**
+Tool names are now consistently formatted before being sent to the model. 
+*Previously, tools with spaces in their names would confuse gpt-oss and lead to tool call failures. 
+Tool names are now converted to `snake_case`. 
+Additionally, we squashed a few parsing bugs that could have previously led to parsing errors in the chat. 
+You might notice significant improvements in tool calling reliability."
+
+**"Reasoning Content from gpt-oss using the Chat Completions endpoint
+This is a change in behavior compared with version 0.3.22.
+    message.content will no longer include reasoning content or <think> tags.
+    Reasoning is now in choices.message.reasoning (non-streaming) and choices.delta.reasoning (streaming).
+    This matches the behavior of o3-mini."
+
+=========== Unlsoth ===========
+https://unsloth.ai/blog/gpt-oss
+ebenda:
+  "Then use the encode_conversations_with_harmony function from Unsloth."
+  ```from unsloth_zoo import encode_conversations_with_harmony
+  def encode_conversations_with_harmony(
+      messages,
+      reasoning_effort = "medium",
+      add_generation_prompt = True,
+      tool_calls = None,
+      developer_instructions = None,
+      model_identity = "You are ChatGPT, a large language model trained by OpenAI.",
+  )```
+
+The harmony format includes multiple interesting things:
+  -  reasoning_effort = "medium" You can select low, medium or high, and this changes gpt-oss's reasoning amount.
+  -  developer_instructions is like a system prompt which you can add.
+  -  model_identity is best left alone - you can edit it, but we're unsure if custom ones will function.
+
+We find multiple issues with the current jinja chat template:
+  -  Function and tool calls are rendered with `tojson`, which is fine it's a `dict`, but if it's a `string`, **speech marks and other symbols become backslashed.
+  -  There are some extra new lines in the jinja template on some boundaries.
+  -  Tool calling thoughts from the model should have the `analysis` tag and not `final` tag."
+    
+https://unsloth.ai/docs/models/gpt-oss-how-to-run-and-fine-tune
+
+==============
+(aus LM Studio model card im load Menü:)
+## Inference examples
+
+**Transformers
+
+You can use gpt-oss-120b and gpt-oss-20b with Transformers. 
+**If you use the Transformers chat template, it will automatically apply the harmony response format. 
+If you use model.generate directly, you need to apply the harmony format manually using the chat template or use our openai-harmony package.
+
+To get started, install the necessary dependencies to setup your environment:
+
+`pip install -U transformers kernels torch`
+
+Once, setup you can proceed to run the model by running the snippet below:
+```
+py
+from transformers import pipeline
+import torch
+
+model_id = "openai/gpt-oss-20b"
+
+pipe = pipeline(
+    "text-generation",
+    model=model_id,
+    torch_dtype="auto",
+    device_map="auto",
+)
+
+messages = [
+    {"role": "user", "content": "Explain quantum mechanics clearly and concisely."},
+]
+
+outputs = pipe(
+    messages,
+    max_new_tokens=256,
+)
+print(outputs[0]["generated_text"][-1])
+```
+
+Alternatively, you can run the model via **Transformers Serve** to spin up a **OpenAI-compatible webserver**:
+
+  transformers serve
+  transformers chat localhost:8000 --model-name-or-path openai/gpt-oss-20b
+
+Learn more about how to use gpt-oss with Transformers.
+https://cookbook.openai.com/articles/gpt-oss/run-transformers
+
+-----
+** vLLM
+vLLM recommends using uv for Python dependency management. 
+You can use vLLM to spin up an OpenAI-compatible webserver. 
+The following command will automatically download the model and start the server.
+
+```
+bash
+uv pip install --pre vllm==0.10.1+gptoss \
+    --extra-index-url https://wheels.vllm.ai/gpt-oss/ \
+    --extra-index-url https://download.pytorch.org/whl/nightly/cu128 \
+    --index-strategy unsafe-best-match
+
+vllm serve openai/gpt-oss-20b
+```
+Learn more about how to use gpt-oss with vLLM.
+https://cookbook.openai.com/articles/gpt-oss/run-vllm
+
+----
+**PyTorch / Triton
+To learn about how to use this model with PyTorch and Triton, check out our reference implementations in the gpt-oss repository.
+https://github.com/openai/gpt-oss?tab=readme-ov-file#reference-pytorch-implementation
+
+

@@ -549,6 +549,13 @@ def _load_registry_for_context() -> tuple[dict[str, Any], dict[str, str]]:
         if isinstance(entry, dict):
             normalized_key = normalize_model_name(key)
             norm[normalized_key] = key
+            # Basis-Variante (ohne @quant) registrieren, damit Modell-IDs
+            # ohne Quant-Suffix (z.B. "zai-org/glm-4.6v-flash") auf den
+            # Registry-Key auflösen. Basis gewinnt nicht gegen einen
+            # exakten @quant-Treffer, da norm[normalized_key] zuerst
+            # gesetzt und hier nicht überschrieben wird, solange der
+            # @quant-Key dieselbe Iterationsreihenfolge hat.
+            norm.setdefault(normalized_key.split("@")[0], key)
     _REGISTRY_DATA = data
     _REGISTRY_NORM = norm
     return _REGISTRY_DATA, _REGISTRY_NORM
@@ -566,8 +573,10 @@ def _get_safe_context(model_identifier: str) -> int | None:
     # 1. Try registry
     registry, rnorm = _load_registry_for_context()
     normalized_key = normalize_model_name(model_identifier)
-    if normalized_key in rnorm:
-        entry = registry[rnorm[normalized_key]]
+    base_key = normalized_key.split("@")[0]
+    matched_key = rnorm.get(normalized_key) or rnorm.get(base_key)
+    if matched_key:
+        entry = registry[matched_key]
         ctx = entry.get("context_length")
         if ctx is not None:
             return int(ctx)
@@ -585,36 +594,13 @@ def _get_safe_context(model_identifier: str) -> int | None:
     return None
 
 
-def _resolve_num_parallel(model_identifier: str, sample_size: int,
-                          cli_override: int | None) -> int:
-    """Determine num_parallel for a model benchmark run.
+def _resolve_num_parallel(sample_size: int) -> int:
+    """Determine num_parallel for a model benchmark run (hardcoded policy).
 
-    Resolution order:
-      1. Explicit CLI ``--num-parallel N`` (N > 0) → use N
-      2. SampleSize >= 20 → force 4 for all models (batching benefit)
-      3. Registry value (MoE/MTP → 4, Dense → 1)
-      4. Fallback → 1
+    Seit 13.08.: np ist eine feste Benchmark-Policy, keine Registry-Eigenschaft.
+    SampleSize >= 10 → 4 Slots (batching benefit), sonst 1.
     """
-    # 1. Explicit CLI override
-    if cli_override is not None and cli_override > 0:
-        return cli_override
-
-    # 2. SampleSize >= 20 → force parallel for all models
-    if sample_size >= 20:
-        return 4
-
-    # 3. Registry default (MoE/MTP → 4, Dense → 1)
-    registry, rnorm = _load_registry_for_context()
-    from assemble_blueprint import normalize_model_name
-    normalized_key = normalize_model_name(model_identifier)
-    if normalized_key in rnorm:
-        entry = registry[rnorm[normalized_key]]
-        np_val = entry.get("num_parallel")
-        if np_val is not None:
-            return int(np_val)
-
-    # 4. Fallback
-    return 1
+    return 4 if sample_size >= 10 else 1
 
 
 def _model_family(model_identifier: str) -> str:
@@ -962,7 +948,7 @@ def _ensure_model_still_loaded(model_identifier: str, model_load_key: str, bench
 
 
 # Returns: dict with pipeline="custom", score (0-1).
-def run_custom_benchmark(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_size: int = 5, seed: int | None = None, is_structured_output_disabled: bool = False, should_keep_response: bool = False, num_parallel: int = 1) -> PipelineResult | None:
+def run_custom_benchmark(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_size: int = 5, seed: int | None = None, is_structured_output_disabled: bool = False, should_keep_response: bool = False) -> PipelineResult | None:
     model_identifier = model_info["key"]
     model_display = model_info["display"]
     fp = os.path.join(DATA_DIR, bench["file"])
@@ -979,8 +965,6 @@ def run_custom_benchmark(model_info: AvailableModelInfo, bench: BenchmarkDef, sa
         "--sample-size", str(sample_size),
         "--benchmark", bench["name"],
     ]
-    if num_parallel > 1:
-        cmd.extend(["--num-parallel", str(num_parallel)])
     if seed is not None:
         cmd.extend(["--seed", str(seed)])
     # Qwen3.5 compatibility: enable systemless prompt embedding
@@ -1027,7 +1011,7 @@ def run_custom_benchmark(model_info: AvailableModelInfo, bench: BenchmarkDef, sa
         print("  [INFO] Channel-Error detected - retrying with --no-structured-output")
         return run_custom_benchmark(model_info, bench, sample_size=sample_size,
                                    seed=seed, is_structured_output_disabled=True,
-                                   should_keep_response=should_keep_response, num_parallel=num_parallel)
+                                   should_keep_response=should_keep_response)
     if result.returncode != 0:
         print(f"  [ERROR] Returncode {result.returncode}")
         print(stderr_text[-500:])
@@ -1638,7 +1622,6 @@ RUN_SPEC_PARSER_DEFAULTS: dict[str, Any] = {
     "sample_size": 5, "model": None, "benchmarks": None, "seed": None,
     "thinking": False, "agentic_mode": "random", "exclude_benchmarks": None,
     "no_structured_output": False, "unload_between": False, "keep_response": False,
-    "num_parallel": None,
 }
 
 
@@ -1774,12 +1757,6 @@ _LAUNCHER_ARG_SPECS: list[tuple[tuple[str, ...], dict[str, Any]]] = [
                        "help": "Force-enable thinking mode for reasoning models on all pipelines (default: off)"}),
     (("--seed",), {"type": int, "default": None,
                    "help": "Random seed for reproducible task selection (passed to custom benchmarks)"}),
-    (("--num-parallel",), {"type": int, "default": None,
-                           "help": "Parallel worker threads for custom benchmarks (DS1000/CoderEval), "
-                                   "uses LM Studio multi-slot serving. "
-                                   "Auto: registry value (MoE/MTP=4, Dense=1); "
-                                   "forced to 4 for all models when SampleSize >= 20. "
-                                   "Explicit value overrides auto."}),
     (("--agentic-mode",), {"type": str, "default": "random", "choices": ["random", "safety"],
                            "help": "Agentic scenario selection: 'random' (all 69) or 'safety' (13 Category-K)"}),
     (("--exclude-benchmarks", "-x"), {"type": str, "default": None,
@@ -2034,8 +2011,7 @@ def _run_benchmarks_for_model(model_info: AvailableModelInfo, benchmarks: list[B
         agentic_names = {b["name"] for b in AGENTIC_BENCHMARKS}
 
         try:
-            np = _resolve_num_parallel(model_load_key, args.sample_size,
-                                      getattr(args, "num_parallel", None))
+            np = _resolve_num_parallel(args.sample_size)
             if np > 1:
                 print(f"  [PARALLEL] num_parallel={np} (SS={args.sample_size})")
 
@@ -2054,8 +2030,7 @@ def _run_benchmarks_for_model(model_info: AvailableModelInfo, benchmarks: list[B
             else:
                 result = run_custom_benchmark(model_info, bench, sample_size=args.sample_size,
                                               seed=args.seed, is_structured_output_disabled=args.no_structured_output,
-                                              should_keep_response=args.keep_response,
-                                              num_parallel=np)
+                                              should_keep_response=args.keep_response)
 
             if result:
                 model_results.append(result)

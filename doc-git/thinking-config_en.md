@@ -12,20 +12,24 @@ Thinking is controlled on three levels:
     Populated automatically from GGUF `tokenizer.chat_template` (Source of Truth for architecture) via `registry_tool.py fill-reasoning` (part of the `sync` pipeline).
     Existing values are **never overwritten** (`skipped_has`) — manual corrections persist.
     
-2. **`get_model_config()`** (`benchmark_config.py:495`): Since 05.08. the **LMS JSON-Config is the ONLY source**
-    (reads `operation.fields` from `user-concrete-model-default-config` — matches the GUI). `BENCHMARK_CATEGORY_DEFAULTS`
-    serve only as fallback when no JSON-Config exists. `MODEL_TEMP_OVERRIDES` and the Knowledge-Floor were **removed**
+2. **`get_model_config()`** (`benchmark_config.py:495`): Since 06.08 the temperature/top_p come from
+    the **Registry `sampling:` field (SSOT, 13.08.)** or the `MODEL_CATEGORY_SAMPLING` fallback table,
+    then the category/thinking defaults. The LMS JSON-Config supplies only **non-temperature** fields
+    (top_k, min_p, enable_thinking, reasoning_effort). `MODEL_TEMP_OVERRIDES` and the Knowledge-Floor were **removed**
     (no Python override anymore). Used by both pipelines (custom via `custom_benchmark.py`, lm_eval via `run_benchmarks.py:_get_evaluation_parameters`).
     
 3. **`--thinking` CLI flag**: Forces `enable_thinking=True` for models matching `REASONING_PATTERNS`.
 
-### Priority chain in `get_model_config()` (verified 05.08. against code)
+### Priority chain in `get_model_config()` (verified 13.08. against code)
 
 ```
-1. LM Studio JSON-Config (operation.fields)   (enableThinking / budgetTokens / parsing.enabled)
-2. BENCHMARK_CATEGORY_DEFAULTS[category]      (fallback ONLY if no JSON-Config exists; enable_thinking=False)
-3. --thinking flag + REASONING_PATTERNS       (force enable_thinking=True)
-Result contains _source ("lms-json" | "category-default") for display.
+1. Registry `sampling:` block (model_registry.yaml, SSOT)      (temperature/top_p per category)
+2. MODEL_CATEGORY_SAMPLING fallback table                      (temperature/top_p per category)
+3. BENCHMARK_THINKING_DEFAULTS (0.6/0.95) in --thinking run,   (temperature/top_p)
+   else BENCHMARK_CATEGORY_DEFAULTS[category]
+4. LM Studio JSON-Config (operation.fields)                    (NON-temperature: top_k/min_p/enable_thinking/reasoning_effort)
+5. --thinking flag + REASONING_PATTERNS                        (force enable_thinking=True)
+Result contains _source ("registry-sampling" | "benchmark-table" | "thinking-default" | "category-default") for display.
 ```
 
 Thinking detection from JSON-Config (`benchmark_config.py:448-462`):
@@ -276,6 +280,14 @@ The registry lookup (`reasoning: thinking`) is reflected in the JSON-Config's
 
 
 ## History
+
+### 2026-08-13
+- **Registry `sampling:` field is the SSOT** (`doc-git/model_registry.yaml`, Variante A):
+  17 models carry per-category `temperature`/`top_p`. `get_model_config()` reads the
+  registry first, falls back to `MODEL_CATEGORY_SAMPLING`, then category/thinking
+  defaults. New `_source` value `registry-sampling`. Plan + log:
+  `doc-git/Planung/registry_sampling.md` + `registry_sampling_log.md`.
+- **`MODEL_CATEGORY_SAMPLING` kept as fallback** (30 models without a `sampling:` block).
 
 ### 2026-08-05
 - **LMS JSON-Config as the ONLY source** (`benchmark_config.py:495`): `MODEL_TEMP_OVERRIDES`

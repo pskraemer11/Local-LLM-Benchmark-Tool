@@ -6,6 +6,17 @@ Hinweise:
 - Stand: 06.08.2026 — umgezogen aus §20 der `doc-git/Architecture, Flow & ChangeLog_en.md` (dort nur noch Verweis).
 - Commit-Hashes beziehen sich auf `main`.
 
+## Registry-Sampling (SSOT) – Plan & Migration (13.08.2026)
+
+| Date | File | Change |
+|------|------|--------|
+| 13.08. | `doc-git/model_registry.yaml` | **Sampling-Felder (Variante A):** 17 Modelle mit `sampling:`-Block (coding/knowledge/agentic/math + thinking-Unterblock), befüllt mit den recherchierten temperature/top_p aus `MODEL_CATEGORY_SAMPLING` (vorher Platzhalter 0.6/0.95). `intel/qwen3-30b-a3b-thinking-2507-q2ks-mixed-autoround` Block entfernt (keine recherchierte Zeile → Fallback korrekt). Kategorien ohne recherchierten Wert (z.B. ernie coding) nicht im Block → Fallback greift |
+| 13.08. | `src/benchmark_config.py` | **Reader-Umbau (Lesepfade):** `+_registry_sampling_block()` (match_registry_key gegen Registry-Keys), `+_sampling_cell()` (Zelle + Quelle), `get_model_config` liest Registry-first. Precedence: Registry-`sampling:` → `MODEL_CATEGORY_SAMPLING` → Kategorie-/Thinking-Defaults. Neue `_source`-Variante "registry-sampling" |
+| 13.08. | `src/benchmark_config.py` | **Entscheidung:** Reader übernimmt NUR temperature/top_p aus der Registry; top_k/min_p/enable_thinking weiterhin aus LMS-JSON (GUI/`--thinking`). `MODEL_CATEGORY_SAMPLING` bleibt als Fallback (30 Modelle ohne Block) |
+| 13.08. | `tests/test_benchmark_config.py` | **7 neue Registry-Sampling-Tests** (recherchierte Werte, partielle Blöcke, Fallback Registry→Tabelle→Default); 2 Tests auf `_source="registry-sampling"` umgestellt |
+| 13.08. | `doc-git/Planung/registry_sampling.md` + `registry_sampling_log.md` | **Migrationsplan + Log:** Schritte 1–6 abgeschlossen, Schritt 7 (Doku/HowTo) offen |
+| 13.08. | gesamt | **Verifikation:** 148 relevante Tests grün, volle Suite 790 passed / 3 pre-existing TabbyAPI-Fehler; End-to-End 0 MISMATCH vs. Recherche; `validate` ohne neue Drifts |
+
 ## QUANT_MAP-Entfernung + Framework-Unabhängigkeit (11.08.2026, abends)
 
 | Date | File | Change |

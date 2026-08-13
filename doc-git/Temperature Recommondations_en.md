@@ -62,20 +62,21 @@ however differentiate per category (coding 0.2, knowledge 0.6, agentic 0.6, math
 A per-category differentiation can therefore **not be expressed** via the JSON config.
 
 **Solution (decision, option "table > defaults, JSON temp ignored"):**
-1. **`MODEL_CATEGORY_SAMPLING`** in `src/benchmark_config.py`: exception table
-   model × category (temperature/top_p, ~30 base models, all with deviating
-   or category-specific values). Cells are based on the overview table
-   below (official; otherwise the BP mean of the stated ranges).
-2. **Precedence:** table cell > `BENCHMARK_THINKING_DEFAULTS` (0.6/0.95) or
-   `BENCHMARK_CATEGORY_DEFAULTS` (0.2/0.6/0.6/0.7). Applies to instruct **and**
-   thinking runs — this way the documented thinking exceptions
-   (GPT-OSS 1.0/1.0, Gemma-4 1.0/0.95, Nemotron-3-Reasoning 1.0/1.0) also take effect as cells.
+1. **Registry `sampling:` field** (`doc-git/model_registry.yaml`, SSOT since 13.08.):
+   per-category `temperature`/`top_p` block (Variante A, model × category). Migrated
+   for 17 models with the researched values (previously: `MODEL_CATEGORY_SAMPLING` in
+   `src/benchmark_config.py`). Missing categories fall back to the table.
+2. **Precedence:** registry `sampling:` cell > `MODEL_CATEGORY_SAMPLING` cell >
+   `BENCHMARK_THINKING_DEFAULTS` (0.6/0.95) or `BENCHMARK_CATEGORY_DEFAULTS`
+   (0.2/0.6/0.6/0.7). Applies to instruct **and** thinking runs — this way the
+   documented thinking exceptions (GPT-OSS 1.0/1.0, Gemma-4 1.0/0.95,
+   Nemotron-3-Reasoning 1.0/1.0) also take effect as cells.
 3. **JSON temp/top_p are ignored for benchmarks** (they only apply to
    GUI usage). The JSON configs continue to supply top_k, min_p,
    enable_thinking, reasoning_effort, max_tokens/ctx.
-4. `_source` shows the origin: `benchmark-table` | `thinking-default` | `category-default`.
+4. `_source` shows the origin: `registry-sampling` | `benchmark-table` | `thinking-default` | `category-default`.
 5. **Deviation from the 05.08 principle** ("LMS JSON = single source"): justified because
-   the JSON config cannot express per-category differentiation. The table is
+   the JSON config cannot express per-category differentiation. The registry/table is
    documented data logic with sources (no obscure `MODEL_TEMP_OVERRIDES` reload);
    all non-temperature parameters remain JSON-fed.
 6. **Compromises:** MiroThinker (1.0/0.95) and Qwen3.6-general (1.0/0.95) run in the

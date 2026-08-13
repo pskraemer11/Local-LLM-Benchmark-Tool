@@ -2163,8 +2163,6 @@ def _parse_args() -> tuple[Any, int]:
     _parser = _ap.ArgumentParser(description="Benchmark tool v13 (DS1000 + CoderEval)")
     _parser.add_argument("--sample-size", type=int, default=SAMPLE_SIZE,
                          help=f"Sample size per benchmark (default: {SAMPLE_SIZE})")
-    _parser.add_argument("--num-parallel", type=int, default=1,
-                         help="Parallel worker threads for LM Studio multi-slot serving (default: 1 = sequential)")
     _parser.add_argument("--non-interactive", action="store_true",
                          help="Skip interactive selection, run all benchmarks + models")
     _parser.add_argument("--model-key", type=str, default=None,
@@ -2299,7 +2297,7 @@ def _run_model_loop(models: list[dict[str, Any]], benchmarks: list[dict[str, Any
                 res, avg_s, avg_l, avg_t, cs = benchmark_model(
                     model_info, tasks, tt, bench["name"], monitor,
                     is_quiet_mode=non_interactive,
-                    num_parallel=getattr(args, "num_parallel", 1),
+                    num_parallel=4 if sample_size >= 10 else 1,
                 )
             except Exception as e:
                 error(f"Benchmark {bench['name']} completely failed: {e}")

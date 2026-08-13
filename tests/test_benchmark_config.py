@@ -94,7 +94,7 @@ class TestSamplingTable:
     def test_autoround_repack_matches_row(self):
         cfg = get_model_config("intel/qwen3-30b-a3b-instruct-2507-q2ks-mixed-autoround", category="coding")
         assert (cfg["temperature"], cfg["top_p"]) == (0.7, 0.8)
-        assert cfg["_source"] == "benchmark-table"
+        assert cfg["_source"] == "registry-sampling"
 
 
 class TestSamplingRowMatcher:
@@ -115,6 +115,51 @@ class TestSamplingRowMatcher:
         assert "coding" not in row
 
 
+class TestRegistrySampling:
+    """Reader liest Registry-`sampling:`-Block (SSOT, Variante A)."""
+
+    def test_registry_block_reads_researched_values(self):
+        # gemma-4-12b: Registry-Block 1.0/0.95 (Research), NICHT Platzhalter
+        cfg = get_model_config("unsloth/gemma-4-12b-it-qat", category="coding")
+        assert (cfg["temperature"], cfg["top_p"]) == (1.0, 0.95)
+        assert cfg["_source"] == "registry-sampling"
+
+    def test_registry_block_per_category_ernie(self):
+        # ernie: nur knowledge/agentic/math recherchiert; coding -> Fallback
+        cfg = get_model_config("noctrex/ernie-4.5-21b-a3b-pt_moe", category="knowledge")
+        assert (cfg["temperature"], cfg["top_p"]) == (0.8, 1.0)
+        assert cfg["_source"] == "registry-sampling"
+        cfg = get_model_config("noctrex/ernie-4.5-21b-a3b-pt_moe", category="coding")
+        assert (cfg["temperature"], cfg["top_p"]) == (0.2, 1.0)  # category-default
+        assert cfg["_source"] == "category-default"
+
+    def test_registry_block_partial_row_falls_back(self):
+        # kimi-linear: kein agentic im Block -> Tabellen-/Kategorie-Fallback
+        cfg = get_model_config("mradermacher/kimi-linear-reap-35b-a3b-instruct-i1", category="coding")
+        assert (cfg["temperature"], cfg["top_p"]) == (0.6, 0.95)
+        assert cfg["_source"] == "registry-sampling"
+
+    def test_registry_glm_46v(self):
+        cfg = get_model_config("zai-org/glm-4.6v-flash", category="math")
+        assert (cfg["temperature"], cfg["top_p"]) == (0.8, 0.6)
+        assert cfg["_source"] == "registry-sampling"
+
+    def test_quant_suffix_matches_registry_block(self):
+        cfg = get_model_config("qwen/qwen3-14b@q6_k", category="math")
+        assert (cfg["temperature"], cfg["top_p"]) == (0.6, 0.95)
+        assert cfg["_source"] == "registry-sampling"
+
+    def test_no_sampling_block_falls_back_to_table(self):
+        # gpt-oss: kein sampling:-Block -> Tabelle (1.0/1.0)
+        cfg = get_model_config("openai/gpt-oss-20b", category="math")
+        assert (cfg["temperature"], cfg["top_p"]) == (1.0, 1.0)
+        assert cfg["_source"] == "benchmark-table"
+
+    def test_unknown_model_no_registry_no_table(self):
+        cfg = get_model_config("unknown/never-heard-8b", category="coding")
+        assert cfg["_source"] == "category-default"
+
+
 class TestThinkingRuns:
     def test_thinking_model_flat_defaults(self):
         cfg = get_model_config(
@@ -132,10 +177,11 @@ class TestThinkingRuns:
             assert (cfg["temperature"], cfg["top_p"]) == (0.6, 0.95)
 
     def test_thinking_model_with_table_row(self):
-        # Gemma-4: dokumentierte Ausnahme 1.0/0.95 statt flat 0.6/0.95
+        # Gemma-4: dokumentierte Ausnahme 1.0/0.95 statt flat 0.6/0.95.
+        # Liegt in der Registry als sampling:-Block vor (SSOT).
         cfg = get_model_config("google/gemma-4-12b-it-qat", category="coding", is_thinking_enabled=True)
         assert (cfg["temperature"], cfg["top_p"]) == (1.0, 0.95)
-        assert cfg["_source"] == "benchmark-table"
+        assert cfg["_source"] == "registry-sampling"
 
     def test_thinking_gpt_oss_row(self):
         cfg = get_model_config("openai/gpt-oss-20b", category="coding", is_thinking_enabled=True)
@@ -164,7 +210,7 @@ class TestThinkingRuns:
         assert cfg["_source"] == "thinking-default"
 
     def test_thinking_without_flag_uses_category_defaults(self):
-        cfg = get_model_config("qwen/qwen3-14b", category="coding", is_thinking_enabled=False)
+        cfg = get_model_config("qwen/qwen2.5-7b-instruct", category="coding", is_thinking_enabled=False)
         assert cfg["temperature"] == 0.2
         assert cfg["_source"] == "category-default"
 

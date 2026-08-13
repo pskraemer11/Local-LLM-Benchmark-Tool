@@ -71,8 +71,20 @@ _VARIANT_SUFFIXES = (
 )
 
 _QUANT_DIR_SUFFIXES = (
-    "-mxfp4", "-gguf", "-mxpr4", "-q4-0", "-q4-k", "-q5-0", "-q5-k", "-q6-k", "-q8-0",
-    "-q2-k", "-q3-k", "-q1-0",
+    "-mxfp4", "-gguf", "-mxpr4",
+    # 2-teilige K/0-Quants (Ordner-Namen, z.B. "...-GGUF-Q4_K")
+    "-q1-0", "-q2-k", "-q3-k", "-q4-0", "-q4-k", "-q5-0", "-q5-k", "-q6-k", "-q8-0",
+    # 3-teilige K-Quants (z.B. "...-GGUF-Q4_K_M", "-Q3_K_S") - JetBrains-Naming
+    "-q2-k-s", "-q2-k-m", "-q2-k-l",
+    "-q3-k-s", "-q3-k-m", "-q3-k-l",
+    "-q4-k-s", "-q4-k-m", "-q4-k-l",
+    "-q5-k-s", "-q5-k-m", "-q5-k-l",
+    "-q6-k-s", "-q6-k-m", "-q6-k-l",
+    # iQ-Quants (IQ1_S ... IQ5_2)
+    "-iq1-s", "-iq1-m", "-iq2-s", "-iq2-xs", "-iq2-xxs",
+    "-iq3-s", "-iq3-xs", "-iq3-xxs",
+    "-iq4-s", "-iq4-xs", "-iq4-nl",
+    "-iq5-0", "-iq5-1", "-iq5-2",
 )
 
 

@@ -1,5 +1,5 @@
 # Qwen-Nachlauf — Pass 2: Andere fehlende Modelle mit aktuellem Setup
-# SS=30, np=4, aktuelle Temperaturen (laut benchmark_config.py)
+# SS=10 (Funktionscheck), np=4, aktuelle Temperaturen (laut benchmark_config.py)
 # Verwendung: python src\run_benchmarks.py --run-spec run.qwen-re-run-pass2.yaml
 
 models:
@@ -11,17 +11,12 @@ models:
   - "unsloth/phi-4"
   # RNJ-1 (fehlte komplett)
   - "essentialai/rnj-1"
-  # F2LLM-v2 (fehlten komplett)
-  - "f2llm-v2-4b"
-  - "f2llm-v2-1.7b"
-  # Em German (fehlten komplett)
-  - "em_german_13b_v01"
-  - "em_german_leo_mistral"
+  # F2LLM-v2 x2 + Em German x2 entfernt - alles Embedding/RAG-Modelle, kein Text-Generator
 
 benchmarks: ["DS1000", "CoderEval", "HumanEval+", "MBPP+", "ARC-Challenge",
              "HellaSwag", "TruthfulQA", "IFEval", "MATH-500", "Agentic"]
 
-sample_size: 30
+sample_size: 10
 seed: 2026
 agentic_mode: "random"
 thinking: false

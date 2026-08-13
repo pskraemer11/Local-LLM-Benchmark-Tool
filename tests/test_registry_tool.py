@@ -395,31 +395,19 @@ class TestCmdSuggestIntegration:
 # ─────────────────────────────────────────────────────────────────────
 
 class TestFixNp:
-    """cmd_fix_np — filesystem-based (framework-independent).
-
-    Source of Truth: GGUF files on disk (filesystem scan via _get_all_ggufs).
-    Behaviors:
-    - Phantoms (no GGUF file) are removed
-    - Base entries (without @quant) are removed when @quant variant exists
-    - Multiple @quant variants are preserved
-    - Reclassifies survivors from GGUF headers
+    """cmd_fix_np — seit 13.08. deprecated: np ist feste Benchmark-Policy
+    (SS>=10 → 4, sonst 1) und kein Registry-Feld mehr. Der Stub informiert
+    nur und schreibt NICHT.
     """
 
-    def _run(self, registry, lms_models, tmp_path, resolve="", gguf_experts=False):
+    def test_fix_np_is_deprecated_stub(self, capsys):
         saved = {}
-        if callable(resolve):
-            resolve_patch = patch.object(rt, "_resolve_model_path_multi", side_effect=resolve)
-        else:
-            resolve_patch = patch.object(rt, "_resolve_model_path_multi", return_value=resolve)
-        with patch.object(rt, "load_registry", return_value=registry), \
-             patch.object(rt, "save_registry", side_effect=lambda r: saved.update(r)), \
-             patch.object(rt, "_run_lms_ls", return_value=lms_models), \
-             patch.object(rt, "MODELS_CACHE", tmp_path), \
-             patch.object(rt, "_GGUF_FILE_CACHE", None), \
-             resolve_patch, \
-             patch.object(rt, "_gguf_has_experts", return_value=gguf_experts):
+        with patch.object(rt, "load_registry", return_value={"x/y": {"file_size_bytes": 1}}), \
+             patch.object(rt, "save_registry", side_effect=lambda r: saved.update(r)):
             rt.cmd_fix_np()
-        return saved
+        out = capsys.readouterr().out
+        assert "fix-np entfällt" in out
+        assert saved == {}  # nichts geschrieben
 
     def test_normalize_variants_strips_publisher_and_underscore(self):
         assert rt._normalize_variants("unsloth/phi-4") == {"phi-4"}
@@ -428,100 +416,6 @@ class TestFixNp:
             "mistralai-magistral-small-2509",
         }
         assert rt._normalize_variants("qwen3.6-27b@q5_0") == {"qwen3-6-27b"}
-
-    def test_quant_suffixed_keys_stay_distinct(self, tmp_path):
-        # Multiple @quant variants of same model coexist (not collapsed)
-        p = tmp_path / "qwen" / "coder"
-        p.mkdir(parents=True)
-        (p / "qwen2.5-coder-14b-instruct-Q5_0.gguf").write_bytes(b"x")
-        (p / "qwen2.5-coder-14b-instruct-Q6_K.gguf").write_bytes(b"x")
-        registry = {
-            "qwen/qwen2.5-coder-14b-instruct@q5_0": {"file_size_bytes": 1},
-            "qwen/qwen2.5-coder-14b-instruct@q6_k": {"file_size_bytes": 2},
-        }
-        saved = self._run(registry, [], tmp_path)
-        assert set(saved) == {
-            "qwen/qwen2.5-coder-14b-instruct@q5_0",
-            "qwen/qwen2.5-coder-14b-instruct@q6_k",
-        }
-
-    def test_duplicate_publisher_keys_collapse_keeping_best(self, tmp_path):
-        # When multiple keys resolve to same GGUF, keep the canonical one
-        p = tmp_path / "unsloth" / "phi-4"
-        p.mkdir(parents=True)
-        (p / "phi-4-Q5_K_M.gguf").write_bytes(b"x")
-        registry = {
-            "unsloth/phi-4@q5_k_m": {"file_size_bytes": 1},
-            "microsoft/unsloth/phi-4": {"file_size_bytes": 1},  # duplicate base
-        }
-        saved = self._run(registry, [], tmp_path)
-        assert set(saved) == {"unsloth/phi-4@q5_k_m"}
-
-    def test_phantom_without_gguf_is_removed(self, tmp_path):
-        # Entries with no matching GGUF file are phantoms -> removed
-        p = tmp_path / "unsloth" / "phi-4"
-        p.mkdir(parents=True)
-        (p / "phi-4-Q5_K_M.gguf").write_bytes(b"x")
-        registry = {
-            "unsloth/phi-4@q5_k_m": {"file_size_bytes": 1},
-            "bartowski/gpt-oss-20b": {"file_size_bytes": 1},  # no GGUF file -> phantom
-        }
-        saved = self._run(registry, [], tmp_path)
-        assert set(saved) == {"unsloth/phi-4@q5_k_m"}
-
-    def test_base_entry_removed_when_quant_variant_exists(self, tmp_path):
-        # Base entry (no @quant) is removed when @quant variant exists
-        p = tmp_path / "unsloth" / "phi-4"
-        p.mkdir(parents=True)
-        (p / "phi-4-Q5_K_M.gguf").write_bytes(b"x")
-        registry = {
-            "unsloth/phi-4": {"file_size_bytes": 1},
-            "unsloth/phi-4@q5_k_m": {"file_size_bytes": 1},
-        }
-        saved = self._run(registry, [], tmp_path)
-        assert set(saved) == {"unsloth/phi-4@q5_k_m"}
-
-    def test_multiple_quant_variants_preserved(self, tmp_path):
-        # Multiple @quant variants of same model coexist
-        p = tmp_path / "unsloth" / "phi-4"
-        p.mkdir(parents=True)
-        (p / "phi-4-Q5_K_M.gguf").write_bytes(b"x")
-        (p / "phi-4-Q8_0.gguf").write_bytes(b"x")
-        registry = {
-            "unsloth/phi-4@q5_k_m": {"file_size_bytes": 1},
-            "unsloth/phi-4@q8_0": {"file_size_bytes": 2},
-        }
-        saved = self._run(registry, [], tmp_path)
-        assert set(saved) == {"unsloth/phi-4@q5_k_m", "unsloth/phi-4@q8_0"}
-
-    def test_classification_applied_to_survivors(self, tmp_path):
-        p = tmp_path / "unsloth" / "qwen3.6-27b"
-        p.mkdir(parents=True)
-        (p / "Qwen3.6-27B-Q3_K_S.gguf").write_bytes(b"x")
-        lms = [{"modelKey": "qwen3.6-27b", "path": "unsloth/qwen3.6-27b/Qwen3.6-27B-Q3_K_S.gguf"}]
-        registry = {"unsloth/qwen3.6-27b": {"file_size_bytes": 1}}
-        saved = self._run(registry, lms, tmp_path, gguf_experts=True)
-        assert saved["unsloth/qwen3.6-27b"]["arch"] == "moe"
-        assert saved["unsloth/qwen3.6-27b"]["num_parallel"] == 4
-
-    def test_no_lms_data_means_no_duplicate_collapse(self, tmp_path):
-        # lms ls fehlgeschlagen (leere Liste): Quant-Varianten dürfen NICHT
-        # kollabieren (Regression: qwen2.5-coder-14b-instruct@q6_k wurde
-        # fälschlich als "Duplikat von @q5_0" gelöscht). Jede Quant-Datei
-        # existiert eigenständig → beide Einträge bleiben erhalten.
-        p = tmp_path / "Qwen" / "Qwen2.5-Coder-14B-Instruct-GGUF"
-        p.mkdir(parents=True)
-        (p / "qwen2.5-coder-14b-instruct-q5_0.gguf").write_bytes(b"x")
-        (p / "qwen2.5-coder-14b-instruct-q6_k.gguf").write_bytes(b"x")
-        registry = {
-            "qwen/qwen2.5-coder-14b-instruct@q5_0": {"file_size_bytes": 1},
-            "qwen/qwen2.5-coder-14b-instruct@q6_k": {"file_size_bytes": 1},
-        }
-        saved = self._run(registry, [], tmp_path)
-        assert set(saved) == {
-            "qwen/qwen2.5-coder-14b-instruct@q5_0",
-            "qwen/qwen2.5-coder-14b-instruct@q6_k",
-        }
 
 
 # ─────────────────────────────────────────────────────────────────────

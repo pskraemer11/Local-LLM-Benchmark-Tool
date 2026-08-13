@@ -13,7 +13,7 @@ auto_fix=True nur bei unveraenderlichen Quellen (gguf): Abweichungen werden
 automatisch aus der Quelle in die Registry geschrieben.
 
 Wichtige Felder:
-  - num_parallel: immer 4 (benchmark_policy, seit 11.08.)
+  - num_parallel: KEIN Registry-Feld mehr (feste Policy seit 13.08.: SS>=10 -> 4, sonst 1)
   - useUnifiedKvCache: Formel (>= 12 GB -> True) + Ausnahmen
     (gemma-4, kimi-linear, gpt-oss -> immer True, vertragen keine KV-Quant)
   - context_length: Registry-SSOT (Benchmark-Wert, <= GGUF-Native-Max)
@@ -62,12 +62,10 @@ FIELD_OWNERSHIP: dict[str, FieldRule] = {
         description="aus GGUF chat_template + Familien-Map; Dual-Mode-Interpretation (nicht rein architektur-bedingt)",
     ),
     # ── Registry (SSOT seit 2026-08-11) ─────────────────────────────
-    # np/UKV/context_length sind durch die Registry definiert (Single Source of
+    # UKV/context_length sind durch die Registry definiert (Single Source of
     # Truth). JSON-Configs sind Runtime-Artefakte (LM Studio liest beim Load,
     # API kann nicht überschreiben). Kein Drift-Check mehr — Registry gewinnt.
-    "num_parallel": FieldRule(
-        "registry", "registry", False, description="SSOT: immer 4 (benchmark_policy)"
-    ),
+    # num_parallel ist seit 13.08. keine Registry-Eigenschaft mehr (feste Policy).
     "useUnifiedKvCache": FieldRule(
         "registry", "registry", False, description="SSOT: Formel (>=12GB) + Ausnahmen (gemma-4/kimi-linear/gpt-oss immer True)"
     ),
@@ -99,6 +97,7 @@ FIELD_OWNERSHIP: dict[str, FieldRule] = {
     "pub_url": FieldRule("registry", "registry", False),
     "notes": FieldRule("registry", "registry", False),
     "display_name": FieldRule("registry", "registry", False),
+    "sampling": FieldRule("registry", "registry", False, description="Sampling data block per registry model (new)"),
     "experts": FieldRule("registry", "registry", False),
     "custom_template": FieldRule("registry", "registry", False),
 }

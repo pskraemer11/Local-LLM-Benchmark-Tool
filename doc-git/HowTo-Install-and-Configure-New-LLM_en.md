@@ -56,7 +56,6 @@ My-New-Model-8B:
   k_cache: "q8_0"
   v_cache: "iq4_nl"
   offload: 1
-  num_parallel: 1
   # notes, reasoning, capabilities, blueprint, truncation, context_length
   # are set automatically by classify + registry_tool.py
 ```
@@ -87,19 +86,19 @@ python src\registry_tool.py sync     # Full maintenance – does EVERYTHING auto
 | `blueprint`            | From reasoning + capabilities                               | `thinking` → `reasoning_assistant`                            |
 | `truncation`           | contextLength from JSON config                              | `16384` (≥8192) → `medium`                                    |
 | `offload`              | Default 1 (full GPU offload) at `add` \ `fill-ctx`          | `1`                                                           |
-| `num_parallel`         | MoE=4 (except ERNIE→1), Dense=1, GPT-OSS=4                  | `4` (MoE) \ `1` (Dense) \ `1` (ERNIE)                         |
+| `num_parallel`         | **Kein Registry-Feld (seit 13.08.):** feste Policy SS>=10→4, sonst 1 | `4` (SS>=10) \ `1` (SS<10)                          |
 | `k_cache`              | `q8_0` (default), Gemma-4\GPT-OSS = `f16`                   | `q8_0`, `f16`                                                 |
 | `v_cache`              | `iq4_nl` (default), Gemma-4\GPT-OSS = `f16`                 | `iq4_nl`, `q5_1`, `f16`                                       |
 | `n_layers`             | **Automatically from GGUF header** via `add`\`fill-arch`    | `49` (North Mini Code), `64` (Qwen3.6-27B)                    |
 | `hidden_dim`           | **Automatically from GGUF header** via `add`\`fill-arch`    | `2048` \ `5120`                                               |
-| `context_length`       | Formula from `file_size_bytes`, `num_parallel`, KV quant    | `16384` (default when size is missing)                        |
+| `context_length`       | Formula from `file_size_bytes`, np policy (=4), KV quant    | `16384` (default when size is missing)                        |
 | `useUnifiedKvCache`    | **VRAM formula** (see below) – written to JSON via `configs`| `false` \ `true`                                              |
 
 **VRAM formula for useUnifiedKvCache (since 17.07.):**
 ```
 model_gb     = file_size \ 1_000_000_000
 kv_gb        = n_layers × hidden_dim × 2 × kv_bytes × context_length \ 1_000_000_000
-total_gb     = model_gb + kv_gb × num_parallel
+total_gb     = model_gb + kv_gb × num_parallel   # np = Policy (4 bei SS>=10)
 useUnifiedKvCache = total_gb ≥ 14.0   # ON when VRAM is tight (≥14.0 GB; 15.2 GB usable)
 ```
 With np=1 or missing architecture data: `useUnifiedKvCache = model_gb ≥ 9.0` (old heuristic).

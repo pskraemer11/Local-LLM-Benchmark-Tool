@@ -5,10 +5,10 @@ Consolidated tool for model_registry.yaml and LM Studio JSON config maintenance.
 Commands:
   compare       Compare registry vs LMS vs JSON configs (report only)
   add           Add LMS models to registry from piped JSON (lms ls --json | python registry_tool.py add)
-  suggest       Dry-run: VRAM-based np/UKV/context recommendation (writes NOTHING)
+  suggest       Dry-run: VRAM-based UKV/context recommendation (writes NOTHING)
   sync-ctx      Sync context_length from JSON configs into registry (only missing)
   sync-from-configs
-                Sync offload, num_parallel, useUnifiedKvCache from JSON configs
+                Sync offload, useUnifiedKvCache from JSON configs
                 into registry (skips context_length to preserve native model limit)
                 MELDE-MODUS seit 09.08.: nur Abgleich/Report, schreibt nichts
   fill-arch     Read n_layers and hidden_dim from local GGUF headers for
@@ -23,7 +23,6 @@ Commands:
   fill-ctx      Add default context_length to entries missing it
                 (size-based rule or 16384 fallback)
   fix-ctx       Recompute context_length for ALL entries (size-based formula)
-  fix-np        Recompute num_parallel for ALL entries (architecture-based)
   fill-size     Look up file_size_bytes from LMS for registry entries missing it
   fill-quant    Read @quant from GGUF filename for registry entries missing
                 quant suffix (Source of Truth: GGUF, not LMS)
@@ -47,15 +46,16 @@ Commands:
                 (--dry-run, --wait-for-lock, --effort, --budget)
   sync          Full sync: add → fill-arch → sync-from-gguf → fill-reasoning → sync-from-configs → fmt
 
-Prinzip (seit 11.08.2026): Die **Registry (model_registry.yaml) ist Single Source of Truth**
-für alle Benchmark-Parameter (num_parallel, useUnifiedKvCache, context_length).
-JSON-Configs sind Runtime-Artefakte (LM Studio liest sie beim Load, API kann sie
-nicht überschreiben). GGUF-Header liefern Architektur-Daten (n_layers, hidden_dim,
-max_context_length). Alle Modelle: np=4. UKV: >= 12 GB → True, Ausnahmen
+Prinzip (seit 13.08.2026): Die **Registry (model_registry.yaml) ist Single Source of Truth**
+für useUnifiedKvCache und context_length. **num_parallel ist eine feste Benchmark-Policy**
+(SS>=10 → 4, sonst 1) und KEIN Registry-Feld mehr. JSON-Configs sind Runtime-Artefakte
+(LM Studio liest sie beim Load, API kann sie nicht überschreiben). GGUF-Header liefern
+Architektur-Daten (n_layers, hidden_dim,
+max_context_length). UKV: >= 12 GB → True, Ausnahmen
 (gemma-4, kimi-linear, gpt-oss) → immer True. blueprint_definitions.yaml ist
 die Quelle für Systemprompts; assemble_blueprint.py generiert die Prompts und
 schreibt sie in die JSON-Configs (systemPrompt, promptTemplate). Dieser Code
-überschreibt keine Benchmark-Parameter in JSON-Configs (np/UKV/ctx kommen aus
+überschreibt keine Benchmark-Parameter in JSON-Configs (UKV/ctx kommen aus
 der Registry).
 """
 
@@ -246,6 +246,11 @@ def cmd_fmt() -> None:
 # ── fill-ctx command ───────────────────────────────────────────────
 
 
+# Feste Benchmark-Policy seit 13.08.: np=4 bei SampleSize >= 10, sonst 1.
+# Die Kontextberechnung rechnet mit der Standard-Benchmark-Konfiguration (np=4).
+_NP_POLICY = 4
+
+
 def cmd_fill_ctx(default: int = 16384) -> None:
     reg = load_registry()
     updated = 0
@@ -256,10 +261,9 @@ def cmd_fill_ctx(default: int = 16384) -> None:
             continue
         size_bytes = entry.get("file_size_bytes")
         if size_bytes and size_bytes > 0:
-            np_val = entry.get("num_parallel", 1)
             kc = entry.get("k_cache", "q8_0")
             vc = entry.get("v_cache", "iq4_nl")
-            entry["context_length"] = _default_ctx_from_size(int(size_bytes), np_val, kc, vc)
+            entry["context_length"] = _default_ctx_from_size(int(size_bytes), _NP_POLICY, kc, vc)
         else:
             entry["context_length"] = default
         updated += 1
@@ -272,7 +276,7 @@ def cmd_fill_ctx(default: int = 16384) -> None:
 
 
 def cmd_fix_ctx() -> None:
-    """Recompute context_length for ALL entries based on current np and KV-cache settings."""
+    """Recompute context_length for ALL entries based on np policy and KV-cache settings."""
     reg = load_registry()
     updated = 0
     for entry in reg.values():
@@ -280,10 +284,9 @@ def cmd_fix_ctx() -> None:
             continue
         sb = entry.get("file_size_bytes")
         if sb and sb > 0:
-            np_val = entry.get("num_parallel", 1)
             kc = entry.get("k_cache", "q8_0")
             vc = entry.get("v_cache", "iq4_nl")
-            new_ctx = _default_ctx_from_size(int(sb), np_val, kc, vc)
+            new_ctx = _default_ctx_from_size(int(sb), _NP_POLICY, kc, vc)
             if entry.get("context_length") != new_ctx:
                 entry["context_length"] = new_ctx
                 updated += 1
@@ -479,118 +482,11 @@ def _resolve_exact(reg_key: str, lms_path_map: dict[str, str]) -> str:
 
 
 def cmd_fix_np() -> None:
-    """Recompute arch classification + num_parallel, remove stale entries.
-
-    Source of Truth: GGUF headers (architecture) + filesystem (deployment).
-    LMS is NOT required — the tool is framework-independent.
-
-    - Reads ``expert_count`` from GGUF header for MoE detection.
-    - Drops entries whose GGUF file no longer exists on disk.
-    - Collapses duplicate entries resolving to the same GGUF file.
-    """
-    reg = load_registry()
-
-    # ── Build filesystem-based lookup: normalized base -> GGUF path ──
-    fs_lookup: dict[str, Path] = {}  # normalized base key -> GGUF path
-    for g in _get_all_ggufs():
-        if not g.is_file():
-            continue
-        base = normalize_model_name(g.name).split("@")[0]
-        if base not in fs_lookup:
-            fs_lookup[base] = g
-
-    def _gguf_for_key(reg_key: str) -> Path | None:
-        """Find GGUF file for a registry key via filesystem scan."""
-        base = normalize_model_name(reg_key).split("@")[0]
-        # Direct match
-        if base in fs_lookup:
-            return fs_lookup[base]
-        # Fuzzy: check if any GGUF base matches
-        for gbase, gpath in fs_lookup.items():
-            if base == gbase or base in gbase or gbase in base:
-                return gpath
-        return None
-
-    updated = 0
-    removed = 0
-    keys = list(reg.keys())  # snapshot to allow deletion during iteration
-
-    # ── pass 1: match registry entries to GGUF files, drop phantoms ──
-    # Group by (publisher, model_base, quant) — the unique identity triple
-    groups: dict[tuple[str, str, str], list[str]] = {}  # identity → [keys]
-    for key in keys:
-        entry = reg[key]
-        if not isinstance(entry, dict):
-            continue
-        ggu = _gguf_for_key(key)
-        if ggu is None:
-            # No GGUF file found → phantom, remove
-            del reg[key]
-            removed += 1
-            print(f"  {key}: gelöscht (kein GGUF gefunden)")
-            continue
-        # Group by identity triple for dedup
-        pub, model, quant = _identity_triple_from_key(key)
-        groups.setdefault((pub, model, quant), []).append(key)
-
-    # ── pass 2: remove base entries when @quant variant exists ──
-    # Group by (publisher, model) without quant to find base vs quant conflicts
-    by_base: dict[tuple[str, str], list[str]] = {}
-    for key in list(reg.keys()):
-        pub, model, quant = _identity_triple_from_key(key)
-        by_base.setdefault((pub, model), []).append(key)
-
-    for members in by_base.values():
-        has_quant = any("@" in k for k in members)
-        if has_quant:
-            # Remove base entries (without @quant) when @quant variant exists
-            for key in members:
-                if "@" not in key:
-                    del reg[key]
-                    removed += 1
-                    print(f"  {key}: gelöscht (Quant-Variante existiert)")
-
-    # ── pass 3: collapse duplicates per identity, keep best match ──
-    groups.clear()
-    for key in reg:
-        if not isinstance(reg[key], dict):
-            continue
-        pub, model, quant = _identity_triple_from_key(key)
-        groups.setdefault((pub, model, quant), []).append(key)
-
-    for members in groups.values():
-        if len(members) < 2:
-            continue
-        # Prefer key with @quant, then by original order
-        members.sort(key=lambda k: (0 if "@" in k else 1, keys.index(k)))
-        keeper = members[0]
-        for key in members[1:]:
-            del reg[key]
-            removed += 1
-            print(f"  {key}: gelöscht (Duplikat von {keeper})")
-
-    # ── pass 3: reclassify survivors from GGUF headers ──
-    for key in list(reg.keys()):
-        entry = reg[key]
-        if not isinstance(entry, dict):
-            continue
-        ggu = _gguf_for_key(key)
-        if ggu is None:
-            continue
-        classification = _classify_arch(key, str(ggu))
-        old_arch = entry.get("arch", "")
-        old_np = entry.get("num_parallel")
-        new_np = 4  # since 2026-08-11: all models use np=4 (Registry is SSOT)
-        changed = (classification != old_arch) or (new_np != old_np)
-        entry["arch"] = classification
-        entry["num_parallel"] = new_np
-        if changed:
-            updated += 1
-            print(f"  {key}: arch {old_arch}→{classification}, np {old_np}→{new_np}")
-
-    if updated or removed:
-        save_registry(reg)
-    print(f"[OK] {updated} aktualisiert, {removed} gelöscht")
+    """Seit 13.08. überflüssig: np ist feste Policy (SS>=10 → 4, sonst 1),
+    kein Registry-Feld mehr. Arch-Reclassification erledigt sync-from-gguf."""
+    print("[INFO] fix-np entfällt: num_parallel ist seit 13.08. eine feste")
+    print("       Benchmark-Policy (SS>=10 → 4, sonst 1) und kein Registry-Feld.")
+    print("       Arch-Reclassification: registry_tool.py sync-from-gguf.")
 
 
 def _identity_triple_from_key(key: str) -> tuple[str, str, str]:
@@ -872,24 +768,20 @@ def _classify_arch(
     return "dense"
 
 
-def _compute_np_ukv(
+def _compute_ukv(
     model_gb: float,
     kv_per_slot_gb: float,
     native_ctx: int,
     vram_available: float = _USABLE_VRAM_GB,
     min_ctx: int = _MIN_CONTEXT_LENGTH,
     model_name: str = "",
-) -> tuple[int, bool, int]:
-    """Compute optimal num_parallel and useUnifiedKvCache based on VRAM budget.
+) -> tuple[bool, int]:
+    """Compute optimal useUnifiedKvCache and context_length based on VRAM budget.
 
-    Priority (user-defined, 05.08.2026):
-      1. np=4, UKV=False  →  max GPU parallelism
-      2. np=4, UKV=True   →  save VRAM (np does not scale KV)
-      3. np=2, UKV=True   →  reduce KV overhead further
-      4. np=1, UKV=True   →  minimum parallelism
-      5. np=1, UKV=False  →  last resort (reduce ctx)
-
-    UKV determination uses the benchmark formula (>= 12 GB or special cases).
+    Seit 13.08.: num_parallel ist eine feste Benchmark-Policy (SS>=10 → 4, sonst 1),
+    kein Registry-Feld. Vom verfügbaren Speicher, der Kontextlänge und der
+    KV-Quantisierung abhängig ist nur UKV — nicht np. Die Kontextberechnung
+    geht daher von der Standard-Benchmark-Konfiguration (np=_NP_POLICY) aus.
 
     Args:
         model_gb: Model file size in GB.
@@ -900,29 +792,29 @@ def _compute_np_ukv(
         model_name: Model identifier for UKV special case lookup (optional).
 
     Returns:
-        (num_parallel, use_unified_kv_cache, context_length)
+        (use_unified_kv_cache, context_length)
     """
     if kv_per_slot_gb <= 0:
-        # No arch data → fallback: np=4, UKV based on benchmark formula
+        # No arch data → UKV based on benchmark formula
         from benchmark_config import should_use_unified_kv_cache
         is_ukv = should_use_unified_kv_cache(model_name or "unknown", model_gb)
-        return 4, is_ukv, native_ctx
+        return is_ukv, native_ctx
 
     # Estimate max ctx from VRAM (for models without max_context_length in registry)
-    # Use np=1, UKV=True as baseline for max possible ctx
     max_possible_ctx = int(vram_available / (kv_per_slot_gb / 1e9)) if kv_per_slot_gb > 0 else native_ctx
     effective_native_ctx = min(native_ctx, max_possible_ctx)
 
-    for np_val, ukv in [(4, False), (4, True), (2, True), (1, True), (1, False)]:
-        np_factor = 1 if ukv else np_val
-        # Max ctx for this np/UKV combination
+    # np factor for KV usage: 1 if UKV else _NP_POLICY
+    for ukv in (False, True):
+        np_factor = 1 if ukv else _NP_POLICY
+        # Max ctx for this UKV combination
         max_ctx_for_config = int(vram_available / (kv_per_slot_gb * np_factor / 1e9))
         ctx = min(effective_native_ctx, max_ctx_for_config)
         if ctx >= min_ctx:
-            return np_val, ukv, ctx
+            return ukv, ctx
 
-    # Fallback: np=1, UKV=False, ctx=min_ctx
-    return 1, False, min_ctx
+    # Fallback: UKV=False, ctx=min_ctx
+    return False, min_ctx
 
 
 # ── add command ────────────────────────────────────────────────────
@@ -988,7 +880,6 @@ def cmd_add(models: list[dict[str, Any]], interactive: bool = False) -> dict[str
             nt += " | Vision"
         if m.get("tools"):
             nt += " | Tool-Use"
-        num_p = 4  # since 2026-08-11: all models use np=4 (Registry is SSOT)
         size_bytes = m.get("size_bytes", 0) or m.get("sizeBytes", 0)
         entry = {
             "publisher": pub,
@@ -997,12 +888,11 @@ def cmd_add(models: list[dict[str, Any]], interactive: bool = False) -> dict[str
             "k_cache": "q8_0",
             "v_cache": "iq4_nl",
             "offload": 1,
-            "num_parallel": num_p,
             "notes": nt,
         }
         if size_bytes and size_bytes > 0:
             entry["file_size_bytes"] = int(size_bytes)
-            entry["context_length"] = _default_ctx_from_size(int(size_bytes), num_p, entry["k_cache"], entry["v_cache"])
+            entry["context_length"] = _default_ctx_from_size(int(size_bytes), _NP_POLICY, entry["k_cache"], entry["v_cache"])
 
         # Auto-fill arch data from GGUF file if available
         model_path = m.get("path", "")
@@ -1087,8 +977,7 @@ def cmd_suggest() -> dict[str, Any]:
             continue
         entry = reg[match]
         try:
-            # ── Priority-based np/UKV computation (05.08.2026) ──
-            # Priority: np=4/UKV=F → np=4/UKV=T → np=2/UKV=T → np=1/UKV=T → np=1/UKV=F
+            # ── UKV/ctx computation (13.08.: np ist feste Policy, s. _NP_POLICY) ──
             fs = entry.get("file_size_bytes", 0)
             nl = entry.get("n_layers")
             hd = entry.get("hidden_dim")
@@ -1104,7 +993,7 @@ def cmd_suggest() -> dict[str, Any]:
             # native_ctx from GGUF header (registry max_context_length)
             native_ctx = entry.get("max_context_length") or 262144  # fallback: 256k
 
-            np_new, ukv_new, ctx_new = _compute_np_ukv(
+            ukv_new, ctx_new = _compute_ukv(
                 model_gb,
                 kv_per_slot_gb,
                 native_ctx,
@@ -1117,7 +1006,6 @@ def cmd_suggest() -> dict[str, Any]:
             print(f"  [SUGGEST] {match}")
             if offload is not None:
                 print(f"    offload      : {offload} (aus Registry)")
-            print(f"    num_parallel : {np_new} (Empfehlung, VRAM={_USABLE_VRAM_GB} GB)")
             print(f"    useUnifiedKvCache: {ukv_new} (Empfehlung)")
             print(f"    context      : {ctx_new} (Empfehlung, min={_MIN_CONTEXT_LENGTH})")
             print(f"    native ctx   : {native_ctx} (aus GGUF, nicht in Config)")
@@ -1209,7 +1097,7 @@ def cmd_rm(model_key: str, delete_files: bool = False, assume_yes: bool = False)
 
 
 def cmd_sync_from_configs() -> None:
-    """Melde-Modus (Feld-Ownership 09.08.): offload, num_parallel, useUnifiedKvCache,
+    """Melde-Modus (Feld-Ownership 09.08.): offload, useUnifiedKvCache,
     context_length aus JSON-Configs NUR melden, nicht schreiben.
 
     Config-JSONs sind GUI-Sicht (kann Nutzer absichtlich anders setzen als die
@@ -1246,14 +1134,14 @@ def cmd_sync_from_configs() -> None:
             blacklisted += 1
             continue
         # Entry exists and is not blacklisted — no drift reporting needed
-        # since Registry is SSOT for np/UKV/offload.
+        # since Registry is SSOT for UKV/offload (np ist seit 13.08. feste Policy).
 
     print(
         "[OK] sync-from-configs (Melde-Modus): 0 Drifts gemeldet, 0 geschrieben"
     )
     print(
-        "[HINWEIS] Keine Aenderung: num_parallel/useUnifiedKvCache/offload sind Registry-SSOT "
-        "(seit 11.08.2026)."
+        "[HINWEIS] Keine Aenderung: useUnifiedKvCache/offload sind Registry-SSOT "
+        "(seit 11.08.2026); num_parallel ist seit 13.08. feste Policy (SS>=10 → 4)."
     )
 
     print(
@@ -2990,7 +2878,7 @@ def _interactive_menu() -> None:
         ("compare", "Compare registry vs LMS vs JSON configs"),
         ("add", "Add LMS models to registry (pipe JSON or provide file)"),
         ("fmt", "Normalize blank lines in registry YAML"),
-        ("fix-np", "Recompute num_parallel for ALL entries"),
+        ("fix-np", "DEPRECATED: np ist feste Policy seit 13.08. (zeigt Info, tut nichts)"),
         ("fix-ctx", "Recompute context_length for ALL entries"),
         ("fill-arch", "Read n_layers/hidden_dim from GGUF headers"),
         ("sync-from-gguf", "Auto-Fix n_layers/hidden_dim/ctx/arch aus GGUF (Feld-Ownership)"),

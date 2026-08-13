@@ -216,7 +216,9 @@ def main() -> None:
         nl = entry.get("n_layers")
         hd = entry.get("hidden_dim")
 
-        np_reg = entry.get("num_parallel", 1) or 1
+        # np ist seit 13.08. feste Benchmark-Policy (SS>=10 → 4, sonst 1), kein
+        # Registry-Feld mehr. Für die KV-Schätzung wird der Standard angenommen.
+        np_reg = 4
         k_reg = str(entry.get("k_cache", "q8_0")) if entry.get("k_cache") else "q8_0"
         v_reg = str(entry.get("v_cache", "iq4_nl")) if entry.get("v_cache") else "iq4_nl"
         ukv_reg = entry.get("useUnifiedKvCache", False)

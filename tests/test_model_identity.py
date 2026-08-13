@@ -70,6 +70,17 @@ class TestNormalizeForConfig:
         assert normalize_for_config("ERNIE-4.5-21B-A3B-PT-GGUF") == "ernie-4-5-21b-a3b-pt"
         assert normalize_for_config("Model-MXFP4") == "model"
 
+    def test_dir_three_part_quant_suffix_stripped(self) -> None:
+        # JetBrains-Naming: "...-GGUF-Q4_K_M" -> "-q4-k-m" (3-teilig)
+        assert (
+            normalize_for_config("JetBrains/Mellum2-12B-A2.5B-Instruct-GGUF-Q4_K_M")
+            == "mellum2-12b-a2-5b-instruct"
+        )
+        assert (
+            normalize_for_config("Model-Q3_K_S")
+            == "model"
+        )
+
 
 class TestNormalizeLmsModelName:
     def test_quant_suffix_stripped(self) -> None:
@@ -130,8 +141,14 @@ class TestMatchRegistryKey:
         assert match_registry_key("GLM-4.6V-Flash", _REGISTRY_KEYS) == "zai-org/glm-4.6v-flash"
 
     def test_ambiguous_prefix_returns_none(self) -> None:
-        # "GLM-REAP-..." ist Praefix von BEIDEN glm-4.7-flash Keys -> mehrdeutig
-        assert match_registry_key("GLM-4.7-Flash-REAP-23B-A3B-Q4_K_S", _REGISTRY_KEYS) is None
+        # "GLM-REAP-..." (ohne Quant) ist Praefix von BEIDEN glm-4.7-flash Keys -> mehrdeutig
+        assert match_registry_key("GLM-4.7-Flash-REAP", _REGISTRY_KEYS) is None
+
+    def test_ambiguous_prefix_with_quant_resolves_exact(self) -> None:
+        # Quant-Suffix wird gestrippt -> eindeutig der REAP-Key (kein Praefix-Fallback)
+        assert match_registry_key("GLM-4.7-Flash-REAP-23B-A3B-Q4_K_S", _REGISTRY_KEYS) == (
+            "unsloth/glm-4.7-flash-reap-23b-a3b"
+        )
 
     def test_unknown_model_returns_none(self) -> None:
         assert match_registry_key("gemma-4-26b-a4b-it", _REGISTRY_KEYS) is None
@@ -201,7 +218,8 @@ class TestFieldOwnership:
 
     def test_config_fields_report_only(self) -> None:
         # Since 2026-08-11: Registry is SSOT, these fields have source="registry"
-        for field in ("num_parallel", "useUnifiedKvCache", "offload", "context_length"):
+        # (num_parallel ist seit 13.08. feste Policy und kein Registry-Feld mehr)
+        for field in ("useUnifiedKvCache", "offload", "context_length"):
             assert resolve(field) is not None
             assert resolve(field).source == "registry"
             assert resolve(field).auto_fix is False
@@ -213,7 +231,7 @@ class TestFieldOwnership:
         d = Drift("n_layers", 32, 48, resolve("n_layers"))
         assert d.auto_fixable is True
         assert "[AUTO-FIX]" in d.report_line()
-        d2 = Drift("num_parallel", 4, 1, resolve("num_parallel"))
+        d2 = Drift("useUnifiedKvCache", True, False, resolve("useUnifiedKvCache"))
         assert d2.auto_fixable is False
         assert "[MELDEN]" in d2.report_line()
 

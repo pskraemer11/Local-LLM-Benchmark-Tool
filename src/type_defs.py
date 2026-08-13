@@ -91,7 +91,6 @@ class RegistryEntry(TypedDict):
     k_cache: str
     v_cache: str
     offload: int | float
-    num_parallel: int
     notes: str
     file_size_bytes: NotRequired[int]
     context_length: NotRequired[int]
