@@ -1045,8 +1045,11 @@ class _WindowsSignalShim:
     raises AttributeError, which its ``except Exception`` catches and retries
     forever (infinite loop -> HumanEval+/MBPP+ never finish). Replacing the
     module-level ``signal`` reference with this shim makes the calls no-ops
-    so the OpenAI requests go through.
+    so the OpenAI requests go through. ``SIGALRM`` is exposed as a dummy
+    attribute because evalplus reads ``signal.SIGALRM`` as well.
     """
+
+    SIGALRM: int = 14
 
     def signal(self, signum: int, handler: object) -> None:
         return None

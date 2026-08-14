@@ -568,6 +568,12 @@ class TestWindowsSignalShim:
         assert hasattr(rb._WindowsSignalShim(), "alarm")
         assert hasattr(rb._WindowsSignalShim(), "signal")
 
+    def test_shim_exposes_sigalrm_attribute(self) -> None:
+        # evalplus liest signal.SIGALRM als Attribut (signal.signal(SIGALRM, handler)).
+        # Ohne dieses Attribut: AttributeError -> Endlos-Retry (Fix 14.08., 2. Iteration).
+        assert hasattr(rb._WindowsSignalShim(), "SIGALRM")
+        assert isinstance(rb._WindowsSignalShim.SIGALRM, int)
+
 
 class TestRunAgentic:
     def test_json_path_uses_safe_identifier_not_slash(self, monkeypatch, tmp_path):
