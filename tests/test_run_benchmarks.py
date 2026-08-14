@@ -549,6 +549,26 @@ class TestEnsureModelStillLoaded:
 # run_agentic – JSON-Pfad (Fix 2026-07-31)
 # ======================================================================
 
+class TestWindowsSignalShim:
+    """Regressionstest für den evalplus-Windows-Fix (14.08.2026).
+
+    evalplus.gen.util.openai_request macht signal.signal/SIGALRM-Aufrufe, die
+    auf Windows nicht existieren. Der _WindowsSignalShim ersetzt das Modul-
+    level `signal` durch No-Ops, damit make_auto_request nicht endlos retried.
+    """
+
+    def test_shim_signal_and_alarm_are_noops(self) -> None:
+        shim = rb._WindowsSignalShim()
+        assert shim.signal(0, None) is None
+        assert shim.alarm(100) == 0
+
+    def test_shim_exposes_alarm_attribute(self) -> None:
+        # evalplus ruft signal.alarm(...) ab - auf echtem Windows-signal fehlt
+        # das Attribut komplett (AttributeError -> Endlos-Retry in make_auto_request).
+        assert hasattr(rb._WindowsSignalShim(), "alarm")
+        assert hasattr(rb._WindowsSignalShim(), "signal")
+
+
 class TestRunAgentic:
     def test_json_path_uses_safe_identifier_not_slash(self, monkeypatch, tmp_path):
         # Fix 2026-07-31: model_identifier mit Slash (z.B. "essentialai/rnj-1@q8_0")

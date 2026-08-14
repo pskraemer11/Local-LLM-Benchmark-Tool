@@ -6,7 +6,17 @@ Hinweise:
 - Stand: 06.08.2026 — umgezogen aus §20 der `doc-git/Architecture, Flow & ChangeLog_en.md` (dort nur noch Verweis).
 - Commit-Hashes beziehen sich auf `main`.
 
-## np-Policy-Refactor + Qwen-Nachlauf + Pass-2 + Top-Candidates (13.08.2026, abends)
+## 3 Benchmark-Fehler behoben (14.08.2026, Fix-Verifikation läuft)
+
+| Date | File | Change |
+|------|------|--------|
+| 14.08. | `src/run_benchmarks.py` | **EvalPlus make_model-Fix:** evalplus 0.3.1 `make_model()` forwardet `max_new_tokens` NICHT (openai-Backend → OpenAIChatDecoder mit Default 768). Kwarg aus dem Aufruf entfernt, `model_obj.max_new_tokens = max_tokens` nach der Erzeugung gesetzt → HumanEval+/MBPP+ `unexpected keyword argument 'max_new_tokens'` behoben |
+| 14.08. | `src/run_benchmarks.py` | **EvalPlus Windows-SIGALRM-Fix (`_WindowsSignalShim`):** evalplus `make_auto_request` (gen/util/openai_request.py) nutzt `signal.alarm`/`SIGALRM` für Request-Timeouts — auf Windows existiert `signal.alarm` NICHT → `AttributeError`, das `except Exception` in evalplus **endlos retried** (echte Ursache dafür, dass HumanEval+/MBPP+ auf Windows nie durchliefen; wurde erst nach dem `max_new_tokens`-Fix sichtbar). Shim ersetzt das Modul-`signal` durch No-Ops (analog MATH-500-Fix 15.07.). + 2 Regressionstests `TestWindowsSignalShim` |
+| 14.08. | `src/custom_benchmark.py` | **REAP-Key-Auflösung (`_resolve_models`):** tolerantes Key-Matching (Basis-Key-Vergleich ohne `@quant`) statt exaktem `m["key"] == args.model_key`. Registry-Key `crucible-labs/gemma4-26b-a4b-reap-25@mixed` matcht jetzt den LMS modelKey → vorher `Model not found` + `sys.exit(1)` → leerer DS1000/CoderEval-Lauf („Benchmark complete" in 3s, Score 0) |
+| 14.08. | `src/custom_benchmark.py` | **`_model_supports_reasoning` Basis-Key-Fix:** Basis-Keys (ohne `@quant`) im Cache abgebildet (analog Launcher-Fix `_load_registry_for_context` 13.08.) → Quant-less LMS modelKey auf `@mixed`-Registry-Einträge (REAP) → `None`-Silent-Skip behoben |
+| 14.08. | `tests/test_custom_benchmark.py` | **9 neue Tests** (TestResolveModels ×4, TestModelSupportsReasoning ×4, TestResolveModels-Mock-Infrastruktur) — deckt REAP-`@mixed`-Key-Matching + Basis-Key-`reasoning`-Cache ab |
+| 14.08. | Umgebung | **tool_eval_bench 2.0.7 in Python 3.12 nachinstalliert** (Commit `f8117c3`, identisch zu 3.14). Das Paket war nur unter Python 3.14 installiert, der Launcher-Subprozess (`sys.executable`) nutzt aber 3.12 → Agentic `ModuleNotFoundError: No module named 'tool_eval_bench'` behoben |
+| 14.08. | gesamt | Verifikation: 242 relevante Tests grün, src ruff-clean; Commit `db52ecef`; **Verifikationslauf** (`run.verify-fixes.yaml`, Gemma4-REAP, SS=10) läuft |
 
 | Date | File | Change |
 |------|------|--------|

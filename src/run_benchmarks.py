@@ -1035,10 +1035,43 @@ def run_custom_benchmark(model_info: AvailableModelInfo, bench: BenchmarkDef, sa
 #   3. evalplus.evaluate -> differential testing with plus_input
 # Uses evalplus-native datasets (humanEval, mbpp).
 # Returns: dict with pipeline="evalplus", score pass@1 (0-1).
+
+class _WindowsSignalShim:
+    """No-op stand-in for the `signal` module attribute lookups evalplus uses.
+
+    evalplus.gen.util.openai_request calls ``signal.signal(SIGALRM, handler)``
+    and ``signal.alarm(...)`` for request timeouts. Both are UNIX-only: on
+    Windows ``signal.alarm`` does not exist, so evalplus' ``make_auto_request``
+    raises AttributeError, which its ``except Exception`` catches and retries
+    forever (infinite loop -> HumanEval+/MBPP+ never finish). Replacing the
+    module-level ``signal`` reference with this shim makes the calls no-ops
+    so the OpenAI requests go through.
+    """
+
+    def signal(self, signum: int, handler: object) -> None:
+        return None
+
+    def alarm(self, seconds: int) -> int:
+        return 0
+
+
 def run_evalplus(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_size: int = 5, seed: int | None = None, is_reasoning_model: bool = False, num_parallel: int = 1) -> PipelineResult | None:
     # Some models (e.g. DeepSeek Coder) generate regex patterns like "\d+"
     # instead of r"\d+", causing SyntaxWarning spam from Python 3.12+.
     warnings.filterwarnings("ignore", category=SyntaxWarning)
+
+    # evalplus' make_auto_request (gen/util/openai_request.py) uses
+    # signal.alarm/SIGALRM for request timeouts - both are UNIX-only. On
+    # Windows, signal.alarm does not exist, so the first codegen request
+    # raises AttributeError, which make_auto_request's `except Exception`
+    # catches and retries forever (infinite loop). Patch the module-level
+    # signal reference to no-ops so the OpenAI requests go through.
+    if os.name == "nt":
+        try:
+            from evalplus.gen.util import openai_request as _evalplus_openai_request
+            _evalplus_openai_request.signal = _WindowsSignalShim()
+        except ImportError:
+            pass
 
     model_identifier = model_info["key"]
     model_display = model_info["display"]
