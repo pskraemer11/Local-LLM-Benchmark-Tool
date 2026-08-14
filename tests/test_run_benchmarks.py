@@ -575,6 +575,44 @@ class TestWindowsSignalShim:
         assert isinstance(rb._WindowsSignalShim.SIGALRM, int)
 
 
+class TestEvalplusSubsetEval:
+    """Regressionstests für die Subset-Evaluation (16.08.2026).
+
+    evalplus' evaluate() lädt das volle Dataset (164/378 Tasks) und assertiert
+    len(completion_id) == len(problems) -> AssertionError bei Stichproben.
+    evalplus_subset_eval.py bewertet nur die gesampelten Tasks.
+    """
+
+    def test_module_importable_and_exposes_main(self) -> None:
+        import evalplus_subset_eval as ese
+
+        assert callable(ese.main)
+        assert callable(ese._evaluate_subset)
+
+    def test_subset_cache_hash_is_stable_and_base_independent(self) -> None:
+        import evalplus_subset_eval as ese
+
+        h1 = ese._subset_cache_hash("base", ["HumanEval/0", "HumanEval/1"])
+        h2 = ese._subset_cache_hash("base", ["HumanEval/0", "HumanEval/1"])
+        h3 = ese._subset_cache_hash("base", ["HumanEval/1", "HumanEval/0"])
+        h4 = ese._subset_cache_hash("other", ["HumanEval/0", "HumanEval/1"])
+        assert h1 == h2
+        assert h1 == h3  # Reihenfolge egal (sortiert)
+        assert h1 != h4  # Basis-Hash fliesst ein
+        assert h1.startswith("base_subset_")
+
+    def test_windows_signal_timer_shim(self) -> None:
+        # time_limit (evalplus/eval/utils.py) ruft signal.setitimer/signal.signal
+        # ab - UNIX-only. Der Shim muss die Attribute des signal-Moduls anbieten.
+        import evalplus_subset_eval as ese
+
+        if not hasattr(ese, "_WindowsSignalTimerShim"):
+            pytest.skip("nur auf Windows aktiv")
+        shim = ese._WindowsSignalTimerShim()
+        assert shim.setitimer(shim.ITIMER_REAL, 5) == 0
+        assert shim.signal(shim.SIGALRM, None) is None
+
+
 class TestRunAgentic:
     def test_json_path_uses_safe_identifier_not_slash(self, monkeypatch, tmp_path):
         # Fix 2026-07-31: model_identifier mit Slash (z.B. "essentialai/rnj-1@q8_0")

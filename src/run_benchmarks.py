@@ -1247,12 +1247,18 @@ def run_evalplus(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_siz
         except OSError as e:
             print(f"  [WARN] alte eval_results-Datei nicht loeschbar: {old_result}: {e}", file=sys.stderr)
 
-    print(f"  [evaluate] {dataset} ...")
+    # evalplus' evaluate() lädt das VOLle Dataset und assertiert, dass jede
+    # Task des Datasets in den Samples vorkommt (AssertionError "Missing
+    # problems in samples"). Bei Stichproben (sample_size < volle Größe) muss
+    # daher eine Subset-Evaluation laufen, die nur die gesampelten Tasks
+    # bewertet. Output-Format ist identisch zur evalplus-CLI.
+    print(f"  [evaluate] {dataset} ({n_select} tasks) ...")
+    evalplus_subset_script = os.path.join(_SRC_DIR, "evalplus_subset_eval.py")
     r2 = subprocess.run(
-        [sys.executable, "-m", "evalplus.evaluate",
+        [sys.executable, evalplus_subset_script,
          "--dataset", dataset,
          "--samples", samples_path,
-         "--i_just_wanna_run"],
+         "--parallel", str(num_parallel)],
         capture_output=True, text=True, timeout=eval_timeout,
         encoding="utf-8", errors="replace"
     )
