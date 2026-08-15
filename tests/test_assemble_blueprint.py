@@ -403,3 +403,83 @@ class TestFindRegistryKeyForConfig:
             key=lambda x: -len(x[0]),
         )
         assert find_registry_key_for_config(self._norm("unsloth/ernie-4.5-21b-a3b-pt"), reg) == {"context_length": 45371}
+
+
+# =========================================================================
+# resolve_template_name / blueprint_features (Blueprint SSOT, Refactor 14.08.)
+# =========================================================================
+
+class TestResolveTemplateName:
+    def test_template_map_substring_match(self):
+        bp = {"template_map": {"12b": "a.jinja", "26b": "c.jinja", "19b": "b.jinja"}}
+        assert ab.resolve_template_name(bp, "gemma-4-12b-it") == "a.jinja"
+        assert ab.resolve_template_name(bp, "gemma4-26b-a4b") == "c.jinja"
+        assert ab.resolve_template_name(bp, "gemma-4-19b") == "b.jinja"
+
+    def test_template_map_first_match_wins(self):
+        bp = {"template_map": {"gemma-4": "g.jinja", "12b": "12.jinja"}}
+        assert ab.resolve_template_name(bp, "gemma-4-12b") == "g.jinja"
+
+    def test_direct_template_fallback(self):
+        bp = {"template": "direct.jinja"}
+        assert ab.resolve_template_name(bp, "any-model") == "direct.jinja"
+
+    def test_template_map_beats_direct_template(self):
+        bp = {"template_map": {"12b": "map.jinja"}, "template": "direct.jinja"}
+        assert ab.resolve_template_name(bp, "gemma-4-12b") == "map.jinja"
+
+    def test_none_or_empty(self):
+        assert ab.resolve_template_name(None, "x") is None
+        assert ab.resolve_template_name({}, "x") is None
+        assert ab.resolve_template_name({"role": "r"}, "x") is None
+
+    def test_case_insensitive(self):
+        bp = {"template_map": {"12B": "a.jinja"}}
+        assert ab.resolve_template_name(bp, "gemma-4-12b") == "a.jinja"
+
+    def test_dots_match_hyphens(self):
+        # Registry-Key normalisiert Punkte zu Bindestrichen (granite-4.1 -> granite-4-1).
+        bp = {"template_map": {"granite-4.1-30b": "g30.jinja", "granite-4.0": "g0.jinja"}}
+        assert ab.resolve_template_name(bp, "ibm-granite/granite-4-1-30b@q3_k_s") == "g30.jinja"
+        assert ab.resolve_template_name(bp, "ibm-granite/granite-4-0-h-tiny@q8_0") == "g0.jinja"
+
+    def test_hyphen_pattern_matches_dot_name(self):
+        bp = {"template_map": {"granite-4-1": "g.jinja"}}
+        assert ab.resolve_template_name(bp, "granite-4.1-30b") == "g.jinja"
+
+
+class TestBlueprintFeatures:
+    def test_returns_empty_for_unknown_blueprint(self):
+        assert ab.blueprint_features("does-not-exist", "m") == {}
+
+    def test_gptoss_stop_strings(self):
+        f = ab.blueprint_features("gptoss_reasoning", "gpt-oss-20b")
+        assert f["stop_strings"] == ["<|return|>"]
+        assert f["template"] == "gpt-oss-20b_harmony.jinja"
+
+    def test_gemma_template_map_and_parsing(self):
+        f = ab.blueprint_features("gemma_reasoning", "gemma4-26b-a4b")
+        assert f["template"] == "gemma4-26b-template_minijinja.jinja"
+        assert f["reasoning_parsing"]["enabled"] is False
+
+    def test_gemma_thinking_by_category(self):
+        # Fix 15.08.: Kategorie-basierte Thinking-Steuerung (SSOT) statt
+        # unkonditionalem <|think|>-Modul. Coding/Agentic aus, Math/Knowledge an.
+        f = ab.blueprint_features("gemma_reasoning", "gemma4-26b-a4b")
+        cats = f["enable_thinking_by_category"]
+        assert cats == {"coding": False, "agentic": False, "knowledge": True, "math": True}
+
+    def test_gemma_think_token_module_removed(self):
+        # Fix 15.08. (Bug B): gemma_think_token-Modul wurde aus dem
+        # gemma_reasoning-Blueprint entfernt - es darf nicht mehr in der
+        # Modulliste auftauchen.
+        bp = ab.load_blueprint_defs().get("blueprints", {}).get("gemma_reasoning")
+        assert bp is not None
+        assert "gemma_think_token" not in bp.get("modules", [])
+
+    def test_gemma_12b_picks_smaller_template(self):
+        f = ab.blueprint_features("gemma_reasoning", "gemma-4-12b-it")
+        assert f["template"] == "gemma4_12b_template_minijinja.jinja"
+
+    def test_no_features_returns_empty(self):
+        assert ab.blueprint_features("reasoning_assistant", "plain-7b") == {}

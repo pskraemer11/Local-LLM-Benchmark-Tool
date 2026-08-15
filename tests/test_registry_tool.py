@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -901,3 +902,97 @@ class TestPipelineDriftExitCode:
     def test_non_drift_errors_do_not_exit(self):
         # template_missing_file etc. sind keine Melde-Konflikte -> kein Exit
         assert self._run_pipeline({"template_missing_file": ["unsloth/x: fehlt"]}) is None
+
+
+# =========================================================================
+# _registry_template_name (Blueprint SSOT, Refactor 14.08.)
+# =========================================================================
+
+class TestRegistryTemplateName:
+    def test_resolves_from_blueprint_template_map(self):
+        # gemma4-26b -> gemma_reasoning -> template_map 26b
+        name = rt._registry_template_name("unsloth/gemma-4-26b-a4b-it@iq3_s")
+        assert name == "gemma4-26b-template_minijinja.jinja"
+
+    def test_resolves_from_blueprint_direct_template(self):
+        # openai/gpt-oss-20b@mxfp4 -> gptoss_reasoning -> template
+        name = rt._registry_template_name("openai/gpt-oss-20b@mxfp4")
+        assert name == "gpt-oss-20b_harmony.jinja"
+
+    def test_legacy_registry_field_fallback(self):
+        # Blueprint ohne Template -> Fallback auf das (veraltete) Registry-Feld.
+        fake_reg = {"unsloth/legacy-model@q4_k_m": {"blueprint": "default_chat", "template": "legacy.jinja"}}
+        with patch.object(rt, "load_registry", return_value=fake_reg), \
+             patch.object(rt, "_load_blueprints", return_value={"default_chat": {"role": "r"}}):
+            name = rt._registry_template_name("unsloth/legacy-model@q4_k_m")
+        assert name == "legacy.jinja"
+
+    def test_returns_none_when_no_template_anywhere(self):
+        name = rt._registry_template_name("lmstudio-community/plain-7b@q4_k_m")
+        assert name is None
+
+
+# =========================================================================
+# glm_patch_config (Fix 14.08.: GLM sind Reasoning-Modelle -> parsing enabled)
+# =========================================================================
+
+class TestGlmPatchConfig:
+    def _config(self, enabled: bool | None = None) -> dict:
+        fields = [{"key": "llm.prediction.structured", "value": {"type": "json_object"}}]
+        if enabled is not None:
+            fields.append({"key": "llm.prediction.reasoning.parsing",
+                           "value": {"enabled": enabled,
+                                     "startString": " thinking",
+                                     "endString": " response"}})
+        return {"operation": {"fields": fields}}
+
+    def _write(self, tmp_path, data) -> Path:
+        p = tmp_path / "glm.json"
+        p.write_text(json.dumps(data), encoding="utf-8")
+        return p
+
+    def _parsing(self, data) -> dict:
+        return next(f for f in data["operation"]["fields"]
+                    if f["key"] == "llm.prediction.reasoning.parsing")
+
+    def test_sets_parsing_enabled_when_false(self, tmp_path: Path) -> None:
+        p = self._write(tmp_path, self._config(enabled=False))
+        with patch.object(rt, "_pre_backup_path", return_value=str(tmp_path / "backup.json")):
+            changed, actions, _ = rt.glm_patch_config(str(p))
+        assert changed is True
+        assert "reasoning.parsing enabled" in actions
+        assert self._parsing(json.loads(p.read_text(encoding="utf-8")))["value"]["enabled"] is True
+
+    def test_adds_parsing_when_missing(self, tmp_path: Path) -> None:
+        p = self._write(tmp_path, self._config(enabled=None))
+        with patch.object(rt, "_pre_backup_path", return_value=str(tmp_path / "backup.json")):
+            changed, actions, _ = rt.glm_patch_config(str(p))
+        assert changed is True
+        assert "reasoning.parsing added (enabled)" in actions
+        rp = self._parsing(json.loads(p.read_text(encoding="utf-8")))
+        assert rp["value"]["enabled"] is True
+        assert rp["value"]["startString"] == " thinking"
+        assert rp["value"]["endString"] == " response"
+
+    def test_leaves_enabled_config_untouched(self, tmp_path: Path) -> None:
+        p = self._write(tmp_path, self._config(enabled=True))
+        with patch.object(rt, "_pre_backup_path", return_value=str(tmp_path / "backup.json")):
+            changed, actions, _ = rt.glm_patch_config(str(p))
+        assert changed is False
+        assert actions == []
+
+    def test_removes_structured_field(self, tmp_path: Path) -> None:
+        p = self._write(tmp_path, self._config(enabled=False))
+        with patch.object(rt, "_pre_backup_path", return_value=str(tmp_path / "backup.json")):
+            rt.glm_patch_config(str(p))
+        data = json.loads(p.read_text(encoding="utf-8"))
+        keys = [f["key"] for f in data["operation"]["fields"]]
+        assert "llm.prediction.structured" not in keys
+
+    def test_dry_run_writes_nothing(self, tmp_path: Path) -> None:
+        p = self._write(tmp_path, self._config(enabled=False))
+        original = p.read_text(encoding="utf-8")
+        changed, _actions, backup = rt.glm_patch_config(str(p), dry_run=True)
+        assert changed is True
+        assert backup is None
+        assert p.read_text(encoding="utf-8") == original

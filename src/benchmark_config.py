@@ -803,14 +803,55 @@ def get_model_config(model_identifier: str, category: str = "coding", is_thinkin
     lms = _lms_generation_config(model_identifier)
     if lms:
         # Nur Nicht-Temperatur-Felder uebernehmen (Sampling-Design 2026-08-06).
+        # enable_thinking wird NICHT blind uebernommen: Kategorie-basierte
+        # Steuerung via Blueprint-Feld schlaegt die JSON-Config (Fix 15.08. -
+        # Gemma-Configs mit budgetTokens=2048 haetten sonst Thinking in allen
+        # Kategorien erzwungen, auch Coding).
         for k in ("top_k", "min_p", "enable_thinking", "reasoning_effort"):
             if k in lms:
                 config[k] = lms[k]
-    # Thinking-Flag: force enable_thinking=True fuer Reasoning-Modelle
+    # Blueprint-SSOT: stop_strings + reasoning_parsing aus blueprint_definitions.yaml
+    # (Refactor 14.08. - Registry-`template:`-Feld ist veraltet).
+    bp_features = _blueprint_features(model_identifier)
+    if bp_features.get("stop_strings"):
+        config["stop"] = bp_features["stop_strings"]
+    if bp_features.get("reasoning_parsing"):
+        config["reasoning_parsing"] = bp_features["reasoning_parsing"]
+    # Kategorie-basierte Thinking-Steuerung aus dem Blueprint (SSOT, 15.08.):
+    # ueberschreibt den LMS-Config-Wert (budgetTokens). Reihenfolge: zuerst die
+    # Kategorie-Steuerung anwenden, damit das --thinking-Flag danach als Force
+    # gewinnen kann (siehe unten).
+    bp_thinking = bp_features.get("enable_thinking_by_category")
+    if isinstance(bp_thinking, dict) and cat in bp_thinking:
+        config["enable_thinking"] = bp_thinking[cat]
+    # Thinking-Flag: force enable_thinking=True fuer Reasoning-Modelle (gewinnt)
     if is_thinking_model:
         config["enable_thinking"] = True
     config["_source"] = source
     return config
+
+
+def _blueprint_features(model_identifier: str) -> dict[str, Any]:
+    """Modellspezifika (stop_strings/reasoning_parsing) aus blueprint_definitions.yaml.
+
+    Single Source of Truth seit 14.08. (Registry-`template:`-Feld veraltet):
+    Registry liefert nur den Blueprint-Namen, die Detailwerte kommen aus der
+    Blueprint-Definition. Liefert {} wenn Modell nicht aufloesbar.
+    """
+    if not model_identifier:
+        return {}
+    try:
+        from assemble_blueprint import blueprint_features
+    except ImportError:
+        return {}
+    reg = _load_quant_registry()
+    if not reg:
+        return {}
+    key = match_registry_key(model_identifier, list(reg.keys()))
+    if key is None:
+        return {}
+    bp_name = (reg.get(key) or {}).get("blueprint") or "default_chat"
+    return blueprint_features(bp_name, model_identifier)
 
 
 def _sampling_cell(model_identifier: str, cat: str) -> tuple[float, float, str] | None:

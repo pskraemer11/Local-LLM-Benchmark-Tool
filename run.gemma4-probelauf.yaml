@@ -1,0 +1,18 @@
+# Probelauf (14.08.): Zweites Gemma-4-Modell nach Blueprint-Umstellung auf gemma_reasoning.
+# Verifiziert die modellspezifische Konfiguration (Systemprompt + Jinja-Template) fuer
+# alle Gemma-4-Varianten; je eine Benchmark aus jeder Pipeline.
+# SS=10 (Funktionscheck), np=4, seed 2026
+# Verwendung: python src\run_benchmarks.py --run-spec run.gemma4-probelauf.yaml
+
+models:
+  - "unsloth/gemma-4-26b-a4b-it@iq3_s"
+
+benchmarks: ["DS1000", "HumanEval+", "MATH-500", "Agentic"]
+
+sample_size: 10
+seed: 2026
+agentic_mode: "random"
+thinking: false
+no_structured_output: false
+unload_between: false
+keep_response: false

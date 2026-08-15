@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 import pytest
 
 from benchmark_config import GPTOSS_REASONING_EFFORT, GPTOSS_REASONING_BUDGET, get_model_config, get_quant
-from custom_benchmark import _uses_qwen_template, strip_thinking_tokens, _can_use_structured_output
+from custom_benchmark import _supports_chat_template_kwargs, strip_thinking_tokens, _can_use_structured_output
 from csv_writer import _truncate_response
 
 # Synthetische Registry für get_quant-Fallback-Tests: unabhängig von der
@@ -304,23 +304,29 @@ class TestGptOssReasoningConstants:
         assert GPTOSS_REASONING_EFFORT == "medium"
 
 
-class TestUsesQwenTemplate:
-    """_uses_qwen_template: Qwen-basierte Templates unterstuetzen chat_template_kwargs."""
+class TestSupportsChatTemplateKwargs:
+    """_supports_chat_template_kwargs: Qwen- und Gemma-Templates unterstuetzen chat_template_kwargs."""
 
     def test_qwen3(self):
-        assert _uses_qwen_template("lmstudio-community/qwen3-8b") is True
+        assert _supports_chat_template_kwargs("lmstudio-community/qwen3-8b") is True
 
     def test_qwen3_5(self):
-        assert _uses_qwen_template("lmstudio-community/qwen3.5-8b") is True
+        assert _supports_chat_template_kwargs("lmstudio-community/qwen3.5-8b") is True
 
     def test_deepseek_r1_distill_qwen(self):
-        assert _uses_qwen_template("lmstudio-community/deepseek-r1-distill-qwen-14b") is True
+        assert _supports_chat_template_kwargs("lmstudio-community/deepseek-r1-distill-qwen-14b") is True
+
+    def test_gemma4(self):
+        assert _supports_chat_template_kwargs("gemma-4-19b-a4b-it-reap-i1@q4_k_m") is True
+
+    def test_gemma4_12b(self):
+        assert _supports_chat_template_kwargs("gemma-4-12b-it-qat@q4_k_xl") is True
 
     def test_non_qwen_model(self):
-        assert _uses_qwen_template("lmstudio-community/ministral-8b-instruct-2410") is False
+        assert _supports_chat_template_kwargs("lmstudio-community/ministral-8b-instruct-2410") is False
 
     def test_none(self):
-        assert _uses_qwen_template(None) is False
+        assert _supports_chat_template_kwargs(None) is False
 
 
 class TestCanUseStructuredOutput:

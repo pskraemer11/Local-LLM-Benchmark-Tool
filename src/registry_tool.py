@@ -110,6 +110,7 @@ from assemble_blueprint import (
     normalize_for_config,
     normalize_model_name,
     read_lms_configs,
+    resolve_template_name,
     validate_prompts,
 )
 from benchmark_config import (
@@ -1933,22 +1934,60 @@ def cmd_fill_reasoning() -> None:
 
 TEMPLATE_DIR = PROJECT_ROOT / "doc-git" / "Jinja-Chat-Templates"
 
+_BLUEPRINT_CACHE: dict[str, Any] | None = None
+
+
+def _load_blueprints() -> dict[str, Any]:
+    """Load blueprint_definitions.yaml (SSOT fuer custom templates/stop-strings)."""
+    global _BLUEPRINT_CACHE
+    if _BLUEPRINT_CACHE is None:
+        from ruamel.yaml import YAML
+        y = YAML()
+        bp_path = PROJECT_ROOT / "doc-git" / "blueprint_definitions.yaml"
+        with open(bp_path, encoding="utf-8") as f:
+            data = y.load(f)
+        _BLUEPRINT_CACHE = (data or {}).get("blueprints", {})
+    return _BLUEPRINT_CACHE
+
+
+def _registry_template_name(model_key: str) -> str | None:
+    """Template-Dateiname fuer einen Registry-Key (Blueprint SSOT, legacy fallback).
+
+    Quelle ist die Blueprint-Definition (``template_map`` per Modellname-Match
+    oder ``template``); das Registry-``template:``-Feld gilt als veraltet und
+    wird nur als Fallback genutzt.
+    """
+    reg = load_registry()
+    entry = reg.get(model_key) or {}
+    bp_name = entry.get("blueprint") or "default_chat"
+    bp = _load_blueprints().get(bp_name) or {}
+    name = resolve_template_name(bp, model_key)
+    if name:
+        return name
+    tpl = entry.get("template")
+    return str(tpl) if tpl else None
+
 
 def cmd_sync_templates() -> None:
-    """Write promptTemplate from registry template files into configs missing it.
+    """Write promptTemplate from blueprint-defined templates into configs missing it.
 
-    Registry-driven (kein hardcodiertes Modell-Listing): jedes Registry-Entry
-    mit ``template:`` wird gegen seine Config geprueft; fehlt/leer ist das Feld
-    ``llm.prediction.promptTemplate``, wird der Inhalt der .jinja-Datei geschrieben.
-    Behebt die validate-Kategorie ``template_missing_config``.
+    Blueprint-driven (SSOT): jedes Registry-Entry, dessen Blueprint eine
+    ``template``/``template_map``-Definition besitzt, wird gegen seine Config
+    geprueft; fehlt/leer ist das Feld ``llm.prediction.promptTemplate``, wird
+    der Inhalt der .jinja-Datei geschrieben. Behebt die validate-Kategorie
+    ``template_missing_config``. Das Registry-``template:``-Feld gilt als
+    veraltet (Fallback).
     """
     reg = load_registry()
     cfgs = read_lms_configs(CONFIG_ROOT)
     added = skipped = errors = 0
     for model_key, entry in reg.items():
-        if not isinstance(entry, dict) or not entry.get("template"):
+        if not isinstance(entry, dict):
             continue
-        tpl_path = TEMPLATE_DIR / entry["template"]
+        tpl_name = _registry_template_name(model_key)
+        if not tpl_name:
+            continue
+        tpl_path = TEMPLATE_DIR / tpl_name
         if not tpl_path.exists():
             print(f"  [ERROR] {model_key}: Template-Datei fehlt ({tpl_path})")
             errors += 1
@@ -2225,11 +2264,13 @@ def cmd_validate(verbose: bool = False, repro: bool = False) -> dict[str, Any]:
         "gguf_header_drift": [],
     }
 
-    # ── Check 1: template: references existent .jinja file ─────────
+    # ── Check 1: template references existent .jinja file ─────────
+    # Quelle ist die Blueprint-Definition (SSOT); Registry-`template:`-Feld ist
+    # veraltet und wird nur als Fallback herangezogen.
     for model_key, entry in reg.items():
         if not isinstance(entry, dict):
             continue
-        tpl = entry.get("template")
+        tpl = _registry_template_name(model_key)
         if tpl:
             tpl_path = TEMPLATE_DIR / tpl
             if not tpl_path.exists():
@@ -2237,14 +2278,17 @@ def cmd_validate(verbose: bool = False, repro: bool = False) -> dict[str, Any]:
                     f"{model_key}: template='{tpl}' -> Datei nicht gefunden ({tpl_path})"
                 )
 
-    # ── Check 2: YAML template: -> Config JSON promptTemplate ──────
+    # ── Check 2: blueprint template -> Config JSON promptTemplate ──
     for model_key, entry in reg.items():
-        if not isinstance(entry, dict) or not entry.get("template"):
+        if not isinstance(entry, dict):
+            continue
+        tpl = _registry_template_name(model_key)
+        if not tpl:
             continue
         match = find_config_for_registry_key(model_key, cfgs)
         if match is None:
             errors["template_missing_config"].append(
-                f"{model_key}: template='{entry['template']}' in YAML, "
+                f"{model_key}: template='{tpl}' definiert, "
                 f"aber Config-JSON nicht gefunden (auch nach fallback matching)"
             )
             continue
@@ -2263,7 +2307,7 @@ def cmd_validate(verbose: bool = False, repro: bool = False) -> dict[str, Any]:
                 break
         if not has_pt:
             errors["template_missing_config"].append(
-                f"{model_key}: template='{entry['template']}' in YAML, "
+                f"{model_key}: template='{tpl}' definiert, "
                 f"aber promptTemplate in Config fehlt/leer ({json_path})"
             )
 
@@ -2514,7 +2558,7 @@ def cmd_pipeline(mode: str = "status", ignore_drift: bool = False) -> None:
     if mode == "full":
         print("[5] Prompt-Assembly ...")
         assemble_prompts(preview_only=False)
-        print("[5a] GLM-Configs verankern (parsing disabled, kein JSON-Zwang) ...")
+        print("[5a] GLM-Configs verankern (reasoning parsing enabled, kein JSON-Zwang) ...")
         cmd_patch_glm_configs()
         print("[6] Validierung ...")
         validate_prompts()
@@ -2653,17 +2697,20 @@ def glm_patch_config(path: str, dry_run: bool = False) -> tuple[bool, list[str],
     # 1) structured-Feld entfernen (erzwingt JSON-Ausgabe)
     fields = [f for f in fields if f.get("key") != "llm.prediction.structured"]
 
-    # 2) reasoning.parsing deaktivieren (strippt sonst allen Content)
+    # 2) reasoning.parsing AKTIVIEREN: GLM sind Reasoning-Modelle, der
+    #    ` thinking…response`-Block muss aus `content` gestrippt werden
+    #    (enabled:false leakt den Block und bricht JSON-Mode; siehe
+    #    `Model Specific Hints/GLM 4.5 - 4.7_Structured Output_en.md`).
     for f in fields:
         if f.get("key") == "llm.prediction.reasoning.parsing":
-            if isinstance(f.get("value"), dict) and f["value"].get("enabled") is True:
-                f["value"]["enabled"] = False
-                actions.append("reasoning.parsing disabled")
+            if isinstance(f.get("value"), dict) and f["value"].get("enabled") is not True:
+                f["value"]["enabled"] = True
+                actions.append("reasoning.parsing enabled")
             break
     else:
         fields.append({"key": "llm.prediction.reasoning.parsing",
-                       "value": {"enabled": False, "startString": " thinking", "endString": " response"}})
-        actions.append("reasoning.parsing added (disabled)")
+                       "value": {"enabled": True, "startString": " thinking", "endString": " response"}})
+        actions.append("reasoning.parsing added (enabled)")
 
     # 3) stopStrings: " response"-Eintraege entfernen (stoppen vor dem Content)
     for f in fields:
@@ -2699,7 +2746,7 @@ def glm_patch_config(path: str, dry_run: bool = False) -> tuple[bool, list[str],
 
 
 def cmd_patch_glm_configs(dry_run: bool = False) -> None:
-    """Traegt GLM-Configs die Empirisch-Fixes nach (parsing disabled, kein JSON-Zwang)."""
+    """Traegt GLM-Configs die Reasoning-Fixes nach (parsing enabled, kein JSON-Zwang)."""
     configs = find_glm_configs()
     if not configs:
         print(f"[WARN] Keine GLM-Konfigurationsdateien unter {CONFIG_ROOT} gefunden")

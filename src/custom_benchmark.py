@@ -857,15 +857,20 @@ def _extract_reasoning_delta(delta: dict) -> str:
     return reasoning or ""
 
 
-def _uses_qwen_template(model_identifier: str | None) -> bool:
-    """True if the model uses the Qwen chat template.
+def _supports_chat_template_kwargs(model_identifier: str | None) -> bool:
+    """True if the model's chat template supports ``chat_template_kwargs``.
 
-    chat_template_kwargs (enable_thinking / reasoning_effort) is only
-    supported by Qwen-based templates. This covers Qwen3/Qwen3.5 and
-    Qwen-based distills (e.g. deepseek-r1-distill-qwen-14b), which ship
-    a Qwen2 arch with the Qwen chat template.
+    ``chat_template_kwargs`` (enable_thinking / reasoning_effort) is the only
+    API-level thinking control and is supported by chat templates that render
+    ``enable_thinking``:
+      - Qwen3/Qwen3.5 and Qwen-based distills (Qwen2 arch, Qwen template)
+      - Gemma-4 (minijinja templates render ``<|think|>`` when
+        ``enable_thinking`` is truthy; fixed 15.08. — previously only Qwen
+        was covered, so Gemma never received the flag and the JSON-config
+        budget (2048) kept thinking active for ALL Gemma benchmarks).
     """
-    return bool(model_identifier) and "qwen" in model_identifier.lower()
+    name = (model_identifier or "").lower()
+    return "qwen" in name or "gemma" in name
 
 
 def generate_answer(cfg: GenerationConfig) -> tuple[str | None, float, int, int, float, int, bool, str | None, str | None]:
@@ -911,7 +916,7 @@ def generate_answer(cfg: GenerationConfig) -> tuple[str | None, float, int, int,
     #   LM Studio GUI per Modell gesetzt (Slider); siehe Recovery.
     #
     if cfg.is_thinking_enabled is False:
-        if _uses_qwen_template(cfg.model_identifier):
+        if _supports_chat_template_kwargs(cfg.model_identifier):
             body["chat_template_kwargs"] = {"enable_thinking": False}
     elif cfg.is_thinking_enabled is not None or cfg.reasoning_effort is not None:
         kwargs = {}
@@ -919,7 +924,7 @@ def generate_answer(cfg: GenerationConfig) -> tuple[str | None, float, int, int,
             kwargs["enable_thinking"] = cfg.is_thinking_enabled
         if cfg.reasoning_effort is not None:
             kwargs["reasoning_effort"] = cfg.reasoning_effort
-        if _uses_qwen_template(cfg.model_identifier):
+        if _supports_chat_template_kwargs(cfg.model_identifier):
             body["chat_template_kwargs"] = kwargs
     if cfg.stop:
         body["stop"] = cfg.stop

@@ -18,6 +18,9 @@ blueprints:
       - coding_principles
       - safety_block
       - output_style_technical
+    template_map:
+      granite-4.0: granite-4.0-h-tiny_template.jinja
+      granite-4.1-30b: granite-4.1-30b_template.jinja
   reasoning_assistant:
     description: Reasoning/Thinking-Modell (instruct-mode)
     role: You are an AI assistant that analyzes problems carefully and provides well-reasoned
@@ -49,6 +52,14 @@ blueprints:
       - safety_block
       - output_style_default
     custom_template: true
+    template_map:
+      12b: gemma4_12b_template_minijinja.jinja
+      19b: gemma4-19b-template_minijinja.jinja
+      26b: gemma4-26b-template_minijinja.jinja
+    reasoning_parsing:
+      enabled: false
+      startString: " thinking"
+      endString: " response"
   gemma_reasoning:
     description: Gemma-4 spezifisch (Thinking via <|think|>)
     role: You are Gemma-4, a helpful AI assistant.
@@ -56,11 +67,23 @@ blueprints:
       for {capabilities}{type_label}.
     modules:
       - gemma_capabilities
-      - gemma_think_token
       - coding_principles
       - safety_block
       - output_style_default
     custom_template: true
+    template_map:
+      12b: gemma4_12b_template_minijinja.jinja
+      19b: gemma4-19b-template_minijinja.jinja
+      26b: gemma4-26b-template_minijinja.jinja
+    enable_thinking_by_category:
+      coding: false
+      agentic: false
+      knowledge: true
+      math: true
+    reasoning_parsing:
+      enabled: false
+      startString: " thinking"
+      endString: " response"
   gptoss_reasoning:
     description: GPT-OSS Harmony-Format (Reasoning + Coding)
     role: You are GPT-OSS, a helpful AI assistant with coding and reasoning skills.
@@ -72,6 +95,9 @@ blueprints:
       - coding_principles
       - safety_block
       - output_style_technical
+    custom_template: true
+    template: gpt-oss-20b_harmony.jinja
+    stop_strings: ["<|return|>"]
   magistral_reasoning:
     description: Magistral [THINK]-Format (Reasoning + Coding)
     role: You are Magistral, an AI assistant that thinks before answering.
@@ -82,8 +108,9 @@ blueprints:
       - coding_principles
       - safety_block
       - output_style_technical
+    stop_strings: ["[THINK]", "[ANSWER]"]
   phi4_reasoning:
-    description: Phi-4-Reasoning-Plus <think>-Format
+    description: Phi-4-Reasoning-Plus  thinking-Format
     role: You are Phi-4, an AI assistant that reasons step by step before answering.
     role_template: You are {name}, a {arch} model{params_label} by {publisher}, optimized
       for {capabilities}{type_label}.
@@ -92,6 +119,13 @@ blueprints:
       - coding_principles
       - safety_block
       - output_style_technical
+    custom_template: true
+    template: phi-4_template_unsloth.jinja
+    stop_strings: ["<|endoftext|>", "</think>"]
+    reasoning_parsing:
+      enabled: false
+      startString: " thinking"
+      endString: " response"
   ministral_reasoning:
     description: Ministral Reasoning [THINK]-Format
     role: You are Ministral, an AI assistant that reasons before answering.
@@ -102,6 +136,7 @@ blueprints:
       - coding_principles
       - safety_block
       - output_style_technical
+    stop_strings: ["[THINK]", "[ANSWER]"]
   nemotron_reasoning:
     description: Nemotron Cascade Thinking-Format
     role: You are Nemotron, an AI assistant that thinks through problems carefully.
@@ -112,6 +147,7 @@ blueprints:
       - coding_principles
       - safety_block
       - output_style_technical
+    stop_strings: ["<|endoftext|>"]
   apriel_reasoning:
     description: Apriel Thinker [BEGIN FINAL RESPONSE]-Format
     role: You are Apriel, an AI assistant that analyzes problems thoroughly.
@@ -122,6 +158,7 @@ blueprints:
       - coding_principles
       - safety_block
       - output_style_technical
+    stop_strings: ["<|endoftext|>", "[BEGIN FINAL RESPONSE]"]
   none:
     description: No blueprint (audio/vision/etc.)
     role: ''

@@ -862,7 +862,9 @@ def _build_lmeval_cmd(model_identifier: str, api_model: str, subset_task: str, p
     # eos_string only for GPT-OSS; other models use YAML until sequences or generation_parameters
     # (except tasks without until, e.g. IFEval: GGUF-EOS fallback, see run_lmeval)
     if gptoss and "until" not in evaluation_parameters:
-        model_settings["eos_string"] = "<|endoftext|>"
+        # Harmony-EOS (Blueprint-SSOT gptoss_reasoning stop_strings). Bisher
+        # <|endoftext|> (bis 13.08.); korrekt ist <|return|> laut Harmony-Template.
+        model_settings["eos_string"] = "<|return|>"
     elif _lmeval_needs_eos_string(subset_task, evaluation_parameters):
         eos_str = _get_model_eos_string(model_identifier)
         if eos_str:
@@ -971,9 +973,11 @@ def run_custom_benchmark(model_info: AvailableModelInfo, bench: BenchmarkDef, sa
     if _is_qwen3_5_model(model_identifier):
         cmd.append("--qwen-prompt")
     # Thinking mode only when --thinking flag is set (math default now False).
-    # Gemma models are excluded from the --thinking flag: they get
-    # enable_thinking=True via the registry (reasoning: thinking) already.
-    if IS_THINKING_ENABLED and _is_reasoning_model(model_identifier) and not _is_gemma_model(model_identifier):
+    # Gemma models follow the same flag now: category-based thinking is
+    # controlled in get_model_config via the blueprint field
+    # (enable_thinking_by_category, Fix 15.08.); the --thinking flag is the
+    # force override on top.
+    if IS_THINKING_ENABLED and _is_reasoning_model(model_identifier):
         cmd.append("--thinking")
     # Pre-emptive --no-structured-output for reasoning and Mamba models
     # (structured output grammar constraints break thinking tokens / SSM architectures)
@@ -1943,12 +1947,6 @@ def _check_registry_for_model(model_identifier: str, model_display: str) -> bool
                   "`python registry_tool.py sync` ausführen. Überspringe.")
             return None
 
-        tpl = registry[matched_key].get("template")
-        if tpl:
-            from registry_tool import TEMPLATE_DIR
-            if not (TEMPLATE_DIR / tpl).exists():
-                print(f"\n  [WARN] {model_display}: template='{tpl}' -> Datei nicht gefunden")
-
         caps = registry[matched_key].get("capabilities")
         if not caps:
             print(f"\n  [ERROR] {model_display}: capabilities-Feld fehlt - Überspringe.")
@@ -1958,6 +1956,24 @@ def _check_registry_for_model(model_identifier: str, model_display: str) -> bool
         if not bp or bp == "none":
             print(f"\n  [ERROR] {model_display}: blueprint-Feld fehlt oder 'none' - Überspringe.")
             return None
+
+        # Template-Check gegen Blueprint-Definition (SSOT); das Registry-
+        # `template:`-Feld gilt als veraltet und wird nur als Fallback genutzt.
+        tpl = None
+        try:
+            from assemble_blueprint import resolve_template_name
+            from registry_tool import _load_blueprints
+            bp_def = _load_blueprints().get(bp)
+            tpl = resolve_template_name(bp_def, model_identifier)
+        except ImportError:
+            pass
+        if not tpl:
+            tpl = registry[matched_key].get("template")
+        if tpl:
+            from registry_tool import TEMPLATE_DIR
+            if not (TEMPLATE_DIR / tpl).exists():
+                print(f"\n  [WARN] {model_display}: template='{tpl}' -> Datei nicht gefunden")
+                return None
 
         trunc = registry[matched_key].get("truncation")
         if trunc not in ("full", "medium", "minimal"):

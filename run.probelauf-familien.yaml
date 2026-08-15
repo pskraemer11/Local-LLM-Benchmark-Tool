@@ -1,0 +1,31 @@
+# Probelauf (14.08.): Alle Registry-Modelle der 5 Familien mit Jinja-Templates/Steuerung.
+# Gemma-4 (6), GPT-OSS (1), Granite (3), Phi-4 (1), GLM (2) - je 1 Benchmark pro Pipeline.
+# Verifiziert modellspezifische Config (Systemprompt + Jinja-Template + reasoning.parsing).
+# SS=10 (Funktionscheck), np=4, seed 2026
+# Lauf-Keys = lms ls --json modelKey (unique_key), NICHT Registry-Keys!
+# Verwendung: python src\run_benchmarks.py --run-spec run.probelauf-familien.yaml
+
+models:
+  - "gemma-4-19b-a4b-it-reap-i1@q4_k_m"
+  - "gemma-4-26b-a4b-it-i1@iq4_xs"
+  - "gemma-4-26b-a4b-it@iq3_s"
+  - "gemma-4-12b-it-qat@q4_k_xl"
+  - "gemma-4-26b-a4b-it-heretic-i1@iq3_m"
+  - "gemma4-26b-a4b-reap-25@Q3_K"
+  - "openai/gpt-oss-20b@mxfp4"
+  - "granite-4.1-8b@Q6_K"
+  - "granite-4.1-30b@Q3_K_S"
+  - "granite-4.0-h-tiny@Q8_0"
+  - "unsloth/phi-4@Q5_K_M"
+  - "glm-4.7-flash@Q3_K_S"
+  - "zai-org/glm-4.6v-flash@q6_k"
+
+benchmarks: ["DS1000", "HumanEval+", "MATH-500", "Agentic"]
+
+sample_size: 10
+seed: 2026
+agentic_mode: "random"
+thinking: false
+no_structured_output: false
+unload_between: false
+keep_response: false

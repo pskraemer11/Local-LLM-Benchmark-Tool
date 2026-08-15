@@ -250,3 +250,51 @@ class TestLmsJsonMerge:
         )
         assert cfg["enable_thinking"] is True
         assert cfg["top_k"] == 20
+
+
+class TestGemmaThinkingByCategory:
+    """Kategorie-basierte Thinking-Steuerung via Blueprint-Feld
+    enable_thinking_by_category (Fix 15.08.): Gemma hat in JSON-Configs
+    budgetTokens=2048 (checked) -> ohne die Kategorie-Steuerung waere
+    enable_thinking in ALLEN Kategorien True. Erwartung: Coding/Agentic
+    False, Math/Knowledge True.
+    """
+
+    def test_gemma_coding_off(self):
+        cfg = get_model_config("unsloth/gemma-4-12b-it-qat@q4_k_xl", category="coding")
+        assert cfg["enable_thinking"] is False
+
+    def test_gemma_agentic_off(self):
+        cfg = get_model_config("unsloth/gemma-4-12b-it-qat@q4_k_xl", category="agentic")
+        assert cfg["enable_thinking"] is False
+
+    def test_gemma_math_on(self):
+        cfg = get_model_config("unsloth/gemma-4-12b-it-qat@q4_k_xl", category="math")
+        assert cfg["enable_thinking"] is True
+
+    def test_gemma_knowledge_on(self):
+        cfg = get_model_config("unsloth/gemma-4-12b-it-qat@q4_k_xl", category="knowledge")
+        assert cfg["enable_thinking"] is True
+
+    def test_gemma_thinking_flag_forces_on(self):
+        # --thinking-Flag gewinnt ueber die Kategorie-Steuerung (coding=False):
+        # der Force-Override steht NACH dem bp_thinking-Block.
+        cfg = get_model_config(
+            "unsloth/gemma-4-12b-it-qat@q4_k_xl",
+            category="coding",
+            is_thinking_enabled=True,
+        )
+        assert cfg["enable_thinking"] is True
+
+    def test_gemma_budget_config_overridden_by_category(self, mocker):
+        # JSON-Config mit budgetTokens=2048 (checked) wuerde enable_thinking
+        # setzen; die Kategorie-Steuerung (coding=False) muss das ueberschreiben.
+        lms = {
+            "enable_thinking": True,
+            "top_k": 20,
+            "llm.prediction.reasoning.budgetTokens": {"checked": True, "value": 2048},
+        }
+        mocker.patch.object(bc, "_lms_generation_config", return_value=lms)
+        cfg = get_model_config("unsloth/gemma-4-12b-it-qat@q4_k_xl", category="coding")
+        assert cfg["enable_thinking"] is False
+        assert cfg["top_k"] == 20

@@ -304,7 +304,7 @@ def select_blueprint(reasoning: str, capabilities: str, arch: str = "", model_na
         return "none"
 
     # Gemma-4 models
-    if "gemma-4" in name_lower or "gemma-4" in arch_lower:
+    if "gemma-4" in name_lower or "gemma-4" in arch_lower or "gemma4" in name_lower:
         if reasoning == "thinking":
             return "gemma_reasoning"
         return "gemma_assistant"
@@ -354,8 +354,80 @@ def select_blueprint(reasoning: str, capabilities: str, arch: str = "", model_na
 
 
 def has_custom_template(entry: dict) -> bool:
-    """Check if model has a custom jinja template."""
+    """Check if model has a custom jinja template (legacy registry-field path)."""
     return "template" in entry and entry["template"]
+
+
+def resolve_template_name(bp_def: dict | None, model_name: str = "") -> str | None:
+    """Resolve jinja template filename from a blueprint definition (SSOT).
+
+    Priority:
+      1. ``template_map``: model-name substring match (e.g. gemma sizes 12b/19b/26b)
+      2. ``template``: blueprint-wide template file
+      3. legacy registry ``template:`` field (handled by the caller)
+
+    ``model_name`` is matched case-insensitively on substrings; pattern dots
+    and hyphens are treated as interchangeable (registry keys normalize dots
+    to hyphens, e.g. ``granite-4.1-30b`` -> ``granite-4-1-30b``).
+    """
+    if not isinstance(bp_def, dict):
+        return None
+    tpl_map = bp_def.get("template_map")
+    if isinstance(tpl_map, dict):
+        name_lower = model_name.lower() if model_name else ""
+        norm_lower = re.sub(r"[.\s]", "-", name_lower)
+        for pattern, fname in tpl_map.items():
+            pat = str(pattern).lower()
+            pat_norm = re.sub(r"[.\s]", "-", pat)
+            if (pat and pat in name_lower) or (pat_norm and pat_norm in norm_lower):
+                return str(fname)
+    tpl = bp_def.get("template")
+    return str(tpl) if tpl else None
+
+
+_BLUEPRINT_DEFS_CACHE: dict[str, Any] | None = None
+
+
+def load_blueprint_defs() -> dict[str, Any]:
+    """Load blueprint_definitions.yaml (blueprints + modules), cached.
+
+    Single Source of Truth fuer Modellspezifika (template, stop_strings,
+    reasoning_parsing). Bestandteil des Refactors 14.08.: Die Registry
+    traegt nur noch den Blueprint-Namen, die Detailwerte kommen von hier.
+    """
+    global _BLUEPRINT_DEFS_CACHE
+    if _BLUEPRINT_DEFS_CACHE is not None:
+        return _BLUEPRINT_DEFS_CACHE
+    with open(BLUEPRINT_PATH, encoding="utf-8") as f:
+        data = YAML().load(f) or {}
+    _BLUEPRINT_DEFS_CACHE = data
+    return _BLUEPRINT_DEFS_CACHE
+
+
+def blueprint_features(bp_name: str, model_name: str = "") -> dict[str, Any]:
+    """Modellspezifika eines Blueprints als dict (SSOT).
+
+    Liefert ``template``/``stop_strings``/``reasoning_parsing`` (falls der
+    Blueprint sie definiert) fuer die Benchmark-Config. ``model_name`` wird
+    nur fuer die ``template_map``-Aufloesung benoetigt.
+    """
+    bp = load_blueprint_defs().get("blueprints", {}).get(bp_name) or {}
+    features: dict[str, Any] = {}
+    tpl = resolve_template_name(bp, model_name)
+    if tpl:
+        features["template"] = tpl
+    stops = bp.get("stop_strings")
+    if isinstance(stops, list) and stops:
+        features["stop_strings"] = [str(s) for s in stops]
+    parsing = bp.get("reasoning_parsing")
+    if isinstance(parsing, dict) and "enabled" in parsing:
+        features["reasoning_parsing"] = parsing
+    thinking_cats = bp.get("enable_thinking_by_category")
+    if isinstance(thinking_cats, dict) and thinking_cats:
+        features["enable_thinking_by_category"] = {
+            str(k): bool(v) for k, v in thinking_cats.items()
+        }
+    return features
 
 
 def extract_params(model_name: str) -> str | None:
@@ -568,6 +640,11 @@ def classify_registry() -> None:
     # Read LM Studio configs for context_length info
     lms_configs = read_lms_configs(CONFIG_ROOT)
 
+    # Read blueprint definitions (SSOT fuer custom template detection)
+    with open(BLUEPRINT_PATH, encoding="utf-8") as f:
+        bp_defs = yaml_ruamel.load(f)
+    blueprints = bp_defs.get("blueprints", {})
+
     updated_count = 0
     for model_name, entry in registry.items():
         if not isinstance(entry, dict):
@@ -575,13 +652,16 @@ def classify_registry() -> None:
 
         arch = str(entry.get("arch", ""))
         notes = str(entry.get("notes", ""))
-        custom_tpl = has_custom_template(entry)
 
         # Classification (priority: GGUF/override > arch map > keywords > instruct)
         existing_reasoning = entry.get("reasoning")
         reasoning = classify_reasoning(model_name, notes, arch, existing_reasoning)
         capabilities = classify_capabilities(model_name, arch, notes)
         blueprint = select_blueprint(reasoning, capabilities, arch, model_name)
+
+        # Custom-Template-Detection: Blueprint-Definition ist SSOT; das
+        # Registry-`template:`-Feld gilt als veraltet und wird ignoriert.
+        custom_tpl = resolve_template_name(blueprints.get(blueprint), model_name) is not None
 
         # Get context length from LM Studio configs
         ctx_len = None
@@ -756,13 +836,7 @@ def create_blueprint_definitions() -> None:
             "medium": "<reasoning>Analyze step by step. Consider multiple approaches. Distinguish facts from assumptions.</reasoning>",
             "minimal": "",
         },
-         "gemma_think_token": {
-            "description": "Gemma-4 <|think|> Token (statt <thinking>)",
-            "full": "<|think|>Analyze the problem step by step before answering.</|think|>",
-            "medium": "<|think|>Analyze step by step.</|think|>",
-            "minimal": "",
-        },
-        "gemma_capabilities": {
+         "gemma_capabilities": {
             "description": "Gemma-4 capabilities profile (text, code, reasoning)",
             "full": "<capabilities>\n- Text generation and conversation\n- Code generation, completion, and debugging\n- Step-by-step reasoning and problem analysis\n- Function calling and structured tool use\n- Long context: up to 256K tokens\n- Multilingual: 140+ languages\n</capabilities>",
             "medium": "<capabilities>Text generation, coding, reasoning, function calling, long context, multilingual.</capabilities>",
@@ -947,7 +1021,7 @@ def assemble_prompts(preview_only: bool = False) -> None:
                     with open(json_path, encoding="utf-8-sig") as f:
                         data = json.load(f)
 
-                    tpl_name = entry.get("template")
+                    tpl_name = resolve_template_name(bp, model_name) or entry.get("template")
                     tpl_content = None
                     if tpl_name:
                         tpl_path = TEMPLATE_DIR / tpl_name

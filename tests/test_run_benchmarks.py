@@ -330,8 +330,17 @@ class TestLmevalParams:
             assert params["temperature"] == temp, model
             assert "top_k" not in params
             assert "min_p" not in params
-            assert "until" not in params
-            assert "stop" not in params
+            if "gpt-oss" not in model:
+                # gpt-oss liefert until aus der Blueprint-Definition (eigener Test).
+                assert "until" not in params
+                assert "stop" not in params
+
+    def test_gptoss_until_from_blueprint(self):
+        # Seit 14.08.: stop_strings kommen aus der Blueprint-Definition (SSOT).
+        # gptoss_reasoning definiert <|return|> (Harmony-EOS, Template-Kommentar:
+        # "<|return|> indicates the end of generation, <|end|> does not").
+        params = _get_evaluation_parameters("unsloth/gpt-oss-20b", "coding")
+        assert params.get("until") == ["<|return|>"]
 
     def test_enable_thinking_false_emits_chat_template_kwargs(self):
         # Wenn enable_thinking=False, wird chat_template_kwargs mit enable_thinking=False gesetzt
@@ -418,22 +427,26 @@ class TestBuildLmevalCmd:
 
     def test_gptoss_adds_eos_string_when_no_until(self):
         # The eos_string is only added when "until" is NOT already in
-        # evaluation_parameters. The default gpt-oss branch sets until=[...]
-        # so we override _get_evaluation_parameters to drop until.
+        # evaluation_parameters. The default gpt-oss branch sets until=[<|return|>]
+        # (Blueprint-SSOT), so we override _get_evaluation_parameters to drop until.
         with patch.object(rb, "_get_evaluation_parameters",
                           return_value={"max_tokens": 4096, "temperature": 1.0}):
             cmd = _build_lmeval_cmd("gpt-oss-20b", "gpt-oss-20b", "task1", 5, "/tmp/out")
             idx = cmd.index("--model_args")
             args_json = json.loads(cmd[idx + 1])
-            assert args_json["eos_string"] == "<|endoftext|>"
+            assert args_json["eos_string"] == "<|return|>"
 
-    def test_gptoss_default_has_eos_string_without_override(self):
-        # MODEL_TEMP_OVERRIDES sind entfernt: ohne JSON-Config liefert der
-        # gpt-oss-Zweig kein `until` mehr -> eos_string-Fallback greift.
+    def test_gptoss_default_has_until_from_blueprint(self):
+        # Seit 14.08.: stop_strings aus Blueprint (SSOT). gptoss_reasoning
+        # liefert until=["<|return|>"], daher greift der eos_string-Fallback
+        # fuer gpt-oss NICHT mehr (bis 13.08.: eos_string=<|endoftext|>).
         cmd = _build_lmeval_cmd("gpt-oss-20b", "gpt-oss-20b", "task1", 5, "/tmp/out")
+        idx = cmd.index("--gen_kwargs")
+        kwargs = json.loads(cmd[idx + 1])
+        assert kwargs["until"] == ["<|return|>"]
         idx = cmd.index("--model_args")
         args_json = json.loads(cmd[idx + 1])
-        assert args_json["eos_string"] == "<|endoftext|>"
+        assert "eos_string" not in args_json
 
     def test_non_gptoss_no_eos_string(self):
         cmd = _build_lmeval_cmd("plain-7b", "plain-7b", "task1", 5, "/tmp/out")
@@ -837,3 +850,51 @@ thinking: true
         args, _ = rb._parse_args(["--run-spec", p, "--sample-size", "19", "--seed", "7"])
         assert args.sample_size == 19
         assert args.seed == 7
+
+
+# ======================================================================
+# _check_registry_for_model (Fix 14.08.: Template-Skip-Bug)
+# ======================================================================
+
+class TestCheckRegistryForModel:
+    """Template-Skip-Bug: `return None` stand auf falscher Ebene und übersprang
+    ALLE Modelle mit Template (auch wenn die Template-Datei existierte)."""
+
+    def _registry(self, template=None, blueprint="default_chat"):
+        entry = {"reasoning": "thinking", "capabilities": ["chat"],
+                 "blueprint": blueprint}
+        if template:
+            entry["template"] = template
+        reg = {"unsloth/gemma-4-26b-a4b-it": entry}
+        norm = {"gemma-4-26b-a4b-it": "unsloth/gemma-4-26b-a4b-it"}
+        return reg, norm
+
+    def test_returns_true_when_template_file_exists(self, tmp_path):
+        # Fix: vorhandene Template-Datei -> KEIN Skip
+        reg, norm = self._registry(blueprint="default_chat")
+        with (
+            patch.object(rb, "_load_registry_for_context", return_value=(reg, norm)),
+            patch("assemble_blueprint.resolve_template_name", return_value="gemma4-26b-template_minijinja.jinja"),
+            patch("registry_tool._load_blueprints", return_value={"default_chat": {}}),
+            patch("registry_tool.TEMPLATE_DIR", tmp_path),
+        ):
+            (tmp_path / "gemma4-26b-template_minijinja.jinja").write_text("{{ x }}", encoding="utf-8")
+            result = rb._check_registry_for_model("unsloth/gemma-4-26b-a4b-it", "Gemma 4")
+        assert result is not None
+
+    def test_returns_none_when_template_file_missing(self, tmp_path):
+        reg, norm = self._registry(blueprint="default_chat")
+        with (
+            patch.object(rb, "_load_registry_for_context", return_value=(reg, norm)),
+            patch("assemble_blueprint.resolve_template_name", return_value="missing.jinja"),
+            patch("registry_tool._load_blueprints", return_value={"default_chat": {}}),
+            patch("registry_tool.TEMPLATE_DIR", tmp_path),
+        ):
+            result = rb._check_registry_for_model("unsloth/gemma-4-26b-a4b-it", "Gemma 4")
+        assert result is None
+
+    def test_returns_none_when_blueprint_missing(self):
+        reg, norm = self._registry(blueprint=None)
+        with patch.object(rb, "_load_registry_for_context", return_value=(reg, norm)):
+            result = rb._check_registry_for_model("unsloth/gemma-4-26b-a4b-it", "Gemma 4")
+        assert result is None
