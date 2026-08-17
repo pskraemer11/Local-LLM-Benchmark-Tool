@@ -573,6 +573,8 @@ class TestUnloadAllModels:
     def test_list_api_failure_returns_false(self, mocker):
         # List API returns None (failure)
         mocker.patch("model_manager._rest_request", return_value=None)
+        # Keep this unit test independent of a locally running TabbyAPI.
+        mocker.patch("model_manager._tabbyapi_unload", return_value=False)
         assert has_unloaded_all_models() is False
 
 

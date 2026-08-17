@@ -1178,143 +1178,113 @@ import os as _os
 import subprocess as _subprocess
 import tempfile as _tempfile
 
-_SANDBOX_SAFE_BUILTINS = frozenset({
-    "abs", "all", "any", "bin", "bool", "bytearray", "bytes", "callable",
-    "chr", "complex", "dict", "dir", "divmod", "enumerate", "filter",
-    "float", "format", "frozenset", "getattr", "hasattr", "hash", "hex",
-    "id", "int", "isinstance", "issubclass", "iter", "len", "list", "map",
-    "max", "min", "next", "object", "oct", "ord", "pow", "print",
-    "property", "range", "repr", "reversed", "round", "set", "slice",
-    "sorted", "str", "sum", "super", "tuple", "type", "zip",
-    "True", "False", "None", "staticmethod", "classmethod",
-    "delattr", "setattr", "memoryview", "ascii",
-})
+from sandbox_worker import (
+    SANDBOX_MAX_OUTPUT_BYTES as _SANDBOX_MAX_OUTPUT_BYTES,
+)
+from windows_job_object import WindowsJobObject, WindowsJobObjectError
 
-_SANDBOX_BLOCKED_MODULES = frozenset({
-    "subprocess", "shutil", "ctypes", "socket",
-    "http", "urllib", "ftplib", "smtplib", "telnetlib",
-    "multiprocessing", "threading", "webbrowser",
-    "signal", "asyncio", "code", "codeop", "pdb",
-    "traceback", "inspect", "antigravity", "tkinter",
-    "platform", "sysconfig", "distutils",
+SANDBOX_MEMORY_LIMIT_BYTES = 1024 * 1024 * 1024
+SANDBOX_ENV_ALLOWLIST = frozenset({
+    "COMSPEC", "LOCALAPPDATA", "NUMBER_OF_PROCESSORS", "OS", "PATH", "PATHEXT",
+    "PROCESSOR_ARCHITECTURE", "PROGRAMDATA", "PROGRAMFILES", "PROGRAMFILES(X86)",
+    "PROGRAMW6432", "SYSTEMDRIVE", "SYSTEMROOT", "USERPROFILE", "WINDIR",
 })
+SANDBOX_SECRET_MARKERS = ("KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL")
+
+
+def _sandbox_environment(tmpdir: str) -> dict[str, str]:
+    """Build the small environment needed by local scientific libraries."""
+    env = {
+        key: value
+        for key, value in _os.environ.items()
+        if key.upper() in SANDBOX_ENV_ALLOWLIST
+        and not any(marker in key.upper() for marker in SANDBOX_SECRET_MARKERS)
+    }
+    env.update({
+        "PYTHONIOENCODING": "utf-8",
+        "PYTHONNOUSERSITE": "1",
+        "TEMP": tmpdir,
+        "TMP": tmpdir,
+        "MPLCONFIGDIR": _os.path.join(tmpdir, ".matplotlib"),
+        "HF_HOME": _os.path.join(tmpdir, ".hf"),
+        "MPLBACKEND": "Agg",
+    })
+    return env
 
 
 def _build_sandbox_script(code_string: str, should_capture_state: bool = False, tests: list[str] | None = None) -> str:
-    """Build a sandbox script that executes code_string in a restricted namespace."""
-    safe_list = _json.dumps(sorted(_SANDBOX_SAFE_BUILTINS))
-    blocked_list = _json.dumps(sorted(_SANDBOX_BLOCKED_MODULES))
-    code_json = _json.dumps(code_string)
-
-    lines = [
-        "import json as _js, sys as _sys",
-        "",
-        "_SAFE = " + safe_list,
-        "_BLOCKED = " + blocked_list,
-        "",
-        "_bd = {}",
-        "if isinstance(__builtins__, dict):",
-        "    for _k in _SAFE:",
-        "        if _k in __builtins__:",
-        "            _bd[_k] = __builtins__[_k]",
-        "else:",
-        "    for _k in _SAFE:",
-        "        _v = getattr(__builtins__, _k, None)",
-        "        if _v is not None:",
-        "            _bd[_k] = _v",
-        "",
-        '_ns = {"__builtins__": _bd}',
-        "",
-        "for _m in _BLOCKED:",
-        "    _sys.modules.pop(_m, None)",
-        "",
-        '_orig_imp = _bd.get("__import__")',
-        "def _safe_import(name, *args, **kwargs):",
-        '    top = name.split(".")[0]',
-        "    if top in _BLOCKED:",
-        '        raise ImportError(f"Module {name!r} is blocked")',
-        "    if _orig_imp is not None:",
-        "        return _orig_imp(name, *args, **kwargs)",
-        "    return __import__(name, *args, **kwargs)",
-        "_bd['__import__'] = _safe_import",
-        "",
-        "for _bd_rm in ('exec', 'open', 'input', 'compile', 'globals', 'locals', 'vars'):",
-        "    _bd.pop(_bd_rm, None)",
-        "",
-        '_result = {"ok": True, "error": None, "state": None, "passed": 0, "total": 0, "details": []}',
-        "try:",
-        "    exec(" + code_json + ", _ns)",
-    ]
-
-    if should_capture_state:
-        lines.extend([
-            "    _state = {}",
-            "    for _k, _v in _ns.items():",
-            "        if _k.startswith('_') or _k == '__builtins__':",
-            "            continue",
-            "        try:",
-            "            _state[_k] = repr(_v)",
-            "        except Exception:",
-            "            _state[_k] = str(type(_v))",
-            '    _result["state"] = _state',
-        ])
-
-    if tests is not None:
-        test_items = _json.dumps(tests)
-        lines.extend([
-            "    _test_items = " + test_items,
-            "    _test_results = []",
-            "    for _ti, _test in enumerate(_test_items):",
-            "        try:",
-            "            exec(_test, _ns)",
-            '            _test_results.append({"index": _ti, "passed": True})',
-            "        except Exception as _te:",
-            '            _test_results.append({"index": _ti, "passed": False, "error": str(_te)})',
-            '    _passed_cnt = sum(1 for _r in _test_results if _r["passed"])',
-            "    _total_cnt = len(_test_results)",
-            '    _result["ok"] = True',
-            '    _result["error"] = None',
-            '    _result["passed"] = _passed_cnt',
-            '    _result["total"] = _total_cnt',
-            '    _result["details"] = _test_results',
-        ])
-
-    lines.extend([
-        "except Exception as _e:",
-        '    _result = {"ok": False, "error": str(_e), "state": None, "passed": 0, "total": 0, "details": []}',
-        "",
-        "_print_data = _js.dumps(_result)",
-        'print("__SANDBOX__" + _print_data)',
-    ])
-
-    return "\n".join(lines)
+    """Build the JSON request consumed by ``sandbox_worker.py``."""
+    return _json.dumps({
+        "code": code_string,
+        "capture_state": should_capture_state,
+        "tests": tests,
+    }, ensure_ascii=False, separators=(",", ":"))
 
 
 def _run_sandbox(script: str, timeout: int = TIMEOUT_EXEC) -> SandboxResult:
-    """Run a sandbox script as a subprocess in a temporary directory."""
+    """Run one JSON worker request under a Windows Job Object."""
     with _tempfile.TemporaryDirectory(prefix="sandbox_") as _tmpdir:
-        tmppath = _os.path.join(_tmpdir, "sandbox_script.py")
+        worker_path = _os.path.join(_os.path.dirname(__file__), "sandbox_worker.py")
+        command = [sys.executable, "-I", "-B", "-X", "utf8", worker_path]
+        creationflags = 0
+        job: WindowsJobObject | None = None
+        if _os.name == "nt":
+            creationflags = getattr(_subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+            creationflags |= getattr(_subprocess, "CREATE_SUSPENDED", 0x00000004)
+        process = None
         try:
-            with _os.fdopen(_os.open(tmppath, _os.O_CREAT | _os.O_WRONLY | _os.O_TRUNC, 0o644), "w", encoding="utf-8") as f:
-                f.write(script)
-            result = _subprocess.run(
-                [sys.executable, tmppath],
-                capture_output=True, text=True, timeout=timeout,
-                encoding="utf-8", errors="replace",
-                env={**_os.environ, "PYTHONIOENCODING": "utf-8"}
+            if _os.name == "nt":
+                job = WindowsJobObject(SANDBOX_MEMORY_LIMIT_BYTES)
+            process = _subprocess.Popen(
+                command,
+                stdin=_subprocess.PIPE,
+                stdout=_subprocess.PIPE,
+                stderr=_subprocess.PIPE,
+                cwd=_tmpdir,
+                env=_sandbox_environment(_tmpdir),
+                creationflags=creationflags,
             )
-            out = result.stdout or ""
+            if job is not None:
+                job.assign(process)
+                job.resume(process)
+            stdout_data, stderr_data = process.communicate(script.encode("utf-8"), timeout=timeout)
+            out = _decode_worker_output(stdout_data or b"")
             for line in out.splitlines():
                 if line.startswith("__SANDBOX__"):
                     try:
                         return _json.loads(line[len("__SANDBOX__"):])
                     except _json.JSONDecodeError:
                         continue
-            if result.stderr:
-                return {"ok": False, "error": result.stderr.strip()[:300], "state": None, "passed": 0, "total": 0}
-            return {"ok": False, "error": f"Exit code {result.returncode}", "state": None, "passed": 0, "total": 0}
+            stderr = _decode_worker_output(stderr_data or b"").strip()
+            if stderr:
+                return {"ok": False, "error": stderr[:300], "state": None, "passed": 0, "total": 0}
+            return {"ok": False, "error": "Sandbox worker exited without a result", "state": None, "passed": 0, "total": 0}
+        except WindowsJobObjectError as exc:
+            if process is not None:
+                process.kill()
+            return {"ok": False, "error": f"Job Object setup failed: {exc}", "state": None, "passed": 0, "total": 0}
         except _subprocess.TimeoutExpired:
+            if job is not None:
+                job.terminate()
+            elif process is not None:
+                process.kill()
+            if process is not None:
+                try:
+                    process.communicate(timeout=2)
+                except _subprocess.TimeoutExpired:
+                    process.kill()
+                    process.communicate()
             return {"ok": False, "error": f"Timeout ({timeout}s)", "state": None, "passed": 0, "total": 0}
+        finally:
+            if job is not None:
+                job.close()
+
+
+def _decode_worker_output(data: bytes) -> str:
+    """Decode bounded worker output without retaining untrusted excess data."""
+    if len(data) > _SANDBOX_MAX_OUTPUT_BYTES:
+        data = data[-_SANDBOX_MAX_OUTPUT_BYTES:]
+    return data.decode("utf-8", errors="replace")
 
 
 def exec_sandboxed(code: str, timeout: int = TIMEOUT_EXEC) -> tuple[bool, str | None]:

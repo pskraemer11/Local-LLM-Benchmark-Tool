@@ -94,7 +94,7 @@ def _tabbyapi_request(endpoint: str, method: str = "GET", data: dict | None = No
                 return {}
             try:
                 return json.loads(raw)
-            except json.JSONDecodeError:
+            except (json.JSONDecodeError, TypeError, ValueError):
                 # Erfolgreicher 2xx, aber kein JSON (z.B. SSE vom
                 # /model/load-Stream) - als Erfolg werten.
                 return {}
@@ -164,7 +164,8 @@ def _tabbyapi_load_model(model_identifier: str, timeout: int = TIMEOUT_LOAD_MODE
 
 def _tabbyapi_unload(timeout: int = TIMEOUT_MODEL_READY) -> bool:
     """Alle Modelle in TabbyAPI entladen."""
-    _tabbyapi_request("/model/unload", method="POST", data={})
+    if _tabbyapi_request("/model/unload", method="POST", data={}) is None:
+        return False
     deadline = time.time() + timeout
     while time.time() < deadline:
         time.sleep(2)
@@ -747,10 +748,6 @@ def is_model_ready(timeout: int = TIMEOUT_MODEL_READY) -> bool:
     while time.time() - start < timeout:
         time.sleep(2)
         print(".", end="", flush=True)
-        # TabbyAPI: bereit, sobald /v1/model/status ein Modell meldet.
-        if _tabbyapi_loaded_name() is not None:
-            print(" OK (TabbyAPI)")
-            return True
         try:
             req = Request(f"{API_BASE}/chat/completions", method="POST",
                           data=json.dumps({
@@ -770,5 +767,10 @@ def is_model_ready(timeout: int = TIMEOUT_MODEL_READY) -> bool:
             # Server-side protocol errors (JSON parse, malformed response, etc.) → keep waiting
             warn(f"Health-check protocol error: {e}")
     print(" TIMEOUT")
+    # TabbyAPI fallback: check once after the primary OpenAI-compatible
+    # readiness window, so the health-check has deterministic retry timing.
+    if _tabbyapi_loaded_name() is not None:
+        print(" OK (TabbyAPI)")
+        return True
     warn("Model readiness timeout")
     return False

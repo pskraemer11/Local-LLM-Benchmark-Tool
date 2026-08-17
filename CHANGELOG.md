@@ -6,6 +6,15 @@ Hinweise:
 - Stand: 06.08.2026 — umgezogen aus §20 der `doc-git/Architecture, Flow & ChangeLog_en.md` (dort nur noch Verweis).
 - Commit-Hashes beziehen sich auf `main`.
 
+## Windows-Worker-Sandbox (17.08.2026)
+
+| Date | File | Change |
+|------|------|--------|
+| 17.08. | `src/sandbox_worker.py` | **Security-Härtung:** JSON-Worker über stdin/stdout, bereinigte Umgebung, strikte Import-Allowlist, begrenzte Builtins, Dunder-Recovery-Sperre und begrenzte Worker-Ausgabe. |
+| 17.08. | `src/windows_job_object.py` | **Windows-Prozessgrenze:** Job Object mit Kill-on-Close, maximal einem aktiven Prozess, Prozess-/Job-Speicherlimit und sicherem Start des suspendierten Workers. |
+| 17.08. | `src/custom_benchmark.py` | `_run_sandbox()` auf den Worker mit `-I -B -X utf8`, Temp-CWD, Secret-Filter, Pipes, Timeout-Aufräumung und Job Object umgestellt. |
+| 17.08. | `tests/test_sandbox_worker.py`, `tests/test_custom_benchmark_io.py` | Regressionstests für JSON-Protokoll, Allowlist, Dunder-Recovery, Environment-Filter, Timeout und Worker-Start ergänzt bzw. angepasst. Siehe Compaction 17.08.2026. |
+
 ## 3 Benchmark-Fehler behoben (14.08.2026, Fix-Verifikation läuft)
 
 | Date | File | Change |
