@@ -1951,14 +1951,17 @@ def _load_blueprints() -> dict[str, Any]:
 
 
 def _registry_template_name(model_key: str) -> str | None:
-    """Template-Dateiname fuer einen Registry-Key (Blueprint SSOT, legacy fallback).
+    """Resolve the template filename for a registry key.
 
-    Quelle ist die Blueprint-Definition (``template_map`` per Modellname-Match
-    oder ``template``); das Registry-``template:``-Feld gilt als veraltet und
-    wird nur als Fallback genutzt.
+    An ``explicit_file`` policy is an intentional model/provider-specific
+    override. Otherwise the Blueprint remains the shared source of truth and
+    the registry ``template`` field is kept as a legacy fallback.
     """
     reg = load_registry()
     entry = reg.get(model_key) or {}
+    if entry.get("template_policy") == "explicit_file":
+        tpl = entry.get("template")
+        return str(tpl) if tpl else None
     bp_name = entry.get("blueprint") or "default_chat"
     bp = _load_blueprints().get(bp_name) or {}
     name = resolve_template_name(bp, model_key)
@@ -2265,8 +2268,8 @@ def cmd_validate(verbose: bool = False, repro: bool = False) -> dict[str, Any]:
     }
 
     # ── Check 1: template references existent .jinja file ─────────
-    # Quelle ist die Blueprint-Definition (SSOT); Registry-`template:`-Feld ist
-    # veraltet und wird nur als Fallback herangezogen.
+    # Explicit registry files are intentional provider/model-specific
+    # overrides; all other templates come from the Blueprint SSOT.
     for model_key, entry in reg.items():
         if not isinstance(entry, dict):
             continue

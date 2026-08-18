@@ -442,6 +442,7 @@ class TestLoadModelViaLMS:
 
     def test_timeout_returns_false(self, mocker):
         mocker.patch("model_manager._rest_request", return_value=None)
+        mocker.patch("model_manager._is_lmstudio_running", return_value=False)
         ok, identifier = load_model_via_lms("test_model")
         assert ok is False
         assert identifier is None
@@ -489,6 +490,7 @@ class TestLoadModelViaLMS:
     def test_load_failure_returns_false(self, mocker):
         # Generic failure (returns None)
         mocker.patch("model_manager._rest_request", return_value=None)
+        mocker.patch("model_manager._is_lmstudio_running", return_value=False)
         ok, identifier = load_model_via_lms("test")
         assert ok is False
         assert identifier is None

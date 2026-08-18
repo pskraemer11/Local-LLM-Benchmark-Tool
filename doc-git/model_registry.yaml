@@ -65,8 +65,8 @@ mradermacher/gemma-4-26b-a4b-it-i1@iq4_xs:
   n_layers: 30
   hidden_dim: 2816
   max_context_length: 262144
-
   custom_template: true
+
 unsloth/gemma-4-26b-a4b-it@iq3_s:
   publisher: unsloth
   hf_url: https://huggingface.co/unsloth/gemma-4-26b-a4b-it
@@ -347,8 +347,8 @@ unsloth/gemma-4-12b-it-qat@q4_k_xl:
   truncation: full
   max_context_length: 262144
   useUnifiedKvCache: true
-
   custom_template: true
+
 mradermacher/kimi-linear-reap-35b-a3b-instruct-i1@iq3_xxs:
   publisher: mradermacher
   hf_url: 
@@ -494,8 +494,8 @@ mradermacher/gemma-4-26b-a4b-it-heretic-i1@iq3_m:
   blueprint: gemma_reasoning
   truncation: full
   useUnifiedKvCache: true
-
   custom_template: true
+
 unsloth/phi-4@q5_k_m:
   publisher: unsloth
   hf_url: https://huggingface.co/unsloth/unsloth/phi-4
@@ -503,14 +503,14 @@ unsloth/phi-4@q5_k_m:
   arch: dense
   quants: Q5_K_M
   k_cache: q8_0
-  v_cache: iq4_nl
+  v_cache: q5_1
   offload: 1.0
   notes: 'Architektur: Llama Dense | 15B Parameter'
   reasoning: thinking
   capabilities: coding, text
   blueprint: reasoning_coding
   truncation: medium
-  useUnifiedKvCache: false
+  useUnifiedKvCache: true
   context_length: 16384
   file_size_bytes: 10412707392
   n_layers: 40
@@ -1033,6 +1033,23 @@ unsloth/glm-4-7-flash@q3_k_s:
   hf_url: https://huggingface.co/unsloth/glm-4.7-flash
   pub_url: https://z.ai/blog/glm-4.7
   arch: moe
+  sampling:
+    coding:
+      temperature: 0.8
+      top_p: 0.6
+    knowledge:
+      temperature: 0.8
+      top_p: 0.6
+    agentic:
+      temperature: 0.8
+      top_p: 0.6
+    math:
+      temperature: 0.8
+      top_p: 0.6
+    thinking:
+      enabled: true
+      temperature: 0.6
+      top_p: 0.95
   k_cache: q8_0
   v_cache: q8_0
   offload: 1.0
@@ -1107,8 +1124,8 @@ crucible-labs/gemma4-26b-a4b-reap-25@mixed:
   truncation: full
   useUnifiedKvCache: false
   quants: MIXED
-
   custom_template: true
+
 essentialai/rnj-1@q8_0:
   publisher: essentialai
   hf_url: https://huggingface.co/essentialai/essentialai/rnj-1
@@ -1154,6 +1171,33 @@ openai/gpt-oss-20b@mxfp4:
   custom_template: true
   max_context_length: 131072
   quants: MXFP4
+
+unsloth/gpt-oss-20b-GGUF@q8_0:
+  publisher: unsloth
+  hf_url: https://huggingface.co/unsloth/gpt-oss-20b-GGUF
+  pub_url: https://unsloth.ai/blog/gpt-oss
+  arch: moe
+  experts: 32
+  k_cache: f16
+  v_cache: f16
+  offload: 1.0
+  notes: 32x2.4B MoE | 131K context | Tool-Use | Configurable Reasoning Effort
+    (low/medium/high) | Harmony Response Format
+  reasoning: thinking
+  capabilities: coding, text
+  blueprint: gptoss_reasoning
+  truncation: full
+  useUnifiedKvCache: true
+  context_length: 32768
+  file_size_bytes: 12109567168
+  n_layers: 24
+  hidden_dim: 2880
+  custom_template: true
+  template_policy: explicit_file
+  template_variant: unsloth_harmony_fix
+  template: gpt-oss-20b-template_unsloth.jinja
+  max_context_length: 131072
+  quants: Q8_0
 
 qwen/qwen3.5-9b@q6_k:
   publisher: qwen
@@ -1245,16 +1289,16 @@ zai-org/glm-4.6v-flash@q6_k:
       temperature: 0.8
       top_p: 0.6
     thinking:
-      enabled: false
+      enabled: true
       temperature: 0.6
       top_p: 0.95
-  k_cache: q8_0
-  v_cache: iq4_nl
+  k_cache: fp16
+  v_cache: fp16
   offload: 1
   notes: 'Architektur: dense | Vision'
   file_size_bytes: 10053622727
   context_length: 98304
-  useUnifiedKvCache: false
+  useUnifiedKvCache: true
   max_context_length: 131072
   reasoning: thinking
   capabilities: vision, text

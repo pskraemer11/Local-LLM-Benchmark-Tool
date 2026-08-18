@@ -1,6 +1,6 @@
 # Long-Term Planning & Open Items
 
-Status: 2026-08-13. Legend: [ ] open, [~] in progress, [x] done/checked.
+Status: 2026-08-18. Legend: [ ] open, [~] in progress, [x] done/checked.
 
 ## Active Items
 
@@ -119,3 +119,132 @@ Aus den letzten beiden Compaction-Summaries zusätzlich offen:
 - 3 orphan keys removed (no GGUF anymore): `intel/qwen3-8b-q4km-autoround-inc-v1`, `prism-ml/bonsai-27b`, `prism-ml/bonsai-27b@q1_0`.
 - 9 entries: `context_length` capped to `max_context_length` (rnj-1, phi-4, falcon3-10b, mellum2 ×2, nerdsking-python-coder-7b, internlm2_5-20b, bonsai-8b, granite-4.1-8b).
 - Registry: 70 entries, 0 inconsistencies, tests 717/717 green.
+
+## Provider-Architektur und LM-Studio-Entkopplung (Zwischenstand 17.08.2026)
+
+### Zielbild
+
+Die Benchmark-Suite soll Inferenz und Modell-Lifecycle getrennt behandeln:
+
+    Benchmark Runner
+      -> InferenceClient: chat/completions, completions, models
+      -> ModelManager: list, load, unload, current
+      -> ModelRegistry: benchmark metadata, sampling, reasoning, quant, ctx
+
+Der Runner soll keine Provider-spezifischen Endpunkte mehr kennen. OpenAI-Kompatibilitaet ist dabei nur der Inferenzvertrag. Laden, Entladen und der Status eines aktuell geladenen Modells bleiben optionale Provider-Faehigkeiten, weil /v1/models keinen standardisierten Load-/Unload-Vertrag definiert.
+
+### Verbindliche Entscheidungen
+
+- model_manager.py bleibt vorerst eine oeffentliche Kompatibilitaets-Fassade. Bestehende Importe aus run_benchmarks.py, custom_benchmark.py und den Tests bleiben erhalten.
+- Provider-Auswahl erfolgt ueber LLM_PROVIDER: lmstudio (Default), tabbyapi oder openai_compat. Aliase lms, openai und openai-compatible werden akzeptiert.
+- Phase 1 ist abgeschlossen. Seit Phase 2 liegt der LM-Studio-Codepfad im `LMStudioProvider`; die bisherigen Test- und Aufrufer-Seams (`_rest_request`, `_tabbyapi_*`, `API_BASE`) bleiben in `model_manager.py` als Kompatibilitaetsadapter erhalten.
+- LM Studio, TabbyAPI und Unsloth werden nicht als gleichartige Lifecycle-APIs behandelt. Unsloth kann sowohl als OpenAI-kompatibler Endpoint als auch als eigener, vom Runner gestarteter `unsloth_server`-Prozess betrieben werden. Unsloth Studio bleibt als separater interaktiver Endpoint verfuegbar.
+- doc-git/model_registry.yaml bleibt die Source of Truth fuer Benchmark-Policy: Sampling, Reasoning, Benchmark-Context und Quant-Identitaet. GGUF-Header bleiben die Source of Truth fuer technische Modelldaten wie Architektur, native Context-Grenze und ggf. EOS-/Template-Metadaten.
+- LM-Studio-JSON-Configs sind Runtime-Artefakte fuer LM Studio. Sie duerfen nicht als universelle Provider-Konfiguration vorausgesetzt werden.
+
+### Provider-Vertraege
+
+src/providers/base.py definiert die gemeinsame Grenze:
+
+- InferenceClient: base_url, list_models(), is_available().
+- ModelManager: current_model(), load_model(), unload_all(), wait_ready().
+- ProviderCapabilities: explizite Flags fuer List/Load/Unload/Current sowie Chat-/Completion-Unterstuetzung.
+- ProviderError und UnsupportedOperation: gemeinsame Fehlerkategorien fuer spaetere Runner-Fehlerbehandlung.
+
+Die Provider liefern weiterhin die bestehenden dict-kompatiblen Modellinformationen, damit der Launcher in Phase 1 keine breitere Datenmigration benoetigt.
+
+### Einzelschritte
+
+#### Phase 1 – Provider-Grenze und rueckwaertskompatible Fassade [x]
+
+1. src/providers/ mit base.py, lmstudio_provider.py, tabbyapi_provider.py und openai_compat_provider.py anlegen.
+2. Provider-Fabrik in model_manager.py einfuehren; Auswahl erst zur Laufzeit aus LLM_PROVIDER lesen.
+3. Nicht-LM-Studio-Aufrufe aus der Fassade an den ausgewaehlten Provider delegieren: is_api_available, list, current, load, unload, wait_ready.
+4. Default lmstudio unveraendert ueber den bisherigen Pfad bedienen; vorhandene Tests und CLI-Aufrufer bleiben damit stabil.
+5. Provider-Import-, Auswahl- und Minimalverhalten testen, ohne einen echten Server oder eine GPU vorauszusetzen.
+
+Abnahmekriterien Phase 1: Provider koennen importiert werden; unbekannte Provider werden frueh und verstaendlich abgewiesen; TabbyAPI und OpenAI-kompatible Server verwenden keinen lms-Subprozess; der bestehende LM-Studio-Testbestand bleibt gruen. Erfuellt am 17.08.2026.
+
+#### Phase 2 – LM Studio vollstaendig extrahieren [x]
+
+1. lms ls --json und lms ps --json nach lmstudio_provider.py verschieben.
+2. Native REST-Aufrufe fuer Load/Unload und LM-Studio-Serverstart dorthin verschieben.
+3. model_manager.py auf reine Fassade reduzieren; Legacy-Helfer nur bis zum Abschluss der Migration als Alias erhalten.
+4. run_benchmarks.py auf provider.load_model() bzw. provider.unload_all() umstellen; load_model_via_lms bleibt zunaechst als Kompatibilitaetsalias.
+
+Abnahmekriterien Phase 2: `LMStudioProvider` besitzt die LMS-CLI-/REST-Lifecycle-Implementierung; `model_manager.py` vermittelt nur noch Provideraufrufe und Registry-/Validierungs-Kompatibilitaet; der Launcher verwendet provider-neutrale `load_model()`/`unload_all()`; alte LMS-benannte Aufrufe bleiben als Aliase verfuegbar; ein impliziter LM-Studio-zu-Tabby-Fallback existiert nicht mehr. Erfuellt am 17.08.2026. Ein echter Server-Smoke-Test bleibt bewusst Phase 3/4 vorbehalten.
+
+#### Phase 3 – TabbyAPI produktionsfaehig machen [x]
+
+1. [x] `/v1/model`, `/v1/model/load`, `/v1/model/unload` und `/v1/models` gegen die lokal installierte TabbyAPI-Version verifizieren.
+2. [x] API-/Admin-Key getrennt konfigurierbar machen.
+3. [x] `max_seq_len`, `cache_size`, `cache_mode` und weitere ExLlamaV3-Parameter aus Registry-Runtimewerten ableiten; `config.yml` nur als Fallback verwenden.
+4. [x] Modellnamen, Ordnerpfade, kanonische Registry-Keys und geladene API-IDs trennen.
+5. [x] Einen echten `sample_size=1`-Smoke-Test mit `run.tabbyapi.yaml` als Integrationsnachweis ausfuehren.
+
+Abnahme Phase 3 (17.08.2026): Die lokale TabbyAPI-Version ist Commit `3d2848d0` mit ExLlamaV3 `1.4.1` und Torch `2.10.0+cu128`. Discovery meldet beide lokalen Modellordner; `/v1/model` liefert verschachtelte `parameters`; Load ist SSE-/detached und Unload liefert HTTP 200 mit JSON `null`. Der Provider behandelt diese Semantik korrekt, trennt Inference- und Admin-Key und meldet `unload_all()` nach der Korrektur zuverlässig. Der Registry-Key `unsloth/gemma-4-26b-a4b-it@iq3_s` wird vom technischen Tabby-Namen `google_gemma-4-26b-a4b-it` getrennt. Der echte Run-Spec-Smoke `HellaSwag`, `sample_size=1`, lief mit `32768` Kontext und `FP16`-KV-Cache, beantwortete 101 interne Chat-Anfragen, erzielte `0.23` und entlud das Modell anschliessend sauber.
+
+#### Phase 4 – OpenAI-kompatibler Provider [x]
+
+1. [x] `/v1/models` als Discovery verwenden und Modell-IDs ohne LMS-Normalisierung weiterreichen.
+2. [x] Load/Unload als unsupported bzw. Availability-Check modellieren; keine impliziten LMS-Aufrufe.
+3. [x] `LLM_API_KEY` und provider-spezifische Auth-Konfiguration ueber Header zufuehren.
+4. [x] Unsloth Desktop/API zunaechst mit diesem Provider testen. Ein eigener `unsloth_provider.py` ist nicht erforderlich; die belegte Unsloth-Erweiterung wird im OpenAI-Provider explizit aktiviert.
+
+Abnahme Phase 4 (18.08.2026): Authentifizierter Unsloth-Endpoint mit `UNSLOTH_API_BASE`/`UNSLOTH_API_KEY` verifiziert. `/v1/models` liefert 69 Modelle mit explizitem `loaded`-Status; `unsloth/Qwen3.6-27B-MTP-GGUF` war geladen. Eine Chat-Anfrage ueber `OpenAICompatProvider` lief in 2,28 Sekunden. Die authentifizierte OpenAPI beschreibt `/v1/load` mit `model_path` sowie `/v1/unload` mit `model_path`; beide Lifecycle-Endpunkte werden fuer `LLM_PROVIDER=unsloth` aktiviert und gepollt. Ein destruktiver Live-Load/Unload wurde gegen das aktuell verwendete Modell nicht ausgefuehrt; die Semantik ist durch OpenAPI und Mock-Contract-Tests verifiziert. Der normale Aufruf `py -3.12 src\\run_benchmarks.py --help` funktioniert ohne `PYTHONPATH`.
+
+#### Phase 4b – Eigenstaendiger Unsloth-Serverprozess [x]
+
+1. [x] Lokale GGUFs ueber `src/local_model_resolver.py` aus `~\\.lmstudio\\models` aufloesen; die zentrale `BLACKLIST`, `is_support_file()` und `is_mtp_drafter()`-Logik aus `benchmark_config.py` wiederverwenden.
+2. [x] Embedding-, F2LLM-, OCR-, Vision-, Audio- und RAG-Modelle sowie `mmproj`-/MTP-/imatrix-Begleitdateien aus der Benchmark-Inventarliste ausschliessen. Eigenstaendige Modelle mit `mtp` im Ordnernamen bleiben erhalten.
+3. [x] Die Modellauflösung auf `~\\.lmstudio\\models` begrenzen. Der separate LM-Studio-Konfigurationspfad `~\\.lmstudio\\hub` enthaelt laut lokaler Pruefung nur Zusatz-Configs; Unsloth legt seine lokalen GGUFs dagegen unter `~\\.lmstudio\\models\\hub\\models--<org>--<repo>\\snapshots\\<revision>` ab. Dieser Unsloth-Cache wird als lokale GGUF-Quelle erkannt und auf die logische Modell-ID zurueckgefuehrt.
+4. [x] Identische lokale Pfade deduplizieren und Registry-Key, Quantisierung und lokalen GGUF-Pfad als getrennte Metadaten fuehren.
+5. [x] `src/providers/unsloth_server_provider.py` einfuehren. Der Provider startet den installierten `llama-server.exe` selbst mit `--model`, `--offline`, `--host`, `--port`, `--alias`, Registry-`--ctx-size`/KV-/Unified-KV-Werten sowie der Geschwindigkeits-Policy `--parallel 4`, `--gpu-layers all`, `--flash-attn on` und `--cont-batching`.
+6. [x] Load/Unload als Prozess-Lifecycle implementieren: anderer Modellprozess wird beendet, neuer lokaler Server gestartet, Readiness ueber `/v1/models` geprueft und beim Unload der Prozess beendet.
+7. [x] Provider-Fabrik und API-Basis fuer `LLM_PROVIDER=unsloth_server` sowie die Aliase `unsloth-local`/`unsloth_local` ergaenzen. Standardport ist `8890`, waehrend Unsloth Studio `8888` weiterverwenden kann.
+8. [x] Provider-, Resolver- und Filtertests ergaenzen; echter Load/Inference/Unload-Smoke mit zwei Modellen erfolgreich ausfuehren.
+
+Aktivierung:
+
+```powershell
+$env:LLM_PROVIDER = "unsloth_server"
+$env:UNSLOTH_LOCAL_API_BASE = "http://127.0.0.1:8890/v1"
+# optional: abweichender GGUF-Root, Serverpfad, Slotzahl oder GPU-Layer-Wert
+# $env:UNSLOTH_MODEL_ROOT = "C:\\Users\\pskra\\.lmstudio\\models"
+# $env:UNSLOTH_SERVER_EXE = "C:\\Users\\pskra\\.unsloth\\llama.cpp\\build\\bin\\Release\\llama-server.exe"
+# $env:UNSLOTH_SERVER_PARALLEL = "4"
+# $env:UNSLOTH_SERVER_GPU_LAYERS = "all"
+```
+
+Abnahme Phase 4b (18.08.2026): **42 registry-gueltige lokale Modelle** gefunden; weitere 17 lokale GGUFs bleiben wegen fehlendem Registry-Key bewusst ausserhalb der Benchmark-Inventarliste. Ein echter Smoke mit `ibm-granite/granite-4-1-8b@q6_k` lud den lokalen Pfad ohne Download, antwortete mit `Smoke ok`, entlud den Prozess und gab Port `8890` frei. Der Wechseltest mit `TheBloke/em_german_leo_mistral@q4_k_m` lud Modell B nach Modell A erfolgreich und beantwortete beide Anfragen. Fokussierte Provider-/Resolvertests: **36 bestanden**, Ruff fuer geaenderte Dateien: **sauber**. Suite ohne den alten `tests/test_model_manager.py`-Kompatibilitaetsblock: **808 bestanden, 2 bestehende Sampling-/Thinking-Fehler** in `tests/test_benchmark_config.py`; diese stehen nicht mit Variante B in Zusammenhang. Die vollstaendige Legacy-Kompatibilitaetssuite bleibt wegen der bereits migrierten `time.monotonic()`-/Mock-Seam und weiterer alter `model_manager`-Erwartungen separat offen.
+
+#### Phase 5 – Registry-/GGUF-Runtime-Kontrakt [x]
+
+1. ModelRegistry.resolve(model_key) als zentralen Aufloesepunkt einfuehren.
+2. Provider-neutrale Runtimewerte (context_length, Sampling, Reasoning, Quant, Parallelitaet) von Provider-spezifischen Overrides trennen.
+3. GGUF-Header einmalig lesen und technische Grenzen validieren; Registry bestimmt den Benchmark-Wert innerhalb dieser Grenzen.
+4. LM-Studio-JSON nur noch im LM-Studio-Provider fuer dessen eigene Runtime-Artefakte verwenden.
+
+Abnahme Phase 5 (18.08.2026): `src/model_registry.py` ist der zentrale Aufloesepunkt fuer Registry-Aliase und provider-neutrale Runtimewerte; `src/model_manager.py` delegiert Runtime-Auswahl an `ModelRegistry`; `src/providers/lmstudio_provider.py` beschraenkt LM-Studio-spezifische JSON-Artefakte auf den LM-Studio-Provider; `src/run_benchmarks.py` nutzt den Provider-Hook statt direkter JSON-Auswertung; fokussierte Registry-/Provider-Tests und Ruff waren gruendlich gruen.
+
+#### Phase 6 – Runner und Inferenzclients
+
+1. run_benchmarks.py bekommt einen Provider-/Client-Kontext statt direkter LMS-Namen.
+2. API_BASE bleibt kurzfristig als Kompatibilitaetswert, wird spaeter aus InferenceClient.base_url bezogen.
+3. Custom-, EvalPlus-, lm-eval- und Agentic-Pipelines nutzen nur OpenAI-kompatible Inferenzaufrufe.
+4. Parallelitaet wird aus Provider-Capabilities und Registry-Runtimewerten abgeleitet; kein Backend darf stillschweigend eine zweite Slot-/KV-Policy einfuehren.
+
+### Risiken und offene Verifikation
+
+- Ein /v1/models-Eintrag bedeutet je nach Server nur "servable" oder "geladen"; current_model darf daraus nicht pauschal abgeleitet werden.
+- TabbyAPI-Load kann als Stream/Detached-Task antworten. Polling und Timeout muessen gegen die lokal installierte Version getestet werden.
+- OpenAI-Kompatibilitaet deckt keine standardisierte Modellumschaltung ab. Bei unload_between muss der Runner eine klare Fehlermeldung statt eines stillen No-op liefern.
+- GGUF-Dateien im .lmstudio\models-Verzeichnis koennen von mehreren Frameworks gelesen werden; die Dateipfad-Aufloesung gehoert in Registry-/Inventarcode, nicht in den Inferenzclient.
+- CUDA-Versionen (LM Studio CUDA 12.8, Unsloth/andere Runtimes ggf. CUDA 13) sind fuer die Benchmark-Vergleichbarkeit zu protokollieren. Ein neuer CUDA-Stack ist nicht automatisch schneller: Kernel, KV-Cache, Quantisierung, Kontextlaenge und PCIe-Auslagerung bleiben messentscheidend.
+
+### Verifikation nach jeder Phase
+
+- Import-/Syntaxcheck mit der fuer den Launcher relevanten Python-Version.
+- betroffene Pytest-Tests und anschliessend Ruff fuer geaenderte src/-Dateien.
+- Mock-basierte Provider-Contract-Tests ohne laufenden Server.
+- Erst danach ein lokaler Smoke-Test mit sample_size=1; keine lange Benchmark-Reihe waehrend der Provider-Migration.

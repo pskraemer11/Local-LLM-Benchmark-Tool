@@ -100,7 +100,14 @@ The template is overwritten by LM Studio updates. After every update:
 
 ## Template-Quelle
 `doc-git/Jinja-Chat-Templates/gpt-oss-20b_harmony.jinja`
-(identical to `gpt-oss-20b-template_unsloth.jinja`, SHA256 confirmed)
+
+## Template scope
+
+- `gpt-oss-20b_harmony.jinja`: upstream / LM Studio Harmony override for `openai/gpt-oss-20b`
+- `gpt-oss-20b-template_unsloth.jinja`: explicit-file override for the verified Unsloth GGUF variant only
+- In `model_registry.yaml`, use `template_policy: explicit_file`, `template_variant: unsloth_harmony_fix`,
+  `template: gpt-oss-20b-template_unsloth.jinja` only for the matching Unsloth model. Do not generalize the
+  Unsloth variant to the upstream model.
 
 ## Quellen
 - https://developers.openai.com/cookbook/articles/openai-harmony

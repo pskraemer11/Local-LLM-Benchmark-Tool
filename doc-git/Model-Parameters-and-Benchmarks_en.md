@@ -1,9 +1,11 @@
 # Model Parameters & Benchmark Results
 
-Hardware: AMD Ryzen 7 (8 cores) | NVIDIA RTX 5070 Ti (16 GB VRAM) | Windows 11
+Hardware: AMD Ryzen 7 (8 cores) | NVIDIA RTX 5060 Ti (16 GB VRAM) | Windows 11
 
 > **Single source of truth for model metadata:** `model_registry.yaml`
 > (architecture, reasoning, capabilities, HF-URLs, quantization, KV-cache).
+> GGUF headers provide the technical limits (native context, architecture details),
+> and backend-specific runtime artifacts are derived from these two sources.
 > This document covers **hardware constraints, benchmark results, and
 > architectural details** that complement the registry.
 
@@ -68,8 +70,9 @@ But: correlation of formula with empirical proofed reality ist very weak! Better
 ## Context Length Regression (log-log)
 
 > **Goal:** Predict maximum usable context length from model metadata (VRAM, architecture).
-> **New Use case:** `registry_tool.py configs` uses this formula to estimate np/UKV settings,
->        but does NOT overwrite context_length in JSON configs (manual GUI settings are authoritative).
+> **New Use case:** `registry_tool.py` now derives provider-runtime values from `model_registry.yaml`
+> and GGUF metadata. LM Studio JSON configs remain backend-local runtime artifacts and are only
+> written for the LM Studio provider when needed; they are not the global authority anymore.
 
 ### Method
 

@@ -1,218 +1,140 @@
-## Installation Guide: Installing and Configuring a New LLM
+# Installation Guide: Installing and Configuring a New LLM
 
-### Phase A – LM Studio handles automatically
+This guide reflects the current provider-split architecture in the benchmark stack.
 
-| Step                                              | What happens                                           | Where                                                                               |
-|---------------------------------------------------|--------------------------------------------------------|-------------------------------------------------------------------------------------|
-| ① Import GGUF \ `lms get`                         | File lands in `~\.lmstudio\models\{publisher}\{name}\` |
-| ② First load of the model                         | LMS generates JSON config                              | `~\.lmstudio\.internal\user-concrete-model-default-config\{publisher}\{dir}\*.json` |
-| ③ If `hub\models\{pub}\{model}\model.yaml` exists | Its `config.operation.fields` are merged into the JSON |
-| ④ If `hub\models\{pub}\{model}\*.jinja` exists    | Its chat template overrides the embedded GGUF template |
+- GGUF headers are the technical source of truth for model architecture facts.
+- `model_registry.yaml` is the source of truth for benchmark policy and provider-neutral runtime values.
+- Provider artifacts such as LM Studio JSON configs, TabbyAPI config, or Unsloth server arguments are derived runtime data.
 
-### Phase B – Manual check & our pipeline
+## 1. Resolution model
 
-**Check: Is the model in the model registry?**
-```bash
-grep -l "model-name" doc-git\model_registry.yaml
-```
+| Layer | Owns | Examples |
+| --- | --- | --- |
+| GGUF header | Immutable technical facts | `n_layers`, `hidden_dim`, max context, embedded chat template |
+| `model_registry.yaml` | Benchmark policy and neutral runtime settings | reasoning, capabilities, blueprint, truncation, KV policy, template policy |
+| Provider adapter | Provider-specific runtime behavior | LM Studio JSON, TabbyAPI, Unsloth `llama-server.exe` args |
 
-**Case 1: Model is already in the registry**
+Important:
 
-1. *ℹ BLACKLIST check:* 
-      If the model name contains keywords like `embed`, `ocr`, `vision`, `whisper`, `german`, `rag`, `translat`, `audio`, `vl`, `flux`, `bge-m3`, `datagemma-rig`, or `em_german`, 
-      it is in `BLACKLIST` and **will be skipped** by `src\registry_tool.py`. 
-      These models are not suitable for coding\math-benchmark use (e.g. embeddings, OCR\vision\audio, RAG\RIG, <16K context length, etc.) and need other special benchmarks.
+- GGUF headers define the model architecture limits.
+- `model_registry.yaml` defines the benchmark policy and the runtime decisions that are independent of a specific provider.
+- LM Studio JSON configs are not a second source of truth. They are LM Studio-specific runtime artifacts and can be regenerated.
+- The benchmark runner resolves models through `ModelRegistry` and the provider adapter, not by reading LM Studio metadata directly.
 
-2. Simply run in your shell:
-```bash
-  python src\registry_tool.py sync
-```
+## 2. Recommended onboarding flow
 
-**Case 2: New model – create entry in registry**
+1. Make sure the GGUF is available in a folder the chosen provider can see.
+2. Add or update the registry entry in `doc-git\model_registry.yaml` if needed.
+3. Run:
 
-Easiest way: Run in Shell:
-```bash
-  python src\registry_tool.py pipeline sync
-```
-detects the model via `lms ls`, registers it automatically (sync) and runs the blueprint classification.
-Internally: `compare` → `sync` → `classify`.
-
- ====================================================================================================== 
-| For the **full run incl. prompt assembly + validation**:  `python src\registry_tool.py pipeline full`|
- ====================================================================================================== 
-
-> ℹ **CWD-independent (03.08., F4):** All entry points have a sys.path bootstrap –
-> `python -m src.registry_tool sync` works from any directory.
-
-or Manual:
-`doc-git\model_registry.yaml` – insert entry (alphabetical position):
-
-```yaml
-My-New-Model-8B:
-  publisher: "publisher"
-  hf_url: "https:\\huggingface.co\publisher\My-New-Model-8B"
-  quants: [Q4_K_M, Q6_K]
-  arch: "Llama Dense"
-  k_cache: "q8_0"
-  v_cache: "iq4_nl"
-  offload: 1
-  # notes, reasoning, capabilities, blueprint, truncation, context_length
-  # are set automatically by classify + registry_tool.py
-```
-
-Then call:
-```
-python src\registry_tool.py sync     # Full maintenance – does EVERYTHING automatically:
-                                        #   add:           new models from LMS into registry (incl. GGUF architecture + reasoning data)
-                                        #   fill-arch:     n_layers\hidden_dim from GGUF headers for existing entries
-                                        #   fill-reasoning: reasoning (thinking\instruct) from GGUF chat_template
-                                        #   configs:       load.fields (offload, np, useUnifiedKvCache) into JSON configs
-                                        #   sync-from-configs:  JSON→Registry (offload, np, ukv only; skips ctx)
-                                        #   sync-ctx:      context_length from JSON configs (missing only)
-                                        #   fill-ctx:      remaining context_length via formula
-                                        #   fmt:           normalize blank lines
-                                        #   classify:      set reasoning, capabilities, blueprint, truncation
-                                        #   assemble:      write prompt into JSON configs
-                                        #   validate:      syntax check
-```
-
-**All info that classify + registry_tool.py determine automatically:**
-
-| Field                  | Source                                                      | Example                                                       |
-|------------------------|-------------------------------------------------------------|---------------------------------------------------------------|
-| `reasoning`\`thinking` | **GGUF `tokenizer.chat_template`** via `read_gguf_arch()`   | Patterns: `enable_thinking`, `<think>`, `reasoning_effort`, … |    
-|    \ `instruct`        |  –> no more keyword fallback. Model is skipped without an entry.                                                            |
-| `capabilities`         | Model name (vl\vision\ocr, coder\code)                      | `qwen2.5-coder-14b` → `[coding, text]`                        |
-| `blueprint`            | From reasoning + capabilities                               | `thinking` → `reasoning_assistant`                            |
-| `truncation`           | contextLength from JSON config                              | `16384` (≥8192) → `medium`                                    |
-| `offload`              | Default 1 (full GPU offload) at `add` \ `fill-ctx`          | `1`                                                           |
-| `num_parallel`         | **Kein Registry-Feld (seit 13.08.):** feste Policy SS>=10→4, sonst 1 | `4` (SS>=10) \ `1` (SS<10)                          |
-| `k_cache`              | `q8_0` (default), Gemma-4\GPT-OSS = `f16`                   | `q8_0`, `f16`                                                 |
-| `v_cache`              | `iq4_nl` (default), Gemma-4\GPT-OSS = `f16`                 | `iq4_nl`, `q5_1`, `f16`                                       |
-| `n_layers`             | **Automatically from GGUF header** via `add`\`fill-arch`    | `49` (North Mini Code), `64` (Qwen3.6-27B)                    |
-| `hidden_dim`           | **Automatically from GGUF header** via `add`\`fill-arch`    | `2048` \ `5120`                                               |
-| `context_length`       | Formula from `file_size_bytes`, np policy (=4), KV quant    | `16384` (default when size is missing)                        |
-| `useUnifiedKvCache`    | **VRAM formula** (see below) – written to JSON via `configs`| `false` \ `true`                                              |
-
-**VRAM formula for useUnifiedKvCache (since 17.07.):**
-```
-model_gb     = file_size \ 1_000_000_000
-kv_gb        = n_layers × hidden_dim × 2 × kv_bytes × context_length \ 1_000_000_000
-total_gb     = model_gb + kv_gb × num_parallel   # np = Policy (4 bei SS>=10)
-useUnifiedKvCache = total_gb ≥ 14.0   # ON when VRAM is tight (≥14.0 GB; 15.2 GB usable)
-```
-With np=1 or missing architecture data: `useUnifiedKvCache = model_gb ≥ 9.0` (old heuristic).
-
-
-### Phase C – Special cases only
-
-**When do I need a Jinja template override?**
-
-Only if the model has **special chat template tokens not embedded in the GGUF. 
-For example: **Gemma-4** with `<|think|>` token.
-
-```bash
-# Create Jinja override (if necessary)
-mkdir -p ~\.lmstudio\hub\models\{publisher}\{model-name}\
-# File: {model-name}-template_minijinja.jinja
-```
-
-**When do I need a model.yaml?**
-
-| Use Case                                                | Codebase Example                                                                  |
-|---------------------------------------------------------|-----------------------------------------------------------------------------------|
-| `customFields` (UI dropdown, e.g. Reasoning-Effort)     | `openai\gpt-oss-20b\model.yaml` → `reasoningEffort`                               |
-| `config.operation.fields` (default temperature, parsing)| `essentialai\rnj-1\model.yaml` → `reasoning.parsing` with `THOUGHT:\RESPONSE:`    |
-| `base` keys (multiple quants → one base model)          | `mistralai\codestral-22b-v0.1\model.yaml` → lmstudio-community-GGUF               |
-
-⚠️ **Caution (from the chronicle, line 2159):** `model.yaml` creates a **virtual model instance** in LMS. If the same GGUF is already loaded as a physical instance 
-    => **HTTP-500 conflict** (two instances on the same file). 
-    Solution: use `model.yaml` only for models without a physical GGUF, or use alternative base keys.
-
-
-### Phase D – After GGUF reinstallation (deleted + reloaded)
-
-```
-1. Delete GGUF                                  # Config is preserved
-2. Re-import GGUF                               # Old config is recognized again
-3. python src\registry_tool.py sync             # Registry + classify + assemble + validate in one step
-```
-→ Done. The old `model.yaml` (if present) is updated on `lms clone`\`lms get`, not on manual import.
-
-
-### Phase E – Remove a model \ delete registry entry
-
-**Use case:** 
-You deleted the GGUF in LM Studio (`lms uninstall` \ manual delete) and no longer want the model in `model_registry.yaml`. 
-The registry entry would otherwise stay forever (`compare` then shows it under "Registry entries not in LMS").
-
-**Remove registry entry** (keeps files + configs):
-```
-python src\registry_tool.py rm <model-key>
-```
-
-**Remove entry + JSON configs + GGUF files in one go:**
-```
-python src\registry_tool.py rm <model-key> --delete-files --yes
-```
-
-| Flag              | Effect                                                                                                                                                |
-|-------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------|
-| (none)            | Only deletes the registry entry. Files\configs stay. Interactive confirm (`[y\N]`).                                                                   |
-| `--delete-files`  | Also deletes JSON configs (incl. `.bak-*` backups) and the model dir under `~\.lmstudio\hub\models\<pub>\<name>` \ `~\.lmstudio\models\<pub>\<name>`. |
-| `--yes`           | Skips the interactive confirmation.                                                                                                                   |
-
-**Note:** The JSON configs live in `~\.lmstudio\.internal\user-concrete-model-default-config`
-(`CONFIG_ROOT` in `registry_tool.py`) and are removed **only** with `--delete-files`.
-Plain `rm <key>` deletes just the registry entry and leaves all files intact.
-Re-adding the model later is automatic via `registry_tool.py sync` \ `pipeline`.
-
-**One-shot maintenance pipeline (replaces the old `sync_model_configs.ps1`):**
-`python src\registry_tool.py pipeline [status|sync|full]`
-- `status` (default): LMS model count + `compare` report (writes nothing)
-- `sync`: + full `sync` + blueprint classification
-- `full`: + prompt assembly + validation
-
-**Quarantine registry entries of uninstalled models (NEW 10.08.):**
-`python src\registry_tool.py quarantine-missing [--dry-run]`
-Finds registry entries whose models are NOT installed in LM Studio and moves them out
-**reversibly** (configs → `_quarantine_missing_<ts>\` under `CONFIG_ROOT`, entries →
-backup YAML under `doc-git/Review-Artifacts/`, nothing is hard-deleted).
-`pipeline full` runs this automatically as step [2b]. Exit codes: 0 = nothing to do,
-1 = no LMS data, 2 = done, but some candidates were only **reported** (GGUF file
-physically present → index problem, e.g. GLM-4.6V — check manually, no auto-removal).
-
-### Cheat Sheet
-
-# THE ONE command for everything (after a new model or changes)
-```bash
+```powershell
 python src\registry_tool.py pipeline full
 ```
 
-# Status report without changes
-`python src\registry_tool.py pipeline`
+This is the canonical one-shot maintenance command for a new or changed model. It:
 
-# Fill in architecture data from GGUF headers (n_layers, hidden_dim)
-`python src\registry_tool.py fill-arch`
+- resolves the registry entry
+- reads the GGUF header once for architecture facts
+- classifies reasoning, capabilities, blueprint, and truncation
+- derives runtime values such as context length, KV cache policy, and provider-specific settings
+- writes the provider artifacts for the current stack
+- validates the result
 
-# Fill in reasoning field from GGUF chat_template (where missing)
-`python src\registry_tool.py fill-reasoning`
+If the model is already known and only needs a partial refresh, the lower-level commands still exist, but `pipeline full` is the safest default.
 
-# np correction for all entries (after architecture changes)
-`python src\registry_tool.py fix-np`
+## 3. What is derived from where
 
-# Recalculate context_length (e.g. after np change)
-`python src\registry_tool.py fix-ctx`
+| Field or decision | Source | Notes |
+| --- | --- | --- |
+| `n_layers` | GGUF header | Read automatically from the model file |
+| `hidden_dim` | GGUF header | Read automatically from the model file |
+| `context_length` | GGUF + registry policy | Derived from architecture and runtime policy |
+| `reasoning` / `thinking` | GGUF chat template | No more keyword fallback for the default path |
+| `capabilities` | Registry classification | For example coding, text, vision, audio exclusions |
+| `blueprint` | Registry classification | Derived from reasoning plus capability hints |
+| `truncation` | Registry / context policy | Based on effective context length |
+| `num_parallel` | Fixed policy | No longer a registry field; current policy is 4 for sample sizes >= 10, otherwise 1 |
+| `k_cache` / `v_cache` | Registry policy | Used to derive the runtime settings |
+| `useUnifiedKvCache` | VRAM formula | Derived from model size, KV settings, and available VRAM |
 
-# Sync offload\np\UKV from JSON configs into registry (configs are the source)
-`python src\registry_tool.py sync-from-configs`
+## 4. Provider-specific behavior
 
-# Compare registry vs LMS vs configs
-`python src\registry_tool.py compare`
+### LM Studio
 
-# Validate registry consistency (templates, drift, required fields)
-`python src\registry_tool.py validate`
+- LM Studio JSON configs under `~\.lmstudio\.internal\user-concrete-model-default-config\` are the LM Studio runtime artifact.
+- LM Studio Hub `model.yaml` and `.jinja` files under `~\.lmstudio\hub\models\...` are LM Studio-only overlays.
+- They are useful for UI defaults and explicit chat-template overrides, but they do not replace `model_registry.yaml`.
 
-# Remove a model from the registry (files\configs stay; --delete-files removes everything)
-`python src\registry_tool.py rm <model-key> [--delete-files] [--yes]`
+### TabbyAPI
 
+- TabbyAPI is used through the OpenAI-compatible surface.
+- The runner consumes the same registry-resolved benchmark policy, but the server/runtime specifics come from the TabbyAPI side.
+
+### Unsloth server
+
+- Unsloth is treated as a separate local server provider.
+- The benchmark runner starts `llama-server.exe` directly for this path.
+- Runtime defaults favor short execution time and high GPU utilization, for example `--parallel 4` and maximal GPU layer offload.
+- If VRAM is tight, the derived KV-quant, unified KV cache, or context-length policy is adjusted before launch.
+
+## 5. Special cases
+
+Some model families need an explicit template override or additional runtime hints. This includes, for example, GPT-OSS Harmony-style templates, Gemma 4 variants, and GLM variants with structured output behavior.
+
+For a known Unsloth GGUF model, use:
+
+```yaml
+template_policy: explicit_file
+template_variant: unsloth_harmony_fix
+template: gpt-oss-20b-template_unsloth.jinja
+```
+
+That is the preferred way to pin the template for a model where the embedded GGUF template is not the one we want to benchmark.
+
+Legacy registry `template:` entries should be treated as fallback only.
+
+Blacklisted families such as embed, OCR, vision, audio, RAG, and other non-benchmark model groups are skipped by the registry pipeline.
+
+## 6. Reinstall, remove, or quarantine
+
+If a model was deleted and then reinstalled, rerun:
+
+```powershell
+python src\registry_tool.py pipeline full
+```
+
+To remove only the registry entry:
+
+```powershell
+python src\registry_tool.py rm <model-key>
+```
+
+To remove the registry entry and the associated files:
+
+```powershell
+python src\registry_tool.py rm <model-key> --delete-files --yes
+```
+
+To quarantine missing models instead of deleting them immediately:
+
+```powershell
+python src\registry_tool.py quarantine-missing --dry-run
+```
+
+## 7. Quick commands
+
+```powershell
+python src\registry_tool.py pipeline full
+python src\registry_tool.py pipeline
+python src\registry_tool.py compare
+python src\registry_tool.py validate
+python src\registry_tool.py fill-arch
+python src\registry_tool.py fill-reasoning
+python src\registry_tool.py rm <model-key> [--delete-files] [--yes]
+```
+
+For a model that is already registered and only needs a benchmark run, the benchmark launcher is:
+
+```powershell
+python src\run_benchmarks.py --help
+```

@@ -350,3 +350,171 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 - `CHANGELOG.md`
 - `security-report-de.md`
 - `security-report-en.md`
+
+=============== Compaction 17.08.2026 / 18:48 ================
+## Objective
+- (Current) Provider-Schicht fuer die Benchmark Suite beginnen und LM-Studio-Abhaengigkeit schrittweise entkoppeln.
+- (Completed) Detaillierte Zwischenplanung in PLANUNG.md dokumentiert und aus doc-git verschoben; Phase-1-Providergrenze implementiert.
+
+## Important Details
+- **Context:** Der bestehende Launcher importiert weiterhin stabile Funktionen aus model_manager.py. LM Studio besitzt neben OpenAI-kompatibler Inferenz native CLI-/REST-Lifecycle-Funktionen; TabbyAPI hat eigene /model-Endpunkte; OpenAI-Kompatibilitaet standardisiert Load/Unload nicht.
+- **Decision:** LLM_PROVIDER steuert lmstudio, tabbyapi oder openai_compat. In Phase 1 bleibt lmstudio auf dem bisherigen Legacy-Pfad, damit vorhandene Tests und Runtime-Seams stabil bleiben. Alternative Provider laufen bereits ueber src/providers.
+- **Source of Truth:** model_registry.yaml fuer Benchmark-Policy; GGUF-Header fuer technische Modelldaten; LM-Studio-JSON nur als LM-Studio-Runtimeartefakt.
+- **Finding:** OpenAICompatProvider darf unload nicht als erfolgreiches No-op ausgeben. TabbyAPI-Load braucht versionsabhaengige Polling-/Payload-Verifikation, insbesondere max_seq_len und cache_size.
+
+## Work State
+### Completed / Active / Blocked
+- Completed: Provider-Vertraege, Provider-Fabrik, drei Providerdateien, Nicht-LM-Studio-Delegation, 10 Contract-Tests, Planung und Changelog.
+- Active: Phase 2, Extraktion der bestehenden LMS-CLI-/REST-Logik aus model_manager.py.
+- Blocked: Kein Architektur-Blocker. Ein bestehender Windows-Berechtigungsfehler verhindert aktuell eine vollstaendig gruene model_manager-Teilsuite.
+
+## Next Move
+1. Bestehenden LM-Studio-Code schrittweise nach lmstudio_provider.py verschieben und Legacy-Aliase beibehalten.
+2. TabbyAPI-Endpunkte gegen die lokal installierte Version pruefen; danach sample_size=1-Smoke-Test.
+3. Registry-Runtimewerte fuer provider-neutrale und provider-spezifische Load-Parameter trennen.
+
+## Relevant Files
+- PLANUNG.md: Architekturentscheidungen und Phasenplan.
+- src/model_manager.py: Kompatibilitaetsfassade und aktuelle Delegationsgrenze.
+- src/providers/base.py: Provider-Vertraege und HTTP-Basis.
+- src/providers/lmstudio_provider.py: Zielmodul fuer Phase-2-Extraktion.
+- src/providers/tabbyapi_provider.py: ExLlamaV3-/TabbyAPI-Lifecycle.
+- src/providers/openai_compat_provider.py: Inference-only Provider.
+- tests/test_provider_architecture.py: Contract- und Auswahltests.
+
+=============== Compaction 17.08.2026 / Phase 2 ===============
+## Objective
+- (Completed) Die eigentliche LM-Studio-CLI-/REST-Lifecycle-Logik aus `model_manager.py` in `LMStudioProvider` verschieben und den Launcher provider-neutral anbinden.
+- (Current) TabbyAPI-Endpunkte und Registry-Runtimewerte gegen die lokal installierte Version verifizieren.
+
+## Important Details
+- `LMStudioProvider` besitzt jetzt `lms ls --json`, `lms ps --json`, native Load-/Unload-Aufrufe, Readiness-Polling und den LM-Studio-Serverstart inklusive `llmster.exe`-Fallback.
+- `model_manager.py` ist eine Kompatibilitaetsfassade: `get_provider()`, Registry-Anbindung, Identifier-Validierung sowie provider-neutrale `load_model()`/`unload_all()` bleiben dort. `load_model_via_lms()` und `has_unloaded_all_models()` sind Aliase fuer bestehende Aufrufer.
+- Die bisherige implizite LMS-zu-Tabby-Ausweichlogik wurde entfernt. TabbyAPI wird ausschliesslich ueber `LLM_PROVIDER=tabbyapi` gewaehlt; dadurch bleiben Fehler und Messungen backend-eindeutig.
+- `run_benchmarks.py` ruft fuer Lifecycle-Operationen die neutralen Manager-Funktionen auf. `custom_benchmark.py` und `tools/parallel_ab.py` duerfen die alten Aliase vorerst weiterverwenden.
+- Verifikation: `py -3.12 -m compileall -q src/providers src/model_manager.py tests/test_provider_architecture.py`; Ruff erfolgreich; fokussiert 85 Provider-/Manager-Tests plus 4 Launcher-Regressionstests bestanden. Danach Vollsuite in einem explizit freigegebenen Temp-Pfad: 860 gesammelt, 858 passed, 2 failed, 0 Setup-Fehler. Die zwei verbleibenden Fehler sind eine bestehende Registry-/Testbaseline-Differenz fuer GLM-4.7 (Registry 0.8/0.6, Test 0.7/1.0), ohne Providerbezug.
+
+## Work State
+### Completed / Active / Blocked
+- Completed: Phase-2-Extraktion, provider-neutraler Launcher-Lifecycle, Legacy-Aliase und Regressionstests.
+- Active: Phase 3 TabbyAPI-Produktionsverifikation sowie Phase 5 Registry-/GGUF-Runtime-Kontrakt.
+- Blocked: Kein Architektur-Blocker. Kein echter Load-/Unload-Smoke-Test wurde ausgefuehrt, um keinen laufenden lokalen Modellserver zu veraendern.
+
+## Next Move
+1. TabbyAPI-Endpunkte, Authentifizierung und Load-Polling gegen die installierte Version pruefen.
+2. Runtimewerte aus `model_registry.yaml` und GGUF-Headern fuer TabbyAPI abbilden.
+3. Danach einen kontrollierten `sample_size=1`-Smoke-Test mit `run.tabbyapi.yaml` ausfuehren.
+
+## Relevant Files
+- `src/providers/lmstudio_provider.py`
+- `src/model_manager.py`
+- `src/run_benchmarks.py`
+- `src/providers/base.py`
+- `tests/test_provider_architecture.py`
+
+=============== Compaction 17.08.2026 / Phase 3 ===============
+## Objective
+- TabbyAPI als produktionsfaehigen Lifecycle-Provider gegen die lokal installierte ExLlamaV3-Umgebung verifizieren und die technische Modell-ID von der kanonischen Registry-Identitaet trennen.
+
+## Important Details
+- Lokale Laufzeit: `C:\Users\pskra\Python-Projekte\exllamav3\exllamav3_env`, Python 3.12, Torch `2.10.0+cu128`, ExLlamaV3 `1.4.1`, TabbyAPI-Commit `3d2848d0`.
+- TabbyAPI-Contract live bestaetigt: `/v1/models` liefert die Modellordner; `/v1/model` liefert `503` ohne Modell und danach verschachtelte `parameters`; `/v1/model/load` antwortet als SSE-/Detached-Task; `/v1/model/unload` antwortet mit HTTP 200 und JSON `null`.
+- Providerfix: Load und Unload lesen den Response-Body nicht mehr aus, wenn nur der HTTP-Erfolg relevant ist. API-Key und Admin-Key bleiben getrennte Header-/Umgebungsvariablen.
+- Registry-Identitaet: Der technische Tabby-Name `google_gemma-4-26b-a4b-it`, API-ID und Pfad werden in `AvailableModelInfo` getrennt vom kanonischen Key `unsloth/gemma-4-26b-a4b-it@iq3_s` gefuehrt. Registry-only-Filterung erfolgt zentral in `model_manager.py`.
+- Registry-Runtime live angewendet: `max_seq_len=32768`, `cache_size=32768`, `cache_mode=FP16`; TabbyAPI meldete diese Werte nach dem Load zurueck. Eine kleine 1B-Chat-Anfrage lief ebenfalls erfolgreich.
+- Echter Run-Spec-Smoke: `run.tabbyapi.yaml`, CLI-Override `--model google_gemma-4-26b-a4b-it --benchmarks HellaSwag --sample-size 1 --seed 2026`. Ergebnis: 101 interne Chat-Anfragen, Score `0.23`, sauberes Unload um 21:50:06. Die hohe GPU-Auslastung war durch aktiviertes Thinking und die vielen lm-eval-Requests erwartbar; kein OOM und kein Prozesshaenger.
+
+## Verification
+- Ruff fuer geaenderte Provider-/Manager-/Runner-Dateien erfolgreich.
+- Fokussierte Regression: 177 Tests bestanden, 1 bestehender `uses_newest_llmster_version`-Test ausgeschlossen.
+- Die Vollsuite-Baseline bleibt: 860 gesammelt, 858 bestanden, 2 Registry-/Testbaseline-Mismatches fuer GLM-4.7, 0 Setup-Fehler bei explizitem beschreibbarem Temp-Pfad.
+
+## Work State
+- Completed: Phase 3, inklusive echter TabbyAPI-Inferenz und Lifecycle-Cleanup.
+- Next: Phase 4 OpenAI-kompatibler Provider/Unsloth-Endpoint; danach Phase 5 als formaler zentraler Registry-/GGUF-Runtime-Kontrakt.
+
+=============== Compaction 17.08.2026 / Phase 4 Zwischenstand ===============
+## Objective
+- Den OpenAI-kompatiblen Provider als Inference-only-Backend belastbar in die Benchmark-Fassade integrieren und Unsloth Studio auf Wiederverwendung dieses Providers pruefen.
+
+## Important Details
+- `/v1/models` liefert technische Modell-IDs unveraendert; keine LM-Studio-Normalisierung.
+- Generische OpenAI-Kompatibilitaet besitzt keinen standardisierten Current-/Load-/Unload-Lifecycle. Fuer `LLM_PROVIDER=unsloth` sind jedoch die authentifizierten Erweiterungen `/v1/load` und `/v1/unload` belegt; `current_model()` nutzt das explizite `loaded`-Feld, und Load/Unload werden mit Polling ausgefuehrt.
+- Auth-Header: expliziter Key, `OPENAI_COMPAT_API_KEY`, `OPENAI_API_KEY`, `LLM_API_KEY`.
+- Unsloth-Konfiguration kann eindeutig ueber `LLM_PROVIDER=unsloth`, `UNSLOTH_API_BASE` und `UNSLOTH_API_KEY` erfolgen; die generischen Variablen bleiben kompatibel. `PYTHONPATH` ist beim normalen Launcher-Aufruf aus dem Projektroot nicht erforderlich.
+- Der Runner fragt Provider-Capabilities ab, reloadet bei Inference-only-Providern nicht blind und weist `--unload-between` mit klarer Meldung zurueck.
+- Unsloth Studio wurde auf Port 8888 authentifiziert: `/v1/models` lieferte 69 Modelle, davon eines mit `loaded=true`; eine kleine Chat-Anfrage lief in 2,28 s. Die OpenAPI bestaetigt Load/Unload mit `model_path`.
+
+## Verification
+- Ruff erfolgreich.
+- Python-3.12-Compileall erfolgreich.
+- Fokussierte Regression: **183 passed, 1 deselected**.
+- Vollsuite: **871 gesammelt, 869 passed, 2 bekannte GLM-4.7-Registry-/Testbaseline-Mismatches, 0 Setup-Fehler**.
+- Nach Lifecycle-Erweiterung bereinigte fokussierte Regression: **187 passed, 1 deselected**. Die globale Benutzerkonfiguration `LLM_PROVIDER=unsloth` muss fuer die Legacy-Testbaseline temporär aus der Testprozessumgebung entfernt werden.
+- Vollsuite nach Lifecycle-Erweiterung: **875 gesammelt, 873 passed, 2 bekannte GLM-4.7-Registry-/Testbaseline-Mismatches, 0 Setup-Fehler**.
+
+## Work State
+- Completed: OpenAI-kompatibler Provider-Vertrag und Runner-Integration.
+- Completed: Authentifizierte Unsloth-Discovery und Chat-Smoke; OpenAI-Provider um expliziten Unsloth-Lifecycle erweitert.
+- Open: Nicht-destruktiver Live-Load/Unload-Smoke mit einem geeigneten Wechselmodell; Registry-Runtimewerte fuer Unsloth folgen in Phase 5.
+- Next: Phase 5 Registry-/GGUF-Runtime-Kontrakt.
+
+=============== Compaction 18.08.2026 / 10:32 ================
+## Objective
+- (Completed) Variante B fuer Unsloth als eigenstaendigen, vom Runner gestarteten `llama-server.exe` umsetzen und die lokale Modellaufloesung an die tatsaechliche Unsloth-Ablage anpassen.
+- (Current) Den provider-neutralen Registry-/GGUF-Runtime-Kontrakt in Phase 5 weiterfuehren.
+
+## Important Details
+- Unsloth legt echte GGUF-Dateien sowohl direkt unter `~\\.lmstudio\\models` als auch im Cache `~\\.lmstudio\\models\\hub\\models--<org>--<repo>\\snapshots\\<revision>` ab. `~\\.lmstudio\\hub` ist dagegen der separate LM-Studio-Konfigurationsbereich und wird vom Unsloth-Resolver nicht durchsucht.
+- Die erste exakte Registry-Pruefung verwarf gueltige Cache-Modelle mit `-GGUF` im Ordnernamen. Eine flexible Pruefung konnte dagegen eine falsche Quantisierung zuweisen, etwa lokales `Q4_K_XL` als Registry-`Q8_0`. Der Resolver normalisiert jetzt die Basis-ID, verlangt die exakt passende Quantisierung und akzeptiert nur die bewusst definierte `@mixed`-Ausnahme.
+- Inventur: 42 lokale GGUFs sind Registry-gueltig; 17 weitere bleiben wegen fehlendem oder nicht passendem Registry-Key ausgeschlossen. Das ist fuer den Benchmark-Provider beabsichtigt.
+
+## Work State
+### Completed / Active / Blocked
+- Completed: Unsloth-Cache-Erkennung, Quantisierungs-Schutz, Tests und Dokumentation. Der echte Zwei-Modell-Load/Inference/Unload-Smoke war bereits erfolgreich; Port `8890` ist danach frei.
+- Verification: Fokussiert 36 Tests bestanden; Vollsuite ohne `tests/test_model_manager.py`: 808 bestanden, 2 bekannte unabhaengige Sampling-/Thinking-Fehler.
+- Blocked: Kein Provider-Blocker. Die Legacy-`model_manager`-Tests bleiben wegen alter Mock-Seams separat offen.
+
+## Next Move
+1. Phase 5 als zentralen Registry-/GGUF-Runtime-Kontrakt konkretisieren.
+2. Kontextlaenge, Sampling, Reasoning, Quant und Parallelitaet provider-neutral aus Registry/GGUF ableiten.
+3. Provider-spezifische Load-Parameter fuer LM Studio, TabbyAPI und Unsloth daraus ableiten und gezielt testen.
+
+## Relevant Files
+- `src/local_model_resolver.py`: Unsloth-Cache-Aufloesung und quant-sicheres Registry-Matching.
+- `src/providers/unsloth_server_provider.py`: Prozess-Lifecycle des lokalen Unsloth-Servers.
+- `tests/test_local_model_resolver.py`: Cache-, Registry- und Fehlquantisierungs-Regressionen.
+- `PLANUNG.md`: Phase-4b-Abnahme und korrigierte Pfad-/Inventardokumentation.
+
+=============== Compaction 18.08.2026 / 14:27 ================
+## Objective
+- (Completed) Phase 5 abschliessen: GGUF-Header plus `model_registry` als Laufzeit-/Benchmark-Quelle der Wahrheit festziehen, LM-Studio-JSON-Artefakte provider-lokal halten und den Runner weiter von LM Studio entkoppeln.
+- (Current) Den Zustand sauber festhalten, damit die naechsten Provider-Schritte ohne Rueckfall in die alte LM-Studio-Kopplung weitergehen koennen.
+
+## Important Details
+- Architekturentscheid: Der GGUF-Header definiert die Modellarchitektur und ihre technischen Grenzen; `doc-git/model_registry.yaml` definiert Benchmark-Metadaten, Sampling, Reasoning, Quantisierung und Kontextpolitik; LM-Studio-JSON-Konfigurationen sind nicht mehr globale Laufzeit-Wahrheit.
+- `src/model_registry.py` loest Registry-Aliase auf und leitet provider-spezifische Runtime-Views ab, inklusive nativer vs. Benchmark-Kontextlaengen und technischer Grenzpruefung.
+- `src/model_manager.py` delegiert Runtime-Auswahl jetzt an `ModelRegistry` und haelt die LM-Studio-spezifische Logik nur noch als schmale Provider-Schnittstelle fuer das zusammengesetzte Systemprompt-Artefakt.
+- `src/providers/lmstudio_provider.py` prueft das LM-Studio-Artefakt fuer das assemblete Systemprompt; `src/run_benchmarks.py` nutzt dafuer jetzt diesen Provider-Hook statt direkt LM-Studio-JSON-Dateien auszuwerten.
+- Letzte Verifikation: fokussierte Tests fuer Registry-/Provider-Architektur bestanden, Ruff war sauber. Es wurde kein neuer Funktionsblocker eingefuehrt.
+- Das Working Tree ist bewusst unruhig und enthaelt fremde bzw. vorbestehende Aenderungen und temporäre Benchmark-Artefakte; weitere Arbeit muss strikt scoped bleiben und darf nichts Unerreichtes zuruecksetzen.
+
+## Work State
+### Completed / Active / Blocked
+- Completed: provider-neutraler Runtime-Kontrakt, Trennung des LM-Studio-Prompt-Artefakts und die dazugehoerigen Regressionstests.
+- Active: kein Code-Blocker an dieser Stelle; der naechste sinnvolle Schritt ist, die restlichen Provider-Start-/Load-Parameter ebenfalls konsequent aus Registry/GGUF abzuleiten.
+- Blocked: keiner.
+
+## Next Move
+1. Provider-spezifische Launch-/Load-Parameter weiter nur aus Registry und GGUF-Metadaten ableiten, nicht aus ad-hoc JSON-Seitenkanaelen.
+2. Model-familien-spezifische Template- oder Runtime-Overrides nur dort erweitern, wo es dafuer explizite Evidenz gibt.
+3. Beim Start der naechsten Phase die betroffenen Provider-Pfade mit einem kleinen, fokussierten Testslice verifizieren, bevor die Flaeche erweitert wird.
+
+## Relevant Files
+- `src/model_registry.py`
+- `src/model_manager.py`
+- `src/providers/lmstudio_provider.py`
+- `src/run_benchmarks.py`
+- `tests/test_model_registry.py`
+- `tests/test_provider_architecture.py`
+- `doc-git/model_registry.yaml`

@@ -522,7 +522,7 @@ class TestEnsureModelStillLoaded:
             "identifier": "qwen3.6-30b@q4_k_m",
         }
         with patch.object(rb, "get_current_loaded_model", return_value=loaded):
-            with patch.object(rb, "load_model_via_lms") as ld:
+            with patch.object(rb, "load_model") as ld:
                 with patch.object(rb, "is_model_ready") as w:
                     _ensure_model_still_loaded("qwen3.6-30b", "qwen3.6-30b")
                     ld.assert_not_called()
@@ -530,7 +530,7 @@ class TestEnsureModelStillLoaded:
 
     def test_reload_called_when_unloaded(self, capsys):
         with patch.object(rb, "get_current_loaded_model", return_value=None):
-            with patch.object(rb, "load_model_via_lms") as ld:
+            with patch.object(rb, "load_model") as ld:
                 with patch.object(rb, "is_model_ready", return_value=True) as w:
                     _ensure_model_still_loaded("qwen3.6-30b", "qwen3.6-30b")
                     ld.assert_called_once()
@@ -542,7 +542,7 @@ class TestEnsureModelStillLoaded:
             "identifier": "some-other-model@q4_k_m",
         }
         with patch.object(rb, "get_current_loaded_model", return_value=loaded):
-            with patch.object(rb, "load_model_via_lms") as ld:
+            with patch.object(rb, "load_model") as ld:
                 with patch.object(rb, "is_model_ready", return_value=True) as w:
                     _ensure_model_still_loaded("qwen3.6-30b", "qwen3.6-30b")
                     ld.assert_called_once()
@@ -550,7 +550,7 @@ class TestEnsureModelStillLoaded:
 
     def test_warning_printed_when_model_lost(self, capsys):
         with patch.object(rb, "get_current_loaded_model", return_value=None):
-            with patch.object(rb, "load_model_via_lms"):
+            with patch.object(rb, "load_model"):
                 with patch.object(rb, "is_model_ready", return_value=True):
                     _ensure_model_still_loaded("qwen3.6-30b", "qwen3.6-30b", "MATH-500")
                     out = capsys.readouterr().out

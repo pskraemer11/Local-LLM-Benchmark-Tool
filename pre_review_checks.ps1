@@ -1,14 +1,14 @@
 <#
 .SYNOPSIS
-    Pre-Review Checks v2 - Review-Gate fuer Local-LLM-Benchmark-Tool (Windows + Python 3.14).
+    Pre-Review Checks v3 - Review-Gate fuer Local-LLM-Benchmark-Tool (Windows + Python auf PATH).
 
 .DESCRIPTION
     Fuehrt die Gate-Checks vor einem Review/Commit aus und erzeugt
     Transparenz-Artefakte in doc-git\Review-Artifacts\:
 
       1. registry_tool.py validate --repro
-         -> repro_issues.md (Registry vs. LM Studio Hub model.yaml)
-         -> BLOCKIERT bei Registry-Problemen (Exit 1)
+         -> repro_issues.md (Registry, GGUF-Header und Provider-Runtime-Drift)
+         -> BLOCKIERT bei Validierungsproblemen (Exit 1)
       2. ruff check . --no-fix
          -> lint_issues.md
          -> BLOCKIERT bei Lint-Fehlern (Exit 1)
@@ -16,12 +16,16 @@
          -> NUR INFORMATIV (Legacy-Typfehler blockieren nicht)
       4. pytest -q
          -> BLOCKIERT bei Testfehlern (Exit 1)
-      5. GGUF-Header vs. Registry (optional, Source-of-Truth-Check)
+      5. GGUF-Header vs. Registry (optional, technical facts)
          -> gguf_issues.md
          -> NUR INFORMATIV
+      6. CHANGELOG + LM Studio Config-np Verifikation (advisory)
+         -> WARNUNGEN, kein harter Blocker
 
-    Source of Truth fuer Modell-Fakten sind die GGUF-Dateien. Die Registry ist
-    editierbar; die Hub-model.yaml wird nirgendwo im Prozess angefasst.
+    Source of Truth in Schichten:
+      - GGUF-Header fuer Architektur- und Kontext-Fakten
+      - model_registry.yaml fuer Benchmark-Policy und provider-neutrale Runtime-Werte
+      - Provider-Artefakte (LM Studio JSON, TabbyAPI, Unsloth) sind abgeleitete Laufzeitdaten
 
 .PARAMETER SkipRepro
     Ueberspringt validate --repro (kein repro_issues.md).
@@ -70,28 +74,28 @@ if (-not $NoTranscript) {
     Start-Transcript -Path $LogFile -Append -Force
     Write-Host "Log: $LogFile" -ForegroundColor DarkGray
 }
-Write-Host "=== Pre-Review Checks v2 - $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') ===" -ForegroundColor Cyan
+Write-Host "=== Pre-Review Checks v3 - $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') ===" -ForegroundColor Cyan
 
 $blockingFails = 0
 $warnings = 0
 
 # ── 1. registry_tool.py validate --repro ──────────────────────────
-Write-Host "`n[1/5] validate --repro (Registry + repro_issues.md) ..." -ForegroundColor Cyan
+Write-Host "`n[1/6] validate --repro (Registry + GGUF + Provider-Runtime) ..." -ForegroundColor Cyan
 if ($SkipRepro) {
     Write-Host "  UEBERSPRUNGEN (-SkipRepro)" -ForegroundColor Yellow
 } else {
     & python src\registry_tool.py validate --repro 2>&1 | Tee-Object -Variable validateOut | Out-Host
     $validateExit = $LASTEXITCODE
     if ($validateExit -ne 0) {
-        Write-Host "  [FEHLER] validate meldet Registry-Probleme (siehe oben)." -ForegroundColor Red
+        Write-Host "  [FEHLER] validate meldet Probleme (siehe oben)." -ForegroundColor Red
         $blockingFails++
     } else {
-        Write-Host "  validate: OK (0 Registry-Probleme)" -ForegroundColor Green
+        Write-Host "  validate: OK" -ForegroundColor Green
     }
 }
 
 # ── 2. ruff check ─────────────────────────────────────────────────
-Write-Host "`n[2/5] ruff check . --no-fix -> lint_issues.md ..." -ForegroundColor Cyan
+Write-Host "`n[2/6] ruff check . --no-fix -> lint_issues.md ..." -ForegroundColor Cyan
 $lintFile = Join-Path $artifactsDir "lint_issues.md"
 $ruffOut = & ruff check . --no-fix 2>&1
 $ruffExit = $LASTEXITCODE
@@ -117,7 +121,7 @@ if ($ruffExit -ne 0) {
 }
 
 # ── 3. mypy (informativ) ──────────────────────────────────────────
-Write-Host "`n[3/5] mypy . (nur informativ) ..." -ForegroundColor Cyan
+Write-Host "`n[3/6] mypy . (nur informativ) ..." -ForegroundColor Cyan
 $mypyOut = & python -m mypy . 2>&1
 $mypyExit = $LASTEXITCODE
 $mypyErrors = ($mypyOut | Select-String -Pattern "error: ").Count
@@ -129,7 +133,7 @@ if ($mypyExit -eq 0) {
 }
 
 # ── 4. pytest ─────────────────────────────────────────────────────
-Write-Host "`n[4/5] pytest -q ..." -ForegroundColor Cyan
+Write-Host "`n[4/6] pytest -q ..." -ForegroundColor Cyan
 if ($SkipPytest) {
     Write-Host "  UEBERSPRUNGEN (-SkipPytest)" -ForegroundColor Yellow
 } else {
@@ -143,8 +147,8 @@ if ($SkipPytest) {
     }
 }
 
-# ── 5. GGUF-Header vs. Registry (Source of Truth, informativ) ─────
-Write-Host "`n[5/5] GGUF-Header vs. Registry -> gguf_issues.md ..." -ForegroundColor Cyan
+# ── 5. GGUF-Header vs. Registry (technische Fakten, informativ) ─────
+Write-Host "`n[5/6] GGUF-Header vs. Registry -> gguf_issues.md ..." -ForegroundColor Cyan
 if ($SkipGguf) {
     Write-Host "  UEBERSPRUNGEN (-SkipGguf)" -ForegroundColor Yellow
 } else {
@@ -216,8 +220,8 @@ lines = [
     "",
     "Generated automatically: " + datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     "",
-    "Source of truth: the GGUF files (immutable model facts). The",
-    "registry is checked here against the GGUF headers (n_layers, hidden_dim,",
+    "Source of truth for architecture facts: the GGUF files.",
+    "The registry is checked here against the GGUF headers (n_layers, hidden_dim,",
     "max_context_length).",
     "",
 ]
@@ -253,7 +257,7 @@ print(f"[GGUF] {len(errors)} deviations, {len(hits)} entries checked.")
 }
 
 # ── 6. CHANGELOG + Config-np Verifikation (advisory) ──────────────
-Write-Host "`n[6/6] CHANGELOG + Config-np Verifikation (advisory) ..." -ForegroundColor Cyan
+Write-Host "`n[6/6] CHANGELOG + LM Studio Config-np Verifikation (advisory) ..." -ForegroundColor Cyan
 
 # CHANGELOG: Gibt es seit letztem Commit neue CHANGELOG-Einträge?
 $changelog = Join-Path $projectPath "CHANGELOG.md"
@@ -291,7 +295,7 @@ if (Test-Path $cfgRoot) {
     }
 }
 if ($npWarnings -eq 0) {
-    Write-Host "  Config-np: Alle Configs haben np=4." -ForegroundColor Green
+    Write-Host "  LM Studio Config-np: Alle Configs haben np=4." -ForegroundColor Green
 } else {
     Write-Host "  [WARN] $npWarnings Configs mit np!=4 gefunden (sollten auf 4 gesetzt werden)." -ForegroundColor Yellow
     $warnings++

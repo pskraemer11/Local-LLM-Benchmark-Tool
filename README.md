@@ -4,14 +4,16 @@
 
 > **Version:** v13.0.5 – Pipeline-Validierung, Hybrid-Klassifikation  
 > **Release date:** 2026-07-29  
-> **Last doc update:** 2026-07-29  
+> **Last doc update:** 2026-08-18
 > - ISO/IEC 9126 Review (28.07.): alle 9 Skripte auf 100% Typ-Hints, Terminal-Farben, `GenerationConfig`-Dataclass  
 > - `run_task()` in 4 Helfer refactored, `run_agentic()` mit Live-Fortschritt, `main()` gesplittet  
 > - Chat-Templates: 4 neue Jinja-Overrides (Gemma-4 QAT, Phi-4 Unsloth, GPT-OSS Unsloth)  
 > - 8 Code-Reviews in `doc-git/Reviews/`, 14 Modell-Dokumente in `doc-git/Model Specific Hints/`  
 > **Status:** see [`doc-git/Reviews/Code-Review_2026-07-28.md`](./doc-git/Reviews/Code-Review_2026-07-28.md) for the latest ISO/IEC 9126 quality review.
 
-Local benchmark framework for LLMs via LM Studio REST API (OpenAI-compatible). Tests coding, reasoning, knowledge, and agentic capabilities across **4 pipelines** with **9 benchmarks** (MMLU-Pro is archived).
+Local benchmark framework for LLMs with a provider layer (LM Studio, TabbyAPI, OpenAI-compatible endpoints, or a dedicated Unsloth llama-server process). Tests coding, reasoning, knowledge, and agentic capabilities across **4 pipelines** with **9 benchmarks** (MMLU-Pro is archived).
+
+Benchmark policy and runtime values come from `doc-git/model_registry.yaml` and GGUF headers. LM Studio JSON files remain backend-local runtime artifacts, not the global source of truth.
 
 **Goal:**
 While many benchmark results are available online, they typically run on large servers with abundant memory and powerful CPU/GPU resources. 
@@ -23,7 +25,7 @@ This test suite makes it possible to find the best models and quantizations for 
 
 **Practical rule (16 GB VRAM):** Models with ≥12 GB weights require `useUnifiedKvCache=true` when running with 4 parallel slots (np=4) — otherwise they slow down dramatically.
 
-Over 50 LLM models were tested on an HP Omen gaming PC with an NVIDIA RTX 5070 Ti (see a sample of results below).
+Over 50 LLM models were tested on an HP Omen gaming PC with an NVIDIA RTX 5060 Ti (see a sample of results below).
 
 ## Features
 
@@ -37,13 +39,12 @@ Over 50 LLM models were tested on an HP Omen gaming PC with an NVIDIA RTX 5070 T
 - **Bootstrap confidence intervals**: 95% CI from per-item data (DS1000 & CoderEval), paired comparison via `--compare`
 - **Terminal colors**: ANSI-coded output with progress bars (`utils/terminal.py`)
 - **GenerationConfig**: 16 parameters → single dataclass (`type_defs.py`)
-- **Registry tool**: `src/registry_tool.py` for model consolidated registry management and parameter overview; JSON config sync; architecture data extraction from GGUF headers
+- **Registry tool**: `src/registry_tool.py` for registry maintenance, GGUF-header extraction, and provider/runtime artifact generation
 
 ## Prerequisites
 
-- **Hardware**: NVIDIA GPU with >=16 GB VRAM (tested: RTX 5070 Ti) - less works, but not with all models tested here. If you use Mac and unified memory you also need memory for your OS.
-- **Software**: LM Studio (>=1.4.1), based on llama.cpp Backends for GGUF model files; lms server (CLI daemon: llmster.exe); model communication controlled with REST-API and OpenAI compatible API on `localhost:1234`. 
-                Other frameworks could work via API, but need adaptation especially for registry tool.
+- **Hardware**: NVIDIA GPU with >=16 GB VRAM (tested: RTX 5060 Ti) - less works, but not with all models tested here. If you use Mac and unified memory you also need memory for your OS.
+- **Software**: LM Studio (>=1.4.1) for the native provider, plus provider-compatible backends such as TabbyAPI or an OpenAI-compatible Unsloth endpoint / llama-server. The active backend is selected via `LLM_PROVIDER`.
 - **Python**: 3.13+
 - **Installed models**: GGUF quantizations in LM Studio
 
@@ -84,6 +85,9 @@ python src/registry_tool.py sync
 # Interactive and CLI mode (select model + benchmarks), see more --help
 python src/run_benchmarks.py --help
 
+# Select a backend provider via LLM_PROVIDER if needed:
+# lmstudio / tabbyapi / openai_compat / unsloth_server
+
 # Direct run (model + all benchmarks + 4 slots parallel)
 python src/run_benchmarks.py --model "qwen2.5-coder-14b-instruct" --sample-size 20 --num-parallel 4
 
@@ -107,7 +111,7 @@ python src/consolidate_results.py
 | `--sample-size`, `-s`| Tasks per benchmark (default: 5)                                                                           |
 | `--thinking`        | Force-enable thinking mode for reasoning models (default: off)                                              |
 | `--seed`            | Random seed for reproducible task selection (passed to custom benchmarks)                                   |
-| `--num-parallel`    | Parallel worker threads for custom benchmarks (DS1000/CoderEval), uses LM Studio multi-slot serving. Auto: registry value (MoE/MTP=4, Dense=1); forced to 4 for all models when SampleSize ≥ 20. Explicit value overrides auto. |
+| `--num-parallel`    | Parallel worker threads for custom benchmarks (DS1000/CoderEval). The effective slot policy comes from registry/runtime values and backend capabilities; explicit value overrides auto. |
 | `--agentic-mode`    | Agentic scenario selection: 'random' (all 69) or 'safety' (13 Category-K)                                   |
 | `--exclude-benchmarks`, `-x` | Comma-separated benchmark names to exclude (e.g. 'MATH-500')                                      |
 | `--no-structured-output` | Disable structured JSON output in custom benchmarks (fallback to regex)                              |
@@ -116,13 +120,9 @@ python src/consolidate_results.py
 
 ## Registry Tool (src/registry_tool.py)
 
-Maintenance tool for `doc-git/model_registry.yaml` and LM Studio JSON configs.
+Maintenance tool for `doc-git/model_registry.yaml`, GGUF architecture data, and LM Studio runtime artifacts.
 
-**Principle (since 05.08.2026):** JSON configs are the source for runtime parameters
-(context_length, numParallelSessions, useUnifiedKvCache, offloadRatio) — set via the
-LMS GUI. The registry is the view. GGUF headers provide architecture data
-(n_layers, hidden_dim, max_context_length). `blueprint_definitions.yaml` is the
-source for system prompts. This tool no longer overwrites JSON configs.
+**Principle (current):** `doc-git/model_registry.yaml` is the source of truth for benchmark policy and provider-neutral runtime values. GGUF headers provide technical model limits (architecture, native context window, reasoning/template hints). LM Studio JSON configs are LM Studio-only runtime artifacts; `registry_tool.py` writes them when the LM Studio provider needs them, but other providers derive their runtime from the registry directly.
 
 | Command            | Description                                                                 |
 |--------------------|-----------------------------------------------------------------------------|
@@ -164,21 +164,25 @@ python src/consolidate_results.py --compare "modelA,modelB" --compare-benchmark 
 ## Architecture
 
 ```
-LM Studio REST API (localhost:1234)
-|
-src/registry_tool.py            (Model registry + JSON config management)
-├── add / fill-arch         (GGUF header reader for n_layers/hidden_dim)
-├── configs / sync-from-configs  (Bidirectional JSON ↔ Registry sync)
-└── sync                    (Full maintenance pipeline)
-|
-src/run_benchmarks.py       (Launcher – load/unload HERE ONLY)
-├── src/custom_benchmark.py   (DS1000, CoderEval)
-├── lm_eval                   (ARC, HellaSwag, TruthfulQA, MATH-500)
-├── evalplus                  (HumanEval+, MBPP+)
-└── tool_eval_bench           (Agentic)
-|
-src/consolidate_results.py   (Weighted leaderboard + bootstrap CI)
-    → ergebnisse/konsolidiert_*.csv + *.md
+Benchmark Runner
+├── InferenceClient: chat/completions, completions, models
+├── ModelManager: list, load, unload, current
+├── ModelRegistry: benchmark metadata, sampling, reasoning, quant, ctx
+└── providers/
+    ├── lmstudio_provider.py
+    ├── tabbyapi_provider.py
+    ├── openai_compat_provider.py
+    └── unsloth_server_provider.py
+
+supporting tools
+├── src/registry_tool.py            (Registry + GGUF + backend runtime artifacts)
+├── src/local_model_resolver.py     (Unsloth cache / GGUF discovery)
+├── src/run_benchmarks.py           (Launcher – provider-aware load/unload)
+├── src/custom_benchmark.py         (DS1000, CoderEval)
+├── lm_eval                         (ARC, HellaSwag, TruthfulQA, MATH-500)
+├── evalplus                        (HumanEval+, MBPP+)
+├── tool_eval_bench                 (Agentic)
+└── src/consolidate_results.py      (Weighted leaderboard + bootstrap CI)
 ```
 
 see also: https://deepwiki.com/pskraemer11/Local-LLM-Benchmark-Tool
@@ -220,10 +224,13 @@ Benchmarks/
 ├── src/run_benchmarks.py           # Launcher
 ├── src/custom_benchmark.py         # Custom pipeline (DS1000, CoderEval)
 ├── src/consolidate_results.py      # Consolidation + bootstrap CI
-├── src/registry_tool.py                # Model registry + JSON config management
+├── src/registry_tool.py                # Registry + backend runtime artifact management
 ├── src/assemble_blueprint.py           # Blueprint/classify/validate assembly
 ├── src/benchmark_config.py             # Weights, Tool-Eval-Scenarios
-├── src/model_manager.py                # LM Studio load/unload
+├── src/model_manager.py                # Provider facade for load/unload/current/list
+├── src/model_registry.py               # Registry resolution + runtime derivation
+├── src/local_model_resolver.py         # Unsloth cache / GGUF resolution
+├── src/providers/                     # Provider implementations
 ├── src/csv_writer.py                   # CSV output
 ├── tools/lmeval_proxy.py            # Native API proxy for lm_eval
 ├── tools/correlation_export.py      # Results correlation export

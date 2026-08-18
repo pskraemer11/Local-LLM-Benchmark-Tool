@@ -114,4 +114,6 @@ im Log; Template-Erkennung testbar mit `./build/bin/test-chat ../minja/build/tes
   Template-Problemen: `test-chat-template` (llama.cpp) oder `gguf_dump --json` zur
   Extraktion nutzen.
 - **llama.cpp-Tools:** für Ad-hoc-Inferenz/Verifikation eines einzelnen GGUF
-  geeignet; für die Benchmark-Pipeline bleibt LM Studio (`lms`) der Orchestrator.
+  geeignet; für die Benchmark-Pipeline ist der Orchestrator heute provider-basiert
+  (LM Studio, TabbyAPI, OpenAI-compatible / Unsloth, oder der runner-own
+  `unsloth_server`-Prozess).

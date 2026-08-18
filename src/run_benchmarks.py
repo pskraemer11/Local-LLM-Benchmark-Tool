@@ -107,10 +107,12 @@ from model_manager import (
     API_BASE,
     get_available_models,
     get_current_loaded_model,
-    has_unloaded_all_models,
+    get_provider_capabilities,
+    has_assembled_system_prompt,
     is_model_ready,
-    load_model_via_lms,
+    load_model,
     parse_selection,
+    unload_all,
 )
 from utils.terminal import (
     cyan,
@@ -822,14 +824,19 @@ def _get_evaluation_parameters(model_identifier: str, bench_name: str = "") -> d
     if config.get("stop"):
         generation_parameters["until"] = config["stop"]
 
-    # ── chat_template_kwargs for enable_thinking / reasoning_effort ──
+# ── chat_template_kwargs for enable_thinking / reasoning_effort ──
     #
     # WICHTIG: chat_template_kwargs ist KEIN OpenAI-Standard-Parameter.
-    #   Er wird NUR von Qwen-Templates unterstuetzt (Qwen3, Qwen3.5 und
-    #   Qwen-basierte Distills wie deepseek-r1-distill-qwen-14b).
+    #   Er wird von Qwen-Templates (Qwen3, Qwen3.5 und Qwen-basierte Distills)
+    #   und Gemma-4-Minijinja-Templates unterstuetzt.
     #   Quelle: https://github.com/lmstudio-ai/lmstudio-bug-tracker/issues/1573
     #   enable_thinking=True fuer Registry-Thinking-Modelle kommt via
     #   get_model_config() aus der Registry (reasoning: thinking).
+    #   Gemma-4: Kategorie-basierte Steuerung via Blueprint-Feld
+    #   enable_thinking_by_category (Fix 15.08.).
+    #
+    # 2026-08-02: gpt-oss-Override (reasoning_effort/max_thinking_tokens)
+    # entfernt; Reasoning-Budget wird in LM Studio GUI per Modell gesetzt.
     #
     # 2026-08-02: gpt-oss-Override (reasoning_effort/max_thinking_tokens)
     #   entfernt; Reasoning-Budget wird in LM Studio GUI per Modell gesetzt.
@@ -933,6 +940,13 @@ def _ensure_model_still_loaded(model_identifier: str, model_load_key: str, bench
     model is still loaded. If not, transparently reload it. This avoids
     silent crashes when a sub-process accidentally unloads the model.
     """
+    capabilities = get_provider_capabilities()
+    if not capabilities.can_report_current_model:
+        if not is_model_ready(timeout=60):
+            label = f" after {bench_name}" if bench_name else ""
+            print(f"  [WARN] Provider readiness check timed out{label}")
+        return
+
     candidate_key = model_identifier.lower()
     loaded = get_current_loaded_model()
     is_ok = False
@@ -944,14 +958,14 @@ def _ensure_model_still_loaded(model_identifier: str, model_load_key: str, bench
     if not is_ok:
         label = f" after {bench_name}" if bench_name else ""
         print(f"  [WARN] Model{label} no longer loaded - reloading...")
-        load_model_via_lms(model_load_key)
+        load_model(model_load_key)
         if not is_model_ready(timeout=60):
             print("  [WARN] Model readiness check timed out")
 
 
 # Returns: dict with pipeline="custom", score (0-1).
 def run_custom_benchmark(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_size: int = 5, seed: int | None = None, is_structured_output_disabled: bool = False, should_keep_response: bool = False) -> PipelineResult | None:
-    model_identifier = model_info["key"]
+    model_identifier = model_info.get("registry_key", model_info["key"])
     model_display = model_info["display"]
     fp = os.path.join(DATA_DIR, bench["file"])
     if not os.path.exists(fp):
@@ -1080,7 +1094,7 @@ def run_evalplus(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_siz
         except ImportError:
             pass
 
-    model_identifier = model_info["key"]
+    model_identifier = model_info.get("registry_key", model_info["key"])
     model_display = model_info["display"]
     dataset = bench["dataset"]
     print(f"\n  >>> EvalPlus: {bench['name']} / {model_display}")
@@ -1293,7 +1307,7 @@ def run_evalplus(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_siz
 # which stratifies the benchmark across 14 subset tasks.
 # Returns: dict with pipeline="lmeval", score (0-1).
 def run_lmeval(model_info: AvailableModelInfo, bench: BenchmarkDef, limit: int = 5, is_reasoning_model: bool = False, num_parallel: int = 1) -> PipelineResult | None:
-    model_identifier = model_info["key"]
+    model_identifier = model_info.get("registry_key", model_info["key"])
     model_display = model_info["display"]
     gptoss = _is_gptoss_model(model_identifier)
     # Use exact load ID from lms ps, fallback variant, fallback key
@@ -1524,7 +1538,7 @@ def run_agentic(model_info: AvailableModelInfo, limit: int = 5, mode: str = "ran
     rng = random.Random(seed)
     selected = rng.sample(all_ids, min(limit, len(all_ids)))
 
-    model_identifier = model_info["key"]
+    model_identifier = model_info.get("registry_key", model_info["key"])
     model_display = model_info["display"]
     safe = model_identifier.replace("/", "_").replace("\\", "_")
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1922,7 +1936,9 @@ def _start_proxy_if_needed(models: list[AvailableModelInfo], benchmarks: list[Be
     """Phase 2c: LM-Eval-Proxy starten falls Reasoning-Modell + lm_eval-Benchmarks."""
     lmeval_names = {b["name"] for b in LMEVAL_BENCHMARKS}
     has_lmeval = any(b["name"] in lmeval_names for b in benchmarks)
-    has_reasoning = any(_is_reasoning_model(m["key"]) for m in models)
+    has_reasoning = any(
+        _is_reasoning_model(m.get("registry_key", m["key"])) for m in models
+    )
     if has_lmeval and has_reasoning:
         _start_lmeval_proxy()
 
@@ -1980,24 +1996,16 @@ def _check_registry_for_model(model_identifier: str, model_display: str) -> bool
             print(f"\n  [WARN] {model_display}: truncation-Feld fehlt - setze default='full'.")
             registry[matched_key]["truncation"] = "full"
 
-        # Check assembled systemPrompt in Config JSON
+        # Check assembled systemPrompt only through the LM Studio provider.
         try:
-            from pathlib import Path as _Path
-
-            from assemble_blueprint import read_lms_configs
-            cfgs = read_lms_configs(_Path.home() / ".lmstudio" / ".internal" / "user-concrete-model-default-config")
-            cfg_key = normalize_model_name(model_identifier)
-            for c in cfgs:
-                if normalize_model_name(c.get("dir_name", "")) == cfg_key:
-                    _data = json.loads(_Path(c["json_path"]).read_text(encoding="utf-8-sig"))
-                    sys_prompt = next((_f.get("value", "") for _f in _data.get("operation", {}).get("fields", [])
-                                      if _f.get("key") == "llm.prediction.systemPrompt"), "")
-                    if not sys_prompt:
-                        print(f"\n  [WARN] {model_display}: systemPrompt in Config JSON ist leer - "
-                              "`assemble_blueprint.py assemble` ausführen.")
-                    break
-        except (ImportError, KeyError, OSError, ValueError):
-            pass
+            prompt_ready = has_assembled_system_prompt(model_identifier)
+            if prompt_ready is False:
+                print(
+                    f"\n  [WARN] {model_display}: systemPrompt in Config JSON ist leer - "
+                    "`assemble_blueprint.py assemble` ausführen."
+                )
+        except Exception as exc:
+            warn(f"{model_display}: prompt-artifact check skipped ({exc})")
 
         return (reasoning_val == "thinking") or _is_qwen3_6_model(model_identifier)
     except (ImportError, KeyError, OSError, ValueError):
@@ -2019,12 +2027,12 @@ def _load_model(model_info: AvailableModelInfo, model_load_key: str, args: Any) 
             print(f"  [OK] '{model_info['display']}' already loaded - ID: {api_model}")
         else:
             print(f"  [INFO] Different model loaded ({loaded['display_name']}) - unloading...")
-            has_unloaded_all_models()
-            ok, api_model = load_model_via_lms(model_load_key)
+            unload_all()
+            ok, api_model = load_model(model_load_key)
             if not ok:
                 return None
     else:
-        ok, api_model = load_model_via_lms(model_load_key)
+        ok, api_model = load_model(model_load_key)
         if not ok:
             return None
 
@@ -2052,12 +2060,16 @@ def _run_benchmarks_for_model(model_info: AvailableModelInfo, benchmarks: list[B
     model_results: list[dict] = []
     model_load_key = model_info.get("model_identifier", model_info["key"])
 
+    if args.unload_between and not get_provider_capabilities().can_unload_models:
+        print("  [ERROR] --unload-between wird vom gewählten Provider nicht unterstützt.")
+        return model_results
+
     for bidx, bench in enumerate(benchmarks):
         if args.unload_between and bidx > 0:
             print("  [INFO] Unloading/reloading model between benchmarks...")
-            has_unloaded_all_models()
+            unload_all()
             time.sleep(2)
-            ok, api_model = load_model_via_lms(model_load_key)
+            ok, api_model = load_model(model_load_key)
             if not ok:
                 print(f"  [ERROR] Reload before {bench['name']} failed. Skipping.")
                 continue
@@ -2164,7 +2176,7 @@ def main() -> None:
     all_summary: list[dict] = []
 
     for midx, model_info in enumerate(models, 1):
-        model_identifier = model_info["key"]
+        model_identifier = model_info.get("registry_key", model_info["key"])
         model_load_key = model_info.get("model_identifier", model_identifier)
         model_display = model_info["display"]
 
@@ -2193,7 +2205,10 @@ def main() -> None:
     _print_final_summary(all_summary)
 
     print("\n  [INFO] Cleaning up - unloading model(s)...")
-    has_unloaded_all_models()
+    if get_provider_capabilities().can_unload_models:
+        unload_all()
+    else:
+        print("  [INFO] Provider exposes no unload operation; server lifecycle remains external.")
 
     _write_consolidated_overview(all_summary, models, args)
 

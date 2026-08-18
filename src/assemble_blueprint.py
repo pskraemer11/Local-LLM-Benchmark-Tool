@@ -753,8 +753,24 @@ def create_blueprint_definitions() -> None:
             "description": "Gemma-4 spezifisch (Thinking via <|think|>)",
             "role": "You are Gemma-4, a helpful AI assistant.",
             "role_template": "You are {name}, a {arch} model{params_label} by {publisher}, optimized for {capabilities}{type_label}.",
-            "modules": ["gemma_capabilities", "gemma_think_token", "coding_principles", "safety_block", "output_style_default"],
+            "modules": ["gemma_capabilities", "coding_principles", "safety_block", "output_style_default"],
             "custom_template": True,
+            "template_map": {
+                "12b": "gemma4_12b_template_minijinja.jinja",
+                "19b": "gemma4-19b-template_minijinja.jinja",
+                "26b": "gemma4-26b-template_minijinja.jinja",
+            },
+            "enable_thinking_by_category": {
+                "coding": False,
+                "agentic": False,
+                "knowledge": True,
+                "math": True,
+            },
+            "reasoning_parsing": {
+                "enabled": False,
+                "startString": " thinking",
+                "endString": " response",
+            },
         },
         "gptoss_reasoning": {
             "description": "GPT-OSS Harmony-Format (Reasoning + Coding)",

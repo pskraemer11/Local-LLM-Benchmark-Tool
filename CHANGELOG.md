@@ -6,6 +6,62 @@ Hinweise:
 - Stand: 06.08.2026 — umgezogen aus §20 der `doc-git/Architecture, Flow & ChangeLog_en.md` (dort nur noch Verweis).
 - Commit-Hashes beziehen sich auf `main`.
 
+## OpenAI-kompatibler Provider Phase 4 (17.08.2026)
+
+| Date | File | Change |
+|------|------|--------|
+| 17.08. | src/providers/openai_compat_provider.py | `/v1/models` wird als unveraenderte Discovery-Quelle verwendet. Der Provider erfindet kein `current_model`, prueft `load_model()` nur gegen die verfuegbaren API-IDs und meldet `unload_all()` explizit als nicht unterstuetzt. |
+| 17.08. | src/providers/openai_compat_provider.py | Auth-Header unterstuetzen die Reihenfolge `OPENAI_COMPAT_API_KEY`, `OPENAI_API_KEY`, `LLM_API_KEY` nach einem expliziten Konstruktor-Key. |
+| 17.08. | src/model_manager.py, src/run_benchmarks.py | Provider-Capabilities werden fuer klare Inference-only-Semantik verwendet: kein blindes Reload nach Benchmarks, `--unload-between` wird bei fehlendem Unload-Vertrag abgewiesen, und das Cleanup meldet den externen Lifecycle. |
+| 17.08. | tests/test_provider_architecture.py | OpenAI-Kompatibilitaets-Contract- und Runner-Regressionstests ergaenzt; fokussiert **183 Tests bestanden**, ein bestehender Discovery-Test ausgeschlossen. |
+| 17.08. | Unsloth Studio | Desktop-Backend auf Port 8888 gestartet: `/api/health` = 200, `/v1/models` = 401 `Not authenticated`. Provider-Headerpfad ist damit bis zur Authentifizierungsgrenze verifiziert; Modell-/Chat-Smoke bleibt ohne JWT/API-Key offen. |
+| 17.08. | gesamt | Vollsuite nach Phase 4: **871 Tests gesammelt, 869 bestanden, 2 fehlgeschlagen, 0 Setup-Fehler**. Die zwei Fehler bleiben die bekannte GLM-4.7-Registry-/Testbaseline-Differenz (`0.8/0.6` gegen `0.7/1.0`). |
+| 18.08. | src/model_manager.py, src/providers/openai_compat_provider.py | Eindeutige Unsloth-Variablen ergaenzt: `LLM_PROVIDER=unsloth` als Alias fuer den OpenAI-kompatiblen Provider sowie `UNSLOTH_API_BASE` und `UNSLOTH_API_KEY`; generische Variablen bleiben kompatibel. Der Launcher benoetigt aus dem Projektroot kein manuelles `PYTHONPATH`. |
+| 18.08. | src/providers/openai_compat_provider.py | Authentifizierte Unsloth-Discovery erweitert: `loaded`, Quantisierung, Display-Name und Kontext-Metadaten bleiben erhalten. Fuer `LLM_PROVIDER=unsloth` werden die belegten `/v1/load`- und `/v1/unload`-Endpunkte mit Status-Polling verwendet; generische OpenAI-Server bleiben Inference-only. |
+| 18.08. | Integration | Unsloth-Live-Smoke: 69 Modelle entdeckt, ein Modell geladen, Chat-Anfrage erfolgreich in **2,28 s**. OpenAPI bestaetigt Load/Unload-Payloads; kein destruktiver Load/Unload gegen das aktive Modell ausgefuehrt. |
+| 18.08. | Tests | Bereinigte fokussierte Provider-/Manager-/Runner-Suite: **187 bestanden, 1 bestehender Discovery-Test ausgeschlossen**. Die Suite muss ohne globale `LLM_PROVIDER`-Vorgabe gestartet werden; produktive Unsloth-Variablen bleiben fuer Benchmark-Prozesse erhalten. |
+| 18.08. | gesamt | Vollsuite nach Unsloth-Lifecycle-Erweiterung: **875 Tests gesammelt, 873 bestanden, 2 bekannte GLM-4.7-Baselinefehler, 0 Setup-Fehler**. |
+
+## TabbyAPI Phase 3 (17.08.2026)
+
+| Date | File | Change |
+|------|------|--------|
+| 17.08. | src/providers/tabbyapi_provider.py | Lokale TabbyAPI-Semantik verifiziert: `/model/load` wird als SSE-/Detached-Operation ohne Body-Parsing behandelt; `/model/unload` akzeptiert den erfolgreichen `null`-Body; `/model` liest verschachtelte Runtime-Parameter. API- und Admin-Key bleiben getrennt. |
+| 17.08. | src/model_manager.py, src/type_defs.py | Registry-Key als kanonische Modellidentitaet ergaenzt, ohne Tabby-Ordnername, API-ID oder Modellpfad zu ersetzen; `registry_only` wird auch fuer Provider ohne eigene Registry-Filterung zentral angewendet. |
+| 17.08. | src/run_benchmarks.py, src/custom_benchmark.py | Runner und Custom-Pipeline verwenden die kanonische Registry-Identitaet fuer Reasoning-/Sampling-/Template-Checks und die technische API-ID fuer Load und Inferenz. |
+| 17.08. | tests/test_provider_architecture.py | Regressionstest fuer TabbyAPIs HTTP-200-`null`-Unload-Antwort ergaenzt; **177 fokussierte Provider-/Manager-/Runner-Tests bestanden**, ein bestehender Discovery-Test ausgeschlossen. |
+| 17.08. | Integration | Echter `run.tabbyapi.yaml`-Smoke mit Gemma, `HellaSwag`, `sample_size=1`: 101 interne Chat-Anfragen, Score **0,23**, Registry-Runtime `32768` Kontext / `FP16` KV-Cache, anschliessendes Unload erfolgreich. |
+
+## Provider-Grenze Phase 2 (17.08.2026)
+
+| Date | File | Change |
+|------|------|--------|
+| 17.08. | src/providers/lmstudio_provider.py | LMS-Lifecycle aus `model_manager.py` extrahiert: `lms ls --json`, `lms ps --json`, native REST-Aufrufe fuer Load/Unload, Readiness und Serverstart. Registry-Display-/Filterlogik bleibt providerseitig angebunden. |
+| 17.08. | src/model_manager.py | Auf Provider-Fassade reduziert. Provider-neutrale `load_model()`/`unload_all()` ergaenzt; `load_model_via_lms()`/`has_unloaded_all_models()` bleiben als Kompatibilitaetsaliase. Versteckter LM-Studio-zu-Tabby-Fallback entfernt. |
+| 17.08. | src/run_benchmarks.py | Launcher verwendet fuer Load/Unload die provider-neutralen Fassadenfunktionen statt LMS-benannter Aufrufe. |
+| 17.08. | tests/test_model_manager.py, tests/test_run_benchmarks.py | Bestehende Patch-Seams auf die extrahierte Providergrenze bzw. die neutralen Launcher-Funktionen angepasst. |
+| 17.08. | gesamt | Python-3.12-Compileall, Ruff fuer geaenderte Provider-/Manager-/Providervertrag-Dateien sowie 85 fokussierte Tests erfolgreich; ein bestehender Windows-Temp-Berechtigungsfehler im llmster-Discovery-Test bleibt ausgeschlossen. |
+
+## Test-Infrastruktur-Baseline (17.08.2026)
+
+| Date | File | Change |
+|------|------|--------|
+| 17.08. | Tests / pytest | Vollsuite mit Python 3.12 in einem explizit freigegebenen Temp-Pfad ausgefuehrt: **860 Tests gesammelt, 858 bestanden, 2 fehlgeschlagen, 0 Setup-Fehler**. Damit ist der bisherige `WinError 5`-Tempfehler als Umgebungsproblem isoliert und fuer diesen Lauf beseitigt. |
+| 17.08. | tests/test_benchmark_config.py, doc-git/model_registry.yaml | Die zwei verbleibenden Fehlschlaege betreffen `unsloth/glm-4.7-flash`: Registry-Sampling `0.8/0.6` trifft auf aeltere Testerwartung `0.7/1.0`. Kein Bezug zu Provider- oder Phase-2-Code; daher bewusst keine Aenderung in diesem Schritt. |
+
+## Provider-Grenze Phase 1 (17.08.2026)
+
+| Date | File | Change |
+|------|------|--------|
+| 17.08. | PLANUNG.md | Planung aus doc-git/Planung.md in den Projektroot verschoben und um Provider-Vertraege, Phasenplan, Abnahmekriterien und offene TabbyAPI-/Unsloth-Verifikation erweitert. |
+| 17.08. | src/providers/base.py | Neue InferenceClient-/ModelManager-Vertraege, ProviderCapabilities und gemeinsame HTTP-/Fehlerbasis. |
+| 17.08. | src/providers/lmstudio_provider.py | LM-Studio-Providergrenze fuer die schrittweise Extraktion angelegt; Phase 1 nutzt fuer LM Studio weiterhin den Legacy-Pfad. |
+| 17.08. | src/providers/tabbyapi_provider.py | TabbyAPI-Provider mit Model-Discovery, Load/Unload, Status-Polling, Auth-Headern und config.yml-Fallback angelegt. |
+| 17.08. | src/providers/openai_compat_provider.py | Inference-first Provider fuer /v1/models; Load als Availability-Check, Unload explizit nicht unterstuetzt. |
+| 17.08. | src/model_manager.py, tests/test_provider_architecture.py | Provider-Auswahl ueber LLM_PROVIDER und Delegation fuer Nicht-LM-Studio-Provider; 10 Contract-Tests ergaenzt. |
+| 17.08. | run-tabbyapi.ps1 | TabbyAPI-Workflow setzt explizit LLM_PROVIDER=tabbyapi, verwendet damit die neue Provider-Fassade und uebergibt nicht mehr den inzwischen entfernten --num-parallel-Parameter. |
+| 17.08. | gesamt | Python-3.12-Compileall und Ruff erfolgreich; fokussierte Provider-Tests 7/7. model_manager + Provider 82/83, ein bestehender Windows-Temp-Berechtigungsfehler im llmster-Discovery-Test. Siehe Compaction 17.08.2026. |
+
 ## Windows-Worker-Sandbox (17.08.2026)
 
 | Date | File | Change |
@@ -288,3 +344,20 @@ Hinweise:
 | 19.06. | `run_benchmarks_v3.py`                        | Import from model_manager, _api_model mechanism, id_range fix |
 | 17.06. | `run_benchmarks_v1.py`                        | First unified launcher |
 | 14.06. | `benchmark_lmstudio_v12.py`                   | First stable version with 10 benchmarks |
+
+## Unsloth Local Cache Resolution (18.08.2026)
+| Date   | File | Change |
+|--------|------|--------|
+| 18.08. | `src/local_model_resolver.py` | **FIX:** Recognize Unsloth GGUFs below `~\\.lmstudio\\models\\hub`, normalize `-GGUF` cache names, and reject registry matches with a conflicting quantization. |
+| 18.08. | `tests/test_local_model_resolver.py` | **TEST:** Add HF-cache mapping, `-GGUF` normalization, and wrong-quant regression coverage. |
+| 18.08. | `PLANUNG.md` | **DOC:** Correct the LM Studio/Unsloth path distinction and record the verified Phase-4b inventory and test results. See Compaction 18.08.2026 / 10:32. |
+
+## Phase 5 Registry/GGUF Runtime Contract (18.08.2026)
+| Date   | File | Change |
+|--------|------|--------|
+| 18.08. | `src/model_registry.py` | **NEW:** Central registry contract for alias resolution, native vs benchmark context limits, technical boundary checks, and provider runtime derivation. |
+| 18.08. | `src/model_manager.py` | **REFACTORED:** Delegate registry identity/runtime selection to `ModelRegistry` and keep only a thin provider hook for the assembled-system-prompt check. |
+| 18.08. | `src/providers/lmstudio_provider.py` | **NEW:** LM Studio-specific inspection of the assembled system-prompt artifact. |
+| 18.08. | `src/run_benchmarks.py` | **REFACTORED:** Use the LM Studio provider hook instead of reading LM Studio JSON configs directly for reasoning/prompt validation. |
+| 18.08. | `tests/test_model_registry.py` | **NEW:** Coverage for alias resolution, context clipping, and provider runtime derivation. |
+| 18.08. | `tests/test_provider_architecture.py` | **NEW:** Coverage for provider delegation and LM Studio prompt-artifact state. |

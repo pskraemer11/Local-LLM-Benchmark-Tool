@@ -1,7 +1,8 @@
 <#
 .SYNOPSIS
-    Installiert Abhaengigkeiten und laedt alle Benchmark-Datensaetze herunter.
-    Ausfuehrung: PowerShell (als Administrator empfohlen).
+    Legacy Windows bootstrap helper for benchmark dependencies and dataset setup.
+    The canonical benchmark entrypoint is src\run_benchmarks.py.
+    Provider setup is handled by registry_tool.py and the provider-specific launchers.
 #>
 
 $ErrorActionPreference = "Stop"
@@ -14,24 +15,26 @@ Write-Host "  Install-Skript fuer lokale LLM-Benchmarks (Windows)"
 Write-Host "=" * 60
 
 # ─── 1. Python-Pruefung ───
-Write-Host "`n[1/4] Pruefe Python-Installation..."
+Write-Host "`n[1/4] Pruefe Python-Installation (3.12+ empfohlen)..."
 try {
     $pyVersion = & python --version 2>&1
     Write-Host "  [OK] $pyVersion"
 } catch {
-    Write-Host "  [ERROR] Python nicht gefunden. Installiere Python 3.10+ von:"
+    Write-Host "  [ERROR] Python nicht gefunden. Installiere Python 3.12+ von:"
     Write-Host "          https://www.python.org/downloads/"
     Write-Host "  Stelle sicher, dass 'python' im PATH ist."
     exit 1
 }
 
 # ─── 2. LM Studio-Pruefung ───
-Write-Host "`n[2/4] Pruefe LM Studio (lms.exe)..."
+Write-Host "`n[2/4] Pruefe LM Studio (optional, lms.exe)..."
 try {
     $lmsVersion = & lms --version 2>&1
     Write-Host "  [OK] $lmsVersion"
 } catch {
     Write-Host "  [WARN] lms.exe nicht im PATH."
+    Write-Host "  LM Studio ist fuer die aktuelle Architektur optional."
+    Write-Host "  Fuer TabbyAPI oder Unsloth brauchst du es nicht zwingend."
     Write-Host "  Installiere LM Studio von: https://lmstudio.ai/"
     Write-Host "  Nach Installation: 'lms' muss im System-PATH sein."
     Write-Host "  (Standard: C:\Users\$env:USERNAME\AppData\Local\LM Studio\LM Studio)"
@@ -65,12 +68,12 @@ $packages = @(
 foreach ($pkg in $packages) {
     Write-Host "  Installiere $pkg ..." -NoNewline
     try {
-        & pip install --quiet $pkg 2>&1 | Out-Null
+        & python -m pip install --quiet $pkg 2>&1 | Out-Null
         Write-Host " OK"
     } catch {
         Write-Host " FEHLGESCHLAGEN"
         Write-Host "  [WARN] $pkg konnte nicht installiert werden."
-        Write-Host "         Manuelle Installation: pip install $pkg"
+        Write-Host "         Manuelle Installation: python -m pip install $pkg"
     }
 }
 
@@ -89,8 +92,8 @@ try {
 # in der aktiven Pipeline. Die simple_evals/ JSONL-Dateien sollten
 # manuell via evalplus / HuggingFace CLI bezogen werden.
 Write-Host "`n[4/4] Benchmark-Datensaetze..."
-Write-Host "  [INFO] download_real_benchmarks.py ist DEPRECATED."
-Write-Host "  [INFO] Manuelle Installation empfohlen – siehe Skript-Header."
+Write-Host "  [INFO] download_real_benchmarks.py ist Legacy-only."
+Write-Host "  [INFO] Der aktuelle Runner ist src\run_benchmarks.py."
 if (Test-Path $DownloadScript) {
     Write-Host "  [INFO] $DownloadScript existiert noch fuer Legacy-Zwecke."
     Write-Host "  [WARN] Datenformate entsprechen NICHT dem v13-Schema."
@@ -99,5 +102,6 @@ if (Test-Path $DownloadScript) {
 Write-Host "`n" + "=" * 60
 Write-Host "  Installation abgeschlossen."
 Write-Host "  Starte das Benchmark-Skript mit:"
-Write-Host "    python run_benchmarks_v3.py --model <modell> --benchmarks all"
+Write-Host "    python src\run_benchmarks.py --help"
+Write-Host "    python src\run_benchmarks.py --run-spec run.example.yaml"
 Write-Host "=" * 60

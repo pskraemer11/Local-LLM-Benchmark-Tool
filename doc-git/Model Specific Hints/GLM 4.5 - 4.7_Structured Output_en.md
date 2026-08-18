@@ -9,6 +9,8 @@
 
 Powerful thinking behavior matters for local LM Studio .gguf usage of GLM 4.5 - 4.7:
 
+> Benchmark note: the local suite now treats this as a provider/runtime policy, not just an LM Studio JSON tweak. For LM Studio the parsing block lives in the JSON config; other providers need an equivalent runtime/template translation.
+
 * **Thinking mode** per model (Quelle: https://docs.z.ai/guides/capabilities/thinking):
   * GLM-4.7 and GLM-4.5V use **forced thinking** (always reason before answering).
   * GLM-4.6 / GLM-4.5 use **auto / hybrid thinking** (the model decides, `enable_thinking` toggles).

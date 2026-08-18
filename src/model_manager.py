@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 """
-Shared module for LM Studio model management.
+Shared model-manager facade for the benchmark suite.
 Imported by run_benchmarks.py AND custom_benchmark.py.
 
 ── Role in the system ─────────────────────────────────────────────
-  This module encapsulates ALL interactions with the LM Studio CLI
-  (lms load / unload / ps). It is used from two sides:
+  The public functions remain stable for the launcher and benchmark
+  subprocesses.  Provider-specific implementation is selected through
+  ``LLM_PROVIDER`` for the new providers package; the default LM Studio path
+  remains compatible with the existing test and runtime seams during the
+  provider migration.
 
   1. run_benchmarks.py (Launcher)
-     - CALLS load_model_via_lms() and has_unloaded_all_models()
+     - CALLS load_model() and unload_all()
      - Model load/unload happens HERE ONLY
      - Uses get_current_loaded_model() for status checking
 
@@ -25,9 +28,9 @@ Imported by run_benchmarks.py AND custom_benchmark.py.
   erfolgen koennen.
 
 ── Wichtige Hinweise ───────────────────────────────────────────────
-  - is_model_ready() wird vom Launcher nach load_model_via_lms()
+  - is_model_ready() wird vom Launcher nach load_model()
     aufgerufen, um die API-Bereitschaft aktiv zu prüfen (anstatt time.sleep(10)).
-  - load_model_via_lms() returns the EXACT model ID from lms ps --json
+  - load_model() returns the EXACT model ID from the selected provider
     (e.g. "microsoft/phi-4@q6_k"), used by ALL pipelines as the
     model parameter in API calls.
 """
@@ -42,13 +45,27 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from benchmark_config import is_support_file
-from utils.terminal import error, info, ok, warn
+from model_registry import ModelRegistry
+from utils.terminal import error, warn
 
 if TYPE_CHECKING:
     from type_defs import AvailableModelInfo, LoadedModelInfo
 
-API_BASE = os.environ.get("LLM_API_BASE", "http://127.0.0.1:1234/v1")
+def _configured_api_base() -> str:
+    """Resolve a provider-specific base URL before the facade is imported."""
+    provider = os.environ.get("LLM_PROVIDER", "lmstudio").strip().lower()
+    if provider in {"unsloth", "openai", "openai-compatible", "openai_compat"}:
+        return os.environ.get("UNSLOTH_API_BASE") or os.environ.get(
+            "LLM_API_BASE", "http://127.0.0.1:1234/v1"
+        )
+    if provider in {"unsloth_server", "unsloth-local", "unsloth_local"}:
+        return os.environ.get("UNSLOTH_LOCAL_API_BASE") or os.environ.get(
+            "LLM_API_BASE", "http://127.0.0.1:8890/v1"
+        )
+    return os.environ.get("LLM_API_BASE", "http://127.0.0.1:1234/v1")
+
+
+API_BASE = _configured_api_base()
 # REST API base (without /v1 suffix) for model management endpoints
 _REST_API_BASE = API_BASE.rsplit("/v1", 1)[0] if API_BASE.endswith("/v1") else API_BASE
 TIMEOUT_CLI = 30
@@ -64,114 +81,138 @@ TIMEOUT_UNLOAD_WAIT = 2
 # need to know that the server is reachable but no model is loaded yet.
 HEALTH_CHECK_SENTINEL_MODEL = "check"
 
+SUPPORTED_PROVIDERS = {"lmstudio", "tabbyapi", "openai_compat", "unsloth_server"}
 
-# ── TabbyAPI-Fallback (exllamav3-Backend) ─────────────────────────
-# Die Modell-Verwaltung (Laden/Entladen/Status) spricht standardmaessig
-# LM Studio an (lms CLI bzw. /api/v1/*-Endpunkte). TabbyAPI stellt das
-# Modell-Management unter /v1/model/* bereit. Diese Helfer greifen nur,
-# wenn der LM-Studio-Pfad fehlschlaegt (Server nicht erreichbar/404).
 
-def _tabbyapi_request(endpoint: str, method: str = "GET", data: dict | None = None,
-                      timeout: int = 30, read_body: bool = True) -> dict | None:
-    """Low-level request gegen TabbyAPI-Endpunkte (/v1/model/*).
+def get_provider_name() -> str:
+    """Return the configured provider name, defaulting to LM Studio."""
+    name = os.environ.get("LLM_PROVIDER", "lmstudio").strip().lower()
+    aliases = {
+        "lms": "lmstudio",
+        "openai": "openai_compat",
+        "openai-compatible": "openai_compat",
+        "unsloth": "openai_compat",
+        "unsloth-local": "unsloth_server",
+        "unsloth_local": "unsloth_server",
+    }
+    name = aliases.get(name, name)
+    if name not in SUPPORTED_PROVIDERS:
+        supported = ", ".join(sorted(SUPPORTED_PROVIDERS))
+        raise ValueError(f"Unknown LLM_PROVIDER={name!r}; expected one of: {supported}")
+    return name
 
-    read_body=False: Antwort nicht lesen (SSE-Streams wie /model/load laufen
-    bis Load-Ende weiter). Der Load laeuft in TabbyAPI als Detached-Task,
-    der Client-Disconnect ueberlebt. Jeder 2xx-Status gilt als Erfolg.
+
+def get_provider() -> Any:
+    """Create the configured provider on demand.
+
+    Imports stay local so the legacy LM Studio path keeps its current import
+    graph and tests can continue to patch ``model_manager`` seams.
     """
-    from urllib.error import HTTPError, URLError
-    from urllib.request import Request, urlopen
-    body = None if data is None else json.dumps(data).encode("utf-8")
-    headers = {"Content-Type": "application/json"} if body is not None else {}
-    try:
-        req = Request(f"{API_BASE}{endpoint}", data=body, headers=headers, method=method)
-        with urlopen(req, timeout=timeout) as resp:
-            if not read_body:
-                resp.read(1)
-                return {}
-            raw = resp.read().decode("utf-8")
-            if not raw:
-                return {}
-            try:
-                return json.loads(raw)
-            except (json.JSONDecodeError, TypeError, ValueError):
-                # Erfolgreicher 2xx, aber kein JSON (z.B. SSE vom
-                # /model/load-Stream) - als Erfolg werten.
-                return {}
-    except (HTTPError, URLError, OSError):
+    from providers.lmstudio_provider import LMStudioProvider
+    from providers.openai_compat_provider import OpenAICompatProvider
+    from providers.tabbyapi_provider import TabbyAPIProvider
+    from providers.unsloth_server_provider import UnslothServerProvider
+
+    provider_name = get_provider_name()
+    if provider_name == "tabbyapi":
+        return TabbyAPIProvider(
+            API_BASE,
+            runtime_loader=_tabbyapi_runtime_overrides,
+            model_dir=os.environ.get("TABBYAPI_MODEL_DIR"),
+        )
+    if provider_name == "openai_compat":
+        # "unsloth" keeps the shared OpenAI-compatible endpoint but enables
+        # lifecycle extensions; the dedicated server process stays separate.
+        lifecycle = os.environ.get("LLM_PROVIDER", "").strip().lower() == "unsloth"
+        return OpenAICompatProvider(API_BASE, lifecycle=lifecycle)
+    if provider_name == "unsloth_server":
+        return UnslothServerProvider(
+            API_BASE,
+            model_root=os.environ.get("UNSLOTH_MODEL_ROOT") or os.environ.get("LMSTUDIO_MODELS_DIR"),
+            executable=os.environ.get("UNSLOTH_SERVER_EXE"),
+            registry_loader=_load_registry_data,
+            runtime_loader=_unsloth_server_runtime_overrides,
+        )
+    return LMStudioProvider(
+        API_BASE,
+        cli_timeout=TIMEOUT_CLI,
+        rest_request=_rest_request,
+        ensure_server=_is_lmstudio_running,
+        registry_overrides=_registry_display_overrides,
+        registry_loader=_load_registry_data,
+        time_fn=time.time,
+        sleep_fn=time.sleep,
+        subprocess_run=subprocess.run,
+    )
+
+
+def get_provider_capabilities() -> Any:
+    """Return capabilities of the configured provider without adding LMS calls."""
+    return get_provider().capabilities
+
+
+def _uses_legacy_lmstudio_path() -> bool:
+    """Use the LM Studio provider while keeping its public facade stable."""
+    return get_provider_name() == "lmstudio"
+
+
+def has_assembled_system_prompt(model_identifier: str) -> bool | None:
+    """Ask the LM Studio provider whether its JSON prompt artifact is populated."""
+    if get_provider_name() != "lmstudio":
         return None
-
-
-def _tabbyapi_loaded_name() -> str | None:
-    """Name des in TabbyAPI aktuell geladenen Modells (oder None).
-
-    Waehrend eines Loads antwortet /v1/model mit 503 ("No models are
-    currently loaded") -> wird als None gewertet, Polling laeuft weiter.
-    """
-    data = _tabbyapi_request("/model")
-    if data is None:
-        return None
-    name = data.get("id")
-    return name if name else None
-
-
-def _tabbyapi_config_load_args() -> dict:
-    """cache_size/max_seq_len aus der tabbyAPI config.yml lesen (Fallback-Defaults).
-
-    Ohne cache_size wuerde TabbyAPI 262144 Tokens als KV-Cache ansetzen und
-    an 16 GB VRAM (RTX 5060 Ti) mit OOM scheitern. Beim Laden via API werden
-    die config.yml-Werte naemlich NICHT uebernommen (nur beim Serverstart).
-    """
-    cfg_paths = [
-        Path(os.environ.get("TABBYAPI_CONFIG", "")) if os.environ.get("TABBYAPI_CONFIG") else None,
-        Path(__file__).resolve().parents[1] / "tabbyAPI" / "config.yml",
-    ]
-    for p in cfg_paths:
-        if p is None or not p.is_file():
-            continue
-        try:
-            import re as _re
-            text = p.read_text(encoding="utf-8")
-
-            def _find(key: str, default: int, _text: str = text) -> int:
-                m = _re.search(rf"^\s*{key}\s*:\s*(\d+)", _text, _re.MULTILINE)
-                return int(m.group(1)) if m else default
-            return {
-                "cache_size": _find(r"cache_size", 8192),
-                "max_seq_len": _find(r"max_seq_len", 16384),
-            }
-        except OSError:
-            continue
-    return {"cache_size": 8192, "max_seq_len": 16384}
-
-
-def _tabbyapi_load_model(model_identifier: str, timeout: int = TIMEOUT_LOAD_MODEL) -> str | None:
-    """Modell in TabbyAPI laden (Name = Ordner-/Modellname) und auf Load warten."""
-    if _tabbyapi_loaded_name() == model_identifier:
-        return model_identifier
-    payload = {"model_name": model_identifier, **_tabbyapi_config_load_args()}
-    if _tabbyapi_request("/model/load", method="POST", data=payload,
-                         timeout=10, read_body=False) is None:
-        return None
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        time.sleep(2)
-        name = _tabbyapi_loaded_name()
-        if name == model_identifier:
-            return name
+    provider = get_provider()
+    checker = getattr(provider, "has_assembled_system_prompt", None)
+    if callable(checker):
+        return checker(model_identifier)
     return None
 
 
+def _unsloth_server_runtime_overrides(model_identifier: str) -> dict[str, Any]:
+    """Map provider-neutral registry runtime values to llama-server options."""
+    return _registry_view().provider_runtime(model_identifier, "unsloth_server")
+
+
+# ── Legacy adapters ───────────────────────────────────────────────
+# The concrete TabbyAPI implementation lives in providers/tabbyapi_provider.py.
+# These names remain patchable for existing callers and tests.
+
+def _tabbyapi_request(endpoint: str, method: str = "GET", data: dict | None = None,
+                      timeout: int = 30, read_body: bool = True) -> dict | None:
+    from providers.tabbyapi_provider import TabbyAPIProvider
+
+    return TabbyAPIProvider(API_BASE).request_json(
+        endpoint,
+        method=method,
+        payload=data,
+        timeout=timeout,
+        read_body=read_body,
+    )
+
+
+def _tabbyapi_loaded_name() -> str | None:
+    from providers.tabbyapi_provider import TabbyAPIProvider
+
+    current = TabbyAPIProvider(API_BASE).current_model()
+    return current["model_identifier"] if current else None
+
+
+def _tabbyapi_config_load_args() -> dict:
+    from providers.tabbyapi_provider import TabbyAPIProvider
+
+    return TabbyAPIProvider(API_BASE)._config_args()
+
+
+def _tabbyapi_load_model(model_identifier: str, timeout: int = TIMEOUT_LOAD_MODEL) -> str | None:
+    from providers.tabbyapi_provider import TabbyAPIProvider
+
+    ok_loaded, loaded_name = TabbyAPIProvider(API_BASE).load_model(model_identifier, timeout=timeout)
+    return loaded_name if ok_loaded else None
+
+
 def _tabbyapi_unload(timeout: int = TIMEOUT_MODEL_READY) -> bool:
-    """Alle Modelle in TabbyAPI entladen."""
-    if _tabbyapi_request("/model/unload", method="POST", data={}) is None:
-        return False
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        time.sleep(2)
-        if _tabbyapi_loaded_name() is None:
-            return True
-    return False
+    from providers.tabbyapi_provider import TabbyAPIProvider
+
+    return TabbyAPIProvider(API_BASE).unload_all(timeout=timeout)
 
 
 # ── Pipeline-specific timeouts ──────────────────────────────────
@@ -209,157 +250,51 @@ def safe_json_loads(text: str) -> Any:
 
 def _rest_request(endpoint: str, method: str = "GET", data: dict | None = None,
                   timeout: int = TIMEOUT_HTTP) -> dict | None:
-    """Make a request to LM Studio REST API.
-    
-    Args:
-        endpoint: REST API endpoint (e.g., "/api/v1/models/load")
-        method: HTTP method (GET, POST)
-        data: Request body (will be JSON-encoded)
-        timeout: Request timeout in seconds
-        
-    Returns:
-        Parsed JSON response or None on error
-    """
-    from urllib.error import HTTPError, URLError
-    from urllib.request import Request, urlopen
-    
-    url = f"{_REST_API_BASE}{endpoint}"
-    headers = {"Content-Type": "application/json"}
-    body = json.dumps(data).encode("utf-8") if data else None
-    
-    try:
-        req = Request(url, method=method, data=body, headers=headers)
-        with urlopen(req, timeout=timeout) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except HTTPError as e:
-        # Return error details for HTTP errors (4xx, 5xx)
-        try:
-            error_body = json.loads(e.read().decode("utf-8"))
-            warn(f"REST API error {e.code}: {error_body}")
-        except Exception:
-            warn(f"REST API error {e.code}: {e.reason}")
-        return None
-    except (URLError, OSError, TimeoutError) as e:
-        warn(f"REST API request failed: {type(e).__name__}: {e}")
-        return None
+    """Compatibility adapter for the provider HTTP transport."""
+    from providers.base import HttpProvider
+
+    return HttpProvider(_REST_API_BASE).request_json(
+        endpoint,
+        method=method,
+        payload=data,
+        timeout=timeout,
+    )
 
 
 def is_api_available() -> bool:
-    from urllib.request import Request, urlopen
-    try:
-        req = Request(f"{API_BASE}/models", method="GET")
-        with urlopen(req, timeout=TIMEOUT_HEALTH_CHECK) as resp:
-            return resp.status == 200
-    except Exception as e:
-        # Vertrag: -> bool, True wenn erreichbar, sonst False.
-        # Breiter Catch ist beabsichtigt: Jeder Fehler bedeutet "nicht erreichbar".
-        warn(f"is_api_available: {type(e).__name__}: {e}")
-        return False
-
-
-def _loaded_from_tabbyapi() -> dict | None:
-    """Geladenes Modell aus TabbyAPI (oder None)."""
-    name = _tabbyapi_loaded_name()
-    if name:
-        return {
-            "identifier": name,
-            "model_identifier": name,
-            "display_name": name,
-            "status": "loaded",
-            "context_length": 0,
-        }
-    return None
+    return get_provider().is_available(timeout=TIMEOUT_HEALTH_CHECK)
 
 
 def get_current_loaded_model() -> LoadedModelInfo | None:
-    try:
-        r = subprocess.run(["lms", "ps", "--json"], capture_output=True, text=True,
-                           timeout=15, encoding="utf-8", errors="replace")
-        if r.returncode != 0:
-            # Fallback: TabbyAPI (z.B. LM Studio läuft, aber CLI antwortet nicht).
-            return _loaded_from_tabbyapi()
-        entries = safe_json_loads(r.stdout)
-        if not entries:
-            return _loaded_from_tabbyapi()
-        entry = entries[0]
-        return {
-            "identifier": entry.get("identifier", ""),
-            "model_identifier": entry.get("modelKey", entry.get("path", "")),
-            "display_name": entry.get("displayName", ""),
-            "status": entry.get("status", ""),
-            "context_length": entry.get("contextLength"),
-        }
-    except (json.JSONDecodeError, subprocess.TimeoutExpired, OSError, KeyError) as e:
-        # KeyError deckt den Fall ab, dass `lms ps --json` ein dict (statt Liste)
-        # liefert - siehe test_handles_dict_format. Vertrag: Optional[LoadedModelInfo].
-        warn(f"lms ps --json fehlgeschlagen: {type(e).__name__}: {e}")
-        # Fallback: TabbyAPI (geladenes Modell direkt vom /v1/model).
-        loaded = _loaded_from_tabbyapi()
-        if loaded:
-            return loaded
-        return None
+    return get_provider().current_model()
+
+
+def unload_all(timeout: int = TIMEOUT_MODEL_READY) -> bool:
+    """Unload all models through the selected provider."""
+    return get_provider().unload_all(timeout=timeout)
 
 
 def has_unloaded_all_models() -> bool:
-    """Unload all models via LM Studio REST API.
-    
-    Uses POST /api/v1/models/unload for each loaded model, then polls
-    GET /api/v1/models until no models are reported loaded.
-    """
-    info("Unloading all models...")
-    
-    # Get list of loaded models
-    models_data = _rest_request("/api/v1/models", method="GET")
-    if models_data is None:
-        # Fallback: TabbyAPI - entladen ohne Modellliste.
-        if _tabbyapi_unload():
-            ok("All models unloaded (TabbyAPI)")
-            return True
-        warn("Could not fetch model list")
-        return False
-    
-    models = models_data.get("models", [])
-    loaded_instances = []
-    for model in models:
-        for inst in model.get("loaded_instances", []):
-            loaded_instances.append(inst.get("id"))
-    
-    if not loaded_instances:
-        ok("No models loaded")
-        return True
-    
-    # Unload each loaded model
-    for instance_id in loaded_instances:
-        result = _rest_request("/api/v1/models/unload", method="POST",
-                              data={"instance_id": instance_id})
-        if result is not None:
-            ok(f"Unloaded {instance_id}")
-        else:
-            warn(f"Failed to unload {instance_id}")
-    
-    # Poll until no models are loaded
-    for attempt in range(15):
-        time.sleep(2)
-        models_data = _rest_request("/api/v1/models", method="GET")
-        if models_data is None:
-            warn(f"Could not fetch model list (attempt {attempt+1}/15)")
-            continue
-        
-        models = models_data.get("models", [])
-        still_loaded = sum(len(m.get("loaded_instances", [])) for m in models)
-        
-        if still_loaded == 0:
-            ok("Old model fully unloaded")
-            return True
-        
-        warn(f"{still_loaded} model(s) still loaded (attempt {attempt+1}/15)")
-    
-    warn("Could not confirm unload - continuing")
-    return False
+    """Compatibility alias for the provider-neutral unload operation."""
+    return unload_all()
 
 
 # ── Registry Helpers ─────────────────────────────────────────────────
 _REGISTRY_CACHE: dict | None = None
+_MODEL_REGISTRY: ModelRegistry | None = None
+
+
+def _registry_view() -> ModelRegistry:
+    """Return a cached registry resolver for the current process."""
+    global _MODEL_REGISTRY
+    if _MODEL_REGISTRY is None:
+        _MODEL_REGISTRY = ModelRegistry(_load_registry_data)
+    return _MODEL_REGISTRY
+
+
+def _tabbyapi_runtime_overrides(model_identifier: str) -> dict[str, Any]:
+    """Resolve safe TabbyAPI load arguments from the registry."""
+    return _registry_view().provider_runtime(model_identifier, "tabbyapi")
 
 def _load_registry_data() -> dict:
     """Load and cache model_registry.yaml."""
@@ -396,132 +331,33 @@ def _registry_display_overrides() -> dict[str, str]:
 
 
 def get_available_models(exclude_keywords: list[str] | None = None, registry_only: bool = False) -> list[AvailableModelInfo]:
-    """Query LM Studio for installed models via `lms ls --json`.
+    """List models through the selected provider."""
+    models = get_provider().list_models(
+        exclude_keywords=exclude_keywords,
+        registry_only=registry_only,
+    )
+    return _attach_registry_identity(models, registry_only=registry_only)
 
-    Returns a list of dicts with keys:
-        key, model_identifier, display, variant, quant, variants,
-        identifier, params, publisher, vram_gb, modelKey
-    """
-    try:
-        result = subprocess.run(
-            ["lms", "ls", "--json"],
-            capture_output=True, text=True, timeout=TIMEOUT_CLI,
-            encoding="utf-8", errors="replace"
-        )
-        if result.returncode == 0:
-            data = safe_json_loads(result.stdout)
-            models = []
-            for item in data if isinstance(data, list) else data.values():
-                if isinstance(item, dict):
-                    base_key = item.get("modelKey", "")
-                    if not base_key:
-                        continue
-                    # Code-Review 2026-08-03 §F1: MTP-Drafter/mmproj-Zusatzdateien
-                    # aus der Modellliste filtern (gleiche Logik wie registry_tool
-                    # `_is_support_file`). Legitime MTP-Modelle (qwen3.6-27b-mtp,
-                    # Ternary-Bonsai-27B-MTP) bleiben unberührt.
-                    if is_support_file(
-                        item.get("path", "") or item.get("indexedModelIdentifier", ""),
-                        item.get("architecture", ""),
-                    ):
-                        continue
-                    quant = item.get("quantization", {}) or {}
-                    quant_name = quant.get("name", "") if isinstance(quant, dict) else ""
-                    sv = item.get("selectedVariant") or ""
-                    unique_key = sv if sv and sv != base_key else (
-                        f"{base_key}@{quant_name}" if quant_name
-                        and not base_key.lower().endswith(f"@{quant_name.lower()}")
-                        else base_key
-                    )
-                    if not quant_name and base_key.endswith("@?"):
-                        # LM Studio kann die Quantisierung dieser GGUF-Datei
-                        # nicht parsen (z.B. TQ2_0, ternär) und setzt im
-                        # modelKey '?' als Platzhalter. Quant für die Anzeige
-                        # aus dem GGUF-Dateinamen zurückgewinnen (letztes
-                        # '-' Segment); der Load-Key bleibt LM Studios
-                        # exakter '@?'-Key (in der GUI ladbar).
-                        fn = (item.get("path") or "").replace("\\", "/").rsplit("/", 1)[-1]
-                        if fn.lower().endswith(".gguf"):
-                            stem = fn[:-5]
-                            if "-" in stem:
-                                quant_name = stem.rsplit("-", 1)[-1]
-                    display = item.get("displayName", base_key)
-                    if quant_name:
-                        if "@" in display:
-                            display = display.split("@")[0]
-                        else:
-                            # displayName enthält den Quant ggf. als
-                            # Leerzeichen-Variante ("TQ2 0") - entfernen.
-                            space_form = quant_name.replace("_", " ")
-                            display = display.removesuffix(" " + space_form)
-                        display = f"{display}@{quant_name}"
-                    sz_bytes = item.get("sizeBytes", 0) or 0
-                    models.append({
-                        "key": unique_key,
-                        "model_identifier": base_key,
-                        "display": display,
-                        "variant": sv or base_key,
-                        "quant": quant_name,
-                        "variants": item.get("variants") or [],
-                        "identifier": item.get("indexedModelIdentifier", base_key),
-                        "params": item.get("paramsString", ""),
-                        "publisher": item.get("publisher", ""),
-                        "vram_gb": round(sz_bytes / 1e9, 2) if sz_bytes else "",
-                        "modelKey": base_key,
-                    })
-            if models:
-                # Apply registry display_name overrides
-                overrides = _registry_display_overrides()
-                if overrides:
-                    from assemble_blueprint import normalize_model_name
-                    for m in models:
-                        normalized_key = normalize_model_name(m["model_identifier"])
-                        if normalized_key in overrides:
-                            m["display"] = overrides[normalized_key]
-                            if m["quant"]:
-                                m["display"] = f"{m['display']}@{m['quant']}"
-                if exclude_keywords:
-                    # Code-Review 2026-07-18 §4.1: filter on BOTH key and
-                    # display, not just key. Some models have publisher
-                    # prefixes in `key` (e.g. "unsloth/phi-4") but the
-                    # filter keywords ("vision", "embed") may only appear
-                    # in `display`. Filter on the concatenation to catch
-                    # both.
-                    models = [m for m in models
-                              if not any(
-                                  kw in (m["key"] + " " + m["display"]).lower()
-                                  for kw in exclude_keywords)]
-                if registry_only:
-                    from assemble_blueprint import normalize_model_name
-                    registry_data = _load_registry_data()
-                    registry_base_keys = set()
-                    for key in registry_data:
-                        if isinstance(registry_data[key], dict):
-                            registry_base_keys.add(
-                                normalize_model_name(key).split("@")[0])
-                    filtered = []
-                    for m in models:
-                        # model_identifier = LMS modelKey (ohne Quant), key =
-                        # unique_key (inkl. @quant, z.B. über selectedVariant).
-                        # Registry-Keys tragen i.d.R. den @quant-Suffix; der
-                        # Filter prüft die Modell-IDENTITÄT (Basis ohne @quant,
-                        # da Sampling-Parameter pro Modell gelten, nicht pro
-                        # Quant). Deckt auch Mischquants ab (Registry
-                        # '@mixed' vs. LMS 'Q3_K').
-                        base = normalize_model_name(m["model_identifier"]).split("@")[0]
-                        if base in registry_base_keys:
-                            filtered.append(m)
-                    missing = len(models) - len(filtered)
-                    if missing:
-                        warn(f"{missing} Modelle nicht in Registry - mit `python registry_tool.py sync` hinzufügen. Ignoriert.")
-                    models = filtered
-                return models
-        warn(f"lms ls failed: {result.stderr.strip()}")
-    except FileNotFoundError:
-        error("lms.exe not found. Is LM Studio installed?")
-    except (subprocess.TimeoutExpired, json.JSONDecodeError) as e:
-        warn(f"Error with lms ls: {e}")
-    return []
+
+def _attach_registry_identity(
+    models: list[AvailableModelInfo],
+    registry_only: bool = False,
+) -> list[AvailableModelInfo]:
+    """Attach the canonical Registry key without changing the API/load ID."""
+    registry = _registry_view()
+    data = registry.load()
+    if not isinstance(data, dict):
+        return [] if registry_only else models
+    matched: list[AvailableModelInfo] = []
+    for model in models:
+        identifier = str(model.get("model_identifier") or model.get("key") or "")
+        resolved = registry.resolve(identifier)
+        if resolved is not None:
+            model["registry_key"] = resolved.registry_key
+            matched.append(model)
+        elif not registry_only:
+            matched.append(model)
+    return matched
 
 
 def parse_selection(choice: str, max_val: int) -> list[int] | None:
@@ -554,92 +390,10 @@ def parse_selection(choice: str, max_val: int) -> list[int] | None:
 
 
 def _is_lmstudio_running() -> bool:
-    """Ensure LM Studio server is reachable, starting it if necessary.
+    """Compatibility adapter for LM Studio server startup and discovery."""
+    from providers.lmstudio_provider import LMStudioProvider
 
-    Order of operations (each step is a no-op if the previous succeeded):
-      1. Check whether /v1/models responds - if yes, return True.
-      2. Try `lms server start` directly. Modern LMS versions manage the
-         underlying daemon themselves.
-      3. Fall back to finding the latest installed `llmster.exe` under
-         `.lmstudio/llmster/` via glob, sorted by version directory name.
-
-    Previously this function relied on a hardcoded path
-    `.lmstudio/llmster/0.0.12-1/llmster.exe` which broke whenever LMS
-    shipped a new version. See Code-Review 2026-07-18, Bug 2.
-    """
-    from urllib.error import URLError
-    from urllib.request import Request, urlopen
-    # 1. Already running?
-    try:
-        req = Request(f"{API_BASE}/models", method="GET")
-        with urlopen(req, timeout=3) as resp:
-            if resp.status == 200:
-                return True
-    except (URLError, OSError, TimeoutError):
-        pass
-
-    # 2. Try `lms server start` (preferred - LMS handles daemon internally)
-    print("  [INFO] LM Studio-Server nicht erreichbar - versuche 'lms server start'...")
-    try:
-        r = subprocess.run(["lms", "server", "start"],
-                           capture_output=True, text=True, timeout=30,
-                           encoding="utf-8", errors="replace")
-        time.sleep(5)
-        # Verify
-        try:
-            req = Request(f"{API_BASE}/models", method="GET")
-            with urlopen(req, timeout=3) as resp:
-                if resp.status == 200:
-                    ok("LM Studio-Server gestartet via 'lms server start'")
-                    return True
-        except (URLError, OSError, TimeoutError):
-            pass
-        warn(f"'lms server start' brachte Server nicht hoch: "
-             f"{r.stderr.strip()[:120]}")
-    except FileNotFoundError:
-        warn("lms.exe nicht im PATH - versuche llmster.exe direkt")
-    except subprocess.TimeoutExpired:
-        warn("'lms server start' Timeout")
-    except (OSError, subprocess.SubprocessError) as e:
-        warn(f"'lms server start' Fehler: {e}")
-
-    # 3. Fallback: find the newest llmster.exe under .lmstudio/llmster/*/
-    llmster_root = Path(os.path.dirname(os.path.dirname(__file__))) / ".lmstudio" / "llmster"
-    if llmster_root.exists():
-        # Find all version directories matching pattern "<version>/llmster.exe"
-        candidates = sorted(
-            (p for p in llmster_root.iterdir() if p.is_dir()),
-            key=lambda p: p.name,
-            reverse=True,  # newest version first (lexicographic - works for semver)
-        )
-        for ver_dir in candidates:
-            exe = ver_dir / "llmster.exe"
-            if exe.is_file():
-                info(f"Starte llmster {ver_dir.name}...")
-                try:
-                    subprocess.Popen([str(exe)])
-                    time.sleep(5)
-                    # Verify
-                    try:
-                        req = Request(f"{API_BASE}/models", method="GET")
-                        with urlopen(req, timeout=3) as resp:
-                            if resp.status == 200:
-                                # Now also start the LMS server
-                                subprocess.run(["lms", "server", "start"],
-                                               capture_output=True, text=True, timeout=30,
-                                               encoding="utf-8", errors="replace")
-                                time.sleep(5)
-                                ok("LM Studio-Server gestartet via llmster")
-                                return True
-                    except (URLError, OSError):
-                        # Server didn't respond yet after llmster start;
-                        # try the next version. This is intentionally
-                        # silent (Code-Review 2026-07-18 §5.2).
-                        pass
-                except (OSError, subprocess.SubprocessError) as e:
-                    warn(f"llmster {ver_dir.name} start fehlgeschlagen: {e}")
-    error("Konnte LM Studio-Server nicht starten")
-    return False
+    return LMStudioProvider(API_BASE).ensure_server()
 
 
 # Code-Review 2026-07-18 §6.1: defensive model_identifier validation.
@@ -669,70 +423,21 @@ def _validate_model_identifier(model_identifier: str) -> str:
     return model_identifier
 
 
-def load_model_via_lms(model_identifier: str, gpu_offload: float | None = None) -> tuple[bool, str | None]:
-    """Load model via LM Studio REST API.
-    
-    Uses POST /api/v1/models/load to load a model into memory.
-    Returns (success, instance_id) tuple.
-    """
+def load_model(model_identifier: str, gpu_offload: float | None = None) -> tuple[bool, str | None]:
+    """Load a model through the selected provider."""
     # Code-Review 2026-07-18 §6.1: validate input early.
     try:
         _validate_model_identifier(model_identifier)
     except ValueError as e:
         error(str(e))
         return False, None
-    
-    info(f"Loading '{model_identifier}'...")
-    
-    # Build load request payload
-    payload = {"model": model_identifier, "echo_load_config": True}
-    if gpu_offload is not None:
-        payload["gpu_offload"] = gpu_offload
 
-    for attempt in range(2):
-        result = _rest_request("/api/v1/models/load", method="POST", data=payload,
-                              timeout=TIMEOUT_LOAD_MODEL)
+    return get_provider().load_model(model_identifier, gpu_offload=gpu_offload)
 
-        if result is not None and result.get("status") == "loaded":
-            instance_id = result.get("instance_id", model_identifier)
-            load_time = result.get("load_time_seconds", 0)
-            load_cfg = result.get("load_config", {})
-            parallel = load_cfg.get("parallel", "?")
-            ok(f"Loaded in {load_time:.1f}s (np={parallel})")
-            info(f"Instance ID: {instance_id}")
-            return True, instance_id
-        
-        if result is not None:
-            ok("Model already loaded")
-            models_data = _rest_request("/api/v1/models", method="GET")
-            if models_data:
-                for model in models_data.get("models", []):
-                    if model.get("key") == model_identifier or model_identifier in model.get("key", ""):
-                        for inst in model.get("loaded_instances", []):
-                            return True, inst.get("id", model_identifier)
-            return True, model_identifier
-        
-        # Handle specific errors
-        if result is None:
-            # Fallback: TabbyAPI (Modellname = Modell-/Ordnername).
-            # Wird zuerst versucht, unabhaengig vom LM-Studio-Status.
-            loaded = _tabbyapi_load_model(model_identifier)
-            if loaded:
-                ok(f"Loaded via TabbyAPI: {loaded}")
-                return True, loaded
-            if attempt == 0:
-                # Check if LM Studio is running, retry if needed
-                if _is_lmstudio_running():
-                    warn("Load failed - retrying...")
-                    time.sleep(3)
-                    continue
-                else:
-                    warn("LM Studio not running")
 
-        warn(f"Load failed (attempt {attempt+1}/2)")
-        return False, None
-    
-    return False, None
+def load_model_via_lms(model_identifier: str, gpu_offload: float | None = None) -> tuple[bool, str | None]:
+    """Compatibility alias for the provider-neutral load operation."""
+    return load_model(model_identifier, gpu_offload=gpu_offload)
 
 
 def is_model_ready(timeout: int = TIMEOUT_MODEL_READY) -> bool:
@@ -741,36 +446,4 @@ def is_model_ready(timeout: int = TIMEOUT_MODEL_READY) -> bool:
     Unlike the previous implementation, this only considers HTTP 200 as "ready".
     Other errors (e.g. "No models loaded", 500, timeout) are retried until timeout.
     """
-    from urllib.error import HTTPError, URLError
-    from urllib.request import Request, urlopen
-    start = time.time()
-    print("  [INFO] Waiting for model readiness", end="", flush=True)
-    while time.time() - start < timeout:
-        time.sleep(2)
-        print(".", end="", flush=True)
-        try:
-            req = Request(f"{API_BASE}/chat/completions", method="POST",
-                          data=json.dumps({
-                              "model": HEALTH_CHECK_SENTINEL_MODEL,
-                              "messages": [{"role": "user", "content": "ping"}],
-                              "max_tokens": 1,
-                          }).encode("utf-8"),
-                          headers={"Content-Type": "application/json"})
-            with urlopen(req, timeout=5) as resp:
-                if resp.status == 200:
-                    print(" ready")
-                    return True
-        except (HTTPError, URLError, OSError):
-            # "No models loaded" (HTTP 400), 503, connection refused → keep waiting
-            pass
-        except (RuntimeError, ValueError, TimeoutError) as e:
-            # Server-side protocol errors (JSON parse, malformed response, etc.) → keep waiting
-            warn(f"Health-check protocol error: {e}")
-    print(" TIMEOUT")
-    # TabbyAPI fallback: check once after the primary OpenAI-compatible
-    # readiness window, so the health-check has deterministic retry timing.
-    if _tabbyapi_loaded_name() is not None:
-        print(" OK (TabbyAPI)")
-        return True
-    warn("Model readiness timeout")
-    return False
+    return get_provider().wait_ready(timeout=timeout)

@@ -1,4 +1,4 @@
-# Architecture & Flow – Status as of 03.08.2026 (v13.0.10)
+# Architecture & Flow – Status as of 18.08.2026 (v13.0.10)
 
 > **Version Convention:** See [`../VERSION`](../VERSION) – Single Source of Truth for project version. The existing `_en.md` filename is legacy (last updated 03.08.2026) – planned migration to `_v13.md` in a future major version.
 > **Review Reference:** See `doc-git/Reviews/Code-Review_2026-08-03_de.md` for the F1–F5 review that informed the 03.08. changes (MTP-Drafter-Filter, Granite-Templates, Docstrings/main()-Zerlegung, CWD-unabhängige Einstiegspunkte, Codestral-Structured-Output). Earlier: `doc-git/Reviews/Code-Review_2026-08-02_de.md` (P1/P3/P4: Struktur-Gate, Agentic-Safety, Run-Spec), `Doku-intern/Code-Review-2026-07-18.md`.
@@ -6,7 +6,7 @@
 ## 1. Overview
 
 The benchmark system consists of **four independent evaluation pipelines**, controlled via a central launcher.
-**Model management (load/unload) is ONLY triggered by the Launcher in `main()`.**
+**Model management (load/unload) is ONLY triggered by the Launcher in `main()`.** The launcher now routes this through a provider layer instead of calling backend-specific code directly.
 
 ### Four Evaluation Pipelines (9 Benchmarks)
 
@@ -47,6 +47,25 @@ model_manager.py (SHARED, unversioned)
 ├── check_api_available()      [unused]
 ├── API_BASE                   (central, not hardcoded in Launcher)
 └── PIPELINE_TIMEOUTS          (centrally defined)
+
+### Current provider split (18.08.2026)
+
+The launcher is now provider-aware. The active flow is:
+
+`Benchmark Runner -> ModelManager -> Provider -> backend`
+
+Current provider roles:
+
+- `LMStudioProvider`: native LM Studio lifecycle and LM Studio-specific JSON artifacts.
+- `TabbyAPIProvider`: Tabby lifecycle and ExLlamaV3 runtime derivation.
+- `OpenAICompatProvider`: inference-only provider with optional lifecycle extension for Unsloth's OpenAI-compatible endpoint.
+- `UnslothServerProvider`: runner-owned `llama-server.exe` process with provider-local GGUF resolution.
+
+Shared runtime source of truth:
+
+- `doc-git/model_registry.yaml` for benchmark policy, sampling, reasoning, quant and context policy.
+- GGUF headers for technical model limits and architecture-specific metadata.
+- `model_manager.py` as compatibility facade only; provider-specific code lives under `src/providers/`.
 
 csv_writer.py (CSV-OUTPUT, unversioned)
 ├── write_accumulative_summary()  -> Unified schema (; delimiter, utf-8)
@@ -1108,8 +1127,8 @@ Changes need ONLY be made in `src/model_manager.py` – no more searching for ha
 | `QUANT_MAP`              | Dict model_key -> Quant label (static, ~45 entries) | Quant mapping for CSV and display. Source priority: QUANT_MAP > `lms ls --json` > Config files > GGUF cache. Auto-generatable via `generate_quant_map.py`. **NEW 18.07.:** `get_quant()` 4-step look-up priority: QUANT_MAP exact → suffix → base → **registry fallback** (`model_registry.yaml:quants` first entry) |
 | `PIPELINE_DISCOVERY`     | Glob pattern + version regex | Dynamic script detection        |
 | `CUSTOM_BENCHMARK_SCRIPT` | dynamic via `glob()`       | Highest `custom_benchmark_v*.py` |
-| `USABLE_VRAM_GB`          | **15.3**                    | **NEW 18.07.:** RTX 5070 Ti 16 GB minus driver/overhead. Single source of truth |
-| `USE_UNIFIED_KV_CACHE_THRESHOLD_GB` | **14.0**       | **NEW 18.07.:** When `total_gb >= this`, UKV cache activates |
+| `USABLE_VRAM_GB`          | **15.3**                    | **NEW 18.07.:** RTX 5060 Ti 16 GB minus driver/overhead. Single source of truth |
+| `USE_UNIFIED_KV_CACHE_THRESHOLD_GB` | **12.0**       | **NEW 18.07.:** When `total_gb >= this`, UKV cache activates |
 | `LEGACY_MODEL_GB_THRESHOLD_GB` | **9.0**             | **NEW 18.07.:** Fallback for entries without `n_layers`/`hidden_dim` |
 | `KV_QUANT_REFERENCE_BYTES` | **1.5**                    | **NEW 18.07.:** Reference (q8_0 + iq4_nl) for ctx scaling in `_default_ctx_from_size` |
 

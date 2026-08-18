@@ -25,7 +25,17 @@ class AvailableModelInfo(TypedDict):
     identifier: str
     params: str
     publisher: str
+    registry_key: NotRequired[str]
+    api_model_id: NotRequired[str]
+    model_name: NotRequired[str]
+    model_path: NotRequired[str | None]
     _api_model: NotRequired[str | None]
+    loaded: NotRequired[bool]
+    created: NotRequired[int]
+    owned_by: NotRequired[str]
+    context_length: NotRequired[int | None]
+    max_context_length: NotRequired[int | None]
+    native_context_length: NotRequired[int | None]
 
 
 class LoadedModelInfo(TypedDict):

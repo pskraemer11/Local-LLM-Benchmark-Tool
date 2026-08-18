@@ -33,7 +33,7 @@ Collected: 2026-08-11.
 
 ### Key Finding
 
-**`load_config.parallel`** — The actual number of parallel slots used by LM Studio (e.g., 4). This is determined by the JSON config file's `numParallelSessions` value, NOT by the API payload.
+**`load_config.parallel`** — The actual number of parallel slots used by LM Studio (e.g., 4). This is determined by the JSON config file's `numParallelSessions` value, not by the API payload. In the benchmark suite, the canonical value is derived from `model_registry.yaml` + GGUF metadata and mirrored into LM Studio runtime artifacts when needed.
 
 ---
 
@@ -154,6 +154,6 @@ The following parameters are **exclusively** set via LM Studio JSON config files
 ### Implication for Benchmarks
 
 Since `numParallelSessions` and `useUnifiedKvCache` cannot be set via API:
-1. JSON config files MUST contain the correct values before model load
-2. The benchmark must ensure models are unloaded/reloaded to pick up config changes
-3. The `model_registry.yaml` serves as the Single Source of Truth for these values
+1. For LM Studio, JSON config files MUST contain the correct values before model load.
+2. The benchmark suite derives those values from `model_registry.yaml` and GGUF metadata, then writes them into LM Studio runtime artifacts when LM Studio is the active provider.
+3. Other providers use the same registry-derived policy directly, without relying on LM Studio JSON configs.

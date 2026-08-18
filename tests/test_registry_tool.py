@@ -919,6 +919,19 @@ class TestRegistryTemplateName:
         name = rt._registry_template_name("openai/gpt-oss-20b@mxfp4")
         assert name == "gpt-oss-20b_harmony.jinja"
 
+    def test_explicit_registry_template_overrides_blueprint(self) -> None:
+        registry = {
+            "unsloth/gpt-oss-20b-GGUF@q8_0": {
+                "blueprint": "gptoss_reasoning",
+                "template_policy": "explicit_file",
+                "template_variant": "unsloth_harmony_fix",
+                "template": "gpt-oss-20b-template_unsloth.jinja",
+            }
+        }
+        with patch.object(rt, "load_registry", return_value=registry):
+            name = rt._registry_template_name("unsloth/gpt-oss-20b-GGUF@q8_0")
+        assert name == "gpt-oss-20b-template_unsloth.jinja"
+
     def test_legacy_registry_field_fallback(self):
         # Blueprint ohne Template -> Fallback auf das (veraltete) Registry-Feld.
         fake_reg = {"unsloth/legacy-model@q4_k_m": {"blueprint": "default_chat", "template": "legacy.jinja"}}

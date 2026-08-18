@@ -1861,7 +1861,9 @@ def benchmark_model(model_info: Any, tasks: list[dict[str, Any]], task_type: str
     """
     is_dict = isinstance(model_info, dict)
     display_name = model_info["display"] if is_dict else model_info
-    model_identifier = model_info["key"] if is_dict else model_info
+    model_identifier = (
+        model_info.get("registry_key", model_info["key"]) if is_dict else model_info
+    )
     # Prefer exact API ID, fall back to model_identifier
     api_model = model_info.get("_api_model") if is_dict else model_identifier
     benchmark_category = get_benchmark_category(benchmark_name)
@@ -2237,7 +2239,8 @@ def _resolve_models(args: Any) -> list[dict[str, Any]]:
         models = []
         for m in available:
             key = m.get("key", "")
-            if key == target:
+            registry_key = m.get("registry_key", "")
+            if key == target or registry_key == target:
                 models.append(m)
                 continue
             try:
@@ -2245,7 +2248,10 @@ def _resolve_models(args: Any) -> list[dict[str, Any]]:
                 m_norm = normalize_model_name(key)
             except (ImportError, AttributeError):
                 m_norm = key.lower()
-            if m_norm == target_norm or m_norm.split("@")[0] == target_base:
+            registry_norm = normalize_model_name(registry_key) if registry_key else ""
+            if (m_norm == target_norm or m_norm.split("@")[0] == target_base
+                    or registry_norm == target_norm
+                    or registry_norm.split("@")[0] == target_base):
                 models.append(m)
         if not models:
             error(f"Model '{args.model_key}' not found.")
@@ -2268,7 +2274,7 @@ def _run_model_loop(models: list[dict[str, Any]], benchmarks: list[dict[str, Any
     api_model_override = args.api_model
     summary = []
     for _, model_info in enumerate(models, 1):
-        model_identifier = model_info["key"]
+        model_identifier = model_info.get("registry_key", model_info["key"])
         model_display = model_info["display"]
         # Reasoning-Registry-Prüfung - ohne Eintrag überspringen
         r = _model_supports_reasoning(model_identifier)

@@ -915,7 +915,7 @@ def is_support_file(
 # scattered across registry_tool.py (`_USABLE_VRAM_GB = 15.3`) and
 # run_benchmarks.py (in-line magic numbers). All VRAM-related
 # thresholds now live here as the single source of truth.
-USABLE_VRAM_GB = 15.3  # RTX 5070 Ti 16 GB minus driver overhead
+USABLE_VRAM_GB = 15.3  # RTX 5060 Ti 16 GB minus driver overhead
 USE_UNIFIED_KV_CACHE_THRESHOLD_GB = 12.0  # When model_size_gb >= this, UKV=True (empirically determined)
 
 # Modelle, die KEINE KV-Quantisierung vertragen -> IMMER UKV=True
