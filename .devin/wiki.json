@@ -2,50 +2,50 @@
   "$schema": "https://docs.devin.ai/deepwiki/wiki.schema.json",
   "repo_notes": [
     {
-      "content": "Local benchmark suite for LLMs (German project, English code). Goal: realistic scores on local hardware with ~16 GB VRAM (RTX 5070 Ti) - finds the Pareto frontier of parameter count, GGUF quantization and KV-cache/context settings. Since v13.0.6 all Python modules live in src/ (run_benchmarks.py, registry_tool.py, assemble_blueprint.py, benchmark_config.py, model_manager.py, consolidate_results.py ...); the code base root and src/ are canonical - do NOT document root-level scripts/files (they are archived legacy).",
+      "content": "Local benchmark suite for LLMs (German project, English code). Goal: reproducible local benchmarks on an NVIDIA RTX 5060 Ti with 16 GB VRAM, finding the Pareto frontier of parameter count, GGUF quantization, KV-cache/context settings and parallel execution. Python 3.12 is the supported runtime. Since v13.0.6 all production Python modules live in src/; document src/, tests/, doc-git/ and the versioned workflow files, while treating unrelated root-level legacy scripts as non-canonical.",
       "author": "pskraemer11"
     },
     {
-      "content": "Configuration is data-driven and lives in doc-git/: model_registry.yaml (canonical per-model data: quants, arch, template, context, offload, blueprint, reasoning), Blueprint-Definitions in blueprint_definitions.yaml, chat templates in doc-git/Jinja-Chat-Templates/. registry_tool.py commands sync/compare/validate/rm are the main entrypoints; assemble_blueprint.py classifies registry models into blueprint categories and assembles system prompts.",
+      "content": "Configuration is data-driven and lives in doc-git/: model_registry.yaml is the source of truth for benchmark metadata and provider-neutral runtime policy (quantization, benchmark context, sampling, reasoning, blueprint and template policy); blueprint_definitions.yaml defines prompt blueprints and doc-git/Jinja-Chat-Templates contains explicit templates. GGUF headers are the source of truth for immutable technical facts such as architecture and native context limits. LM Studio JSON files are backend-local artifacts, never the global source of truth. registry_tool.py commands sync/compare/validate/rm and validate --ci are the main maintenance entrypoints.",
       "author": "pskraemer11"
     },
     {
-      "content": "Key workflow (documented in doc-git/HowTo-Install-and-Configure-New-LLM_en.md): lms ls -> sync_model_configs.ps1 or registry_tool.py sync -> registry_tool.py sync internally runs classify+assemble+validate. New models are auto-detected; BLACKLIST models (embedding/ocr/vision/whisper/etc.) are skipped automatically.",
+      "content": "Key workflow: discover local GGUFs and provider models, resolve them against model_registry.yaml, read GGUF headers for technical identity, then run registry_tool.py sync/validate and a selected benchmark run-spec. The shared BLACKLIST excludes embeddings, OCR, vision-only, whisper and other unsupported auxiliary models; companion files such as MTP drafters, mmproj and importance matrices are not standalone benchmark models.",
       "author": "pskraemer11"
     },
     {
-      "content": "v13.0.10 features to document: YAML run-spec (--run-spec run.yaml, SUPPRESS probe parser, CLI>YAML>defaults precedence), seed flag, agentic-safety mode (--agentic-mode safety), structure gate (output_status, entry_point_found, extracted_code), gpt-oss reasoning centralization (GPTOSS_REASONING_EFFORT/GPTOSS_REASONING_BUDGET drive engine config AND gptoss_reasoning blueprint synchronously), Bonsai temperature overrides.",
+      "content": "Current architecture to document explicitly: Benchmark Runner depends on provider-neutral InferenceClient (chat/completions/models), ModelManager (list/load/unload/current) and ModelRegistry (metadata, sampling, reasoning, quantization and context). Providers include LM Studio, TabbyAPI, generic OpenAI-compatible endpoints, authenticated Unsloth Studio and a runner-managed Unsloth llama-server process. The runner must not depend on LM Studio for generic inference.",
       "author": "pskraemer11"
     },
     {
-      "content": "Testing: unit/integration tests live under tests/ or test/ dirs (invocation: python -m pytest); run the full registry + benchmark pipeline via src/registry_tool.py validate before committing registry changes.",
+      "content": "Testing and delivery: tests live under tests/ and run with Python 3.12 via pytest. validate --ci is a headless registry check without LM Studio, local hub state or local GGUF inventory. Versioned .githooks/ provide staged pre-commit checks, conventional commit-msg validation and a complete pre-push review gate; CI and Review workflows independently repeat the relevant checks with UTF-8 output and a focused mypy scope.",
       "author": "pskraemer11"
     }
   ],
   "pages": [
     {
       "title": "Overview",
-      "purpose": "Project purpose: realistic local LLM benchmarking under 16 GB VRAM constraints (RTX 5070 Ti), Pareto frontier of parameter count / quantization / KV-cache. Summarize the 4 pipelines (Custom, EvalPlus, LM-Eval, Agentic) and the benchmarks (DS1000, CoderEval, HumanEval+, MBPP+, ARC, HellaSwag, TruthfulQA, MATH-500, Tool-Eval).",
+      "purpose": "Project purpose: reproducible local LLM benchmarking under 16 GB VRAM constraints on an RTX 5060 Ti. Summarize the four pipelines (Custom, EvalPlus, LM-Eval, Agentic), the provider-neutral runner architecture, and the supported coding, reasoning, knowledge and agentic benchmark families.",
       "parent": null
     },
     {
       "title": "Getting Started & Installation",
-      "purpose": "Clone (github.com/pskraemer11/Local-LLM-Benchmark-Tool), prerequisites (LM Studio >=1.4.1 with REST/OpenAI API on localhost:1234, lms CLI, Python 3.13+), pip installs incl. lm-eval/env dependencies, first run of a small benchmark on a local model.",
+      "purpose": "Clone github.com/pskraemer11/Local-LLM-Benchmark-Tool, install Python 3.12 dependencies, then select a backend through LLM_PROVIDER. LM Studio >=1.4.1 with its REST/OpenAI API is one supported provider; TabbyAPI, OpenAI-compatible endpoints and the local Unsloth llama-server provider are alternatives. Explain that local GGUF discovery and registry validation are separate from inference-server selection.",
       "parent": "Overview"
     },
     {
       "title": "Source Layout (src/)",
-      "purpose": "Directory structure after the v13.0.6 src/-migration: describe every Python module in src/ and its responsibility (launcher, registry tool, blueprint assembly, config, model manager, result consolidation, csv writer, benchmark runners, utils). Explicitly state that root-level scripts are archived legacy and must not be documented.",
+      "purpose": "Describe the current source layout: src/run_benchmarks.py as launcher, src/model_manager.py as provider facade, src/model_registry.py as runtime resolver, src/providers/ for LM Studio, TabbyAPI, OpenAI-compatible and Unsloth implementations, src/local_model_resolver.py for local GGUF inventory, plus registry, blueprint, benchmark and result modules. Cover tests/, doc-git/ and versioned .githooks/ as operationally relevant areas.",
       "parent": "Overview"
     },
     {
       "title": "Model Registry & Registration",
-      "purpose": "doc-git/model_registry.yaml schema and fields (quants, arch, template, context length, offload, num_parallel, reasoning, blueprint). registry_tool.py commands sync, validate, rm, configs and the HowIs/auto-add path via sync_model_configs.ps1. Explain BLACKLIST (embedding/ocr/vision) handling and that config JSONs live under user-concrete-model-default-config.",
+      "purpose": "Document model_registry.yaml as the benchmark-policy and provider-neutral runtime source of truth: model identity, quantization, context, sampling, reasoning, capabilities, blueprint and template policy. Explain GGUF-header validation, provider-specific derivation, validate --ci, the shared BLACKLIST and why LM Studio user-concrete-model-default-config JSON files remain local backend artifacts.",
       "parent": "Getting Started & Installation"
     },
     {
       "title": "Blueprints & System Prompts",
-      "purpose": "Blueprint system: blueprint definitions (reasoning_assistant, coding_agent, etc.), how assemble_blueprint.py classifies a model (Legacy/LLM reasoning families, arch info from GGUF headers) and injects system prompts into LM Studio configs. Document source of prompt templates.",
+      "purpose": "Document blueprint classification and prompt construction from blueprint_definitions.yaml, model_registry.yaml, GGUF reasoning/template hints and explicit Jinja files. Explain model-family policies such as GPT-OSS Harmony, GLM, Gemma and explicit template variants, and distinguish provider-neutral template policy from LM Studio-only generated artifacts.",
       "parent": "Overview"
     },
     {
@@ -60,17 +60,27 @@
     },
     {
       "title": "Reasoning & Thinking Mode",
-      "purpose": "How reasoning models (thinking mode) are handled: thinking/reasoning fields in registry, enable_thinking flag, gpt-oss reasoning effort/budget centralization, reasoning patterns. Including agentic-safety mode.",
+      "purpose": "Explain reasoning and thinking handling across providers: registry reasoning policy, enable_thinking, GPT-OSS reasoning effort/budget, structured-output/template requirements and agentic safety mode. Show how the runner passes provider-neutral sampling and reasoning settings without assuming LM Studio.",
       "parent": "Benchmark Pipelines"
     },
     {
       "title": "VRAM & Hardware Optimization",
-      "purpose": "The VRAM math: USABLE_VRAM_GB, num_parallel slot computation, enableUnifiedKvCache decision, k/v cache quantization, offratio. 16 GB target and what happens if exceeded. Reference the document section and registry fields.",
+      "purpose": "Document VRAM policy for the 16 GB RTX 5060 Ti: four parallel benchmark slots where feasible, maximum GPU offload, context-length limits, KV-cache quantization, unified KV cache and fallback reductions when free VRAM is tight. Distinguish benchmark worker parallelism from backend server session parallelism.",
       "parent": "Overview"
     },
     {
       "title": "Testing & CI",
-      "purpose": "Unit test coverage for the core modules (registry_tool, benchmark config, assemble_blueprint), test commands, and integration tests for the pipelines. How to run the test suite before committing.",
+      "purpose": "Document unit and integration coverage, the Python 3.12 test commands, headless registry validation, focused mypy scope, Ruff policy and the staged pre-commit/full pre-push safety gates. Include the known non-blocking pynvml deprecation warning and informative full-tree mypy legacy findings.",
+      "parent": "Overview"
+    },
+    {
+      "title": "Provider Architecture & Lifecycle",
+      "purpose": "Explain the separation between Benchmark Runner, InferenceClient, ModelManager and ModelRegistry. Compare LM Studio, TabbyAPI, generic OpenAI-compatible endpoints, Unsloth Studio and the runner-managed Unsloth llama-server process, including discovery, load/unload capabilities, API bases, authentication and provider-specific runtime translation.",
+      "parent": "Overview"
+    },
+    {
+      "title": "CI, Review & Git Hooks",
+      "purpose": "Document the versioned .githooks/ pre-commit, commit-msg and pre-push gates, the pre_review_checks.ps1 artifact policy, headless validate --ci, Python 3.12 and UTF-8 workflow settings, focused mypy scope, and the relationship between local hooks and GitHub Actions.",
       "parent": "Overview"
     }
   ]
