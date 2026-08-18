@@ -20,6 +20,13 @@ Hinweise:
 
 Die Hooks erzeugen CHANGELOG-Eintraege nicht automatisch; dieser Eintrag dokumentiert die bewusst eingecheckte Workflow-Aenderung. Das `.devin/wiki.json` ist ein versioniertes Devin/DeepWiki-Manifest und wird nicht automatisch in ein GitHub-Wiki publiziert.
 
+## Lokale Run-Specs aus dem Repository entfernt (19.08.2026)
+
+| Date | File | Change |
+|------|------|--------|
+| 19.08. | `run-*.bat`, `run-*.ps1`, `run.*.yaml`, `run_lint.ps1` | Lokale Benchmark-Run-Specs und Hilfsskripte aus dem Git-Index entfernt, ohne die Dateien lokal zu loeschen. Passende `.gitignore`-Regeln verhindern eine versehentliche erneute Aufnahme. |
+| 19.08. | `AGENTS.md`, `doc-git/install_benchmark-data_windows.ps1`, `doc-git/Architecture, Flow & ChangeLog_en.md`, `doc-git/Reviews/Code-Review_2026-08-02_de.md` | Direkte Hinweise auf entfernte Beispiel-Run-Specs durch lokale, benutzerspezifische Run-Spec-Platzhalter ersetzt; historische Verweise bleiben als Dokumentation erhalten. |
+
 ## OpenAI-kompatibler Provider Phase 4 (17.08.2026)
 
 | Date | File | Change |

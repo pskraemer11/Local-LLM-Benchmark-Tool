@@ -103,5 +103,5 @@ Write-Host "`n" + "=" * 60
 Write-Host "  Installation abgeschlossen."
 Write-Host "  Starte das Benchmark-Skript mit:"
 Write-Host "    python src\run_benchmarks.py --help"
-Write-Host "    python src\run_benchmarks.py --run-spec run.example.yaml"
+Write-Host "    python src\run_benchmarks.py --run-spec <lokale-run-spec.yaml>"
 Write-Host "=" * 60

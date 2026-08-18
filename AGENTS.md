@@ -33,7 +33,7 @@
 - `tests/` – Pytest-Suite
 - `doc-git/` – Architektur-Doku, model_registry.yaml, blueprint_definitions.yaml, Jinja-Chat-Templates/, Model Specific Hints/, Developer-Docs/
 - `PLANUNG.md` – zentrale Workflow- und Architekturplanung im Projektroot
-- `run.verify-fixes.yaml` u.ä. – YAML-Run-Specs für Benchmark-Läufe
+- lokale `run.*.yaml`-Run-Specs – Benchmark-Läufe außerhalb des versionierten Quellcodes
 - `ergebnisse/`, `Doku-intern/` – gitignored (Lauf-Ergebnisse, Terminal-Logs, Chatverlauf-Compactions)
 
 ## Wichtige Pfade (Windows, lokal)

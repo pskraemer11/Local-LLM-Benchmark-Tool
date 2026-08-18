@@ -74,7 +74,7 @@ vorliegt (d.h. DS1000-Harness-/Bare-Execution-Fehler von "kein Code erzeugt" tre
 - CLI-Flag `--seed` (reproduzierbare Prompt-Auswahl).
 
 ### Beispiel
-`run.example.yaml` (Modelle/Benchmarks/sample_size/seed/agentic_mode + Flags).
+eine lokale YAML-Run-Spec (Modelle/Benchmarks/sample_size/seed/agentic_mode + Flags).
 
 ---
 

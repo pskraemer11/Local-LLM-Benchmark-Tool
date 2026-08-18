@@ -476,7 +476,7 @@ BENCHMARK_CATEGORY_DEFAULTS  (global, 4 entries)
 Reproducible runs via a YAML file instead of long CLI invocations:
 
 ```bash
-python run_benchmarks.py --run-spec run.example.yaml     # --config is an alias
+python src/run_benchmarks.py --run-spec <local-run-spec.yaml>     # --config is an alias
 ```
 
 **Precedence: `CLI flags > YAML > script defaults`.** The detection of which CLI flags
@@ -495,7 +495,7 @@ against a `seed:` value in the YAML.
   (SUPPRESS probe parse namespace).
 - `_LAUNCHER_ARG_SPECS`: shared argument definitions for main & probe parser.
 
-**Supported keys** (example see `run.example.yaml`): `models`, `benchmarks`,
+**Supported keys** (use a local YAML run-spec): `models`, `benchmarks`,
 `sample_size`, `seed`, `agentic_mode` (`random`/`safety`), `exclude_benchmarks`,
 `thinking`, `no_structured_output`, `unload_between`, `keep_response`.
 `temperature/top_p` overrides are deliberately **not** in the spec – they come from

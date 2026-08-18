@@ -30,6 +30,13 @@ backups/
 # Interne Skripte (nicht fuer Repo)
 run_missing_benchmarks.ps1
 
+# Lokale Benchmark-Run-Specs und Hilfsskripte (nicht fuer Repo)
+run-*.bat
+run-*.ps1
+run.*.yaml
+run.example.yaml
+run_lint.ps1
+
 # LM Studio / Nutzer-spezifisch
 lmstudio_model-list*.json
 lmstudio_model-list*.txt
