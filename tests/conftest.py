@@ -41,6 +41,8 @@ from __future__ import annotations
 import json
 import os
 import sys
+import tempfile
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -57,6 +59,37 @@ if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 if _SRC_DIR not in sys.path:
     sys.path.insert(0, _SRC_DIR)
+
+
+# Keep pytest and tempfile traffic inside the workspace.
+_TEST_TEMP_ROOT = Path(_REPO_ROOT) / ".pytest-temp"
+_TEST_TEMP_ROOT.mkdir(parents=True, exist_ok=True)
+
+
+@pytest.fixture(autouse=True)
+def isolate_test_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep tests isolated from live provider credentials and temp paths."""
+    for _env_var in ("TMP", "TEMP", "TMPDIR"):
+        monkeypatch.setenv(_env_var, str(_TEST_TEMP_ROOT))
+    monkeypatch.setattr(tempfile, "tempdir", str(_TEST_TEMP_ROOT))
+
+    for _env_var in (
+        "UNSLOTH_API_BASE",
+        "UNSLOTH_LOCAL_API_BASE",
+        "UNSLOTH_API_KEY",
+        "UNSLOTH_SERVER_API_KEY",
+        "UNSLOTH_MODEL_ROOT",
+        "UNSLOTH_SERVER_EXE",
+        "OPENAI_API_KEY",
+        "OPENAI_COMPAT_API_KEY",
+        "LLM_API_KEY",
+        "TABBYAPI_API_KEY",
+        "TABBYAPI_ADMIN_KEY",
+        "TABBYAPI_MODEL_DIR",
+    ):
+        monkeypatch.delenv(_env_var, raising=False)
+    monkeypatch.setenv("LLM_PROVIDER", "lmstudio")
+    monkeypatch.setenv("LLM_API_BASE", "http://127.0.0.1:1234/v1")
 
 
 # ─────────────────────────────────────────────────────────────────────

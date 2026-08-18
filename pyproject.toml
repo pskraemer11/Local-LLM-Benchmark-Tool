@@ -12,6 +12,7 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 addopts = "-v --tb=short"
+cache_dir = ".pytest-temp/pytest-cache"
 
 [tool.ruff]
 line-length = 120
@@ -55,6 +56,7 @@ extend-exclude = [
     "Doku-intern",
     "ds1000_official",
     "embedding-eval",
+    "utils/**",
     "ergebnisse",
     "human_eval_plus",
     "human-eval",

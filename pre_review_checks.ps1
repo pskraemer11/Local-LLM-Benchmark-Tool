@@ -19,7 +19,7 @@
       5. GGUF-Header vs. Registry (optional, technical facts)
          -> gguf_issues.md
          -> NUR INFORMATIV
-      6. CHANGELOG + LM Studio Config-np Verifikation (advisory)
+      6. CHANGELOG + LM Studio runtime-config numParallelSessions Verifikation (advisory)
          -> WARNUNGEN, kein harter Blocker
 
     Source of Truth in Schichten:
@@ -64,6 +64,14 @@ if (-not (Test-Path -LiteralPath $projectPath)) {
     exit 1
 }
 Set-Location -LiteralPath $projectPath
+
+$workspaceTemp = Join-Path $projectPath ".pytest-temp"
+if (-not (Test-Path -LiteralPath $workspaceTemp)) {
+    New-Item -ItemType Directory -Path $workspaceTemp -Force | Out-Null
+}
+$env:TMP = $workspaceTemp
+$env:TEMP = $workspaceTemp
+$env:TMPDIR = $workspaceTemp
 
 $artifactsDir = Join-Path $projectPath "doc-git\Review-Artifacts"
 if (-not (Test-Path -LiteralPath $artifactsDir)) {
@@ -161,6 +169,7 @@ from pathlib import Path
 PROJECT = Path.cwd()  # Skript laeuft immer mit cwd=Projektroot (Set-Location)
 sys.path.insert(0, str(PROJECT / "src"))
 
+from benchmark_config import is_support_file  # noqa: E402
 from registry_tool import MODELS_CACHE, _get_all_ggufs, _read_gguf_arch, load_registry  # noqa: E402
 
 
@@ -180,7 +189,7 @@ hits: dict[str, tuple[Path, tuple]] = {}
 with ThreadPoolExecutor(max_workers=8) as pool:
     futures = {}
     for path in _get_all_ggufs():
-        if "mmproj" in path.name.lower():
+        if is_support_file(path):
             continue
         futures[pool.submit(_read_gguf_arch, str(path))] = path
     for fut in as_completed(futures):
@@ -276,7 +285,8 @@ if (-not (Test-Path -LiteralPath $changelog)) {
     }
 }
 
-# Config-np: Alle aktiven Configs sollten np=4 haben
+# LM Studio runtime-config check: numParallelSessions should remain 4
+# (benchmark num_parallel is a separate launcher policy).
 $cfgRoot = Join-Path $env:USERPROFILE ".lmstudio\.internal\user-concrete-model-default-config"
 $npWarnings = 0
 if (Test-Path $cfgRoot) {
@@ -295,9 +305,9 @@ if (Test-Path $cfgRoot) {
     }
 }
 if ($npWarnings -eq 0) {
-    Write-Host "  LM Studio Config-np: Alle Configs haben np=4." -ForegroundColor Green
+    Write-Host "  LM Studio runtime-config numParallelSessions: Alle Configs haben 4." -ForegroundColor Green
 } else {
-    Write-Host "  [WARN] $npWarnings Configs mit np!=4 gefunden (sollten auf 4 gesetzt werden)." -ForegroundColor Yellow
+    Write-Host "  [WARN] $npWarnings Configs mit numParallelSessions!=4 gefunden (sollten auf 4 gesetzt werden)." -ForegroundColor Yellow
     $warnings++
 }
 

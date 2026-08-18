@@ -1035,17 +1035,17 @@ unsloth/glm-4-7-flash@q3_k_s:
   arch: moe
   sampling:
     coding:
-      temperature: 0.8
-      top_p: 0.6
+      temperature: 0.7
+      top_p: 1.0
     knowledge:
-      temperature: 0.8
-      top_p: 0.6
+      temperature: 1.0
+      top_p: 0.95
     agentic:
-      temperature: 0.8
-      top_p: 0.6
+      temperature: 0.7
+      top_p: 0.95
     math:
-      temperature: 0.8
-      top_p: 0.6
+      temperature: 1.0
+      top_p: 0.95
     thinking:
       enabled: true
       temperature: 0.6

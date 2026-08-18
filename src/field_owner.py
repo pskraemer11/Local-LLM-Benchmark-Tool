@@ -84,6 +84,12 @@ FIELD_OWNERSHIP: dict[str, FieldRule] = {
         "registry", "config", False, checks=("template_file",),
         description="Jinja-Vorlage-Referenz (menschlich)"
     ),
+    "template_policy": FieldRule(
+        "registry", "registry", False, description="Template-Auswahlpolicy (blueprint vs explicit_file)"
+    ),
+    "template_variant": FieldRule(
+        "registry", "registry", False, description="Benannte Template-Variante fuer explicit_file-Modelle"
+    ),
     "truncation": FieldRule(
         "registry", "config", False, description="Truncation-Verhalten (menschlich)"
     ),

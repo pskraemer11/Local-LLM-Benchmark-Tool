@@ -98,7 +98,10 @@ class OpenAICompatProvider(HttpProvider):
         return models
 
     def is_available(self, timeout: int = 5) -> bool:
-        payload = self.request_json("/models", timeout=timeout)
+        try:
+            payload = self.request_json("/models", timeout=timeout)
+        except Exception:
+            return False
         return payload is not None
 
     def current_model(self) -> dict[str, Any] | None:

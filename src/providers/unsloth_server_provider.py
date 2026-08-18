@@ -256,7 +256,10 @@ class UnslothServerProvider(HttpProvider):
         return self._controller.stop(timeout)
 
     def is_available(self, timeout: int = 5) -> bool:
-        return self.request_json("/models", timeout=timeout) is not None
+        try:
+            return self.request_json("/models", timeout=timeout) is not None
+        except Exception:
+            return False
 
     def wait_ready(self, timeout: int = 120) -> bool:
         deadline = time.monotonic() + timeout

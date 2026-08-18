@@ -2,6 +2,155 @@
 
 Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen oder per Kommando). CHANGELOG = was, Compaction = warum/was nächste.
 
+
+============== Compaction 06.08.2026 / 19:35 ==================
+## Objective
+- Review-Prozess-Konzept (3 Säulen) umsetzen, das der Nutzer mit „Ja, so umsetzen" abgesegnet hat: (1) CHANGELOG.md als zentrale Design-/Bug-/Fix-Doku, (2) Pre-Commit-Gate (pre_review_checks.ps1 v2 + validate-Erweiterung + pre-push-Hook + CI-Fix), (3) Transparenz-Artefakte (repro_issues.md, lint_issues.md committet, Logs ignoriert).
+
+## Important Details
+- Nutzer-Entscheidungen aus den 3 Konzept-Fragen:
+  1. Artefakte: `repro_issues.md` + `lint_issues.md` werden committet; `validate_errors.log` + `pre_review_checks_*.log` → `.gitignore` (transient).
+  2. CHANGELOG: **Root `CHANGELOG.md`** (neu); §20 „Version Changelog" aus `doc-git/Architecture, Flow & ChangeLog_en.md` (Z. ~1312) wandert vollständig dorthin, Architecture-Doku behält nur Verweis. Eintrag-Format: Datum | Datei(en) | Entscheidung/Fix + Zeilen `Grund:`/`Quelle:`.
+  3. Push-Gate: **pre-push-Hook + CI-Fix** (nach Erklärung von Hook/CI gewählt; Hook bricht `git push` bei Fehlern ab, CI läuft nach Push auf GitHub als Sicherheitsnetz).
+- Zusatz-Anmerkung des Nutzers: Artefakte ersetzen **nicht** den Review-Bericht; CHANGELOG entlastet README (reiner Quickstart); Fehler treten auch im laufenden Betrieb auf (z. B. Benchmark-Runs), nicht nur bei Reviews; Verfahren muss einfach/sicher sein („nichts vergessen" bei vielen Schritten).
+- Geplante Dateien laut Konzept/Todo: `CHANGELOG.md` (Root), `doc-git/Review-Prozess.md`, `doc-git/Reviews/_templates/{Phase1-Prompt.md, Phase2-Prompt.md, Review-Report-Template.md}` (konsolidiert aus `Doku-intern/Review-Checkliste (Single-Entwickler).md` + `Doku-intern/Review Prompt für Benchmarktest.md` + Heise-Prinzipien), `doc-git/Review-Artifacts/` (repro_issues.md + lint_issues.md als Snapshot je Review), `scripts/pre-push.ps1` + Installer (via `core.hooksPath`), `.gitignore`-Ergänzung, `.github/workflows/review.yml`-Fix.
+- Umsetzungsreihenfolge: validate-Erweiterung (──repro/--verbose) → Skript v2 → Hook → CI-Fix → CHANGELOG (§20-Umzug) → Templates → Prozess-Doku/Artefakte/gitignore → End-to-End-Test (Gate-Lauf, Hook-Test, CI-YAML-Syntax).
+- Für `--repro`: Nutzung von `src/tools/gguf_full_metadata_reader.py` (nutzt `from gguf import GGUFReader`); Vergleichsquellen: `~/.lmstudio/hub/models/{publisher}/{model}/model.yaml`, JSON-Configs, `model_registry.yaml`, GGUF-Header.
+- Offene Kleinigkeit aus Konzept: `gguf`-Paket verfügbar? → **geklärt: installiert** (`C:\Users\pskra\AppData\Local\Programs\Python\Python314\Lib\site-packages\gguf\__init__.py`); ebenso ruamel.yaml + psutil OK.
+- Verbleibende Altlasten: 5 untracked `pre_review_checks_20260806_*.log` bleiben uncommittet; DeepSeek-Registry-Einträge bleiben (6 „missing"); Registry = 64 Keys; validate = 0 Probleme (Stand vor dieser Sitzung).
+
+## Work State
+### Completed
+- Konzept (3 Säulen, 11 Schritte) erstellt, vom Nutzer freigegeben; 3 Folge-Fragen beantwortet; Zusatz-Anmerkungen integriert.
+- Todo-Liste (9 Items) angelegt — aktuelle Reihenfolge: Baseline → validate --verbose/--repro → Skript v2 → Hook → CI → CHANGELOG → Templates → gitignore/Artefakte → E2E-Test.
+- Basline-Checks z. T. durchgeführt:
+  - `gguf` (Python314 site-packages), `ruamel.yaml`, `psutil` importierbar.
+  - `pre_review_checks_20260806_132030.log` zeigt Bug #1: Skript ruft `registry_tool.py validation` (falsch) statt `validate` → `[ERROR] Unknown command: validation`.
+  - Bug #2 (bekannt): Skript-Schritt 4 ruft gelöschtes `src\tools\_check_gguf_ctx.py` auf.
+  - **Neuer Bug #3**: `ruff check .` bricht mit `unknown field 'tool'` ab — verursacht durch `--config .\.pyproject.toml` im Skript: die Root-`pyproject.toml` enthält jetzt nur `[tool.pytest.ini_options]`, keinen `[tool.ruff]`-Block (Ruff-Configs liegen in `.ruff.toml` + `.pyproject.toml` versteckt).
+- Frühere Sitzung (Kontext für CHANGELOG/Review): Review-Berichte von 2026-06-28 bis 2026-08-03 in `doc-git/Reviews/` (10 Stück, Format: ISO/IEC 9126, Artefakt-Referenzen, Commit-Hashes, P0/P1/P2-Priorisierung).
+
+### Active
+- Todo 1 „Baseline: ruff/mypy-Status, gguf-Paket, pre_review-Log auswerten" fast fertig — ruff-Status noch unklar, weil `ruff check .` am Config-Fehler abstürzt; mypy-Status noch nicht gelaufen.
+- Todo 2 „registry_tool.py: validate --verbose + --repro" noch nicht begonnen.
+
+### Blocked
+- (none) — aber `ruff check .` muss zunächst ohne die kaputte `--config .\.pyproject.toml`-Angabe getestet werden (bzw. auf `.ruff.toml` umgestellt).
+
+## Next Move
+1. Ruff-Config-Problem verifizieren/lösen: `ruff check .` **ohne** `--config` testen (nutzt dann auto-detect von `.ruff.toml`); ggf. Doppel-Config-Konflikt `.ruff.toml` ↔ verstecktes `.pyproject.toml` prüfen; Fehlerbehebungs-Entscheidung für v2-Skript festhalten.
+2. Todo 2: `validate` in `src/registry_tool.py` erweitern — `--verbose` (Detail je Prüfpunkt) + `--repro` (schreibt `doc-git/Review-Artifacts/repro_issues.md` mit Diskrepanzen Registry ↔ JSON-Configs ↔ `hub/models/*/model.yaml` ↔ GGUF-Header via `gguf_full_metadata_reader.py`).
+3. Todo 3: `pre_review_checks.ps1` v2 schreiben — ① Git-Status/Branch-Info ② `validate` (immer zusätzlich in `validate_errors.log`) ③ `ruff check` + `mypy` → `lint_issues.md` ④ `pytest tests/` ⑤ `validate --repro` → `repro_issues.md`; harte Stopps bei Exit-Code ≠ 0; Bug `validation`→`validate` fixen; toten `_check_gguf_ctx.py`-Aufruf ersetzen; `--config`-Flag korrigieren.
+4. Danach gemäß Todo-Liste: pre-push-Hook + Installer (`scripts/hooks/`, `core.hooksPath`), CI-Fix (`review.yml`: Runner `windows-2025`, Deps via `[project]`-Metadaten ergänzen oder `requirements.txt`), CHANGELOG.md (§20-Umzug + neue Einträge), `_templates/` + `Review-Prozess.md`, `.gitignore` + `Review-Artifacts/`-Initialisierung, abschließender End-to-End-Test.
+
+## Relevant Files
+- `src/registry_tool.py` — validate erweitern (`--verbose`, `--repro`); Dispatch `elif cmd == "validate"` (Z. ~2265), `cmd_validate`-Report (Z. ~1825)
+- `pre_review_checks.ps1` — v2-Rewrite; bekannte Bugs: `validation`-Aufruf, toter `_check_gguf_ctx.py`-Aufruf, `--config .\.pyproject.toml` (→ „unknown field `tool`")
+- `pyproject.toml` (Root, neu) — nur `[tool.pytest.ini_options]`; Ursache des ruff-Config-Fehlers im Skript
+- `.ruff.toml`, `.pyproject.toml` (versteckt) — Ruff/pylint/mypy-Configs (aus Mistral/Vibe https://chat.mistral.ai/work/e4dd489b-946d-412d-9538-ec17a803c108), entstehen als neue Dateien bereits committet (a276f160)
+- `.github/workflows/review.yml` — aktuell kaputt: `runs-on: Windows 11` (ungültig), `pip install -e .` scheitert (kein `[project]`-Block), fehlende Deps (ruamel.yaml/psutil/gguf)
+- `doc-git/Architecture, Flow & ChangeLog_en.md` — §20 „Version Changelog" (Z. ~1312) wandert in CHANGELOG.md; Verweis statt §20
+- `src/tools/gguf_full_metadata_reader.py` — GGUF-Metadaten-Extraktion für `--repro`
+- `doc-git/Reviews/` (10 Berichte) + `Doku-intern/Review-Checkliste (Single-Entwickler).md`, `Doku-intern/Review Prompt für Benchmarktest.md` — Quelle für `_templates/`-Konsolidierung
+- `C:\Users\pskra\.lmstudio\hub\models\{publisher}\{model}\model.yaml` — Vergleichsquelle für `--repro`
+- `.gitignore` — Ergänzen: `validate_errors.log`, `pre_review_checks_*.log`; `doc-git/Review-Artifacts/` wird committet
+
+================= Compaction 06.08.2026 / 20:42 ===========
+## Objective
+- Review-Prozess-Konzept (3 Säulen) umsetzen: CHANGELOG.md, Pre-Commit-Gate (pre_review_checks.ps1 v2 + validate-Erweiterung + pre-push-Hook + CI-Fix), Transparenz-Artefakte (repro_issues.md/lint_issues.md committet).
+- Aktueller Arbeitsschritt: Baseline abschließen (ruff/mypy) und `validate --verbose/--repro` in `registry_tool.py` implementieren.
+
+## Important Details
+- **Config-Konsolidierung abgeschlossen**: verstecktes `.ruff.toml` + `.pyproject.toml` per `git rm` entfernt; **alle** Tool-Configs (pytest/ruff/mypy/pylint) jetzt in sichtbarem Root-`pyproject.toml`; `ruff check .` ohne `--config`-Flag im Skript.
+- **Mistral-Regelliste ist nur Vorschlag** (expliziter Nutzerhinweis): „Empfehlungen aus Mistral-Chat müssen nicht streng gefolgt werden … lieber einmal mehr fragen, wenn etwas unklar ist".
+- Nutzer-Entscheidungen dieser Sitzung:
+  1. FBT001/002/003 + S310/S603/S607 → in `pyproject.toml` ignore-Liste aufgenommen (mit Begründungskommentaren, Entscheidung 06.08.2026).
+  2. mypy im Gate: **nur informativ, nicht blockierend** (195 Legacy-Typfehler).
+  3. ANN101/ANN102 aus ignore entfernt (Ruff-Warnung: Regeln entfernt, Ignorieren wirkungslos).
+- **Ergebnis Baseline**: `ruff check .` → „All checks passed!" (0 Fehler, Ausgangslage 531); `python -m pytest -q` → 741 passed (4.19–4.61 s); `mypy .` → 195 Fehler in 13 Dateien (informativ; Top: custom_benchmark 40, run_benchmarks 36, assemble_blueprint 23, consolidate_results 22, gguf_full_metadata_reader 22; Top-Kategorien: type-arg 51, assignment 24, attr-defined 22, var-annotated 18).
+- Wichtige Fixes: B023 **echter Thread-Bug** in `custom_benchmark.py` (~Z. 589–599: Closures eingefroren als Default-Argumente `result_lock`/`result`/`cancel_event`/`current_start_timeout`, danach ANN001-Typannotationen `threading.Lock`/`dict[str, Any]`/`threading.Event`); Re-Export `USE_UNIFIED_KV_CACHE_THRESHOLD_GB as _USE_UNIFIED_KV_CACHE_THRESHOLD_GB` + `# noqa: F401` in `registry_tool.py` wiederhergestellt (Tests importieren ihn); S506-noqa in `run_benchmarks.py` Z. 300 („_NoopLoader ist bewusst sicher – yaml.safe_load scheitert an lm_eval-`!function`-Tags"); B007-Bereinigung via `_`/`.values()`; B905 `strict=True`; TYPE_CHECKING-Blöcke in 5 Dateien.
+- Bekannte Skript-Bugs für v2-Rewrite (noch offen): `registry_tool.py validation` (falscher Befehl) + toter `src\tools\_check_gguf_ctx.py`-Aufruf.
+- Geplante Artefakte/Doku unverändert (CHANGELOG.md Root, `doc-git/Review-Prozess.md`, `doc-git/Reviews/_templates/`, `doc-git/Review-Artifacts/`, `scripts/pre-push.ps1` + Installer via `core.hooksPath`, `.github/workflows/review.yml`-Fix, `.gitignore` um `validate_errors.log`/`pre_review_checks_*.log`).
+
+## Work State
+### Completed
+- **Todo 1 (Baseline) komplett**: ruff 531→0 Fehler; Config-Durcheinander gelöst; B023-Bug behoben; Suite grün; mypy-Status geklärt (informativ); 5 untracked alte `pre_review_checks_*.log` bleiben uncommittet.
+- `pyproject.toml` enthält jetzt: `[tool.pytest.ini_options]`, `[tool.ruff]` (line-length 120, target py314, exclusions für Archiv/simple_evals/tests/Legacy), `[tool.ruff.lint]` select/ignore/fixable (ignore: ANN401, B008, B011, S101, S311, PERF203, PERF401, FBT001, FBT002, FBT003, S310, S603, S607), `[tool.ruff.lint.per-file-ignores]`, `[tool.ruff.format]`, `[tool.pylint.main]`, `[tool.mypy]` (strict=true, exclude: simple_evals/, Archiv/, Doku-intern/, doc-git/, backups/, lm_eval_tasks/, human[-_]eval, ds1000_official/, ergebnisse/, runs/, logs/, tests/).
+- `src/tools/gguf_full_metadata_reader.py` & `src/tools/lmeval_proxy.py`: `Optional[str]`/`Optional[bytes]`-Typen ergänzt (RUF013-Fix).
+
+### Active
+- **Todo 2 in Arbeit**: `validate --verbose` + `--repro` in `src/registry_tool.py` implementieren; `cmd_validate` (Z. 1656) angefangen zu lesen — Checks bisher: `template_missing_file`, `template_missing_config` (weitere folgen bis ~Z. 1830, Report folgt); Dispatch: `"validate": cmd_validate` (Z. 2123), Aufruf `elif cmd == "validate": cmd_validate()` (Z. 2268).
+
+### Blocked
+- (none)
+
+## Next Move
+1. `cmd_validate`-Funktion komplett lesen (Z. 1656–1830+), um Ergebnisstruktur (`errors`-Dict, exit/report-Logik) für `--verbose`-Detailausgabe und `--repro`-Artefakt zu verstehen.
+2. Argument-Parsing/Dispatch um `--verbose`/`--repro` erweitern; `--repro` nutzt `hub/models/*/model.yaml` + `GGUFReader` (`src/tools/gguf_full_metadata_reader.py`) → schreibt `doc-git/Review-Artifacts/repro_issues.md`.
+3. Danach: `pre_review_checks.ps1` v2 (Gate: validate→log, ruff→lint_issues.md, mypy informativ, pytest, `--repro`→repro_issues.md, CHANGELOG-Erinnerung; Fix `validation`→`validate`, toten gguf-Aufruf ersetzen, ohne `--config`).
+
+## Relevant Files
+- `src/registry_tool.py` — `cmd_validate` Z. 1656; Dispatch Z. 2123/2268; Re-Export-Fix in Import-Block (~Z. 100–115); TYPE_CHECKING für `RegistryEntry`.
+- `pyproject.toml` (Root) — zentrale Tool-Config (ruff/mypy/pytest/pylint), Grundlage für Gate-Skript und CI-Fix.
+- `pre_review_checks.ps1` — v2-Rewrite offen; bekannte Bugs (falscher Command-Name, toter `_check_gguf_ctx.py`).
+- `src/custom_benchmark.py` — B023-Fix (~Z. 589–599), `_TaskProgress` (~Z. 1832–1870, Einrückungs-Fix enthalten).
+- `src/run_benchmarks.py` — S506-noqa Z. 300; F821-noqas für `model_obj` (~Z. 1140–1150).
+- `.github/workflows/review.yml` — weiterhin kaputt (Runner `Windows 11` ungültig → `windows-2025`, `pip install -e .` ohne `[project]`, fehlende Deps ruamel.yaml/psutil/gguf).
+- `doc-git/Architecture, Flow & ChangeLog_en.md` — §20 „Version Changelog" (~Z. 1312) → CHANGELOG.md-Umzug offen.
+- `src/tools/gguf_full_metadata_reader.py` — für `--repro` (Type-Fix enthalten).
+
+==================== Compaction 06.08.2026 / 23:15 =======================
+*OC:
+## Objective
+- Review-Gate-Tooling etablieren (abgeschlossen: Todos 1–3, Planung 18, BLACKLIST-Feinschliffe) und Dokumentation vereinheitlichen: neue deutsche Review-HowTo in `Doku-intern`, alle Publikations-Dokumente in `doc-git` vollständig auf Englisch umstellen (`Reviews/` bleibt ausdrücklich unangetastet).
+
+## Important Details
+- `doc-git/` = alles zur Veröffentlichung (GitHub); `Doku-intern/` = intern (deutsch).
+- `Reviews/` NICHT anpassen (Nutzer-Entscheid). `Review-Artifacts/` wird als Publikations-Artefakt weiterhin übersetzt.
+- F2LLM: gesamte Familie inkl. 14B bleibt geblacklistet (Embedding per HF-Cards, `Feature Extraction`); trotz „Reasoning"-Anzeige in LMS (Qwen3-Backbone + Chat-Template) — Nutzer bestätigt: „Passt schon!".
+- Qwen3.5/3.6: Dual-Mode, Default Thinking (`enableThinking.defaultValue: true`); Punkt 18 abgeschlossen.
+- GGUF = Source of Truth (unveränderlich); Registry editierbar; Hub-`model.yaml` nie anfassen; Mistral-Regelliste = Vorschlag.
+- mypy nur informativ (195 Legacy); Commit-Stil `fix:`/`feat:`/`docs:`; CHANGELOG-Referenzen auf `main`.
+- Übersetzungsregeln: Markdown-Struktur, Pfade, Modellnamen, Hashes, Zahlen, Datumsformate (TT.MM. behalten) NICHT ändern; Ablauf: HowTo → 3 große Dateien (parallel) → kleine Dateien → Code-Artefakt-Generierung → Umbenennungen → Verifikation/Commits.
+
+## Work State
+### Completed
+- **Todo 3 abgeschlossen**: 3 Commits — `98e0700f` (CHANGELOG.md aus §20, §20 → kurzer Verweis, UTF-8 verifiziert via Python), `dec76d4d` (HowTo Windows-Backslash-Pfade, separater Commit), `ff8898f` (BLACKLIST: `text-embedding`/`granite-embedding` entfernt, Substring `embed` deckt ab; Konstanten an Dateianfang verschoben).
+- `87e51863`: BLACKLIST-Kommentar `em_german` präzisiert (deckt `em_german_13b` + `em_german_leo_mistral` ab).
+- `0061df90`: f2llm auf `f2llm-v2-1.7b`/`f2llm-v2-4b` präzisiert (14B erlaubt) — **widerrufen** durch:
+- `e8de48c`: f2llm wieder generisch (HF-Cards belegen: gesamte Familie Embedding, inkl. 14B).
+- **Planung 18 fertig** (`fc49787c`): `qwen/qwen3.5-9b` → `reasoning: thinking` + `max_context_length: 262144`; `assemble_blueprint.py:248-249`-Kommentar korrigiert; enable_thinking-Handling geprüft (kein Code-Change nötig); `validate --repro` = 0 Abweichungen, ruff 0, 741 Tests grün; Planung.md `[x]`, CHANGELOG-Eintrag ergänzt.
+- **HowTo-Review-Gate_de.md** in `Doku-intern/` geschrieben (deutsch): 3 Säulen, 5 Check-Checks-Tabelle, Phase-2-Stichproben, ausführliche Prompt-Vorlage, Phasen/Regeln.
+- **Parallel-Agenten (3 große Übersetzungen)**: `Temperature Recommondations.md` (244 Zeilen, vollständig englisch, verifiziert per Regex) ✓; `Planung.md` (53 Zeilen, englisch, Checkbox-Status erhalten, Dateiname bleibt) ✓; `Architecture, Flow & ChangeLog_en.md` — Agent lieferte 2× leeres Ergebnis, Datei NIE angefasst (git status unverändert) → **mache ich selbst, aktuell in Arbeit**.
+- Front-Tabelle abgeschlossen: 105 Zeilen mit deutschen Treffern identifiziert via `lang_lines.py`; bisher übersetzt: Z.1, 77, Flow-Diagramm, §2.1a (Pre-Run-Checks komplett), §2.7-Sectionen (Reasoning-Quellen/Used-by, Qwen3-Familie, Registry-getriebenes enable_thinking, §2.11 YAML-Run-Spec komplett, §2.12 Seed-Durchgängigkeit, tool-eval-bench-CLI inkl. AGENTIC_SAFETY-Abschnitt, §3-Sektionen Struktur-Gate + main()/consolidate_results + _write_tbl, F5-Structured-Output-exclusions), Interne-Namen/Index-Tabelle `blueprint`/`truncation`/`custom_template`.
+- `lang_scan.py` + `lang_lines.py` in `C:\Users\pskra\AppData\Local\Temp\opencode\` (UTF-8-Wrapper gegen Kodierungsprobleme; Mischtabelle der 124 Muttersprachen; Zeilen-Trefferliste als `%TEMP%\opencode\arch_lines.txt`).
+
+### Active
+- **Architecture-Datei in Arbeit (selbst, batch-edit)**: bisher ~24 Edit-Blöcke x4 Sprachen fertig; **offen der Rest aus `arch_lines.txt`**; aktueller Read-Punkt Z. 790–1033 (nach Edit 4); Z. 795, 799, 800–801, 820–850 (Struktur-Gate + consolidate_results + _write_tbl) fertig — **Rest der Treffer-Liste (Z. > 860, Details in `arch_lines.txt`) noch nicht übersetzt**.
+- `Planung.md` und `Temperature Recommondations.md` sind uncommittet im Working Tree (git status: `M doc-git/Planung.md`, `M "doc-git/Temperature Recommondations.md"`).
+
+### Blocked
+- (none)
+
+## Next Move
+1. `doc-git/Architecture, Flow & ChangeLog_en.md` zu Ende übersetzen: Read-Reste (ab Z. 860/`arch_lines.txt`) + Zeilen außerhalb der Edit-Blöcke, dann lang_scan, Commits „docs: … englisch".
+2. Kleine Dateien übersetzen: `A-B-Vergleich*` (2, 29+63 Treffer), `Modell Specific Hints/*` (x3 Dateien inkl. Ordnerumbenennung, 4 Dateien: GPT-OSS-Harmony/README, Qwen3.6-Fix, phi-4), `HowTo-Install-and-Configure-New-LLM_en.md` (19), `Model-Parameters-and-Benchmarks_en.md` (Check).
+3. Code/Umbennungen: `registry_tool.py` `_write_repro_issues` + `pre_review_checks.ps1` GGUF-Check auf Englisch („kein"/„gefunden" vs. „none"/„found"), Artefakte neu generieren; `git mv` „Temperature Recommondations.md"→„..._en.md", „A-B-Vergleich …"→„A-B-Comparison …", Ordner „Modell Specific Hints"→„Model Specific Hints" (Code-Referenzen prüfen); `HowTo-Review-Gate_de.md` committen.
+4. Finale Verifikation: lang_scan → 0 Mischungen (mit 3-Treffer-Schwelle), ruff, pytest (741), validate; Commits mit `docs:`.
+
+## Relevant Files
+- `Doku-intern/HowTo-Review-Gate_de.md` — neu, deutsch, committet noch nicht.
+- `doc-git/Architecture, Flow & ChangeLog_en.md` — Übersetzung in Arbeit (noch ~Reste aus `arch_lines.txt`).
+- `doc-git/Temperature Recommondations.md` + `doc-git/Planung.md` — übersetzt, uncommittet, Umbenennung nur für Temperature auf `_en` geplant (nicht Planung; Dateiname bleibt).
+- `doc-git/A-B-Vergleich*` (2 Dateien) + `doc-git/Modell Specific Hints/` (4 .md) — kleine Übersetzungen offen.
+- `src/benchmark_config.py` — BLACKLIST-Änderungen committet (`ff8898f`, `87e5186`, `e8de48c`); Referenzen auf „Modell Specific Hints" prüfen (Datei-Doku).
+- `doc-git/Review-Artifacts/repro_issues.md` — bei Umstellung `registry_tool.py` neu generieren (deutsche Meldungen).
+- `src/registry_tool.py` — `_write_repro_issues` (deutsche Strings: „kein", „gefunden", „Hub-Abweichungen") → auf Englisch.
+- `pre_review_checks.ps1` — GGUF-Check-Abschnitt (deutsche Meldungen) → auf Englisch.
+
+==================================================
+
+
 =============== Compaction 14.08.2026 / 11:30 ================
 ## Objective
 - (Current) Grundsätzliche Lösung verankern: modellspezifische Jinja-Chat-Templates, Systemprompts und Stop-Strings müssen dauerhaft in der **Blueprint-Datei als einziger Quelle** (`blueprint_definitions.yaml`) liegen und von `assemble_blueprint.py` + `benchmark_config.py` gelesen werden, damit sie `registry_tool.py`/`pipeline`-Revisionen nicht verlieren.

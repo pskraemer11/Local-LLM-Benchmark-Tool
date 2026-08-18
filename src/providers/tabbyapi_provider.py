@@ -142,7 +142,10 @@ class TabbyAPIProvider(HttpProvider):
         }
 
     def is_available(self, timeout: int = 5) -> bool:
-        return self.request_json("/models", timeout=timeout) is not None
+        try:
+            return self.request_json("/models", timeout=timeout) is not None
+        except Exception:
+            return False
 
     def _config_args(self) -> dict[str, Any]:
         """Read TabbyAPI model defaults as a provider-local fallback."""
