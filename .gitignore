@@ -64,8 +64,12 @@ prompt_inventory.csv
 *.tmp
 *.bak
 *.swp
+*.lnk
 .pytest-temp/
 
 # Review-Gate-Logs (Artefakte in doc-git/Review-Artifacts/ werden committet)
 pre_review_checks_*.log
 validate_errors.log
+
+# Lokale, regenerierbare Quarantaene-Backups der Registry
+doc-git/Review-Artifacts/quarantine_registry_*.yaml
