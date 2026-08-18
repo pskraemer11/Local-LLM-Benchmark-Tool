@@ -79,7 +79,8 @@ if ($pythonFiles.Count -gt 0) {
     if (-not (Get-Command ruff -ErrorAction SilentlyContinue)) {
         Stop-Hook "ruff ist fuer den Pre-Commit-Check nicht verfuegbar."
     }
-    Invoke-Checked "ruff" @("check", "--no-fix", "--", $pythonFiles)
+    $ruffArgs = @("check", "--select", "E,F", "--ignore", "E501,F401,E402", "--no-fix", "--") + $pythonFiles
+    Invoke-Checked "py" (@("-3.12", "-m", "ruff") + $ruffArgs)
     $compileArgs = @("-m", "py_compile") + $pythonFiles
     Invoke-Checked "python" $compileArgs
 }

@@ -672,7 +672,7 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 ## Objective
 - (Completed) CI-/Review-Gates auf den aktuellen Provider-/Registry-Architekturstand synchronisieren.
 - (Completed) Versionierte Git-Hooks fuer Pre-Commit, Commit-Msg und Pre-Push einfuehren und fuer dieses Arbeitsverzeichnis aktivieren.
-- (Current) Aenderungen zusammen mit ihrer Dokumentation committen und nach GitHub pushen.
+- (Completed) Aenderungen zusammen mit ihrer Dokumentation committen und nach GitHub pushen.
 
 ## Important Details
 - `core.hooksPath` ist lokal auf `.githooks` gesetzt; die Einstellung liegt in `.git/config` und wird von Git nicht automatisch mit einem Clone uebertragen. `.githooks/README.md` beschreibt die einmalige Aktivierung.
@@ -681,16 +681,17 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 - Die Laufzeitparameter und Modellquelle bleiben provider-neutral aus GGUF und `model_registry.yaml` abgeleitet; LM-Studio-JSON-Dateien sind keine globale Source of Truth.
 - Der Readiness-Check war erfolgreich: **894 Tests bestanden**, Ruff und Compile-Pruefungen sauber, Workflow-YAML und PowerShell-Syntax gueltig, `validate --ci` ohne Probleme, fokussiertes mypy ohne Befunde. Bekannt bleiben die informative Vollbaum-mypy-Legacylast und die `pynvml`-Deprecation-Warnung.
 - `.devin/wiki.json` ist ein versioniertes Devin/DeepWiki-Manifest. Es ist nicht das separate GitHub-Wiki-Repository (`<repo>.wiki.git`) und wird nicht durch einen normalen Push automatisch als GitHub-Wiki veroeffentlicht.
+- Der erste Commit/Push (`8ca45d31`) lief erfolgreich. Eine anschliessende Pre-Commit-Pruefung zeigte eine nicht-blockierende Ruff-Argumentwarnung; der Hook wird deshalb in einem kleinen Folgecommit mit flacher Argumentliste und CI-kompatiblem Regelsatz korrigiert.
 
 ## Work State
 ### Completed / Active / Blocked
 - Completed: Hook-Skripte, CI-/Review-Synchronisierung, headless Registry-Validierung, UTF-8-Erzwingung, Dokumentation und Tests.
-- Active: explizit beabsichtigte Dateien fuer Commit und Push scopen; vorbestehende untracked Dateien `utils/` sowie die beiden Server-Hilfe-Texte bleiben unangetastet.
+- Active: den kleinen Ruff-Hook-Folgefix committen und pushen; vorbestehende untracked Dateien `utils/` sowie die beiden Server-Hilfe-Texte bleiben unangetastet.
 - Blocked: keiner.
 
 ## Next Move
 1. Beabsichtigte Dateien explizit stagen und den Commit durch die neuen Hooks laufen lassen.
-2. `git push origin main` ausfuehren; dabei den vollstaendigen Pre-Push-Gate erneut abwarten.
+2. `git push origin main` fuer den Folgefix ausfuehren; dabei den vollstaendigen Pre-Push-Gate erneut abwarten.
 3. Push-Status und die Frage zur separaten GitHub-Wiki-Aktualisierung im Abschluss klaeren.
 
 ## Relevant Files

@@ -15,6 +15,7 @@ Hinweise:
 | 19.08. | `src/registry_tool.py`, `tests/test_registry_tool.py` | `validate --ci` als LM-Studio-freier Modus ergaenzt; UTF-8-Ausgabe unter Windows erzwungen und der Headless-Pfad getestet. |
 | 19.08. | `pre_review_checks.ps1`, `pyproject.toml`, `src/benchmark_config.py` | Pre-Review um temporaere Artefakte ohne Working-Tree-Aenderung erweitert, Python-Zielversion auf 3.12 vereinheitlicht und fokussierte mypy-Rueckgaben bereinigt. |
 | 19.08. | `AGENTS.md`, `doc-git/HowTo-Review-Gate_de.md` | Dauerhafte Hook-Aktivierung, Sicherheitsregeln, Readiness-Kriterien und CI-Grenzen dokumentiert. |
+| 19.08. | `.githooks/pre_commit.ps1` | Ruff-Aufruf korrigiert: staged Python-Dateien werden mit flacher Argumentliste und dem CI-kompatiblen E/F-Regelsatz unter Python 3.12 geprueft. |
 | 19.08. | Verifikation | Readiness erfolgreich: **894 Tests bestanden**, Ruff/Compile, YAML-/PowerShell-Syntax, `validate --ci` und fokussiertes mypy ohne Fehler. Details und Entscheidungsrahmen siehe [COMPACTIONS.md](COMPACTIONS.md). |
 
 Die Hooks erzeugen CHANGELOG-Eintraege nicht automatisch; dieser Eintrag dokumentiert die bewusst eingecheckte Workflow-Aenderung. Das `.devin/wiki.json` ist ein versioniertes Devin/DeepWiki-Manifest und wird nicht automatisch in ein GitHub-Wiki publiziert.
