@@ -16,7 +16,7 @@ cache_dir = ".pytest-temp/pytest-cache"
 
 [tool.ruff]
 line-length = 120
-target-version = "py314"
+target-version = "py312"
 cache-dir = ".ruff_cache"
 
 # Don't lint the Archiv, Bibliotheken, etc. folder (legacy code)
@@ -134,7 +134,7 @@ enable = ["R0902", "R0903", "R0913", "R0914", "R0801"]
 
 [tool.mypy]
 # Lenient settings: legacy research codebase with gradual typing.
-python_version = "3.14"
+python_version = "3.12"
 ignore_missing_imports = true
 strict = true
 warn_unused_ignores = false

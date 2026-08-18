@@ -29,7 +29,10 @@ und ersetzt die bisherige manuelle Checkliste für den Review-Ablauf.
 - Die Mistral-Regelliste (aus früheren Reviews) ist nur ein **Vorschlag**;
   bei Unklarheiten wird im Review nachgefragt, nicht geraten.
 
-- `mypy` ist nur **informativ** und nicht blockierend.
+- Im lokalen Gate ist der Vollbaum-Check `mypy .` weiterhin **informativ** und
+  nicht blockierend. Die GitHub-Workflows verwenden dagegen einen definierten,
+  fokussierten Scope (`src/benchmark_config.py` und `src/csv_writer.py`) als
+  blockierenden Typecheck.
 
 - Qwen 3.5/3.6-Modelle sind **Dual-Mode**: Thinking per Toggle steuerbar,
   Default = Thinking (`enableThinking.defaultValue: true`).
@@ -66,7 +69,7 @@ Die 6 Checks im Überblick:
 |---|---------------------------|-------------------|--------------------------------------------|---------------------------------------------------------------|
 | 1 | Registry-Validierung (`validate --repro`) | **Ja** | `repro_issues.md` | Registry-, GGUF- und Provider-Runtime-Prüfungen |
 | 2 | `ruff check . --no-fix` | **Ja** | `lint_issues.md` | Lint-Fehler blockieren |
-| 3 | `mypy .` | Nein (informativ) | — | Legacy-Typfehler werden nur berichtet |
+| 3 | `mypy .` | Nein (informativ) | — | Lokaler Vollbaum-Check; Legacy-Typfehler werden nur berichtet |
 | 4 | `pytest -q` | **Ja** | — | Vollsuite; zuletzt 893 Tests bestanden |
 | 5 | GGUF-Header-Check | Nein (informativ) | `gguf_issues.md` | Architektur-Fakten gegen GGUF-Header |
 | 6 | CHANGELOG + LM-Studio-Runtime-Konfiguration | Nein (advisory) | — | Prüft CHANGELOG-Hinweis und `numParallelSessions` |
@@ -96,7 +99,13 @@ Nach dem Gate-Lauf:
 ```powershell
 python .\src\registry_tool.py validate --verbose          # alle Einzelprobleme
 python .\src\registry_tool.py validate --verbose --repro  # Artefakt neu schreiben
+python .\src\registry_tool.py validate --ci              # headless CI: Registry/Template-Dateien
 ```
+
+Der `--ci`-Modus benötigt weder LM-Studio-Configs noch lokale GGUF-Dateien.
+Er ist für GitHub Actions gedacht und prüft ausschließlich statische
+Registry-/Template-Regeln. Die vollständige lokale Validierung bleibt
+`validate --repro` vorbehalten.
 
 5. **Neu aufgenommene Modelle** doppelt prüfen (GGUF-Header + Hub-`model.yaml`
    + Hersteller-Model-Card). Bekannte Fallstricke:
@@ -134,7 +143,8 @@ Vorgehen:
 3. Regeln:
    - Die Mistral-Regelliste ist nur ein Vorschlag. Bei Unklarheiten frag
      nach, statt zu raten.
-    - mypy-Fehler sind informativ und nicht blockierend.
+    - Im lokalen Gate sind mypy-Fehler informativ und nicht blockierend; der
+      GitHub-Typecheck prüft nur den fokussierten Scope.
     - Qwen 3.5/3.6 = Dual-Mode, Thinking-Toggle, Default Thinking.
    - Embedding-Modelle (auch große wie F2LLM-v2-14B) gehören auf die
      BLACKLIST, auch wenn LM Studio sie als Reasoning anzeigt.
@@ -147,7 +157,28 @@ Vorgehen:
 
 ---
 
-## 6. Abschluss
+## 6. Versionierte Git-Hooks
+
+Der Repository-Clone verwendet den versionierten Hook-Pfad `.githooks`:
+
+```powershell
+git config core.hooksPath .githooks
+```
+
+- `pre-commit` prüft staged Dateien schnell und blockierend: Whitespace,
+  Secret-Muster, sensible Dateitypen, Ruff, Python-Syntax, YAML/JSON sowie
+  Registry-Änderungen und fokussierte Registry-Tests.
+- `commit-msg` prüft Conventional-Commit-Präfix, Subject-Länge und Secrets.
+- `pre-push` führt die vollständige lokale Gate-Suite ohne Skip-Schalter aus
+  und prüft anschließend den fokussierten mypy-Scope blockierend. Die dabei
+  erzeugten Artefakte werden temporär geschrieben, da der Commit bereits
+  erstellt ist.
+
+Die Hooks sind unter Windows als Git-kompatible Shell-Einstiegspunkte mit
+PowerShell-Helfern implementiert. `--no-verify` bleibt ein dokumentierter
+Notfallweg und darf nicht zum normalen Workflow werden.
+
+## 7. Abschluss
 
 - Alle Befunde abgearbeitet: fixen (Code) oder begründet verwerfen
   (im Review-Text dokumentieren).

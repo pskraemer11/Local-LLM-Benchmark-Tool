@@ -34,6 +34,7 @@ Commands:
   validate      Check model_registry.yaml consistency: template files exist,
                 Config JSON promptTemplate matches YAML, override overlap,
                 required fields present, registry-vs-config drift, etc.
+                Use --ci for headless CI validation without LM-Studio state.
   sync-templates
                 Write promptTemplate from registry template files into config
                 JSONs that are missing it (fixes validate template_missing_config)
@@ -189,6 +190,16 @@ def _run_lms_ls() -> list[dict[str, Any]]:
 
     print("[WARN] lms ls auch nach Server-Start fehlgeschlagen")
     return []
+
+
+def _configure_utf8_output() -> None:
+    """Make direct CLI output safe for Windows consoles and CI runners."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            # Test doubles and already-closed streams may not support reconfigure.
+            pass
 
 
 # ── Blank-line formatting ──────────────────────────────────────────
@@ -2242,17 +2253,18 @@ def _gguf_drift_errors(reg: dict[str, Any]) -> list[str]:
     return out
 
 
-def cmd_validate(verbose: bool = False, repro: bool = False) -> dict[str, Any]:
+def cmd_validate(verbose: bool = False, repro: bool = False, ci: bool = False) -> dict[str, Any]:
     """Validate model_registry.yaml consistency: templates, configs, overrides.
 
     verbose: zeigt alle Einzelprobleme (statt nur die ersten 10 je Kategorie).
     repro:   schreibt zusätzlich doc-git/Review-Artifacts/repro_issues.md mit
              GGUF-Hub-Abweichungen (Registry vs. LM-Studio-Hub model.yaml).
+    ci:      headless static checks only; skips LM-Studio configs and local GGUFs.
 
     Returns dict with error counts per check category.
     """
     reg = load_registry()
-    cfgs = read_lms_configs(CONFIG_ROOT)
+    cfgs = [] if ci else read_lms_configs(CONFIG_ROOT)
     errors: dict[str, list[str]] = {
         "template_missing_file": [],
         "template_missing_config": [],
@@ -2283,6 +2295,8 @@ def cmd_validate(verbose: bool = False, repro: bool = False) -> dict[str, Any]:
 
     # ── Check 2: blueprint template -> Config JSON promptTemplate ──
     for model_key, entry in reg.items():
+        if ci:
+            continue
         if not isinstance(entry, dict):
             continue
         tpl = _registry_template_name(model_key)
@@ -2342,6 +2356,8 @@ def cmd_validate(verbose: bool = False, repro: bool = False) -> dict[str, Any]:
 
     # ── Check 5: Registry name findet Config JSON (mit fallback matching) ──
     for model_key, entry in reg.items():
+        if ci:
+            continue
         if not isinstance(entry, dict):
             continue
         # Skip models without GGUF installed (no config expected)
@@ -2437,7 +2453,7 @@ def cmd_validate(verbose: bool = False, repro: bool = False) -> dict[str, Any]:
     # unveraenderlichen GGUF-Headern; Abweichungen werden gemeldet (fixbar
     # durch 'sync-from-gguf'). reasoning bleibt bewusst außen vor
     # (Interpretationsspielraum, wird nur als fill-if-missing behandelt).
-    gguf_drift_errors = _gguf_drift_errors(reg)
+    gguf_drift_errors = [] if ci else _gguf_drift_errors(reg)
     errors["gguf_header_drift"] = gguf_drift_errors
 
     # ── Report ─────────────────────────────────────────────────────
@@ -2964,6 +2980,7 @@ def _interactive_menu() -> None:
 
 
 def main() -> None:
+    _configure_utf8_output()
     if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
         if len(sys.argv) < 2:
             _interactive_menu()
@@ -3031,6 +3048,7 @@ def main() -> None:
         errors = cmd_validate(
             verbose="--verbose" in flags,
             repro="--repro" in flags,
+            ci="--ci" in flags or "--headless" in flags,
         )
         sys.exit(1 if any(errors.values()) else 0)
     elif cmd == "quarantine-missing":

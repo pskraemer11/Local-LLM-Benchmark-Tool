@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+
+repo_root="$(git rev-parse --show-toplevel)"
+exec pwsh -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass \
+  -File "$repo_root/.githooks/commit_msg.ps1" "$@"

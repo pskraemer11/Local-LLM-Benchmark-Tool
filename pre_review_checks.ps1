@@ -42,6 +42,9 @@
 .PARAMETER NoTranscript
     Kein Transcript-Log schreiben (fuer pre-push-Hook-Aufrufe).
 
+.PARAMETER NoArtifacts
+    Review-Artefakte nur temporaer erzeugen (fuer Pre-Push nach einem Commit).
+
 .EXAMPLE
     .\pre_review_checks.ps1
     .\pre_review_checks.ps1 -SkipGguf -LogFile "C:\temp\gate.log"
@@ -53,7 +56,8 @@ param (
     [switch]$SkipPytest,
     [switch]$SkipGguf,
     [string]$LogFile = "pre_review_checks_$(Get-Date -Format 'yyyyMMdd_HHmmss').log",
-    [switch]$NoTranscript
+    [switch]$NoTranscript,
+    [switch]$NoArtifacts
 )
 
 $ErrorActionPreference = "Stop"
@@ -65,6 +69,10 @@ if (-not (Test-Path -LiteralPath $projectPath)) {
 }
 Set-Location -LiteralPath $projectPath
 
+# Einheitliche Unicode-Ausgabe fuer Python auf Windows und in CI.
+$env:PYTHONUTF8 = "1"
+$env:PYTHONIOENCODING = "utf-8"
+
 $workspaceTemp = Join-Path $projectPath ".pytest-temp"
 if (-not (Test-Path -LiteralPath $workspaceTemp)) {
     New-Item -ItemType Directory -Path $workspaceTemp -Force | Out-Null
@@ -73,10 +81,15 @@ $env:TMP = $workspaceTemp
 $env:TEMP = $workspaceTemp
 $env:TMPDIR = $workspaceTemp
 
-$artifactsDir = Join-Path $projectPath "doc-git\Review-Artifacts"
+$artifactsDir = if ($NoArtifacts) {
+    Join-Path $env:TEMP "Benchmarks-PreReview-$PID"
+} else {
+    Join-Path $projectPath "doc-git\Review-Artifacts"
+}
 if (-not (Test-Path -LiteralPath $artifactsDir)) {
     New-Item -ItemType Directory -Path $artifactsDir -Force | Out-Null
 }
+$env:BENCHMARK_REVIEW_ARTIFACTS_DIR = $artifactsDir
 
 if (-not $NoTranscript) {
     Start-Transcript -Path $LogFile -Append -Force
@@ -92,7 +105,9 @@ Write-Host "`n[1/6] validate --repro (Registry + GGUF + Provider-Runtime) ..." -
 if ($SkipRepro) {
     Write-Host "  UEBERSPRUNGEN (-SkipRepro)" -ForegroundColor Yellow
 } else {
-    & python src\registry_tool.py validate --repro 2>&1 | Tee-Object -Variable validateOut | Out-Host
+    $validateArgs = @("src\registry_tool.py", "validate")
+    if (-not $NoArtifacts) { $validateArgs += "--repro" }
+    & python @validateArgs 2>&1 | Tee-Object -Variable validateOut | Out-Host
     $validateExit = $LASTEXITCODE
     if ($validateExit -ne 0) {
         Write-Host "  [FEHLER] validate meldet Probleme (siehe oben)." -ForegroundColor Red
@@ -161,6 +176,7 @@ if ($SkipGguf) {
     Write-Host "  UEBERSPRUNGEN (-SkipGguf)" -ForegroundColor Yellow
 } else {
     $ggufScript = @'
+import os
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
@@ -223,7 +239,9 @@ for key, (path, (nl, hd, ctx)) in sorted(hits.items()):
         if rv is not None and int(rv) != gguf_val:
             errors.append(f"- **{key}**: {label} Registry={rv} vs GGUF={gguf_val} ({path})")
 
-out = PROJECT / "doc-git" / "Review-Artifacts" / "gguf_issues.md"
+artifact_root = Path(os.environ.get("BENCHMARK_REVIEW_ARTIFACTS_DIR", str(PROJECT / "doc-git" / "Review-Artifacts")))
+artifact_root.mkdir(parents=True, exist_ok=True)
+out = artifact_root / "gguf_issues.md"
 lines = [
     "# GGUF-Issues: model_registry.yaml vs. GGUF-Header",
     "",
@@ -322,9 +340,11 @@ if ($blockingFails -gt 0) {
     Write-Host "  - tests/test_model_manager.py::TestUnloadAllModels, TestWaitForModelReady, TestValidateModelKey" -ForegroundColor DarkGray
     Write-Host "    (API-Pfad /v1/model vs /v1/chat/completions — wird separat gefixt)" -ForegroundColor DarkGray
     if (-not $NoTranscript) { Stop-Transcript }
+    if ($NoArtifacts) { Remove-Item -LiteralPath $artifactsDir -Recurse -Force -ErrorAction SilentlyContinue }
     exit 1
 }
 Write-Host "`n=== Alle blockierenden Checks bestanden ===" -ForegroundColor Green
 Write-Host "[HINWEIS] Nach Push: Compaction + CHANGELOG-Eintrag nicht vergessen (Trigger: commit/push)." -ForegroundColor Cyan
 if (-not $NoTranscript) { Stop-Transcript }
+if ($NoArtifacts) { Remove-Item -LiteralPath $artifactsDir -Recurse -Force -ErrorAction SilentlyContinue }
 exit 0

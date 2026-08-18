@@ -64,3 +64,19 @@
 - Vor Commit: Ruff-Cleanliness für geänderte `src/`-Dateien sicherstellen.
 - `utils/` ist fremder Code und bleibt untracked.
 - Review: beachte Skill review.md
+
+## Git-Hooks und Sicherheitsgate
+- Der versionierte Hook-Pfad ist `.githooks/`; im lokalen Clone muss
+  `git config core.hooksPath .githooks` gesetzt sein.
+- `pre-commit` prüft staged Dateien: Diff-Whitespace, sensible Dateitypen,
+  hochwahrscheinliche Secret-Muster, Ruff, Python-Syntax, YAML/JSON und bei
+  Registry-Änderungen `registry_tool.py validate --ci` sowie fokussierte Tests.
+- `commit-msg` verlangt eine nichtleere Conventional-Commit-Subject-Zeile
+  (maximal 72 Zeichen); Merge-/Revert-Nachrichten bleiben erlaubt.
+- `pre-push` führt `pre_review_checks.ps1` ohne Skip-Schalter und anschließend
+  den fokussierten blockierenden mypy-Scope aus; die dabei erzeugten Artefakte
+  bleiben temporär, weil der Commit beim Pre-Push bereits erstellt ist.
+- `--no-verify` ist nur für dokumentierte Notfälle zulässig; die übersprungenen
+  Prüfungen müssen vor dem Push manuell nachgeholt werden.
+- Die vollständige lokale Suite und GitHub Actions bleiben unabhängige zweite
+  und dritte Schutzebenen; ein lokaler Hook ersetzt keine CI-Prüfung.

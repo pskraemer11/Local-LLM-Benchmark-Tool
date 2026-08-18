@@ -102,6 +102,28 @@ class TestVramConstants:
         assert _LEGACY_MODEL_GB_THRESHOLD_GB == 9.0
 
 
+class TestHeadlessValidation:
+    """CI validation must not require local LM Studio state or GGUF files."""
+
+    def test_ci_mode_skips_configs_and_gguf(self):
+        registry = {
+            "unsloth/test@q4_k_m": {
+                "arch": "dense",
+                "reasoning": "instruct",
+                "capabilities": ["text"],
+                "blueprint": "default_chat",
+            }
+        }
+        with (
+            patch.object(rt, "load_registry", return_value=registry),
+            patch.object(rt, "read_lms_configs", side_effect=AssertionError("CI must be headless")),
+            patch.object(rt, "_gguf_drift_errors", side_effect=AssertionError("CI must skip GGUF scans")),
+        ):
+            errors = rt.cmd_validate(ci=True)
+
+        assert not any(errors.values())
+
+
 class TestKVBytesTable:
     """Byte-per-element mapping for each quantization type."""
 

@@ -17,7 +17,7 @@ import json
 import os
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from type_defs import ModelConfig
@@ -514,7 +514,7 @@ def _normalize_lms_model_name(name: str) -> str:
 
     Konsolidiert in model_identity.py (Fix 2026-08-09).
     """
-    return normalize_lms_model_name(name)
+    return cast("str", normalize_lms_model_name(name))
 
 
 def _lms_index() -> list[dict[str, Any]]:
@@ -600,7 +600,7 @@ def _normalized_lms_key(model_identifier: str) -> str:
 
     Konsolidiert in model_identity.py (Fix 2026-08-09).
     """
-    return normalized_lms_key(model_identifier)
+    return cast("str", normalized_lms_key(model_identifier))
 
 
 def _model_sampling_row(model_identifier: str) -> dict[str, tuple[float, float]] | None:
@@ -851,7 +851,7 @@ def _blueprint_features(model_identifier: str) -> dict[str, Any]:
     if key is None:
         return {}
     bp_name = (reg.get(key) or {}).get("blueprint") or "default_chat"
-    return blueprint_features(bp_name, model_identifier)
+    return cast("dict[str, Any]", blueprint_features(bp_name, model_identifier))
 
 
 def _sampling_cell(model_identifier: str, cat: str) -> tuple[float, float, str] | None:

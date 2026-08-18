@@ -6,6 +6,19 @@ Hinweise:
 - Stand: 06.08.2026 — umgezogen aus §20 der `doc-git/Architecture, Flow & ChangeLog_en.md` (dort nur noch Verweis).
 - Commit-Hashes beziehen sich auf `main`.
 
+## CI-/Review-Gate und versionierte Git-Hooks (19.08.2026)
+
+| Date | File | Change |
+|------|------|--------|
+| 19.08. | `.githooks/` | Versionierte `pre-commit`, `commit-msg` und `pre-push` Hooks eingefuehrt. Pre-Commit prueft staged Dateien, Ruff/Compile, strukturierte Daten und Registry-Aenderungen; Pre-Push startet das vollstaendige Pre-Review ohne dauerhafte Artefakte; Commit-Msg erzwingt ein lesbares Format und blockiert erkannte Zugangsdaten. |
+| 19.08. | `.github/workflows/ci.yml`, `.github/workflows/review.yml` | CI und Review auf Python 3.12, UTF-8-Ausgabe, identische Ruff-/fokussierte mypy-Grundlagen und headless Registry-Validierung synchronisiert. |
+| 19.08. | `src/registry_tool.py`, `tests/test_registry_tool.py` | `validate --ci` als LM-Studio-freier Modus ergaenzt; UTF-8-Ausgabe unter Windows erzwungen und der Headless-Pfad getestet. |
+| 19.08. | `pre_review_checks.ps1`, `pyproject.toml`, `src/benchmark_config.py` | Pre-Review um temporaere Artefakte ohne Working-Tree-Aenderung erweitert, Python-Zielversion auf 3.12 vereinheitlicht und fokussierte mypy-Rueckgaben bereinigt. |
+| 19.08. | `AGENTS.md`, `doc-git/HowTo-Review-Gate_de.md` | Dauerhafte Hook-Aktivierung, Sicherheitsregeln, Readiness-Kriterien und CI-Grenzen dokumentiert. |
+| 19.08. | Verifikation | Readiness erfolgreich: **894 Tests bestanden**, Ruff/Compile, YAML-/PowerShell-Syntax, `validate --ci` und fokussiertes mypy ohne Fehler. Details und Entscheidungsrahmen siehe [COMPACTIONS.md](COMPACTIONS.md). |
+
+Die Hooks erzeugen CHANGELOG-Eintraege nicht automatisch; dieser Eintrag dokumentiert die bewusst eingecheckte Workflow-Aenderung. Das `.devin/wiki.json` ist ein versioniertes Devin/DeepWiki-Manifest und wird nicht automatisch in ein GitHub-Wiki publiziert.
+
 ## OpenAI-kompatibler Provider Phase 4 (17.08.2026)
 
 | Date | File | Change |
