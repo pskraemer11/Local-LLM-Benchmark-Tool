@@ -1,0 +1,7 @@
+flowchart LR
+    A[Remote client] --> B[TLS and authenticated gateway]
+    B --> C[Route, origin, and rate policy]
+    C --> D[Loopback bounded LM-Eval proxy]
+    D --> E[Size, SSE, pool, and idle limits]
+    E --> F[Local upstream]
+    G[Gateway owner] --> H[Rotation, monitoring, incident response]

@@ -1,0 +1,8 @@
+flowchart LR
+    A[Model or task code] --> B[Common evaluator adapter]
+    B --> C{{Low-privilege isolated worker}}
+    C --> D[Private workspace ACL]
+    C --> E[Network and native capability deny]
+    C --> F[Windows Job Object]
+    C --> G[Bounded result channel]
+    D --> H[Approved inputs and outputs only]

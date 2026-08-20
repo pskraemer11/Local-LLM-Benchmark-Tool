@@ -262,7 +262,10 @@ class LMStudioProvider(HttpProvider):
                         if model.get("key") == model_identifier or model_identifier in model.get("key", ""):
                             for instance in model.get("loaded_instances", []):
                                 return True, instance.get("id", model_identifier)
-                return True, model_identifier
+                status = str(result.get("status", "unknown"))
+                detail = result.get("error") or result.get("message") or status
+                warn(f"LM Studio rejected model load for '{model_identifier}': {detail}")
+                return False, None
             if attempt == 0:
                 running = self._ensure_server_callback() if self._ensure_server_callback else self.ensure_server()
                 if running:
@@ -313,9 +316,13 @@ class LMStudioProvider(HttpProvider):
         while self._time() - start < timeout:
             self._sleep(2)
             print(".", end="", flush=True)
+            current = self.current_model()
             response = self.chat_completions(
                 {
-                    "model": "check",
+                    # The sentinel is useful when no CLI state is available,
+                    # but a real loaded identifier is required for LM Studio
+                    # instances that reject unknown model names.
+                    "model": current.get("identifier", "check") if current else "check",
                     "messages": [{"role": "user", "content": "ping"}],
                     "max_tokens": 1,
                 },

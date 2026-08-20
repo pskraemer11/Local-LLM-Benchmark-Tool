@@ -1,0 +1,7 @@
+flowchart LR
+    A[Model or task code] --> B[Common policy adapter]
+    B --> C[Reviewed scientific wrappers]
+    C --> D[Custom or EvalPlus worker]
+    D --> E[Windows Job Object]
+    E --> F[Bounded files and resources]
+    A -. blocked native/file APIs .-> X[Rejected]

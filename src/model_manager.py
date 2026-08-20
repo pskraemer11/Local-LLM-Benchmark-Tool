@@ -54,15 +54,23 @@ if TYPE_CHECKING:
 def _configured_api_base() -> str:
     """Resolve a provider-specific base URL before the facade is imported."""
     provider = os.environ.get("LLM_PROVIDER", "lmstudio").strip().lower()
+    explicit_base = os.environ.get("LLM_API_BASE")
+    default_base = "http://127.0.0.1:1234/v1"
+    if provider in {"tabbyapi"}:
+        return os.environ.get("TABBYAPI_API_BASE") or explicit_base or "http://127.0.0.1:5000/v1"
     if provider in {"unsloth", "openai", "openai-compatible", "openai_compat"}:
-        return os.environ.get("UNSLOTH_API_BASE") or os.environ.get(
-            "LLM_API_BASE", "http://127.0.0.1:1234/v1"
+        return (
+            explicit_base
+            if explicit_base and explicit_base != default_base
+            else os.environ.get("UNSLOTH_API_BASE", default_base)
         )
     if provider in {"unsloth_server", "unsloth-local", "unsloth_local"}:
-        return os.environ.get("UNSLOTH_LOCAL_API_BASE") or os.environ.get(
-            "LLM_API_BASE", "http://127.0.0.1:8890/v1"
+        return (
+            explicit_base
+            if explicit_base and explicit_base != default_base
+            else os.environ.get("UNSLOTH_LOCAL_API_BASE", "http://127.0.0.1:8890/v1")
         )
-    return os.environ.get("LLM_API_BASE", "http://127.0.0.1:1234/v1")
+    return os.environ.get("LMSTUDIO_API_BASE") or explicit_base or default_base
 
 
 API_BASE = _configured_api_base()

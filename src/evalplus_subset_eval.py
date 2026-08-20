@@ -24,12 +24,15 @@ from typing import Any
 
 import numpy as np
 
-# evalplus' query_maximum_memory_bytes() defaults to 4GB, so reliability_guard
-# calls ``import resource`` (UNIX-only) in the sandboxed child process. On
-# Windows that ModuleNotFoundError crashes every check_correctness() call.
-# Setting it to -1 makes query_maximum_memory_bytes() return None and skips
-# the resource import entirely (evalplus/eval/utils.py:114ff).
-os.environ.setdefault("EVALPLUS_MAX_MEMORY_BYTES", "-1")
+# EvalPlus' in-process ``resource`` guard is UNIX-only.  Windows applies the
+# equivalent limit to the complete evaluator process tree in
+# ``run_benchmarks.py`` via a Job Object.  Keep a positive value in the
+# environment so a missing/disabled memory policy is never represented by the
+# old ``-1`` sentinel.
+EVALPLUS_MAX_MEMORY_BYTES = int(os.environ.get("EVALPLUS_MAX_MEMORY_BYTES", str(2 * 1024 ** 3)))
+if EVALPLUS_MAX_MEMORY_BYTES <= 0:
+    raise ValueError("EVALPLUS_MAX_MEMORY_BYTES must be positive")
+os.environ["EVALPLUS_MAX_MEMORY_BYTES"] = str(EVALPLUS_MAX_MEMORY_BYTES)
 
 # evalplus' time_limit (evalplus/eval/utils.py) calls
 # ``signal.setitimer``/``signal.signal(SIGALRM, ...)`` - both UNIX-only. The
@@ -39,6 +42,7 @@ os.environ.setdefault("EVALPLUS_MAX_MEMORY_BYTES", "-1")
 # AttributeError and everything is marked "fail". The outer untrusted_check
 # timeout (p.join + terminate) remains as safety net.
 if os.name == "nt":
+    import evalplus.eval as _evalplus_eval
     import evalplus.eval.utils as _evalplus_eval_utils
 
     class _WindowsSignalTimerShim:
@@ -54,6 +58,18 @@ if os.name == "nt":
             return None
 
     _evalplus_eval_utils.signal = _WindowsSignalTimerShim()  # type: ignore[attr-defined]
+
+    # ``reliability_guard`` imports the POSIX-only ``resource`` module when a
+    # positive memory limit is supplied.  The outer Job Object owns that
+    # control on Windows; retain EvalPlus' destructive-operation guards while
+    # deliberately delegating memory enforcement to the process boundary.
+    _original_reliability_guard = _evalplus_eval.reliability_guard
+
+    def _windows_reliability_guard(maximum_memory_bytes: int | None = None) -> None:
+        del maximum_memory_bytes
+        _original_reliability_guard(None)
+
+    _evalplus_eval.reliability_guard = _windows_reliability_guard
 
 from evalplus.data.mbpp import mbpp_serialize_inputs
 from evalplus.data.utils import load_solutions

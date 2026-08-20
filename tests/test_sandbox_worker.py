@@ -22,6 +22,8 @@ def test_allowlisted_import_and_execution() -> None:
     "import warnings",
     "import sys",
     "from pathlib import Path",
+    "import numpy.ctypeslib",
+    "import scipy._lib._ccallback",
 ])
 def test_non_allowlisted_import_is_rejected(code: str) -> None:
     with pytest.raises(ImportError, match="allowlist"):
@@ -33,8 +35,17 @@ def test_non_allowlisted_import_is_rejected(code: str) -> None:
     "value = ().__class__",
 ])
 def test_interpreter_recovery_syntax_is_rejected(code: str) -> None:
-    with pytest.raises(ValueError, match="dunder"):
-        _execute({"code": code, "capture_state": False, "tests": None})
+        with pytest.raises(ValueError, match="dunder"):
+            _execute({"code": code, "capture_state": False, "tests": None})
+
+
+def test_native_loader_attribute_path_is_rejected() -> None:
+    with pytest.raises(ValueError, match="native loader"):
+        _execute({
+            "code": "import numpy as np\nnp.ctypeslib.load_library('host', '.')",
+            "capture_state": False,
+            "tests": None,
+        })
 
 
 def test_tests_and_state_use_same_bounded_namespace() -> None:

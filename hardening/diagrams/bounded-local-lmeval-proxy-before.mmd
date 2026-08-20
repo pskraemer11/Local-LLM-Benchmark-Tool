@@ -1,0 +1,7 @@
+flowchart LR
+    A[Local or network client] --> B[Configurable ThreadingHTTPServer]
+    B --> C[Unbounded request/response reads]
+    B --> D[Unbounded SSE buffer]
+    B --> E[Arbitrary POST forwarding]
+    E --> F[Configured upstream]
+    G[Parent launcher] --> H[Normal-path stop only]

@@ -121,6 +121,7 @@ from utils.terminal import (
     progress_bar,
     warn,
 )
+from windows_job_object import run_bounded_subprocess
 
 # Model classification helper functions
 REASONING_KEYWORDS = ["reasoning", "think", "r1", "rnj", "magistral"]
@@ -337,6 +338,7 @@ os.makedirs(RESULTS_DIR, exist_ok=True)
 LMEVAL_PROXY_PORT = 1235
 LMEVAL_PROXY_SCRIPT = os.path.join(SRC_DIR, "tools", "lmeval_proxy.py")
 _lmeval_proxy_proc: subprocess.Popen | None = None
+_lmeval_proxy_cleanup_registered = False
 
 
 def _proxy_is_running() -> bool:
@@ -344,7 +346,7 @@ def _proxy_is_running() -> bool:
 
 
 def _start_lmeval_proxy() -> None:
-    global _lmeval_proxy_proc
+    global _lmeval_proxy_proc, _lmeval_proxy_cleanup_registered
     if _proxy_is_running():
         return
     if not os.path.isfile(LMEVAL_PROXY_SCRIPT):
@@ -355,6 +357,9 @@ def _start_lmeval_proxy() -> None:
             [sys.executable, LMEVAL_PROXY_SCRIPT, "--port", str(LMEVAL_PROXY_PORT)],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
+        if not _lmeval_proxy_cleanup_registered:
+            atexit.register(_stop_lmeval_proxy)
+            _lmeval_proxy_cleanup_registered = True
         # Wait briefly for startup
         import socket
         for _ in range(10):
@@ -1272,12 +1277,17 @@ def run_evalplus(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_siz
     # bewertet. Output-Format ist identisch zur evalplus-CLI.
     print(f"  [evaluate] {dataset} ({n_select} tasks) ...")
     evalplus_subset_script = os.path.join(_SRC_DIR, "evalplus_subset_eval.py")
-    r2 = subprocess.run(
+    evalplus_memory_limit = int(os.environ.get("EVALPLUS_MAX_MEMORY_BYTES", str(2 * 1024 ** 3)))
+    if evalplus_memory_limit <= 0:
+        raise ValueError("EVALPLUS_MAX_MEMORY_BYTES must be positive")
+    r2 = run_bounded_subprocess(
         [sys.executable, evalplus_subset_script,
          "--dataset", dataset,
          "--samples", samples_path,
          "--parallel", str(num_parallel)],
         capture_output=True, text=True, timeout=eval_timeout,
+        memory_limit_bytes=evalplus_memory_limit,
+        max_processes=min(16, max(4, num_parallel + 2)),
         encoding="utf-8", errors="replace"
     )
     eval_out = r2.stdout[-500:] if r2.stdout else ""

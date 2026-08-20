@@ -27,6 +27,16 @@ def test_provider_factory_selects_explicit_provider(monkeypatch: pytest.MonkeyPa
     assert isinstance(model_manager.get_provider(), TabbyAPIProvider)
 
 
+def test_provider_specific_api_base_aliases(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "tabbyapi")
+    monkeypatch.setenv("TABBYAPI_API_BASE", "http://127.0.0.1:5500/v1")
+    assert model_manager._configured_api_base() == "http://127.0.0.1:5500/v1"
+
+    monkeypatch.setenv("LLM_PROVIDER", "lmstudio")
+    monkeypatch.setenv("LMSTUDIO_API_BASE", "http://127.0.0.1:1555/v1")
+    assert model_manager._configured_api_base() == "http://127.0.0.1:1555/v1"
+
+
 def test_provider_factory_accepts_openai_alias(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LLM_PROVIDER", "openai")
     assert isinstance(model_manager.get_provider(), OpenAICompatProvider)
@@ -56,6 +66,13 @@ def test_unsloth_alias_uses_provider_specific_base_and_key(monkeypatch: pytest.M
     assert provider.capabilities.can_unload_models is True
 
 
+def test_explicit_llm_api_base_wins_over_stale_unsloth_base(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "unsloth")
+    monkeypatch.setenv("LLM_API_BASE", "http://127.0.0.1:8890/v1")
+    monkeypatch.setenv("UNSLOTH_API_BASE", "http://127.0.0.1:8888/v1")
+    assert model_manager._configured_api_base() == "http://127.0.0.1:8890/v1"
+
+
 def test_provider_factory_rejects_unknown_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LLM_PROVIDER", "does-not-exist")
     with pytest.raises(ValueError, match="Unknown LLM_PROVIDER"):
@@ -67,6 +84,19 @@ def test_lmstudio_is_default_legacy_compatibility_path(monkeypatch: pytest.Monke
     assert model_manager.get_provider_name() == "lmstudio"
     assert model_manager._uses_legacy_lmstudio_path() is True
     assert isinstance(model_manager.get_provider(), LMStudioProvider)
+
+
+def test_lmstudio_load_rejects_explicit_api_error() -> None:
+    responses = [
+        {"status": "error", "error": "model not found"},
+        {"models": []},
+    ]
+    provider = LMStudioProvider(
+        "http://127.0.0.1:1234/v1",
+        rest_request=lambda *args, **kwargs: responses.pop(0),
+        ensure_server=lambda: pytest.fail("an explicit API error must not start a second server"),
+    )
+    assert provider.load_model("missing-model") == (False, None)
 
 
 def test_facade_delegates_model_listing_to_non_lms_provider(monkeypatch: pytest.MonkeyPatch) -> None:

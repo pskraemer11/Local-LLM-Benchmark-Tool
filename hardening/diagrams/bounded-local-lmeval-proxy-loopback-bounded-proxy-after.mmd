@@ -1,0 +1,7 @@
+flowchart LR
+    A[Local benchmark client] --> B[Loopback-only proxy]
+    B --> C[Route and method allowlist]
+    C --> D[Bounded body/response/SSE reads]
+    D --> E[Bounded admission and timeouts]
+    E --> F[Local upstream]
+    G[Parent exit or exception] --> H[Guaranteed proxy cleanup]

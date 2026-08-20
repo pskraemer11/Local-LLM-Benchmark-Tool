@@ -701,3 +701,32 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 - `pre_review_checks.ps1`: gemeinsames Pre-Review-Gate.
 - `src/registry_tool.py`: headless Registry-Validierung.
 - `AGENTS.md`, `doc-git/HowTo-Review-Gate_de.md`: dauerhafte Betriebsdokumentation.
+
+=============== Compaction 20.08.2026 / 14:20 ================
+## Objective
+- (Current) Einen reproduzierbaren lokalen TabbyAPI-Start für Benchmarks mit der gemeinsamen ExLlamaV3-Umgebung herstellen.
+- (Completed) Provider-Endpunkte trennen, das vorhandene kleine EXL3-Testmodell verwenden und den Ablauf verifizieren.
+
+## Important Details
+- **User intent:** TabbyAPI und exllamav3 sollen dieselbe virtuelle Umgebung verwenden; keine zweite Installation von Torch/Transformers/PyTorch.
+- **Context:** Das Testmodell liegt unter `C:\Users\pskra\LLM-Modelle\Llama-3.2-1B-Instruct-exl3-4.0bpw`; `tabbyAPI\models` verweist per Junction auf diesen Modellordner.
+- **Root cause:** Das alte `run-tabbyapi.ps1` startete keinen Server. `tabbyAPI\start.bat` verwendet außerdem standardmäßig `tabbyAPI\venv`, was die vereinheitlichte Umgebung verfehlt. Die bestehende TabbyAPI-Konfiguration enthielt zudem einen nicht vorhandenen Gemma-Modellnamen.
+- **Decision:** Das neue Skript startet `tabbyAPI\start.py` direkt mit `exllamav3\exllamav3_env\Scripts\python.exe`, erzeugt eine temporäre Konfiguration ohne vorab geladenes Modell, wartet auf `127.0.0.1:5000` und lädt das Benchmarkmodell anschließend über die API.
+- **Provider separation:** `LMSTUDIO_API_BASE`, `UNSLOTH_API_BASE`, `UNSLOTH_LOCAL_API_BASE` und `TABBYAPI_API_BASE` sind provider-spezifisch; `LLM_API_BASE` bleibt nur als Kompatibilitäts-Fallback. `LLM_PROVIDER` bleibt ein Prozess-Selector.
+
+## Work State
+### Completed / Active / Blocked
+- Completed: Start-/Preflight-Skript, temporäre TabbyAPI-Konfiguration, provider-spezifische API-Aliase, README und Regressionstest.
+- Verification: TabbyAPI `/v1/models`, Modell laden, Chat-Smoke und Entladen erfolgreich; 31 Provider-Architekturtests bestanden; Ruff und PowerShell-Parserprüfung sauber; Port 5000 nach Cleanup frei.
+- Blocked: keiner.
+
+## Next Move
+1. Für Benchmarks `run-tabbyapi.ps1` verwenden und nicht `tabbyAPI\start.bat`.
+2. Bei Bedarf getrennte LM-Studio-, Unsloth-GUI- und Unsloth-CLI-Smokes mit den dokumentierten Endpunkten durchführen.
+3. Den im Screenshot sichtbaren `UNSLOTH_API_KEY` rotieren/revozieren.
+
+## Relevant Files
+- `run-tabbyapi.ps1`: Lokaler TabbyAPI-Start, Readiness-Prüfung, Benchmark-Aufruf und Cleanup; absichtlich unversioniertes lokales Hilfsskript.
+- `src/model_manager.py`: Provider-spezifische API-Basisauflösung mit Rückwärtskompatibilität.
+- `tests/test_provider_architecture.py`: Regressionstest für die neuen Endpunkt-Aliase.
+- `README.md`: Bedienung und Provider-Endpunkte.

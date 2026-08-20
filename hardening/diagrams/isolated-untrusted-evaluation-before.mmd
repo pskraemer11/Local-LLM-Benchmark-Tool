@@ -1,0 +1,9 @@
+flowchart LR
+    A[Model or task code] --> B[Custom benchmark worker]
+    A --> C[EvalPlus subprocess]
+    B --> D[AST and import filters]
+    D --> E[exec with scientific libraries]
+    E --> F[User filesystem and native capabilities]
+    C --> G[Memory guard disabled on Windows]
+    G --> H[check_correctness]
+    H --> I[Outer wall-clock timeout only]

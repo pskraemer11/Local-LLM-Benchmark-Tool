@@ -45,6 +45,20 @@ SANDBOX_BLOCKED_MODULES = frozenset({
     "warnings", "webbrowser",
 })
 
+# These modules/functions are not needed by the benchmark fixtures and expose
+# native loaders or arbitrary memory-mapped/file-backed code.  The allowlist is
+# still compatibility-oriented for scientific fixtures, but these escape
+# routes are rejected both statically and by the import hook.
+SANDBOX_BLOCKED_IMPORT_PREFIXES = frozenset({
+    "cffi", "ctypes", "numpy.ctypeslib", "numpy.f2py",
+    "numpy.core._multiarray_umath", "numpy._core._multiarray_umath",
+    "scipy._lib._ccallback", "scipy.LowLevelCallable",
+})
+SANDBOX_BLOCKED_ATTRIBUTE_NAMES = frozenset({
+    "CDLL", "WinDLL", "OleDLL", "PyDLL", "dlopen", "load_library",
+    "find_library", "memmap",
+})
+
 
 class _BoundedTextWriter(io.TextIOBase):
     """Absorb untrusted print output without allowing unbounded pipe growth."""
@@ -71,11 +85,42 @@ class _BoundedTextWriter(io.TextIOBase):
 def _validate_source(code: str) -> None:
     """Reject obvious interpreter-recovery syntax before execution."""
     tree = ast.parse(code, mode="exec")
+    aliases: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                aliases[alias.asname or alias.name.split(".", 1)[0]] = alias.name
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            for alias in node.names:
+                aliases[alias.asname or alias.name] = f"{module}.{alias.name}".strip(".")
+
+    def dotted_name(node: ast.AST) -> str | None:
+        if isinstance(node, ast.Name):
+            return aliases.get(node.id, node.id)
+        if isinstance(node, ast.Attribute):
+            parent = dotted_name(node.value)
+            return f"{parent}.{node.attr}" if parent else node.attr
+        return None
+
+    def is_blocked_path(path: str) -> bool:
+        return any(path == prefix or path.startswith(prefix + ".") for prefix in SANDBOX_BLOCKED_IMPORT_PREFIXES)
+
     for node in ast.walk(tree):
         if isinstance(node, (ast.Name, ast.Attribute)):
             identifier = node.id if isinstance(node, ast.Name) else node.attr
             if identifier.startswith("__") or identifier.endswith("__"):
                 raise ValueError("dunder access is not allowed in sandbox code")
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            imports = [alias.name for alias in node.names] if isinstance(node, ast.Import) else [
+                f"{node.module or ''}.{alias.name}".strip(".") for alias in node.names
+            ]
+            if any(is_blocked_path(path) for path in imports):
+                raise ImportError("native loader modules are not allowed by the sandbox allowlist")
+        if isinstance(node, ast.Attribute):
+            path = dotted_name(node)
+            if path and (is_blocked_path(path) or node.attr in SANDBOX_BLOCKED_ATTRIBUTE_NAMES):
+                raise ValueError("native loader APIs are not allowed in sandbox code")
 
 
 def _make_builtins() -> dict[str, Any]:
@@ -86,6 +131,8 @@ def _make_builtins() -> dict[str, Any]:
                     fromlist: tuple[str, ...] = (), level: int = 0) -> Any:
         if level != 0:
             raise ImportError("relative imports are not allowed")
+        if any(name == prefix or name.startswith(prefix + ".") for prefix in SANDBOX_BLOCKED_IMPORT_PREFIXES):
+            raise ImportError("native loader modules are not allowed by the sandbox allowlist")
         top_level = name.split(".", 1)[0]
         if top_level not in SANDBOX_ALLOWED_MODULES:
             raise ImportError(f"Module {name!r} is not on the sandbox allowlist")

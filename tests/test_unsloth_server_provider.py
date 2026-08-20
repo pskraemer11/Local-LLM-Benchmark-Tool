@@ -108,3 +108,27 @@ def test_provider_starts_offline_server_with_local_model(tmp_path: Path, monkeyp
     assert "--cont-batching" in command
     assert provider.unload_all() is True
     assert controller.stopped is True
+
+
+def test_provider_attaches_to_already_running_external_server(tmp_path: Path, monkeypatch: Any) -> None:
+    model_path = tmp_path / "openai" / "gpt-oss-20b" / "gpt-oss-20b-MXFP4.gguf"
+    model_path.parent.mkdir(parents=True)
+    model_path.write_bytes(b"GGUF")
+    registry: dict[str, Any] = {"openai/gpt-oss-20b@mxfp4": {}}
+    provider = UnslothServerProvider(
+        "http://127.0.0.1:8890/v1",
+        model_root=tmp_path,
+        executable=tmp_path / "missing-llama-server.exe",
+        registry_loader=lambda: registry,
+    )
+    monkeypatch.setattr(
+        provider,
+        "request_json",
+        lambda endpoint, **kwargs: {"data": [{"id": "openai/gpt-oss-20b@mxfp4"}]}
+        if endpoint == "/models" else None,
+    )
+
+    loaded, identifier = provider.load_model("openai/gpt-oss-20b@mxfp4")
+
+    assert (loaded, identifier) == (True, "openai/gpt-oss-20b@mxfp4")
+    assert provider.current_model()["external"] is True

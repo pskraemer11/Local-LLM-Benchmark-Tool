@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import ctypes
 import os
+import subprocess
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    import subprocess
+    from collections.abc import Sequence
 
 
 class WindowsJobObjectError(RuntimeError):
@@ -101,7 +102,11 @@ class WindowsJobObject:
     _JOB_OBJECT_LIMIT_JOB_MEMORY = 0x00000200
     _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
 
-    def __init__(self, memory_limit_bytes: int, max_processes: int = 1) -> None:
+    def __init__(self, memory_limit_bytes: int, max_processes: int = 4) -> None:
+        if memory_limit_bytes <= 0:
+            raise ValueError("memory_limit_bytes must be positive")
+        if max_processes <= 0:
+            raise ValueError("max_processes must be positive")
         self._handle: Any = None
         self._enabled = os.name == "nt"
         if not self._enabled:
@@ -188,3 +193,59 @@ class WindowsJobObject:
         finally:
             _kernel32.CloseHandle(snapshot)
         raise WindowsJobObjectError(f"No suspended primary thread found for process {pid}")
+
+
+def run_bounded_subprocess(
+    command: Sequence[str],
+    *,
+    timeout: float | None,
+    memory_limit_bytes: int,
+    max_processes: int,
+    **popen_kwargs: Any,
+) -> subprocess.CompletedProcess[Any]:
+    """Run a child process with Windows process-tree resource enforcement.
+
+    Windows has no portable ``resource.setrlimit`` equivalent.  Starting the
+    child suspended, assigning it to a Job Object, and resuming it makes the
+    memory/process limits apply before evaluator code can run.  Descendants
+    created by EvalPlus inherit the same job.  Non-Windows callers retain the
+    normal subprocess semantics so the module remains importable in tooling.
+    """
+    job: WindowsJobObject | None = None
+    creationflags = int(popen_kwargs.pop("creationflags", 0) or 0)
+    if popen_kwargs.pop("capture_output", False):
+        popen_kwargs.setdefault("stdout", subprocess.PIPE)
+        popen_kwargs.setdefault("stderr", subprocess.PIPE)
+    if os.name == "nt":
+        creationflags |= getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+        creationflags |= getattr(subprocess, "CREATE_SUSPENDED", 0x00000004)
+        job = WindowsJobObject(memory_limit_bytes, max_processes=max_processes)
+
+    try:
+        process = subprocess.Popen(command, creationflags=creationflags, **popen_kwargs)
+        try:
+            if job is not None:
+                try:
+                    job.assign(process)
+                    job.resume(process)
+                except BaseException:
+                    job.terminate()
+                    process.kill()
+                    process.wait(timeout=5)
+                    raise
+            stdout, stderr = process.communicate(timeout=timeout)
+            return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+        except subprocess.TimeoutExpired:
+            if job is not None:
+                job.terminate()
+            else:
+                process.kill()
+            try:
+                process.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.communicate()
+            raise
+    finally:
+        if job is not None:
+            job.close()

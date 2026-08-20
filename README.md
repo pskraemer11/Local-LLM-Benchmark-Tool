@@ -1,29 +1,33 @@
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/pskraemer11/Local-LLM-Benchmark-Tool)
+[![Ask DeepWiki](https://deepwiki.com/pskraemer11/Local-LLM-Benchmark-Tool)
 
 # LLM Benchmark Suite
 
-> **Version:** v13.0.5 – Pipeline-Validierung, Hybrid-Klassifikation  
-> **Release date:** 2026-07-29  
+> **Version:** v13.0.5 – Pipeline-Validierung, Hybrid-Klassifikation
+> **Release date:** 2026-07-29
 > **Last doc update:** 2026-08-18
-> - ISO/IEC 9126 Review (28.07.): alle 9 Skripte auf 100% Typ-Hints, Terminal-Farben, `GenerationConfig`-Dataclass  
-> - `run_task()` in 4 Helfer refactored, `run_agentic()` mit Live-Fortschritt, `main()` gesplittet  
-> - Chat-Templates: 4 neue Jinja-Overrides (Gemma-4 QAT, Phi-4 Unsloth, GPT-OSS Unsloth)  
-> - 8 Code-Reviews in `doc-git/Reviews/`, 14 Modell-Dokumente in `doc-git/Model Specific Hints/`  
-> **Status:** see [`doc-git/Reviews/Code-Review_2026-07-28.md`](./doc-git/Reviews/Code-Review_2026-07-28.md) for the latest ISO/IEC 9126 quality review.
+> - Review-Bewertung nach ISO/IEC 9126 (28.07.): alle 9 Skripte auf 100% Typ-Hints, Terminal-Farben, `GenerationConfig`-Dataclass,
+>       acc. `.opencode\agents\review.md`
+> - `run_task()` in 4 Helfer refactored, `run_agentic()` mit Live-Fortschritt, `main()` gesplittet
+> - Chat-Templates: 4 neue Jinja-Overrides (Gemma-4 QAT, Phi-4 Unsloth, GPT-OSS Unsloth)
+> - 8 Code-Reviews in `doc-git/Reviews/`, 12 Modell-Dokumente in `doc-git/Model Specific Hints/`
+> **Status:** see `doc-git/Reviews/Code-Review_2026-07-28.md` for the latest ISO/IEC 9126 quality review.
 
-Local benchmark framework for LLMs with a provider layer (LM Studio, TabbyAPI, OpenAI-compatible endpoints, or a dedicated Unsloth llama-server process). Tests coding, reasoning, knowledge, and agentic capabilities across **4 pipelines** with **9 benchmarks** (MMLU-Pro is archived).
+Local benchmark framework for LLMs with a provider layer (LM Studio, TabbyAPI, OpenAI-compatible endpoints, or a dedicated Unsloth llama-server process).
+Tests coding, reasoning, knowledge, and agentic capabilities across **4 pipelines** with **9 benchmarks** (MMLU-Pro is archived).
 
 Benchmark policy and runtime values come from `doc-git/model_registry.yaml` and GGUF headers. LM Studio JSON files remain backend-local runtime artifacts, not the global source of truth.
 
 **Goal:**
-While many benchmark results are available online, they typically run on large servers with abundant memory and powerful CPU/GPU resources. 
-This project focuses on obtaining realistic values for local execution under real-world constraints where resources — especially VRAM — are limited. 
-This means either smaller (generally weaker) models with fewer parameters, or medium-sized models with heavy quantization (which also impacts quality). 
-The same applies to KV-cache: either heavily quantized and/or limited context length to fit in VRAM, otherwise token/s plummets and runtime skyrockets.
+Although many benchmark results for LLMs are available online, these are typically run on large servers with ample RAM and powerful CPU/GPU resources.
+This project focuses on determining **realistic** values for **local execution** under real-world constraints, where resources—particularly VRAM—are limited.
 
-This test suite makes it possible to find the best models and quantizations for a given piece of hardware.
+This means either smaller (typically less powerful) models with fewer weights or medium-sized models with strong quantization (which also affects quality).
+The same applies to the KV cache: either strong quantization and/or a limited context length to fit within the VRAM; otherwise, the number of tokens per second drops drastically and runtime skyrockets.
 
-**Practical rule (16 GB VRAM):** Models with ≥12 GB weights require `useUnifiedKvCache=true` when running with 4 parallel slots (np=4) — otherwise they slow down dramatically.
+This test suite makes it possible to identify the best models and quantizations for a specific hardware configuration.
+
+**Rule of thumb (16 GB VRAM):** Use model weights < 14 GB to leave room for the KV cache and overhead. Swapping to shared CPU memory dramatically reduces speed.
+Models with ≥12 GB of weights generally require `useUnifiedKvCache=true` if they are to be run with 4 parallel slots (np=4)—otherwise, they slow down drastically.
 
 Over 50 LLM models were tested on an HP Omen gaming PC with an NVIDIA RTX 5060 Ti (see a sample of results below).
 
@@ -78,45 +82,55 @@ git clone https://github.com/xlangai/DS-1000.git ds1000_official
 
 ## Quick Start
 
-```bash
-# Registry maintenance (add new models, sync configs, extract GGUF arch data), interactive and CLI mode
-python src/registry_tool.py sync
+** Registry maintenance (add new models, sync configs, extract GGUF arch data), interactive and CLI mode
+`python src/registry_tool.py sync
 
-# Interactive and CLI mode (select model + benchmarks), see more --help
-python src/run_benchmarks.py --help
+** Interactive and CLI mode (select model + benchmarks), see more --help
+`python src/run_benchmarks.py --help
 
-# Select a backend provider via LLM_PROVIDER if needed:
-# lmstudio / tabbyapi / openai_compat / unsloth_server
+** Select a backend provider via LLM_PROVIDER if needed:
+> lmstudio / tabbyapi / unsloth_server / OpenAI compatible API
 
-# Direct run (model + all benchmarks + 4 slots parallel)
-python src/run_benchmarks.py --model "qwen2.5-coder-14b-instruct" --sample-size 20 --num-parallel 4
+** Backend environment separation:
+> `LLM_PROVIDER` is a per-process selector; one benchmark process uses one backend.
+> LM Studio uses `LMSTUDIO_API_BASE=http://127.0.0.1:1234/v1`.
+> Unsloth CLI uses `UNSLOTH_LOCAL_API_BASE=http://127.0.0.1:8890/v1`.
+> TabbyAPI uses `TABBYAPI_API_BASE=http://127.0.0.1:5000/v1` and must be started with
+> `C:\Users\pskra\Python-Projekte\exllamav3\exllamav3_env\Scripts\python.exe`.
+> `LLM_API_BASE` remains a backward-compatible generic fallback for existing run specs.
+> `run-tabbyapi.ps1` starts TabbyAPI with that interpreter, waits for readiness,
+> and then runs the benchmark client with the project Python.
 
-# With thinking mode for reasoning models (auto-detected or forced via --thinking)
-python src/run_benchmarks.py --model "qwen3-30b-a3b-instruct" --sample-size 20 --thinking
+** Direct run (model + all benchmarks + 4 slots parallel)
+`python src/run_benchmarks.py --model "qwen2.5-coder-14b-instruct" --sample-size 20 --num-parallel 4
 
-# Specific benchmarks
-python src/run_benchmarks.py --model "qwen2.5-coder-14b-instruct" --benchmarks DS1000,CoderEval --sample-size 10
+** With thinking mode for reasoning models (auto-detected or forced via --thinking)
+`python src/run_benchmarks.py --model "qwen3-30b-a3b-instruct" --sample-size 20 --thinking
 
-# Consolidate results (weighted leaderboard + bootstrap CI)
-python src/consolidate_results.py
-```
+** Specific benchmarks
+`python src/run_benchmarks.py --model "qwen2.5-coder-14b-instruct" --benchmarks DS1000,CoderEval --sample-size 10
+
+** Consolidate results (weighted leaderboard + bootstrap CI)
+`python src/consolidate_results.py
+
 
 ## CLI Options (run_benchmarks)
 
-| Flag                | Description                                                                                                  |
-|---------------------|--------------------------------------------------------------------------------------------------------------|
-| `--run-spec`, `--config` | Run-Spec (run.yaml): models/benchmarks/seed/... - CLI flags override YAML                                |
-| `--model`, `-m`     | Model selection: number(s) like '20', '1,3,5', '1-5', name or 'all'                                          |
-| `--benchmarks`, `-b`| Comma-separated: DS1000, CoderEval, HumanEval+, MBPP+, ARC, HellaSwag, TruthfulQA, MATH-500, Agentic         |
-| `--sample-size`, `-s`| Tasks per benchmark (default: 5)                                                                           |
-| `--thinking`        | Force-enable thinking mode for reasoning models (default: off)                                              |
-| `--seed`            | Random seed for reproducible task selection (passed to custom benchmarks)                                   |
-| `--num-parallel`    | Parallel worker threads for custom benchmarks (DS1000/CoderEval). The effective slot policy comes from registry/runtime values and backend capabilities; explicit value overrides auto. |
-| `--agentic-mode`    | Agentic scenario selection: 'random' (all 69) or 'safety' (13 Category-K)                                   |
-| `--exclude-benchmarks`, `-x` | Comma-separated benchmark names to exclude (e.g. 'MATH-500')                                      |
-| `--no-structured-output` | Disable structured JSON output in custom benchmarks (fallback to regex)                              |
-| `--unload-between`  | Reload model between benchmarks (default: keep loaded). Use if KV-cache/GPU memory degradation occurs.      |
-| `--keep-response`   | Write the full LLM response to per-task CSVs (default: truncated to 200 chars)                              |
+| Flag                         | Description                                                                                                 |
+|------------------------------|-------------------------------------------------------------------------------------------------------------|
+| `--run-spec`, `--config`     | Run-Spec (run.yaml): models/benchmarks/seed/... - CLI flags override YAML                                   |
+| `--model`, `-m`              | Model selection: number(s) like '20', '1,3,5', '1-5', name or 'all'                                         |
+| `--benchmarks`, `-b`         | Comma-separated: DS1000, CoderEval, HumanEval+, MBPP+, ARC, HellaSwag, TruthfulQA, MATH-500, Agentic        |
+| `--sample-size`, `-s`        | Tasks per benchmark (default: 5)                                                                            |
+| `--thinking`                 | Force-enable thinking mode for reasoning models (default: off)                                              |
+| `--seed`                     | Random seed for reproducible task selection (passed to custom benchmarks)                                   |
+| `--num-parallel`             | Parallel worker threads for custom benchmarks (DS1000/CoderEval). The effective slot policy comes from      |
+|                              |         registry/runtime values and backend capabilities; explicit value overrides auto.                    |
+| `--agentic-mode`             | Agentic scenario selection: 'random' (all 69) or 'safety' (13 Category-K)                                   |
+| `--exclude-benchmarks`, `-x` | Comma-separated benchmark names to exclude (e.g. 'MATH-500')                                                |
+| `--no-structured-output`     | Disable structured JSON output in custom benchmarks (fallback to regex)                                     |
+| `--unload-between`           | Reload model between benchmarks (default: keep loaded). Use if KV-cache/GPU memory degradation occurs.      |
+| `--keep-response`            | Write the full LLM response to per-task CSVs (default: truncated to 200 chars)                              |
 
 ## Registry Tool (src/registry_tool.py)
 
@@ -124,24 +138,26 @@ Maintenance tool for `doc-git/model_registry.yaml`, GGUF architecture data, and 
 
 **Principle (current):** `doc-git/model_registry.yaml` is the source of truth for benchmark policy and provider-neutral runtime values. GGUF headers provide technical model limits (architecture, native context window, reasoning/template hints). LM Studio JSON configs are LM Studio-only runtime artifacts; `registry_tool.py` writes them when the LM Studio provider needs them, but other providers derive their runtime from the registry directly.
 
-| Command            | Description                                                                 |
-|--------------------|-----------------------------------------------------------------------------|
-| `sync`             | Full pipeline: add → fill-arch → fill-reasoning → sync-from-configs → fmt    |
-| `validate`         | Consistency check: template files, Config promptTemplate vs YAML, override overlap, required fields, registry-vs-config drift |
-| `add`              | Add new models from LMS to registry (piped from `lms ls --json`)            |
-| `fill-arch`        | Extract n_layers/hidden_dim from local GGUF headers (~1ms/file)             |
-| `fill-reasoning`   | Read reasoning (thinking/instruct) from GGUF chat_template                  |
-| `fill-size`        | Look up file_size_bytes from LMS for entries missing it                     |
-| `sync-ctx`         | Sync context_length from JSON configs into registry (only missing)          |
-| `sync-from-configs`| Sync offload, num_parallel, useUnifiedKvCache from JSON configs into registry (skips context_length to preserve native model limit) |
+| Command            | Description                                                                          |
+|--------------------|--------------------------------------------------------------------------------------|
+| `sync`             | Full pipeline: add → fill-arch → fill-reasoning → sync-from-configs → fmt            |
+| `validate`         | Consistency check: template files, Config promptTemplate vs YAML, override overlap,  |
+|                    |    ... required fields, registry-vs-config drift                                     |
+| `add`              | Add new models from LMS to registry (piped from `lms ls --json`)                     |
+| `fill-arch`        | Extract n_layers/hidden_dim from local GGUF headers (~1ms/file)                      |
+| `fill-reasoning`   | Read reasoning (thinking/instruct) from GGUF chat_template                           |
+| `fill-size`        | Look up file_size_bytes from LMS for entries missing it                              |
+| `sync-ctx`         | Sync context_length from JSON configs into registry (only missing)                   |
+| `sync-from-configs`| Sync offload, num_parallel, useUnifiedKvCache from JSON configs into registry        |
+|                    |    ... (skips context_length to preserve native model limit)                         |
 | `fill-ctx`         | Add default context_length to entries missing it (size-based rule or 16384 fallback) |
-| `fix-ctx`          | Recompute context_length for ALL entries (size-based formula)               |
-| `fix-np`           | Recompute num_parallel for ALL entries (architecture-based)                 |
-| `suggest`          | Dry-run: VRAM-based np/UKV/context recommendation (writes NOTHING)          |
-| `compare`          | Registry vs LMS vs JSON configs comparison report                           |
-| `fmt`              | Normalize blank lines in registry YAML                                      |
-| `migrate-keys`     | Re-key entries without publisher prefix to publisher/model-name             |
-| `rm`               | Remove registry entry (optionally `--delete-files` + `--yes`)               |
+| `fix-ctx`          | Recompute context_length for ALL entries (size-based formula)                        |
+| `fix-np`           | Recompute num_parallel for ALL entries (architecture-based)                          |
+| `suggest`          | Dry-run: VRAM-based np/UKV/context recommendation (writes NOTHING)                   |
+| `compare`          | Registry vs LMS vs JSON configs comparison report                                    |
+| `fmt`              | Normalize blank lines in registry YAML                                               |
+| `migrate-keys`     | Re-key entries without publisher prefix to publisher/model-name                      |
+| `rm`               | Remove registry entry (optionally `--delete-files` + `--yes`)                        |
 
 ## Consolidate Results (src/consolidate_results.py)
 

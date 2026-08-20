@@ -120,6 +120,12 @@ class UnslothServerProvider(HttpProvider):
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
         super().__init__(base_url, headers)
         self._resolver = LocalModelResolver(model_root, registry_loader=registry_loader)
+        self._allow_external_attach = (
+            controller is None
+            and process_factory is None
+            and os.environ.get("UNSLOTH_SERVER_ATTACH_EXTERNAL", "1").strip().lower()
+            not in {"0", "false", "no"}
+        )
         self._executable = Path(
             executable
             or os.environ.get("UNSLOTH_SERVER_EXE")
@@ -132,6 +138,45 @@ class UnslothServerProvider(HttpProvider):
         self._start_timeout = int(os.environ.get("UNSLOTH_SERVER_START_TIMEOUT", "15"))
         self._ready_timeout = int(os.environ.get("UNSLOTH_SERVER_READY_TIMEOUT", "180"))
         self._stop_timeout = int(os.environ.get("UNSLOTH_SERVER_STOP_TIMEOUT", "30"))
+
+    def _remote_model_infos(self) -> list[dict[str, Any]] | None:
+        """Return models from an already-running external llama-server.
+
+        A CLI server or Unsloth Studio can own the process independently of
+        this launcher.  Attaching to its OpenAI endpoint must happen before we
+        attempt to start a second server on the same port.
+        """
+        if not self._allow_external_attach:
+            return None
+        payload = self.request_json("/models", timeout=5)
+        if not isinstance(payload, dict):
+            return None
+        raw_models = payload.get("data", payload.get("models", []))
+        if not isinstance(raw_models, list):
+            return []
+        result: list[dict[str, Any]] = []
+        for item in raw_models:
+            if isinstance(item, str):
+                identifier = item
+            elif isinstance(item, dict):
+                identifier = item.get("id") or item.get("model") or item.get("name")
+            else:
+                identifier = None
+            if identifier:
+                result.append({
+                    "key": identifier,
+                    "model_identifier": identifier,
+                    "display": identifier,
+                    "variant": identifier,
+                    "quant": "",
+                    "variants": [],
+                    "identifier": identifier,
+                    "params": "",
+                    "publisher": identifier.split("/", 1)[0] if "/" in identifier else "",
+                    "modelKey": identifier,
+                    "loaded": True,
+                })
+        return result
 
     def list_models(
         self,
@@ -158,15 +203,20 @@ class UnslothServerProvider(HttpProvider):
         ]
 
     def current_model(self) -> dict[str, Any] | None:
-        if not self._controller.is_running() or not self._controller.model_identifier:
-            return None
-        model_identifier = self._controller.model_identifier
+        if self._controller.is_running() and self._controller.model_identifier:
+            model_identifier = self._controller.model_identifier
+        else:
+            remote_models = self._remote_model_infos()
+            if not remote_models or len(remote_models) != 1:
+                return None
+            model_identifier = remote_models[0]["model_identifier"]
         return {
             "identifier": model_identifier,
             "model_identifier": model_identifier,
             "display_name": model_identifier,
             "status": "loaded",
             "context_length": None,
+            "external": not self._controller.is_running(),
         }
 
     def _server_port(self) -> str:
@@ -232,6 +282,12 @@ class UnslothServerProvider(HttpProvider):
         current = self.current_model()
         if current and current["model_identifier"] == candidate.model_identifier:
             return True, candidate.model_identifier
+        if current and current.get("external"):
+            warn(
+                f"Externer Unsloth/llama-server bedient bereits "
+                f"'{current['model_identifier']}'; kein zweiter Server wird gestartet."
+            )
+            return False, None
         if current and not self.unload_all(timeout=self._stop_timeout):
             return False, None
         if not self._executable.is_file():
@@ -253,6 +309,9 @@ class UnslothServerProvider(HttpProvider):
         return True, candidate.model_identifier
 
     def unload_all(self, timeout: int = 120) -> bool:
+        if not self._controller.is_running() and self._remote_model_infos():
+            warn("Externer Unsloth/llama-server bleibt unverändert; Unload nicht vom Launcher erzwungen.")
+            return False
         return self._controller.stop(timeout)
 
     def is_available(self, timeout: int = 5) -> bool:
@@ -264,7 +323,7 @@ class UnslothServerProvider(HttpProvider):
     def wait_ready(self, timeout: int = 120) -> bool:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            if not self._controller.is_running():
+            if not self._controller.is_running() and self._remote_model_infos() is None:
                 return False
             if self.is_available(timeout=min(5, max(1, int(deadline - time.monotonic())))):
                 return True

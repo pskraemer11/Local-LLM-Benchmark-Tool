@@ -382,3 +382,11 @@ Die Hooks erzeugen CHANGELOG-Eintraege nicht automatisch; dieser Eintrag dokumen
 | 18.08. | `src/run_benchmarks.py` | **REFACTORED:** Use the LM Studio provider hook instead of reading LM Studio JSON configs directly for reasoning/prompt validation. |
 | 18.08. | `tests/test_model_registry.py` | **NEW:** Coverage for alias resolution, context clipping, and provider runtime derivation. |
 | 18.08. | `tests/test_provider_architecture.py` | **NEW:** Coverage for provider delegation and LM Studio prompt-artifact state. |
+
+## TabbyAPI Unified Environment and Provider Endpoints (20.08.2026)
+| Date   | File | Change |
+|--------|------|--------|
+| 20.08. | `run-tabbyapi.ps1` | **NEW/LOCAL:** Start TabbyAPI with the shared `exllamav3_env`, resolve the EXL3 model junction, create a temporary no-preload config, wait for port 5000, optionally run the benchmark, and clean up. |
+| 20.08. | `src/model_manager.py` | **ENHANCEMENT:** Add `TABBYAPI_API_BASE` and `LMSTUDIO_API_BASE` with `LLM_API_BASE` fallback. |
+| 20.08. | `tests/test_provider_architecture.py` | **TEST:** Cover provider-specific API-base aliases. |
+| 20.08. | `README.md` | **DOC:** Document the shared exllamav3 environment, TabbyAPI test model, and separate provider endpoints. See Compaction 20.08.2026 / 14:20. |
