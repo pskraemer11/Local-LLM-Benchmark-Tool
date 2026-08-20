@@ -1880,6 +1880,9 @@ mradermacher/f2llm-v2-1.7b@q4_k_m:
   context_length: 65536
   reasoning: none
   blueprint: none
+  max_context_length: 40960
+  n_layers: 28
+  hidden_dim: 2048
 
 freedomaisvr/gemma-4-26b-a4b-it-qat-nvfp4@nvfp4:
   publisher: FreedomAISVR
