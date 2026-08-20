@@ -333,17 +333,18 @@ def select_blueprint(reasoning: str, capabilities: str, arch: str = "", model_na
     if "apriel" in name_lower and "thinker" in name_lower:
         return "apriel_reasoning"
 
+    # Granite models use their own blueprint so the Granite-specific Jinja
+    # map cannot affect unrelated coding models.
+    if "granite" in name_lower:
+        if "coding" in capabilities.split(", "):
+            return "granite_coding_agent"
+        return "default_chat"
+
     # Reasoning models
     if reasoning == "thinking":
         if "coding" in capabilities.split(", "):
             return "reasoning_coding"
         return "reasoning_assistant"
-
-    # Granite models: use coding_agent blueprint when coding capability present
-    if "granite" in name_lower and "code" not in name_lower:
-        if "coding" in capabilities.split(", "):
-            return "coding_agent"
-        return "default_chat"
 
     # Coding models
     if "coding" in capabilities.split(", "):
@@ -722,31 +723,41 @@ def create_blueprint_definitions() -> None:
             "description": "Standard Chat-Assistent",
             "role": "You are a helpful AI assistant. Answer concisely and accurately.",
             "role_template": "You are {name}, a {arch} model{params_label} by {publisher}, optimized for {capabilities}{type_label}.",
-            "modules": ["safety_block", "output_style_default"],
+            "modules": ["instruct_scaffolding", "safety_block", "output_style_default"],
         },
         "coding_agent": {
             "description": "Coding-spezialisierter Assistent",
             "role": "You are an expert software engineer with strong coding skills.",
             "role_template": "You are {name}, a {arch} model{params_label} by {publisher}, specialized in {capabilities}{type_label}.",
-            "modules": ["coding_principles", "safety_block", "output_style_technical"],
+            "modules": ["instruct_scaffolding", "coding_principles", "safety_block", "output_style_technical"],
+        },
+        "granite_coding_agent": {
+            "description": "IBM Granite Coding-Assistent mit modellfamilien-spezifischem Template",
+            "role": "You are an IBM Granite software engineer with strong coding skills.",
+            "role_template": "You are {name}, a {arch} model{params_label} by {publisher}, specialized in {capabilities}{type_label}.",
+            "modules": ["instruct_scaffolding", "coding_principles", "safety_block", "output_style_technical"],
+            "template_map": {
+                "granite-4.0": "granite-4.0-h-tiny_template.jinja",
+                "granite-4.1-30b": "granite-4.1-30b_template.jinja",
+            },
         },
         "reasoning_assistant": {
-            "description": "Reasoning/Thinking-Modell (instruct-mode)",
-            "role": "You are an AI assistant that analyzes problems carefully and provides well-reasoned answers.",
+            "description": "Reasoning/Thinking-Modell ohne CoT-Scaffolding",
+            "role": "You are an AI assistant. Provide accurate, well-considered answers.",
             "role_template": "You are {name}, a {arch} model{params_label} by {publisher}, optimized for {capabilities}{type_label}.",
-            "modules": ["thinking_instruction", "safety_block", "output_style_default"],
+            "modules": ["safety_block", "output_style_default"],
         },
         "reasoning_coding": {
-            "description": "Reasoning-Modell mit Coding-Fokus",
-            "role": "You are an expert software engineer who analyzes problems step by step.",
+            "description": "Reasoning-Modell mit Coding-Fokus ohne CoT-Scaffolding",
+            "role": "You are an expert software engineer with strong coding skills.",
             "role_template": "You are {name}, a {arch} model{params_label} by {publisher}, specialized in {capabilities}{type_label}.",
-            "modules": ["thinking_instruction", "coding_principles", "safety_block", "output_style_technical"],
+            "modules": ["coding_principles", "safety_block", "output_style_technical"],
         },
          "gemma_assistant": {
             "description": "Gemma-4 spezifisch (Standard)",
             "role": "You are Gemma-4, a helpful AI assistant.",
             "role_template": "You are {name}, a {arch} model{params_label} by {publisher}, optimized for {capabilities}{type_label}.",
-            "modules": ["gemma_capabilities", "coding_principles", "safety_block", "output_style_default"],
+            "modules": ["instruct_scaffolding", "gemma_capabilities", "coding_principles", "safety_block", "output_style_default"],
             "custom_template": True,
         },
         "gemma_reasoning": {
@@ -776,37 +787,37 @@ def create_blueprint_definitions() -> None:
             "description": "GPT-OSS Harmony-Format (Reasoning + Coding)",
             "role": "You are GPT-OSS, a helpful AI assistant with coding and reasoning skills.",
             "role_template": "You are {name}, a {arch} model{params_label} by {publisher}, optimized for {capabilities}{type_label}.",
-            "modules": ["gptoss_reasoning_level", "thinking_instruction", "coding_principles", "safety_block", "output_style_technical"],
+            "modules": ["gptoss_reasoning_level", "coding_principles", "safety_block", "output_style_technical"],
         },
         "magistral_reasoning": {
             "description": "Magistral [THINK]-Format (Reasoning + Coding)",
-            "role": "You are Magistral, an AI assistant that thinks before answering.",
+            "role": "You are Magistral, an AI assistant.",
             "role_template": "You are {name}, a {arch} model{params_label} by {publisher}, optimized for {capabilities}{type_label}.",
-            "modules": ["thinking_instruction", "coding_principles", "safety_block", "output_style_technical"],
+            "modules": ["coding_principles", "safety_block", "output_style_technical"],
         },
         "phi4_reasoning": {
             "description": "Phi-4-Reasoning-Plus <think>-Format",
-            "role": "You are Phi-4, an AI assistant that reasons step by step before answering.",
+            "role": "You are Phi-4, an AI assistant.",
             "role_template": "You are {name}, a {arch} model{params_label} by {publisher}, optimized for {capabilities}{type_label}.",
-            "modules": ["thinking_instruction", "coding_principles", "safety_block", "output_style_technical"],
+            "modules": ["coding_principles", "safety_block", "output_style_technical"],
         },
         "ministral_reasoning": {
             "description": "Ministral Reasoning [THINK]-Format",
-            "role": "You are Ministral, an AI assistant that reasons before answering.",
+            "role": "You are Ministral, an AI assistant.",
             "role_template": "You are {name}, a {arch} model{params_label} by {publisher}, optimized for {capabilities}{type_label}.",
-            "modules": ["thinking_instruction", "coding_principles", "safety_block", "output_style_technical"],
+            "modules": ["coding_principles", "safety_block", "output_style_technical"],
         },
         "nemotron_reasoning": {
             "description": "Nemotron Cascade Thinking-Format",
-            "role": "You are Nemotron, an AI assistant that thinks through problems carefully.",
+            "role": "You are Nemotron, an AI assistant.",
             "role_template": "You are {name}, a {arch} model{params_label} by {publisher}, optimized for {capabilities}{type_label}.",
-            "modules": ["thinking_instruction", "coding_principles", "safety_block", "output_style_technical"],
+            "modules": ["coding_principles", "safety_block", "output_style_technical"],
         },
         "apriel_reasoning": {
             "description": "Apriel Thinker [BEGIN FINAL RESPONSE]-Format",
-            "role": "You are Apriel, an AI assistant that analyzes problems thoroughly.",
+            "role": "You are Apriel, an AI assistant.",
             "role_template": "You are {name}, a {arch} model{params_label} by {publisher}, optimized for {capabilities}{type_label}.",
-            "modules": ["thinking_instruction", "coding_principles", "safety_block", "output_style_technical"],
+            "modules": ["coding_principles", "safety_block", "output_style_technical"],
         },
         "none": {
             "description": "No blueprint (audio/vision/etc.)",
@@ -846,15 +857,15 @@ def create_blueprint_definitions() -> None:
             "medium": f"Reasoning: {GPTOSS_REASONING_EFFORT}",
             "minimal": f"Reasoning: {GPTOSS_REASONING_EFFORT}",
         },
-        "thinking_instruction": {
-            "description": "Chain-of-Thought prompt for reasoning models",
+        "instruct_scaffolding": {
+            "description": "Structured problem-solving guidance for instruct models",
             "full": "<reasoning>\n- Analyze the problem step by step before answering.\n- Consider multiple approaches where relevant.\n- Distinguish between established facts, assumptions, and uncertainty.\n- Verify your reasoning for logical consistency.\n</reasoning>",
             "medium": "<reasoning>Analyze step by step. Consider multiple approaches. Distinguish facts from assumptions.</reasoning>",
             "minimal": "",
         },
          "gemma_capabilities": {
             "description": "Gemma-4 capabilities profile (text, code, reasoning)",
-            "full": "<capabilities>\n- Text generation and conversation\n- Code generation, completion, and debugging\n- Step-by-step reasoning and problem analysis\n- Function calling and structured tool use\n- Long context: up to 256K tokens\n- Multilingual: 140+ languages\n</capabilities>",
+            "full": "<capabilities>\n- Text generation and conversation\n- Code generation, completion, and debugging\n- Reasoning and problem-analysis capabilities\n- Function calling and structured tool use\n- Long context: up to 256K tokens\n- Multilingual: 140+ languages\n</capabilities>",
             "medium": "<capabilities>Text generation, coding, reasoning, function calling, long context, multilingual.</capabilities>",
             "minimal": "",
         },

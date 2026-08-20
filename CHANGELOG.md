@@ -27,6 +27,15 @@ Die Hooks erzeugen CHANGELOG-Eintraege nicht automatisch; dieser Eintrag dokumen
 | 19.08. | `run-*.bat`, `run-*.ps1`, `run.*.yaml`, `run_lint.ps1` | Lokale Benchmark-Run-Specs und Hilfsskripte aus dem Git-Index entfernt, ohne die Dateien lokal zu loeschen. Passende `.gitignore`-Regeln verhindern eine versehentliche erneute Aufnahme. |
 | 19.08. | `AGENTS.md`, `doc-git/install_benchmark-data_windows.ps1`, `doc-git/Architecture, Flow & ChangeLog_en.md`, `doc-git/Reviews/Code-Review_2026-08-02_de.md` | Direkte Hinweise auf entfernte Beispiel-Run-Specs durch lokale, benutzerspezifische Run-Spec-Platzhalter ersetzt; historische Verweise bleiben als Dokumentation erhalten. |
 
+## Registry-Sampling vollständig in die YAML-Registry migriert (20.08.2026)
+
+| Date | File | Change |
+|------|------|--------|
+| 20.08. | `doc-git/model_registry.yaml` | 35 recherchierte Sampling-Tabellenzeilen in Registry-`sampling:`-Blöcke überführt; damit sind 53 von 61 Einträgen Registry-basiert. |
+| 20.08. | `src/benchmark_config.py` | `MODEL_CATEGORY_SAMPLING` und der Tabellen-Fallback entfernt. Sampling-Quellen sind jetzt ausschließlich Registry, generische Thinking-Defaults oder Kategorie-Defaults. |
+| 20.08. | `tests/test_benchmark_config.py`, `tests/test_run_benchmarks.py` | Regressionen auf Registry-SSOT und den Default-Fallback angepasst. |
+| 20.08. | `doc-git/Planung/registry_sampling.md`, `doc-git/Planung/registry_sampling_log.md` | Phase 2 als vollständig durchgeführt dokumentiert. |
+
 ## OpenAI-kompatibler Provider Phase 4 (17.08.2026)
 
 | Date | File | Change |

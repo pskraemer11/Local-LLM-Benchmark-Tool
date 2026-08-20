@@ -198,7 +198,7 @@ class TestGetModelConfigLmsSource:
     Knowledge-Temperature-Floor sind entfernt. Seit 2026-08-06 kommen aus
     ~/.lmstudio/.internal/user-concrete-model-default-config nur noch
     NICHT-Temperatur-Felder (top_k, min_p, enable_thinking, reasoning_effort);
-    temperature/top_p entscheiden MODEL_CATEGORY_SAMPLING bzw. die Defaults.
+    temperature/top_p entscheiden Registry-Sampling bzw. die Defaults.
     """
 
     @staticmethod
@@ -221,7 +221,7 @@ class TestGetModelConfigLmsSource:
     def test_lms_temp_ignored_category_default_used(self, tmp_path):
         # JSON-temperature/top_p zaehlen seit 2026-08-06 nicht mehr fuer
         # Benchmarks (ein Einzelwert kann keine Kategorie-Differenzierung
-        # ausdruecken); ohne Tabellen-Zeile gelten die Kategorie-Defaults.
+        # ausdruecken); ohne Registry-Zeile gelten die Kategorie-Defaults.
         self._write_lms_config(tmp_path, "pub1", "fake-model-7b",
                                {"llm.prediction.temperature": 0.5,
                                 "llm.prediction.topPSampling": 0.9})

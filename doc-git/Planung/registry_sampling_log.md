@@ -177,3 +177,28 @@ wirken auf künftige Benchmark-Läufe).
 - **Wichtig:** `latest-run`-Modus (Default) verwarf alle DS1000-Paare — der Konsolidierer behält nur Dateien mit exakt dem neuesten Timestamp, DS/CE-Paare haben aber leicht versetzte Timestamps (rnj-1: DS=21-40-05, CE=21-40-16). Erst `--all-runs` (neuestes CSV pro Modell) bzw. `--merge` liefert DS1000+CoderEval zusammen. Für künftige Konsolidierungen: **`--all-runs` bzw. `--merge` verwenden, nicht Default.**
 - **Top-Candidates-Tabelle (`Model-Parameters-and-Benchmarks_en.md`) neu übertragen (Top 35/64), PROVISIONAL aufgelöst.** Neue Spitzenreiter: Qwen3 Coder 30B A3B Instruct@q3_k_s (**78%**), Qwen3 30B A3B Instruct 2507@q3_k_s (**77%**), Gemma 4 19B A4B Instruct REAP@q4_k_s (70%, Effizienz-Winner 50.2 %p/h). Granite 4.1 8B@q8_0 (69.6%) überholt die q6_k-Variante. Pass-2-Neuzugänge in der Tabelle: RNJ-1@q8_0 (64%, Rang 18), Qwen3.5 9B@q6_k (55%, Rang 35).
 - **Verifikation:** Commit `4ed39479` (np-Refactor + Registry-Auflösung + Pass-2); 215 betroffene Tests grün, volle Suite 786 passed / 3 pre-existing TabbyAPI-Fehler; `validate` = 0 Probleme.
+
+---
+
+## 2026-08-20 – Phase 2: Vollständige Registry-Sampling-Umstellung
+
+**Ziel:** Die recherchierten modell-/kategorieabhängigen Sampling-Werte dürfen nicht länger
+aus einer parallelen Python-Tabelle gelesen werden. `doc-git/model_registry.yaml` ist für
+`temperature`/`top_p` die einzige Laufzeitquelle.
+
+**Migration:**
+- 35 weitere Registry-Einträge erhielten einen `sampling:`-Block aus den zuvor in
+  `MODEL_CATEGORY_SAMPLING` gespeicherten Recherchewerten.
+- Damit enthalten 53 von 61 Registry-Einträgen einen Sampling-Block; 8 Einträge bleiben
+  bewusst ohne Sonderwerte und nutzen die generischen Kategorie-/Thinking-Defaults.
+- `MODEL_CATEGORY_SAMPLING` und `_model_sampling_row()` wurden aus
+  `src/benchmark_config.py` entfernt.
+- `_sampling_cell()` verwendet ausschließlich den Registry-Block; der mögliche `_source`
+  ist jetzt `registry-sampling`, `thinking-default` oder `category-default`.
+- `top_k`, `min_p`, `enable_thinking` und `reasoning_effort` bleiben als Nicht-Temperatur-
+  beziehungsweise Provider-/GUI-spezifische Felder außerhalb dieser Phase. Ihre vollständige
+  Runtime-Migration gehört zum separaten Provider-/Runtime-Kontrakt.
+
+**Verifikation:** Registry-Sampling- und Default-Tests angepasst; YAML-Registry bleibt mit
+61 Einträgen parsebar. `registry_tool.py validate` und die vollständige Suite sind vor dem
+Commit erneut auszuführen.

@@ -4,6 +4,20 @@ unsloth/ernie-4.5-21b-a3b-pt@iq4_nl:
   pub_url: https://yiyan.baidu.com
   quants: IQ4_NL
   arch: moe
+  sampling:
+    knowledge:
+      temperature: 0.8
+      top_p: 1.0
+    agentic:
+      temperature: 0.3
+      top_p: 0.95
+    math:
+      temperature: 0.25
+      top_p: 0.95
+    thinking:
+      enabled: false
+      temperature: 0.6
+      top_p: 0.95
   experts: 14
   k_cache: q5_1
   v_cache: q4_nl
@@ -26,6 +40,23 @@ mradermacher/gemma-4-19b-a4b-it-reap-i1@q4_k_m:
   pub_url: https://ai.google.dev/gemma/docs/core/model_card_4?hl=de
   quants: Q4_K_M
   arch: moe
+  sampling:
+    coding:
+      temperature: 1.0
+      top_p: 0.95
+    knowledge:
+      temperature: 1.0
+      top_p: 0.95
+    agentic:
+      temperature: 1.0
+      top_p: 0.95
+    math:
+      temperature: 1.0
+      top_p: 0.95
+    thinking:
+      enabled: false
+      temperature: 0.6
+      top_p: 0.95
   experts: 18
   k_cache: f16
   v_cache: f16
@@ -50,6 +81,23 @@ mradermacher/gemma-4-26b-a4b-it-i1@iq4_xs:
   hf_url: https://huggingface.co/mradermacher/gemma-4-26b-a4b-it-i1
   pub_url: https://ai.google.dev/gemma/docs/core/model_card_4?hl=de
   arch: moe
+  sampling:
+    coding:
+      temperature: 1.0
+      top_p: 0.95
+    knowledge:
+      temperature: 1.0
+      top_p: 0.95
+    agentic:
+      temperature: 1.0
+      top_p: 0.95
+    math:
+      temperature: 1.0
+      top_p: 0.95
+    thinking:
+      enabled: false
+      temperature: 0.6
+      top_p: 0.95
   quants: IQ4_XS
   k_cache: f16
   v_cache: f16
@@ -72,6 +120,23 @@ unsloth/gemma-4-26b-a4b-it@iq3_s:
   hf_url: https://huggingface.co/unsloth/gemma-4-26b-a4b-it
   pub_url: https://ai.google.dev/gemma/docs/core/model_card_4?hl=de
   arch: moe
+  sampling:
+    coding:
+      temperature: 1.0
+      top_p: 0.95
+    knowledge:
+      temperature: 1.0
+      top_p: 0.95
+    agentic:
+      temperature: 1.0
+      top_p: 0.95
+    math:
+      temperature: 1.0
+      top_p: 0.95
+    thinking:
+      enabled: false
+      temperature: 0.6
+      top_p: 0.95
   quants: IQ3_S
   k_cache: fp16
   v_cache: fp16
@@ -96,6 +161,23 @@ unsloth/qwen3-30b-a3b-instruct-2507@q3_k_s:
   pub_url: https://qwen.ai
   quants: Q3_K_S
   arch: moe
+  sampling:
+    coding:
+      temperature: 0.7
+      top_p: 0.8
+    knowledge:
+      temperature: 0.7
+      top_p: 0.8
+    agentic:
+      temperature: 0.7
+      top_p: 0.8
+    math:
+      temperature: 0.7
+      top_p: 0.8
+    thinking:
+      enabled: false
+      temperature: 0.6
+      top_p: 0.95
   experts: 16
   k_cache: q5_1
   v_cache: iq4_nl
@@ -119,6 +201,20 @@ qwen/qwen2.5-coder-14b-instruct@q5_0:
   hf_url: https://huggingface.co/Qwen/qwen2.5-coder-14b-instruct@q5_0
   pub_url: https://qwen.ai
   arch: dense
+  sampling:
+    knowledge:
+      temperature: 0.7
+      top_p: 0.8
+    agentic:
+      temperature: 0.6
+      top_p: 0.8
+    math:
+      temperature: 0.7
+      top_p: 0.8
+    thinking:
+      enabled: false
+      temperature: 0.6
+      top_p: 0.95
   quants: Q5_0
   k_cache: q5_1
   v_cache: iq4_nl
@@ -140,6 +236,20 @@ qwen/qwen2.5-coder-14b-instruct@q5_k_m:
   hf_url: https://huggingface.co/Qwen/qwen2.5-coder-14b-instruct@q5_k_m
   pub_url: https://qwen.ai
   arch: dense
+  sampling:
+    knowledge:
+      temperature: 0.7
+      top_p: 0.8
+    agentic:
+      temperature: 0.6
+      top_p: 0.8
+    math:
+      temperature: 0.7
+      top_p: 0.8
+    thinking:
+      enabled: false
+      temperature: 0.6
+      top_p: 0.95
   quants: Q5_K_M
   k_cache: q5_1
   v_cache: iq4_nl
@@ -161,6 +271,20 @@ qwen/qwen2.5-coder-14b-instruct@q6_k:
   hf_url: https://huggingface.co/Qwen/qwen2.5-coder-14b-instruct@q6_k
   pub_url: https://qwen.ai
   arch: dense
+  sampling:
+    knowledge:
+      temperature: 0.7
+      top_p: 0.8
+    agentic:
+      temperature: 0.6
+      top_p: 0.8
+    math:
+      temperature: 0.7
+      top_p: 0.8
+    thinking:
+      enabled: false
+      temperature: 0.6
+      top_p: 0.95
   quants: Q6_K
   k_cache: q5_1
   v_cache: iq4_nl
@@ -183,6 +307,23 @@ Qwen/Qwen3.5-9B-GGUF@q6_k:
   pub_url: https://qwen.ai
   quants: Q6_K
   arch: dense
+  sampling:
+    coding:
+      temperature: 0.6
+      top_p: 0.95
+    knowledge:
+      temperature: 1.0
+      top_p: 0.95
+    agentic:
+      temperature: 1.0
+      top_p: 0.95
+    math:
+      temperature: 1.0
+      top_p: 1.0
+    thinking:
+      enabled: false
+      temperature: 0.6
+      top_p: 0.95
   k_cache: q5_1
   v_cache: q8_0
   notes: 'Architektur: Qwen3.5 Hybrid Gated Delta Networks combined with sparse Mixture-of-Experts'
@@ -501,6 +642,23 @@ unsloth/phi-4@q5_k_m:
   hf_url: https://huggingface.co/unsloth/unsloth/phi-4
   pub_url: https://microsoft.com/research
   arch: dense
+  sampling:
+    coding:
+      temperature: 0.0
+      top_p: 1.0
+    knowledge:
+      temperature: 0.0
+      top_p: 1.0
+    agentic:
+      temperature: 0.0
+      top_p: 1.0
+    math:
+      temperature: 0.0
+      top_p: 1.0
+    thinking:
+      enabled: false
+      temperature: 0.6
+      top_p: 0.95
   quants: Q5_K_M
   k_cache: q8_0
   v_cache: q5_1
@@ -523,6 +681,23 @@ unsloth/devstral-small-2-24b-instruct-2512@q3_k_s:
   pub_url: https://mistral.ai/news/devstral/
   quants: Q3_K_S
   arch: dense
+  sampling:
+    coding:
+      temperature: 0.15
+      top_p: 0.95
+    knowledge:
+      temperature: 0.4
+      top_p: 0.95
+    agentic:
+      temperature: 0.15
+      top_p: 0.95
+    math:
+      temperature: 0.3
+      top_p: 0.95
+    thinking:
+      enabled: false
+      temperature: 0.6
+      top_p: 0.95
   k_cache: q5_1
   v_cache: iq4_nl
   offload: 1.0
@@ -544,6 +719,23 @@ tiiuae/falcon3-10b-instruct@q8_0:
   pub_url: https://falconllm.tii.ae
   quants: Q8_0
   arch: dense
+  sampling:
+    coding:
+      temperature: 0.2
+      top_p: 0.95
+    knowledge:
+      temperature: 0.65
+      top_p: 0.9
+    agentic:
+      temperature: 0.25
+      top_p: 0.95
+    math:
+      temperature: 0.2
+      top_p: 0.95
+    thinking:
+      enabled: false
+      temperature: 0.6
+      top_p: 0.95
   k_cache: q8_0
   v_cache: iq4_nl
   notes: 'Architektur: Falcon3 Dense. Multi-head Latent Attention (MLA) with RoPE'
@@ -565,6 +757,23 @@ ibm-granite/granite-4-0-h-tiny@q8_0:
   pub_url: https://www.ibm.com/granite/docs/models/granite4-1
   quants: Q8_0
   arch: moe
+  sampling:
+    coding:
+      temperature: 0.0
+      top_p: 1.0
+    knowledge:
+      temperature: 0.0
+      top_p: 1.0
+    agentic:
+      temperature: 0.0
+      top_p: 1.0
+    math:
+      temperature: 0.0
+      top_p: 1.0
+    thinking:
+      enabled: false
+      temperature: 0.6
+      top_p: 0.95
   experts: 64
   k_cache: q8_0
   v_cache: q5_1
@@ -572,7 +781,7 @@ ibm-granite/granite-4-0-h-tiny@q8_0:
     | max. 1 Mio Kontext | Code-, Math- & Multilingual-Faehigkeiten'
   reasoning: instruct
   capabilities: coding, text
-  blueprint: coding_agent
+  blueprint: granite_coding_agent
   truncation: full
   custom_template: true
   context_length: 32768
@@ -589,13 +798,30 @@ ibm-granite/granite-4-1-30b@q3_k_s:
   pub_url: https://www.ibm.com/granite/docs/models/granite4-1
   quants: Q3_K_S
   arch: dense
+  sampling:
+    coding:
+      temperature: 0.0
+      top_p: 1.0
+    knowledge:
+      temperature: 0.0
+      top_p: 1.0
+    agentic:
+      temperature: 0.0
+      top_p: 1.0
+    math:
+      temperature: 0.0
+      top_p: 1.0
+    thinking:
+      enabled: false
+      temperature: 0.6
+      top_p: 0.95
   k_cache: q5_1
   v_cache: iq4_nl
   offload: 1.0
   notes: 'Architektur: Granite-4.1 | Dense 30B | 131K Kontext | Code-, Math- & Multilingual-Faehigkeiten'
   reasoning: instruct
   capabilities: coding, text
-  blueprint: coding_agent
+  blueprint: granite_coding_agent
   truncation: full
   custom_template: true
   context_length: 32768
@@ -611,6 +837,20 @@ unsloth/januscoder-14b@q6_k:
   pub_url: https://huggingface.co/unsloth/JanusCoder-14B-GGUF
   quants: Q6_K
   arch: dense
+  sampling:
+    knowledge:
+      temperature: 0.7
+      top_p: 0.8
+    agentic:
+      temperature: 0.2
+      top_p: 0.95
+    math:
+      temperature: 0.5
+      top_p: 0.95
+    thinking:
+      enabled: false
+      temperature: 0.6
+      top_p: 0.95
   k_cache: q8_0
   v_cache: q5_1
   notes: 'Architektur: JanusCoder Dense | Coder-Modell'
@@ -633,6 +873,20 @@ jetbrains/mellum2-12b-a2.5b-instruct@q4_k_m:
   pub_url: https://www.jetbrains.com
   quants: Q4_K_M
   arch: moe
+  sampling:
+    coding:
+      temperature: 0.6
+      top_p: 0.95
+    knowledge:
+      temperature: 0.6
+      top_p: 0.95
+    math:
+      temperature: 0.6
+      top_p: 0.95
+    thinking:
+      enabled: false
+      temperature: 0.6
+      top_p: 0.95
   experts: 16
   k_cache: q8_0
   v_cache: q5_1
@@ -643,7 +897,7 @@ jetbrains/mellum2-12b-a2.5b-instruct@q4_k_m:
   blueprint: coding_agent
   truncation: full
   useUnifiedKvCache: false
-  context_length:
+  context_length: 60494
   file_size_bytes: 8071293600
   n_layers: 28
   hidden_dim: 2304
@@ -656,6 +910,23 @@ lmstudio-community/ministral-3-14b-instruct-2512@q6_k:
   pub_url: https://mistral.ai/news/ministral/
   quants: Q6_K
   arch: dense
+  sampling:
+    coding:
+      temperature: 0.1
+      top_p: 0.95
+    knowledge:
+      temperature: 0.1
+      top_p: 0.95
+    agentic:
+      temperature: 0.1
+      top_p: 0.95
+    math:
+      temperature: 0.1
+      top_p: 0.95
+    thinking:
+      enabled: false
+      temperature: 0.6
+      top_p: 0.95
   k_cache: q5_1
   v_cache: iq4_nl
   offload: 1.0
@@ -678,6 +949,23 @@ nerdsking/nerdsking-python-coder-7b-i@q8_0:
   pub_url: https://huggingface.co/Nerdsking
   quants: Q8_0
   arch: dense
+  sampling:
+    coding:
+      temperature: 0.1
+      top_p: 0.95
+    knowledge:
+      temperature: 0.7
+      top_p: 0.95
+    agentic:
+      temperature: 0.2
+      top_p: 0.95
+    math:
+      temperature: 0.25
+      top_p: 0.95
+    thinking:
+      enabled: false
+      temperature: 0.6
+      top_p: 0.95
   k_cache: f16
   v_cache: q8_0
   notes: 'Architektur: Python Coder (custom)'
@@ -699,6 +987,23 @@ unsloth/qwen3-coder-30b-a3b-instruct@q3_k_s:
   pub_url: https://qwen.ai
   quants: Q3_K_S
   arch: moe
+  sampling:
+    coding:
+      temperature: 0.7
+      top_p: 0.8
+    knowledge:
+      temperature: 0.7
+      top_p: 0.8
+    agentic:
+      temperature: 0.7
+      top_p: 0.8
+    math:
+      temperature: 0.7
+      top_p: 0.8
+    thinking:
+      enabled: false
+      temperature: 0.6
+      top_p: 0.95
   experts: 16
   k_cache: q5_1
   v_cache: iq4_nl
@@ -721,6 +1026,23 @@ unsloth/north-mini-code-1-0@iq3_s:
   hf_url: https://huggingface.co/unsloth/north-mini-code-1.0
   pub_url: https://huggingface.co/unsloth
   arch: moe
+  sampling:
+    coding:
+      temperature: 1.0
+      top_p: 0.95
+    knowledge:
+      temperature: 1.0
+      top_p: 0.95
+    agentic:
+      temperature: 1.0
+      top_p: 0.95
+    math:
+      temperature: 1.0
+      top_p: 0.95
+    thinking:
+      enabled: false
+      temperature: 0.6
+      top_p: 0.95
   quants: IQ3_S
   experts: 16
   k_cache: q8_0
@@ -745,6 +1067,23 @@ unsloth/qwen3-6-27b@q3_k_s:
   pub_url: https://qwen.ai/blog?id=qwen3.6-27b
   quants: Q3_K_S
   arch: dense
+  sampling:
+    coding:
+      temperature: 0.6
+      top_p: 0.95
+    knowledge:
+      temperature: 1.0
+      top_p: 0.95
+    agentic:
+      temperature: 1.0
+      top_p: 0.95
+    math:
+      temperature: 1.0
+      top_p: 0.95
+    thinking:
+      enabled: false
+      temperature: 0.6
+      top_p: 0.95
   k_cache: q5_1
   v_cache: iq4_nl
   offload: 1.0
@@ -768,6 +1107,23 @@ unsloth/qwen3-6-27b-mtp@q8_0:
   pub_url: https://qwen.ai/blog?id=qwen3.6-27b
   quants: Q8_0
   arch: mtp
+  sampling:
+    coding:
+      temperature: 0.6
+      top_p: 0.95
+    knowledge:
+      temperature: 1.0
+      top_p: 0.95
+    agentic:
+      temperature: 1.0
+      top_p: 0.95
+    math:
+      temperature: 1.0
+      top_p: 0.95
+    thinking:
+      enabled: false
+      temperature: 0.6
+      top_p: 0.95
   k_cache: q5_1
   v_cache: iq4_nl
   offload: 1.0
@@ -790,6 +1146,23 @@ bartowski/mistralai-magistral-small-2509@q3_k_m:
   hf_url: https://huggingface.co/bartowski/mistralai_magistral-small-2509
   pub_url: https://mistral.ai/news/magistral/
   arch: dense
+  sampling:
+    coding:
+      temperature: 0.7
+      top_p: 0.95
+    knowledge:
+      temperature: 0.7
+      top_p: 0.95
+    agentic:
+      temperature: 0.7
+      top_p: 0.95
+    math:
+      temperature: 0.7
+      top_p: 0.95
+    thinking:
+      enabled: false
+      temperature: 0.6
+      top_p: 0.95
   quants: Q3_K_M
   k_cache: q5_1
   v_cache: iq4_nl
@@ -811,6 +1184,23 @@ internlm/internlm2-5-20b-chat@q4_k_m:
   hf_url: https://huggingface.co/internlm/internlm2_5-20b-chat
   pub_url: https://internlm.intern-ai.org.cn
   arch: dense
+  sampling:
+    coding:
+      temperature: 0.6
+      top_p: 0.8
+    knowledge:
+      temperature: 0.6
+      top_p: 0.8
+    agentic:
+      temperature: 0.6
+      top_p: 0.8
+    math:
+      temperature: 0.6
+      top_p: 0.8
+    thinking:
+      enabled: false
+      temperature: 0.6
+      top_p: 0.95
   quants: Q4_K_M
   k_cache: q8_0
   v_cache: iq4_nl
@@ -1071,6 +1461,23 @@ ibm-granite/granite-4-1-8b@q6_k:
   hf_url: https://huggingface.co/ibm-granite/granite-4.1-8b
   pub_url: https://www.ibm.com/granite/docs/models/granite4-1
   arch: dense
+  sampling:
+    coding:
+      temperature: 0.0
+      top_p: 1.0
+    knowledge:
+      temperature: 0.0
+      top_p: 1.0
+    agentic:
+      temperature: 0.0
+      top_p: 1.0
+    math:
+      temperature: 0.0
+      top_p: 1.0
+    thinking:
+      enabled: false
+      temperature: 0.6
+      top_p: 0.95
   k_cache: q8_0
   v_cache: iq4_nl
   offload: 1.0
@@ -1082,7 +1489,7 @@ ibm-granite/granite-4-1-8b@q6_k:
   reasoning: instruct
   useUnifiedKvCache: false
   capabilities: coding, text
-  blueprint: coding_agent
+  blueprint: granite_coding_agent
   truncation: full
   max_context_length: 131072
   quants: Q6_K
@@ -1131,6 +1538,23 @@ essentialai/rnj-1@q8_0:
   hf_url: https://huggingface.co/essentialai/essentialai/rnj-1
   pub_url: https://essentialai.com
   arch: dense
+  sampling:
+    coding:
+      temperature: 0.2
+      top_p: 0.95
+    knowledge:
+      temperature: 0.2
+      top_p: 0.95
+    agentic:
+      temperature: 0.2
+      top_p: 0.95
+    math:
+      temperature: 0.2
+      top_p: 0.95
+    thinking:
+      enabled: false
+      temperature: 0.6
+      top_p: 0.95
   k_cache: q8_0
   v_cache: iq4_nl
   offload: 1.0
@@ -1153,6 +1577,23 @@ openai/gpt-oss-20b@mxfp4:
   pub_url: https://openai.com/index/introducing-gpt-oss/, 
     https://github.com/openai/gpt-oss/tree/main?tab=readme-ov-file#harmony-format--tools
   arch: moe
+  sampling:
+    coding:
+      temperature: 1.0
+      top_p: 1.0
+    knowledge:
+      temperature: 1.0
+      top_p: 1.0
+    agentic:
+      temperature: 1.0
+      top_p: 1.0
+    math:
+      temperature: 1.0
+      top_p: 1.0
+    thinking:
+      enabled: false
+      temperature: 0.6
+      top_p: 0.95
   experts: 32
   k_cache: f16
   v_cache: f16
@@ -1177,6 +1618,23 @@ unsloth/gpt-oss-20b-GGUF@q8_0:
   hf_url: https://huggingface.co/unsloth/gpt-oss-20b-GGUF
   pub_url: https://unsloth.ai/blog/gpt-oss
   arch: moe
+  sampling:
+    coding:
+      temperature: 1.0
+      top_p: 1.0
+    knowledge:
+      temperature: 1.0
+      top_p: 1.0
+    agentic:
+      temperature: 1.0
+      top_p: 1.0
+    math:
+      temperature: 1.0
+      top_p: 1.0
+    thinking:
+      enabled: false
+      temperature: 0.6
+      top_p: 0.95
   experts: 32
   k_cache: f16
   v_cache: f16
@@ -1392,4 +1850,288 @@ TheBloke/em_german_leo_mistral@q4_k_m:
   hidden_dim: 4096
   max_context_length: 32768
 
+esatapedico/qwen3.8-27b-nvfp4-budget@nvfp4:
+  publisher: esatapedico
+  hf_url: https://huggingface.co/esatapedico/qwen3.8-27b-nvfp4-budget
+  quants: NVFP4
+  arch: dense
+  k_cache: q8_0
+  v_cache: iq4_nl
+  offload: 1
+  notes: 'Architektur: dense'
+  file_size_bytes: 14722826656
+  context_length: 16384
+  n_layers: 64
+  hidden_dim: 5120
+  max_context_length: 262144
+  reasoning: thinking
+  blueprint: reasoning_assistant
 
+mradermacher/f2llm-v2-1.7b@q4_k_m:
+  publisher: mradermacher
+  hf_url: https://huggingface.co/mradermacher/F2LLM-v2-1.7B-GGUF
+  quants: Q4_K_M
+  arch: dense
+  k_cache: q8_0
+  v_cache: iq4_nl
+  offload: 1
+  notes: 'Architektur: dense'
+  file_size_bytes: 1107410688
+  context_length: 65536
+  reasoning: none
+  blueprint: none
+
+freedomaisvr/gemma-4-26b-a4b-it-qat-nvfp4@nvfp4:
+  publisher: FreedomAISVR
+  hf_url: https://huggingface.co/freedomaisvr/gemma-4-26b-a4b-it-qat-nvfp4
+  quants: NVFP4
+  arch: moe
+  sampling:
+    coding:
+      temperature: 1.0
+      top_p: 0.95
+    knowledge:
+      temperature: 1.0
+      top_p: 0.95
+    agentic:
+      temperature: 1.0
+      top_p: 0.95
+    math:
+      temperature: 1.0
+      top_p: 0.95
+    thinking:
+      enabled: false
+      temperature: 0.6
+      top_p: 0.95
+  k_cache: q8_0
+  v_cache: iq4_nl
+  offload: 1
+  notes: 'Architektur: dense | Vision'
+  file_size_bytes: 15443872640
+  context_length: 16384
+  n_layers: 30
+  hidden_dim: 2816
+  max_context_length: 262144
+  reasoning: thinking
+  blueprint: gemma_reasoning
+
+freedomaisvr/gemma-4-12b-it-nvfp4@nvfp4:
+  publisher: FreedomAISVR
+  hf_url: https://huggingface.co/freedomaisvr/gemma-4-12b-it-nvfp4
+  quants: NVFP4
+  arch: dense
+  sampling:
+    coding:
+      temperature: 1.0
+      top_p: 0.95
+    knowledge:
+      temperature: 1.0
+      top_p: 0.95
+    agentic:
+      temperature: 1.0
+      top_p: 0.95
+    math:
+      temperature: 1.0
+      top_p: 0.95
+    thinking:
+      enabled: false
+      temperature: 0.6
+      top_p: 0.95
+  k_cache: q8_0
+  v_cache: iq4_nl
+  offload: 1
+  notes: 'Architektur: dense | Vision'
+  file_size_bytes: 7097909536
+  context_length: 65536
+  n_layers: 48
+  hidden_dim: 3840
+  max_context_length: 262144
+  reasoning: thinking
+  blueprint: gemma_reasoning
+
+freedomaisvr/gpt-oss-20b-nvfp4@nvfp4:
+  publisher: FreedomAISVR
+  hf_url: https://huggingface.co/freedomaisvr/gpt-oss-20b-nvfp4
+  quants: NVFP4
+  arch: moe
+  sampling:
+    coding:
+      temperature: 1.0
+      top_p: 1.0
+    knowledge:
+      temperature: 1.0
+      top_p: 1.0
+    agentic:
+      temperature: 1.0
+      top_p: 1.0
+    math:
+      temperature: 1.0
+      top_p: 1.0
+    thinking:
+      enabled: false
+      temperature: 0.6
+      top_p: 0.95
+  k_cache: q8_0
+  v_cache: iq4_nl
+  offload: 1
+  notes: 'Architektur: dense'
+  file_size_bytes: 12706763328
+  context_length: 16384
+  n_layers: 24
+  hidden_dim: 2880
+  max_context_length: 131072
+  reasoning: thinking
+  blueprint: gptoss_reasoning
+
+unsloth/qwen3.6-27b-mtp@iq3_xxs:
+  publisher: unsloth
+  hf_url: https://huggingface.co/unsloth/qwen3.6-27b-mtp@iq3_xxs
+  arch: mtp
+  sampling:
+    coding:
+      temperature: 0.6
+      top_p: 0.95
+    knowledge:
+      temperature: 1.0
+      top_p: 0.95
+    agentic:
+      temperature: 1.0
+      top_p: 0.95
+    math:
+      temperature: 1.0
+      top_p: 0.95
+    thinking:
+      enabled: false
+      temperature: 0.6
+      top_p: 0.95
+  k_cache: q8_0
+  v_cache: iq4_nl
+  offload: 1
+  notes: 'Architektur: mtp | Multi-Token Prediction'
+  file_size_bytes: 12203615360
+  context_length: 16384
+  n_layers: 65
+  hidden_dim: 5120
+  max_context_length: 262144
+  reasoning: thinking
+  blueprint: reasoning_assistant
+
+unsloth/qwen3-8-27b@q3_k_s:
+  publisher: unsloth
+  hf_url: https://huggingface.co/unsloth/qwen3.8-27b
+  arch: dense
+  k_cache: q8_0
+  v_cache: iq4_nl
+  offload: 1
+  notes: 'Architektur: dense | Vision'
+  file_size_bytes: 13502100816
+  context_length: 16384
+  n_layers: 65
+  hidden_dim: 5120
+  max_context_length: 262144
+  reasoning: thinking
+  quants: Q3_K_S
+  blueprint: reasoning_assistant
+
+alumin-hydro/qwen3-5-9b-physics@q4_k_m:
+  publisher: Alumin-Hydro
+  hf_url: https://huggingface.co/alumin-hydro/qwen3.5-9b-physics
+  arch: dense
+  sampling:
+    coding:
+      temperature: 0.6
+      top_p: 0.95
+    knowledge:
+      temperature: 1.0
+      top_p: 0.95
+    agentic:
+      temperature: 1.0
+      top_p: 0.95
+    math:
+      temperature: 1.0
+      top_p: 1.0
+    thinking:
+      enabled: false
+      temperature: 0.6
+      top_p: 0.95
+  k_cache: q8_0
+  v_cache: iq4_nl
+  offload: 1
+  notes: 'Architektur: dense'
+  file_size_bytes: 6443474482
+  context_length: 65536
+  n_layers: 27
+  hidden_dim: 1152
+  max_context_length: 262144
+  reasoning: instruct
+  quants: Q4_K_M
+  blueprint: default_chat
+
+intel/qwen3-coder-30b-a3b-instruct-q2ks-mixed-autoround@q2_k:
+  publisher: Intel
+  hf_url:
+    https://huggingface.co/intel/qwen3-coder-30b-a3b-instruct-q2ks-mixed-autoround
+  arch: moe
+  sampling:
+    coding:
+      temperature: 0.7
+      top_p: 0.8
+    knowledge:
+      temperature: 0.7
+      top_p: 0.8
+    agentic:
+      temperature: 0.7
+      top_p: 0.8
+    math:
+      temperature: 0.7
+      top_p: 0.8
+    thinking:
+      enabled: false
+      temperature: 0.6
+      top_p: 0.95
+  k_cache: q8_0
+  v_cache: iq4_nl
+  offload: 1
+  notes: 'Architektur: dense'
+  file_size_bytes: 10740661760
+  context_length: 24576
+  n_layers: 48
+  hidden_dim: 2048
+  max_context_length: 262144
+  reasoning: instruct
+  quants: Q2_K
+  blueprint: coding_agent
+
+williamliao/qwen3-6-27b-nvfp4@q4:
+  publisher: williamliao
+  hf_url: https://huggingface.co/williamliao/qwen3.6-27b-nvfp4
+  arch: dense
+  sampling:
+    coding:
+      temperature: 0.6
+      top_p: 0.95
+    knowledge:
+      temperature: 1.0
+      top_p: 0.95
+    agentic:
+      temperature: 1.0
+      top_p: 0.95
+    math:
+      temperature: 1.0
+      top_p: 0.95
+    thinking:
+      enabled: false
+      temperature: 0.6
+      top_p: 0.95
+  k_cache: q8_0
+  v_cache: iq4_nl
+  offload: 1
+  notes: 'Architektur: dense'
+  file_size_bytes: 15730721280
+  context_length: 16384
+  n_layers: 65
+  hidden_dim: 5120
+  max_context_length: 262144
+  reasoning: thinking
+  quants: Q4
+  blueprint: reasoning_assistant

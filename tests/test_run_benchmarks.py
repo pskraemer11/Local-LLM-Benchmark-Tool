@@ -257,7 +257,8 @@ class TestLmevalParams:
     """Tests fuer _get_evaluation_parameters() (Sampling-Design 2026-08-06).
 
     Seit 2026-08-05: MODEL_TEMP_OVERRIDES und der Knowledge-Floor sind entfernt.
-    Seit 2026-08-06: temperature/top_p kommen aus MODEL_CATEGORY_SAMPLING bzw.
+    Seit der Registry-Sampling-Migration: temperature/top_p kommen aus der
+    Registry bzw.
     den Kategorie-Defaults; LMS-JSON liefert nur noch Nicht-Temperatur-Felder.
     Diese Tests patchen LMS_CONFIG_ROOT auf ein leeres Verzeichnis, damit sie
     maschinenunabhaengig bleiben.
@@ -314,14 +315,14 @@ class TestLmevalParams:
         assert params["temperature"] == 0.6        # leicht stochastisch fuer tool-use
         assert params["max_tokens"] == 4096
 
-    def test_sampling_table_replaces_model_overrides(self):
+    def test_registry_sampling_replaces_model_overrides(self):
         # MODEL_TEMP_OVERRIDES sind entfernt; stattdessen entscheidet
-        # MODEL_CATEGORY_SAMPLING (Modell x Kategorie) ueber die Defaults.
+        # Registry-Sampling (Modell x Kategorie) ueber die Defaults.
         expected = {
             "unsloth/phi-4": 0.0,                       # Zeile phi-4
             "unsloth/gpt-oss-20b": 1.0,                 # Zeile gpt-oss
             "vinpix/bonsai-8b-llama.cpp": 0.2,          # Bonsai 06.08. entfernt -> Kategorie-Default
-            "lmstudio-community/deepseek-coder-v2-lite-instruct": 0.3,  # Zeile deepseek-coder-v2
+            "unsloth/qwen3-coder-30b-a3b-instruct": 0.7,  # Registry-Sampling
             "qwen3.5-72b-instruct": 0.2,                # keine Zeile -> Kategorie-Default
             "gemma-3-12b": 0.2,                         # keine Zeile -> Kategorie-Default
         }
@@ -366,7 +367,7 @@ class TestLmevalParams:
 
     def test_lms_temp_ignored_category_variation_applies(self, tmp_path):
         # Gleiche Config -> Kategorie-Differenzierung greift (2026-08-06):
-        # ohne Tabellen-Zeile gelten pro Kategorie die Defaults, nicht der
+        # ohne Registry-Zeile gelten pro Kategorie die Defaults, nicht der
         # eine GUI-Wert.
         self._write_lms_config(tmp_path, "pub1", "fake-model-7b",
                                {"llm.prediction.temperature": 0.6})

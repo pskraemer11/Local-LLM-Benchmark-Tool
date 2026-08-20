@@ -783,7 +783,7 @@ def _evaluation_summary(model_identifier: str, category: str) -> str:
     """Human-readable summary of the effective generation config (Punkt 1).
 
     Shows temp/top_p/top_k/min_p/max_tokens/thinking and the source
-    ("benchmark-table" = MODEL_CATEGORY_SAMPLING-Ausnahme, "category-default" =
+    ("registry-sampling" = Registry-Ausnahme, "category-default" =
     Instruct-Fallback, "thinking-default" = Thinking-Fallback im --thinking-Lauf).
     """
     cfg = get_model_config(model_identifier, category=category, is_thinking_enabled=IS_THINKING_ENABLED)
@@ -803,7 +803,7 @@ def _get_evaluation_parameters(model_identifier: str, bench_name: str = "") -> d
     """Returns LM-Eval parameters from benchmark_config.get_model_config().
 
     Derives benchmark category from bench_name, then calls get_model_config()
-    (Sampling-Design 2026-08-06: MODEL_CATEGORY_SAMPLING > Kategorie-Defaults;
+    (Sampling-Design: Registry-Sampling > Kategorie-Defaults;
     aus der LMS-JSON-Config nur Nicht-Temperatur-Felder).
     MODEL_TEMP_OVERRIDES / Registry-Thinking / Knowledge-Floor sind entfernt.
 

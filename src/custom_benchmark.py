@@ -1874,7 +1874,7 @@ def benchmark_model(model_info: Any, tasks: list[dict[str, Any]], task_type: str
     if num_parallel > 1:
         print(f"  Parallel:  {num_parallel} Worker (LM Studio Multi-Slot)")
     # Effektive Generations-Parameter anzeigen (Punkt 1): Quelle ist die
-    # Sampling-Tabelle ("benchmark-table"), der Kategorie- bzw. Thinking-Fallback.
+    # Registry-Sampling sowie Kategorie- bzw. Thinking-Fallback.
     _cfg_src = model_config.get("_source", "?")
     print(f"  Config:    temp={model_config.get('temperature')}, "
           f"top_p={model_config.get('top_p')}, "

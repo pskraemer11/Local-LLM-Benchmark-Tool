@@ -200,6 +200,11 @@ class TestClassifyReasoningQwen3:
                               model_name="qwen3-30b-a3b-instruct-2507")
         assert bp == "coding_agent"
 
+    def test_granite_uses_dedicated_blueprint(self):
+        bp = select_blueprint("instruct", "coding, text", arch="Granite MoE",
+                              model_name="ibm-granite/granite-4.1-30b")
+        assert bp == "granite_coding_agent"
+
     def test_qwen3_instruct_assembled_prompt_has_no_reasoning(self):
         bp = select_blueprint("instruct", "coding, text", arch="Qwen3 MoE",
                               model_name="qwen3-30b-a3b-instruct-2507")
@@ -461,6 +466,25 @@ class TestBlueprintFeatures:
         f = ab.blueprint_features("gemma_reasoning", "gemma4-26b-a4b")
         assert f["template"] == "gemma4-26b-template_minijinja.jinja"
         assert f["reasoning_parsing"]["enabled"] is False
+
+    def test_generic_coding_blueprint_has_no_granite_template(self):
+        assert ab.blueprint_features("coding_agent", "qwen3-coder-30b") == {}
+
+    def test_granite_blueprint_resolves_granite_template(self):
+        f = ab.blueprint_features("granite_coding_agent", "ibm-granite/granite-4.1-30b")
+        assert f["template"] == "granite-4.1-30b_template.jinja"
+
+    def test_reasoning_blueprints_do_not_use_cot_scaffolding(self):
+        blueprints = ab.load_blueprint_defs()["blueprints"]
+        for name, definition in blueprints.items():
+            if "reasoning" in name:
+                assert "thinking_instruction" not in definition.get("modules", [])
+                assert "instruct_scaffolding" not in definition.get("modules", [])
+
+    def test_instruct_blueprints_use_instruct_scaffolding(self):
+        blueprints = ab.load_blueprint_defs()["blueprints"]
+        for name in ("default_chat", "coding_agent", "granite_coding_agent", "gemma_assistant"):
+            assert "instruct_scaffolding" in blueprints[name]["modules"]
 
     def test_gemma_thinking_by_category(self):
         # Fix 15.08.: Kategorie-basierte Thinking-Steuerung (SSOT) statt

@@ -34,7 +34,8 @@ Commands:
   validate      Check model_registry.yaml consistency: template files exist,
                 Config JSON promptTemplate matches YAML, override overlap,
                 required fields present, registry-vs-config drift, etc.
-                Use --ci for headless CI validation without LM-Studio state.
+                Usage: validate [--ci|--headless] [--verbose] [--repro]
+                --ci/--headless: headless CI validation without LM-Studio state.
   sync-templates
                 Write promptTemplate from registry template files into config
                 JSONs that are missing it (fixes validate template_missing_config)
@@ -2457,13 +2458,16 @@ def cmd_validate(verbose: bool = False, repro: bool = False, ci: bool = False) -
     errors["gguf_header_drift"] = gguf_drift_errors
 
     # ── Report ─────────────────────────────────────────────────────
-    total = sum(len(v) for v in errors.values())
+    advisory_checks = {"missing_capabilities"}
+    blocking_total = sum(len(v) for k, v in errors.items() if k not in advisory_checks)
+    advisory_total = sum(len(v) for k, v in errors.items() if k in advisory_checks)
     print(f"\n{'=' * 60}")
-    print(f"  Validierung: {total} Probleme gefunden")
+    print(f"  Validierung: {blocking_total} blockierende Probleme, {advisory_total} Hinweise")
     print(f"{'=' * 60}")
     for check, items in errors.items():
         if items:
-            print(f"\n  ❌ {check} ({len(items)}):")
+            marker = "⚠️" if check in advisory_checks else "❌"
+            print(f"\n  {marker} {check} ({len(items)}):")
             shown = items if verbose else items[:10]
             for item in shown:
                 print(f"     - {item}")
@@ -3050,7 +3054,11 @@ def main() -> None:
             repro="--repro" in flags,
             ci="--ci" in flags or "--headless" in flags,
         )
-        sys.exit(1 if any(errors.values()) else 0)
+        advisory_checks = {"missing_capabilities"}
+        has_blocking_errors = any(
+            items for check, items in errors.items() if check not in advisory_checks
+        )
+        sys.exit(1 if has_blocking_errors else 0)
     elif cmd == "quarantine-missing":
         dry_run = "--dry-run" in sys.argv
         sys.exit(cmd_quarantine_missing(dry_run=dry_run))

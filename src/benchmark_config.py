@@ -64,10 +64,10 @@ EXCLUDE_KEYWORDS = BLACKLIST
 
 
 # ── Benchmark-Kategorie-Defaults (Fallback, seit 2026-08-05) ──
-# Seit 2026-08-06 gilt das Sampling-Design (MODEL_CATEGORY_SAMPLING >
-# Kategorie-Defaults; JSON-temp/top_p GUI-only, siehe get_model_config).
-# Die Kategorie-Defaults greifen, wenn weder Tabellen-Zelle noch Thinking-Lauf
-# zutrifft. MODEL_TEMP_OVERRIDES und der Knowledge-Floor wurden entfernt
+# Registry-Sampling hat Vorrang vor den Kategorie-Defaults; die Kategorie-
+# Defaults greifen, wenn kein recherchierter Registry-Block bzw. keine
+# Kategorie im Registry-Block vorhanden ist. JSON-temperature/top_p bleiben
+# GUI-only und werden fuer Benchmarks ignoriert. MODEL_TEMP_OVERRIDES und der Knowledge-Floor wurden entfernt
 # (Punkte 3+4, Transparenz-Refactor 05.08.2026).
 # Temperaturen: Recherche 06.08.2026 (doc-git/Temperature Recommondations_en.md).
 # Instruct-Modelle nutzen Kategorie-Defaults (coding 0.2, knowledge 0.6,
@@ -273,218 +273,15 @@ MMLU_PRO_SUBSETS = [
 ]
 
 
-# ── Benchmark-Sampling-Tabelle Temperatur (Modell x Kategorie) ──
-# Hoechste Precedence fuer temperature/top_p im Benchmark (2026-08-06):
-#   MODEL_CATEGORY_SAMPLING > Kategorie-Defaults > Thinking-Defaults
-# Die LMS-JSON-Temperatur wird fuer Benchmarks IGNORIERT (ein Einzelwert pro
-# Modell kann die Kategorie-Differenzierung nicht ausdruecken); sie gilt nur
-# noch fuer die GUI-Nutzung. Quellen: doc-git/Temperature Recommondations_en.md
-# (Uebersichtstabelle). Fehlende Zellen = Kategorie-Defaults. Keys sind die
-# normalisierten Modellnamen (Prefix-Match, "name"-Key bzw. "key"-Praefix).
-MODEL_CATEGORY_SAMPLING: dict[str, dict[str, tuple[float, float]]] = {
-    "qwen3-coder-30b-a3b": {
-        "coding": (0.7, 0.8),
-        "knowledge": (0.7, 0.8),
-        "agentic": (0.7, 0.8),
-        "math": (0.7, 0.8),
-    },
-    "qwen3-coder-reap": {
-        "coding": (0.7, 0.8),
-        "knowledge": (0.7, 0.8),
-        "agentic": (0.7, 0.8),
-        "math": (0.7, 0.8),
-    },
-    "qwen2-5-coder-14b": {
-        "knowledge": (0.7, 0.8),
-        "agentic": (0.6, 0.8),
-        "math": (0.7, 0.8),
-    },
-    "qwen3-30b-a3b-instruct-2507": {
-        "coding": (0.7, 0.8),
-        "knowledge": (0.7, 0.8),
-        "agentic": (0.7, 0.8),
-        "math": (0.7, 0.8),
-    },
-    "qwen3-14b": {
-        "coding": (0.6, 0.95),
-        "knowledge": (0.6, 0.95),
-        "agentic": (0.6, 0.95),
-        "math": (0.6, 0.95),
-    },
-    "qwen3-5-9b": {
-        "coding": (0.6, 0.95),
-        "knowledge": (1.0, 0.95),
-        "agentic": (1.0, 0.95),
-        "math": (1.0, 1.0),
-    },
-    "qwen3-6-27b": {
-        "coding": (0.6, 0.95),
-        "knowledge": (1.0, 0.95),
-        "agentic": (1.0, 0.95),
-        "math": (1.0, 0.95),
-    },
-    "qwen3-6-28b-reap-i1": {
-        "coding": (0.6, 0.95),
-        "knowledge": (1.0, 0.95),
-        "agentic": (1.0, 0.95),
-        "math": (1.0, 0.95),
-    },
-    "deepseek-coder-33b": {
-        "coding": (0.2, 0.95),
-        "knowledge": (0.7, 0.95),
-        "agentic": (0.2, 0.95),
-        "math": (0.5, 0.95),
-    },
-    "deepseek-coder-v2": {
-        "coding": (0.3, 0.95),
-        "knowledge": (0.7, 0.95),
-        "agentic": (0.3, 0.95),
-        "math": (0.4, 0.95),
-    },
-    "gpt-oss": {
-        "coding": (1.0, 1.0),
-        "knowledge": (1.0, 1.0),
-        "agentic": (1.0, 1.0),
-        "math": (1.0, 1.0),
-    },
-    "phi-4": {
-        "coding": (0.0, 1.0),
-        "knowledge": (0.0, 1.0),
-        "agentic": (0.0, 1.0),
-        "math": (0.0, 1.0),
-    },
-    "gemma-4": {
-        "coding": (1.0, 0.95),
-        "knowledge": (1.0, 0.95),
-        "agentic": (1.0, 0.95),
-        "math": (1.0, 0.95),
-    },
-    "gemma4-26b-a4b-reap-25": {
-        "coding": (1.0, 0.95),
-        "knowledge": (1.0, 0.95),
-        "agentic": (1.0, 0.95),
-        "math": (1.0, 0.95),
-    },
-    "rnj-1": {
-        "coding": (0.2, 0.95),
-        "knowledge": (0.2, 0.95),
-        "agentic": (0.2, 0.95),
-        "math": (0.2, 0.95),
-    },
-    "granite-4": {
-        "coding": (0.0, 1.0),
-        "knowledge": (0.0, 1.0),
-        "agentic": (0.0, 1.0),
-        "math": (0.0, 1.0),
-    },
-    "codestral-22b": {
-        "coding": (0.2, 0.95),
-        "knowledge": (0.7, 0.95),
-        "agentic": (0.2, 0.95),
-        "math": (0.3, 0.95),
-    },
-    "mamba-codestral": {
-        "coding": (0.2, 0.95),
-        "knowledge": (0.7, 0.95),
-        "agentic": (0.2, 0.95),
-        "math": (0.3, 0.95),
-    },
-    "devstral": {
-        "coding": (0.15, 0.95),
-        "knowledge": (0.4, 0.95),
-        "agentic": (0.15, 0.95),
-        "math": (0.3, 0.95),
-    },
-    "mistralai-magistral": {
-        "coding": (0.7, 0.95),
-        "knowledge": (0.7, 0.95),
-        "agentic": (0.7, 0.95),
-        "math": (0.7, 0.95),
-    },
-    "ministral": {
-        "coding": (0.1, 0.95),
-        "knowledge": (0.1, 0.95),
-        "agentic": (0.1, 0.95),
-        "math": (0.1, 0.95),
-    },
-    "januscoder": {
-        "knowledge": (0.7, 0.8),
-        "agentic": (0.2, 0.95),
-        "math": (0.5, 0.95),
-    },
-    "north-mini-code": {
-        "coding": (1.0, 0.95),
-        "knowledge": (1.0, 0.95),
-        "agentic": (1.0, 0.95),
-        "math": (1.0, 0.95),
-    },
-    "nerdsking": {
-        "coding": (0.1, 0.95),
-        "knowledge": (0.7, 0.95),
-        "agentic": (0.2, 0.95),
-        "math": (0.25, 0.95),
-    },
-    "glm-4-7": {
-        "coding": (0.7, 1.0),
-        "knowledge": (1.0, 0.95),
-        "agentic": (0.7, 0.95),
-        "math": (1.0, 0.95),
-    },
-    "glm-4-6v": {
-        "coding": (0.8, 0.6),
-        "knowledge": (0.8, 0.6),
-        "agentic": (0.8, 0.6),
-        "math": (0.8, 0.6),
-    },
-    "ernie": {
-        "knowledge": (0.8, 1.0),
-        "agentic": (0.3, 0.95),
-        "math": (0.25, 0.95),
-    },
-    "falcon3": {
-        "coding": (0.2, 0.95),
-        "knowledge": (0.65, 0.9),
-        "agentic": (0.25, 0.95),
-        "math": (0.2, 0.95),
-    },
-    "mellum2": {
-        "coding": (0.6, 0.95),
-        "knowledge": (0.6, 0.95),
-        "math": (0.6, 0.95),
-    },
-    "kimi-linear": {
-        "coding": (0.6, 0.95),
-        "knowledge": (0.6, 0.95),
-        "math": (0.6, 0.95),
-    },
-    "nemotron-3-nano": {
-        "coding": (1.0, 1.0),
-        "knowledge": (1.0, 1.0),
-        "agentic": (0.6, 0.95),
-        "math": (1.0, 1.0),
-    },
-    "lfm2-24b": {
-        "knowledge": (0.1, 0.95),
-        "agentic": (0.1, 0.95),
-        "math": (0.1, 0.95),
-    },
-    "internlm2-5": {
-        "coding": (0.6, 0.8),
-        "knowledge": (0.6, 0.8),
-        "agentic": (0.6, 0.8),
-        "math": (0.6, 0.8),
-    },
-    "internlm2-math": {
-        "knowledge": (0.7, 0.95),
-        "math": (0.2, 0.95),
-    },
-}
-
+# ── Registry-Sampling (SSOT) ──
+# Recherchierte modell- und kategorieabhaengige Werte liegen in
+# doc-git/model_registry.yaml. Nicht dokumentierte Modelle verwenden die
+# generischen Kategorie-/Thinking-Defaults darunter.
 
 # ── LM Studio JSON-Configs: GUI-Quelle fuer Generations-Parameter ──
 # Die LMS-GUI speichert ihre Einstellungen pro Modell als JSON-Config unter
 # ~/.lmstudio/.internal/user-concrete-model-default-config/. Seit 2026-08-06
-# gilt fuer Benchmarks das Sampling-Design (MODEL_CATEGORY_SAMPLING +
+# gilt fuer Benchmarks das Sampling-Design (Registry-Sampling +
 # Kategorie-Defaults); aus den JSON-Configs werden nur NICHT-Temperatur-Felder
 # uebernommen (top_k, min_p, enable_thinking, reasoning_effort). Die JSON-
 # temperature/top_p gelten nur noch fuer die GUI-Nutzung (ein Einzelwert pro
@@ -601,23 +398,6 @@ def _normalized_lms_key(model_identifier: str) -> str:
     Konsolidiert in model_identity.py (Fix 2026-08-09).
     """
     return cast("str", normalized_lms_key(model_identifier))
-
-
-def _model_sampling_row(model_identifier: str) -> dict[str, tuple[float, float]] | None:
-    """Passende Zeile der Benchmark-Sampling-Tabelle (MODEL_CATEGORY_SAMPLING).
-
-    Prefix-/Suffix-Match gegen den normalisierten Modellnamen (wie
-    _lms_generation_config), erste Treffer-Zeile gewinnt.
-    """
-    if not model_identifier:
-        return None
-    key = _normalized_lms_key(model_identifier)
-    if not key:
-        return None
-    for table_key, row in MODEL_CATEGORY_SAMPLING.items():
-        if table_key == key or key.startswith(table_key + "-") or key.endswith("-" + table_key):
-            return row
-    return None
 
 
 def _registry_sampling_block(model_identifier: str) -> dict[str, Any] | None:
@@ -765,27 +545,23 @@ def get_model_config(model_identifier: str, category: str = "coding", is_thinkin
     Priority:
       1. Registry `sampling:`-Block (Variante A, SSOT) - temperature/top_p pro
          Kategorie; fehlende Kategorien fallen auf Punkt 2 zurueck.
-      2. MODEL_CATEGORY_SAMPLING[row][category] - temperature/top_p als
-         Ausnahme-Tabelle (Modell x Kategorie, Research 06.08.2026); gilt fuer
-         Instruct- UND Thinking-Laeufe (dokumentierte Thinking-Ausnahmen wie
-         GPT-OSS 1.0/1.0, Gemma-4 1.0/0.95, Nemotron-3-Reasoning 1.0/1.0)
-      3. BENCHMARK_THINKING_DEFAULTS (0.6/0.95) fuer Reasoning-Modelle im
+      2. BENCHMARK_THINKING_DEFAULTS (0.6/0.95) fuer Reasoning-Modelle im
          --thinking-Lauf, sonst BENCHMARK_CATEGORY_DEFAULTS[category]
-      4. LM Studio JSON-Config: NUR Nicht-Temperatur-Felder (top_k, min_p,
+      3. LM Studio JSON-Config: NUR Nicht-Temperatur-Felder (top_k, min_p,
          enable_thinking, reasoning_effort) - temperature/top_p der GUI werden
          IGNORIERT (ein Einzelwert pro Modell kann die Kategorie-Differenzierung
          nicht ausdruecken; JSON-Werte gelten seit 2026-08-06 nur noch fuer die
          GUI-Nutzung, nicht fuer Benchmarks)
-      5. --thinking CLI-Flag: force enable_thinking fuer Reasoning-Modelle
-    Das Ergebnis enthaelt `_source` ("registry-sampling" | "benchmark-table" |
+      4. --thinking CLI-Flag: force enable_thinking fuer Reasoning-Modelle
+    Das Ergebnis enthaelt `_source` ("registry-sampling" |
     "thinking-default" | "category-default") zur Anzeige.
     """
     cat = category if category in BENCHMARK_CATEGORY_DEFAULTS else "coding"
     key_lower = model_identifier.lower() if model_identifier else ""
     # Thinking-Lauf + Reasoning-Modell: pauschale Thinking-Defaults (0.6/0.95)
-    # statt der Kategorie-Defaults (Research 06.08.2026). Die Ausnahme-Tabelle
-    # und der Registry-Block schlagen auch hier (dokumentierte Ausnahmen:
-    # GPT-OSS 1.0/1.0, Gemma-4 1.0/0.95, Nemotron-3-Reasoning 1.0/1.0, ...).
+    # statt der Kategorie-Defaults (Research 06.08.2026). Der Registry-Block
+    # schlaegt auch hier (dokumentierte Ausnahmen: GPT-OSS 1.0/1.0,
+    # Gemma-4 1.0/0.95, Nemotron-3-Reasoning 1.0/1.0, ...).
     is_thinking_model = is_thinking_enabled and any(_word_boundary_match(p, key_lower) for p in REASONING_PATTERNS)
     if is_thinking_model:
         config: dict[str, Any] = dict(BENCHMARK_THINKING_DEFAULTS)
@@ -857,17 +633,14 @@ def _blueprint_features(model_identifier: str) -> dict[str, Any]:
 def _sampling_cell(model_identifier: str, cat: str) -> tuple[float, float, str] | None:
     """temperature/top_p + Quelle fuer Modell x Kategorie.
 
-    Precedence: Registry-`sampling:`-Block (SSOT) -> MODEL_CATEGORY_SAMPLING
-    -> None (dann greifen Kategorie-/Thinking-Defaults im Aufrufer).
+    Precedence: Registry-`sampling:`-Block (SSOT) -> None (dann greifen
+    Kategorie-/Thinking-Defaults im Aufrufer).
     """
     reg = _registry_sampling_block(model_identifier)
     if reg:
         entry = reg.get(cat)
         if isinstance(entry, dict) and "temperature" in entry and "top_p" in entry:
             return float(entry["temperature"]), float(entry["top_p"]), "registry-sampling"
-    cell = (_model_sampling_row(model_identifier) or {}).get(cat)
-    if cell:
-        return cell[0], cell[1], "benchmark-table"
     return None
 
 
