@@ -1,9 +1,9 @@
 # Zentrale Tool-Konfiguration (ruff, pytest, mypy, pylint).
 # Konsolidiert am 06.08.2026 aus .ruff.toml + .pyproject.toml + pyproject.toml:
-# - Versteckte Konfigdateien (.ruff.toml, .pyproject.toml) werden von ruff/pytest/mypy
-#   NICHT bzw. nur falsch erkannt ("unknown field `tool`").
+# - Versteckte Konfigdateien (.ruff.toml, .pyproject.toml) werden von ruff/pytest/mypy NICHT
+#     bzw. nur falsch erkannt ("unknown field `tool`").
 # - Alle Tools erkennen ausschliesslich unversteckte Dateien: pyproject.toml, ruff.toml,
-#   mypy.ini, pylintrc, etc. - deshalb wird alles hier gefuehrt.
+#     mypy.ini, pylintrc, etc. - deshalb wird alles hier gefuehrt.
 # Quelle der Regelauswahl: Mistral/Vibe https://chat.mistral.ai/work/e4dd489b-946d-412d-9538-ec17a803c108
 
 [tool.pytest.ini_options]
@@ -25,6 +25,7 @@ extend-exclude = [
     ".direnv",
     ".eggs",
     ".git",
+    ".githooks",
     ".github",
     ".git-rewrite",
     ".hg",
