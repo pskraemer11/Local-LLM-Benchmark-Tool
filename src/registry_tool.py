@@ -46,7 +46,7 @@ Commands:
   patch-reasoning-effort
                 Add gpt-oss-20b reasoningEffort/budgetTokens to LMS configs
                 (--dry-run, --wait-for-lock, --effort, --budget)
-  sync          Full sync: add → fill-arch → sync-from-gguf → fill-reasoning → sync-from-configs → fmt
+  sync          Full sync: add → fill-quant → fill-arch → sync-from-gguf → fill-reasoning → sync-from-configs → fmt
 
 Prinzip (seit 13.08.2026): Die **Registry (model_registry.yaml) ist Single Source of Truth**
 für useUnifiedKvCache und context_length. **num_parallel ist eine feste Benchmark-Policy**
@@ -2491,7 +2491,7 @@ _DRIFT_CHECKS = ("config_context_drift", "config_context_too_small", "gguf_heade
 
 
 def cmd_sync() -> None:
-    """Full sync: add → fill-arch → sync-from-gguf → fill-reasoning → sync-from-configs → fmt.
+    """Full sync: add → fill-quant → fill-arch → sync-from-gguf → fill-reasoning → sync-from-configs → fmt.
 
     Nur Registry-Pflege aus unveränderlichen Quellen (GGUF-Header, JSON-Configs).
     Es wird NIE in JSON-Configs geschrieben (die GUI ist die Quelle) und die
@@ -2516,6 +2516,9 @@ def cmd_sync() -> None:
         cmd_add(new_models)
     else:
         print("[add] Keine neuen Modelle")
+
+    print("[fill-quant] fehlende @quant-Suffixe aus GGUF-Headern ergänzen ...")
+    cmd_fill_quant()
 
     print("[fill-arch] n_layers/hidden_dim + reasoning aus GGUF-Headern in Registry ...")
     cmd_fill_arch()
@@ -2572,7 +2575,7 @@ def cmd_pipeline(mode: str = "status", ignore_drift: bool = False) -> None:
         print("[2b] Quarantäne nicht-installierter Modelle (missing) ...")
         cmd_quarantine_missing()
 
-    print("[3] Full sync (add + fill-arch + sync-from-gguf + fill-reasoning + sync-from-configs + fmt) ...")
+    print("[3] Full sync (add + fill-quant + fill-arch + sync-from-gguf + fill-reasoning + sync-from-configs + fmt) ...")
     cmd_sync()
 
     print("[4] Klassifikation (blueprint + reasoning) ...")
@@ -2939,7 +2942,7 @@ def _run_menu_cmd(cmd: str) -> None:
 def _interactive_menu() -> None:
     """Show interactive command selection menu when no args given."""
     cmds = [
-        ("sync", "Full sync: add → fill-arch → sync-from-gguf → fill-reasoning → sync-from-configs → fmt"),
+        ("sync", "Full sync: add → fill-quant → fill-arch → sync-from-gguf → fill-reasoning → sync-from-configs → fmt"),
         ("pipeline", "Status/Sync/Full-Wartung: status | sync | full (Exit 1 bei Drift)"),
         ("patch-reasoning-effort", "gpt-oss-20b Reasoning-Effort in LMS-Configs nachtragen"),
         ("validate", "Check model_registry.yaml consistency (inkl. Config-Abweichungen)"),
