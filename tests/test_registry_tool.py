@@ -21,6 +21,7 @@ import yaml
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
+import assemble_blueprint as ab
 import registry_tool as rt
 from registry_tool import (
     _classify_arch,
@@ -784,6 +785,104 @@ class TestCmdAddSkipsSupportFiles:
         assert "unsloth/qwen3.6-27b-mtp" in reg
         assert result["added"] == ["unsloth/qwen3.6-27b-mtp"]
 
+    def test_add_skips_embeddings_and_ocr_records(self, tmp_path, monkeypatch):
+        reg_path = tmp_path / "registry.yaml"
+        reg_path.write_text("{}\n", encoding="utf-8")
+        monkeypatch.setattr(rt, "REGISTRY_PATH", reg_path)
+        monkeypatch.setattr(rt, "MODELS_CACHE", tmp_path / "models")
+
+        result = rt.cmd_add(
+            [
+                {
+                    "type": "embedding",
+                    "modelKey": "text-embedding-bge-m3",
+                    "publisher": "gpustack",
+                },
+                {
+                    "type": "llm",
+                    "modelKey": "chandra-ocr-2",
+                    "publisher": "mradermacher",
+                },
+                {
+                    "type": "llm",
+                    "modelKey": "example-coder-7b",
+                    "publisher": "example",
+                },
+            ]
+        )
+
+        reg = rt.load_registry(reg_path)
+        assert "example/example-coder-7b" in reg
+        assert "gpustack/text-embedding-bge-m3" not in reg
+        assert "mradermacher/chandra-ocr-2" not in reg
+        assert len(result["skipped"]) == 2
+
+
+def test_registry_matching_accepts_lms_punctuation_and_quant_metadata(monkeypatch):
+    registry = {
+        "byteshape/qwen3-6-35b-a3b@iq3_s": {"blueprint": "full"},
+        "byteshape/qwen3-6-35b-a3b@q3_k_s": {"blueprint": "full"},
+    }
+    monkeypatch.setattr(rt, "load_registry", lambda: registry)
+    lms = [
+        {
+            "type": "llm",
+            "modelKey": "qwen3.6-35b-a3b",
+            "publisher": "byteshape",
+            "quantization": {"name": "IQ3_S"},
+        }
+    ]
+
+    assert rt._missing_registry_keys(lms) == ["byteshape/qwen3-6-35b-a3b@q3_k_s"]
+
+
+def test_fill_quant_uses_lms_quantization_without_gguf_path(monkeypatch):
+    registry = {
+        "mistralai/ministral-3-14b-reasoning": {"blueprint": "full"},
+    }
+    saved: dict[str, dict] = {}
+    monkeypatch.setattr(rt, "load_registry", lambda: registry)
+    monkeypatch.setattr(rt, "save_registry", lambda value: saved.update(value))
+    monkeypatch.setattr(
+        rt,
+        "_run_lms_ls",
+        lambda: [
+            {
+                "type": "llm",
+                "modelKey": "mistralai/ministral-3-14b-reasoning",
+                "publisher": "mistralai",
+                "quantization": {"name": "Q6_K"},
+            }
+        ],
+    )
+
+    rt.cmd_fill_quant()
+
+    assert "mistralai/ministral-3-14b-reasoning@q6_k" in saved
+    assert saved["mistralai/ministral-3-14b-reasoning@q6_k"]["quants"] == "Q6_K"
+
+
+def test_rekey_registry_to_exact_lms_identity(monkeypatch):
+    registry = {
+        "qwen/qwen2-5-coder-14b-instruct@q6_k": {"blueprint": "coding_agent"},
+    }
+    saved: dict[str, dict] = {}
+    monkeypatch.setattr(rt, "save_registry", lambda value: saved.update(value))
+    models = [
+        {
+            "type": "llm",
+            "modelKey": "qwen2.5-coder-14b-instruct",
+            "publisher": "Qwen",
+            "quantization": {"name": "Q6_K"},
+        }
+    ]
+
+    changed = rt._rekey_registry_to_lms(registry, models)
+
+    assert changed == 1
+    assert "qwen/qwen2.5-coder-14b-instruct@q6_k" in saved
+    assert saved["qwen/qwen2.5-coder-14b-instruct@q6_k"]["blueprint"] == "coding_agent"
+
 
 # ─────────────────────────────────────────────────────────────────────
 # cmd_sync_from_gguf: Auto-Fix aus GGUF-Headern (Feld-Ownership)
@@ -924,6 +1023,86 @@ class TestPipelineDriftExitCode:
     def test_non_drift_errors_do_not_exit(self):
         # template_missing_file etc. sind keine Melde-Konflikte -> kein Exit
         assert self._run_pipeline({"template_missing_file": ["unsloth/x: fehlt"]}) is None
+
+    def test_full_is_read_only_for_lms_configs(self):
+        calls = []
+
+        def record_quarantine(*, dry_run=False):
+            calls.append(("quarantine", dry_run))
+            return 0
+
+        def record_assemble(*, preview_only=False):
+            calls.append(("assemble", preview_only))
+
+        with (
+            patch.object(rt, "_run_lms_ls", return_value=[]),
+            patch.object(rt, "cmd_compare"),
+            patch.object(rt, "cmd_quarantine_missing", side_effect=record_quarantine),
+            patch.object(rt, "cmd_sync"),
+            patch.object(rt, "classify_registry"),
+            patch.object(rt, "assemble_prompts", side_effect=record_assemble),
+            patch.object(rt, "cmd_patch_glm_configs", side_effect=AssertionError("config patch must not run")),
+            patch.object(rt, "validate_prompts"),
+            patch.object(rt, "cmd_validate", return_value={"gguf_header_drift": []}),
+        ):
+            assert rt.cmd_pipeline("full") is None
+
+        assert calls == [("quarantine", True), ("assemble", True)]
+
+
+def test_assemble_adds_system_prompt_without_touching_load_fields(tmp_path, monkeypatch):
+    config_root = tmp_path / "configs"
+    publisher_dir = config_root / "mistralai"
+    publisher_dir.mkdir(parents=True)
+    config_path = publisher_dir / "ministral-3-14b-reasoning.json"
+    original_load_fields = [
+        {"key": "llm.load.llama.kCacheQuantizationType", "value": "q8_0"},
+        {"key": "llm.load.llama.vCacheQuantizationType", "value": "q5_1"},
+    ]
+    config_path.write_text(
+        json.dumps(
+            {
+                "preset": "",
+                "operation": {"fields": [{"key": "custom.field", "value": "keep"}]},
+                "load": {"fields": original_load_fields},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    registry_path = tmp_path / "model_registry.yaml"
+    registry_path.write_text(
+        "mistralai/ministral-3-14b-reasoning:\n"
+        "  publisher: mistralai\n"
+        "  arch: ministral\n"
+        "  reasoning: thinking\n"
+        "  blueprint: default_chat\n"
+        "  truncation: full\n",
+        encoding="utf-8",
+    )
+    blueprint_path = tmp_path / "blueprint_definitions.yaml"
+    blueprint_path.write_text(
+        "blueprints:\n"
+        "  default_chat:\n"
+        "    role: A helpful assistant.\n"
+        "    modules: []\n"
+        "modules: {}\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(ab, "CONFIG_ROOT", config_root)
+    monkeypatch.setattr(ab, "REGISTRY_PATH", registry_path)
+    monkeypatch.setattr(ab, "BLUEPRINT_PATH", blueprint_path)
+    monkeypatch.setattr(ab, "TEMPLATE_DIR", tmp_path / "templates")
+    ab._LMS_CONFIGS_CACHE.clear()
+
+    ab.assemble_prompts(preview_only=False)
+
+    written = json.loads(config_path.read_text(encoding="utf-8"))
+    fields = written["operation"]["fields"]
+    assert next(field["value"] for field in fields if field["key"] == "custom.field") == "keep"
+    assert next(field["value"] for field in fields if field["key"] == "llm.prediction.systemPrompt")
+    assert written["load"]["fields"] == original_load_fields
 
 
 # =========================================================================

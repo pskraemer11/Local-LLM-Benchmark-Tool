@@ -63,6 +63,26 @@ def is_mtp_drafter(model_name: str, file_size_bytes: int = 0) -> bool:
 EXCLUDE_KEYWORDS = BLACKLIST
 
 
+def is_registry_candidate(model: dict[str, Any]) -> bool:
+    """Return whether an LMS record belongs in the benchmark registry.
+
+    ``lms ls --json`` includes embeddings and also reports several OCR models
+    as ``type == "llm"``.  The registry is currently limited to models for
+    which the local benchmark pipelines exist, so the type check and the
+    established keyword blacklist must be applied before registry discovery.
+    Records from older/test callers may not carry ``type``; those remain
+    eligible and are still checked against the shared blacklist.
+    """
+    model_type = str(model.get("type", "")).strip().lower()
+    if model_type and model_type != "llm":
+        return False
+    searchable = " ".join(
+        str(model.get(field, ""))
+        for field in ("modelKey", "key", "displayName", "path", "indexedModelIdentifier")
+    ).lower()
+    return not any(keyword in searchable for keyword in BLACKLIST)
+
+
 # ── Benchmark-Kategorie-Defaults (Fallback, seit 2026-08-05) ──
 # Registry-Sampling hat Vorrang vor den Kategorie-Defaults; die Kategorie-
 # Defaults greifen, wenn kein recherchierter Registry-Block bzw. keine

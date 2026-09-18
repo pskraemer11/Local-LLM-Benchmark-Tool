@@ -1056,14 +1056,18 @@ def assemble_prompts(preview_only: bool = False) -> None:
                             tpl_content = tpl_path.read_text(encoding="utf-8")
 
                     fields = data.setdefault("operation", {}).setdefault("fields", [])
+                    found_system_prompt = False
                     found_pt = False
                     for field in fields:
                         if field.get("key") == "llm.prediction.systemPrompt":
                             field["value"] = assembled_prompt
+                            found_system_prompt = True
                         if field.get("key") == "llm.prediction.promptTemplate":
                             if tpl_content is not None:
                                 field["value"] = tpl_content
                             found_pt = True
+                    if not found_system_prompt:
+                        fields.append({"key": "llm.prediction.systemPrompt", "value": assembled_prompt})
                     if tpl_content is not None and not found_pt:
                         fields.append({"key": "llm.prediction.promptTemplate", "value": tpl_content})
 

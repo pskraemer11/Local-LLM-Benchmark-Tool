@@ -6,11 +6,10 @@ Commands:
   compare       Compare registry vs LMS vs JSON configs (report only)
   add           Add LMS models to registry from piped JSON (lms ls --json | python registry_tool.py add)
   suggest       Dry-run: VRAM-based UKV/context recommendation (writes NOTHING)
-  sync-ctx      Sync context_length from JSON configs into registry (only missing)
   sync-from-configs
-                Sync offload, useUnifiedKvCache from JSON configs
-                into registry (skips context_length to preserve native model limit)
-                MELDE-MODUS seit 09.08.: nur Abgleich/Report, schreibt nichts
+                Sync offload, useUnifiedKvCache, context_length and KV-cache
+                quantization from JSON configs into registry
+                Report mode by default; use --write to persist GUI values
   fill-arch     Read n_layers and hidden_dim from local GGUF headers for
                 registry entries missing arch data
   sync-from-gguf
@@ -41,7 +40,8 @@ Commands:
                 JSONs that are missing it (fixes validate template_missing_config)
   pipeline      One-shot maintenance (replaces sync_model_configs.ps1):
                 pipeline [status|sync|full] -> compare, +sync, +classify,
-                +assemble+validate (full). Exit 1 bei offenen Melde-Konflikten,
+                +preview+validate (full). Config-JSONs bleiben unverändert.
+                Exit 1 bei offenen Melde-Konflikten,
                 --ignore-drift unterdrückt den Exit-Code.
   patch-reasoning-effort
                 Add gpt-oss-20b reasoningEffort/budgetTokens to LMS configs
@@ -109,7 +109,6 @@ from assemble_blueprint import (
     find_all_configs_for_registry_key,
     find_config_for_registry_key,
     find_registry_key_for_config,
-    normalize_for_config,
     normalize_model_name,
     read_lms_configs,
     resolve_template_name,
@@ -120,6 +119,7 @@ from benchmark_config import (
     GPTOSS_REASONING_BUDGET,
     GPTOSS_REASONING_EFFORT,
     is_mtp_drafter,
+    is_registry_candidate,
     is_support_file,
 )
 from benchmark_config import (
@@ -339,7 +339,7 @@ def cmd_fill_size() -> None:
                 pass
 
     # Fallback: LMS for entries still missing size
-    lms_models = _run_lms_ls()
+    lms_models = _benchmark_lms_models(_run_lms_ls())
     if lms_models:
         lms_sizes: dict[str, int] = {}
         for m in lms_models:
@@ -524,25 +524,28 @@ def _identity_triple_from_key(key: str) -> tuple[str, str, str]:
 
 def cmd_compare() -> dict[str, Any]:
     reg = load_registry()
-    lms = _run_lms_ls()
+    lms = _benchmark_lms_models(_run_lms_ls())
     cfgs = read_lms_configs(CONFIG_ROOT)
 
-    registry_key_map = {normalize_model_name(k): k for k, v in reg.items() if isinstance(v, dict)}
-    lm = {normalize_model_name(m.get("modelKey", "")): m for m in lms}
+    registry_keys = [k for k, v in reg.items() if isinstance(v, dict)]
     new_models: list[dict] = []
-    for lk, lm2 in sorted(lm.items()):
-        if not any(lk == r for r in registry_key_map):
-            new_models.append(lm2)
+    for model in lms:
+        if not any(_lms_matches_registry_key(model, key) for key in registry_keys):
+            new_models.append(model)
 
     missing: list[str] = []
     for rn, re_ in reg.items():
-        if not isinstance(re_, dict) or re_.get("blueprint") == "none":
+        if (
+            not isinstance(re_, dict)
+            or re_.get("blueprint") == "none"
+            or not is_registry_candidate({"modelKey": rn})
+        ):
             continue
-        rk2 = normalize_model_name(rn)
-        if not any(rk2 in lm_key or lm_key in rk2 for lm_key in lm):
+        if not any(_lms_matches_registry_key(model, rn) for model in lms):
             missing.append(rn)
 
     orphan: set[str] = set()
+    registry_key_map = {normalize_model_name(k): k for k in registry_keys}
     for c in cfgs:
         n = normalize_model_name(c["dir_name"])
         if not any(n in r or r in n for r in registry_key_map):
@@ -608,20 +611,17 @@ def _missing_registry_keys(lms: list[dict]) -> list[str]:
     Report konservativ; Quarantäne entfernt nur nachweislich fehlende.)
     """
     reg = load_registry()
-    lms_quant: dict[str, str] = {}
-    lms_variants: dict[str, str] = {}
-    for m in lms:
-        mk = str(m.get("modelKey", "")).lower()
-        if "@" in mk:
-            lms_quant.setdefault(_quant_variant(mk), mk)
-        for variant in _normalize_variants(mk):
-            lms_variants.setdefault(variant, mk)
+    lms = _benchmark_lms_models(lms)
 
     missing: list[str] = []
     for rn, re_ in reg.items():
-        if not isinstance(re_, dict) or re_.get("blueprint") == "none":
+        if (
+            not isinstance(re_, dict)
+            or re_.get("blueprint") == "none"
+            or not is_registry_candidate({"modelKey": rn})
+        ):
             continue
-        if _registry_key_installed(rn, lms_quant, lms_variants) is None:
+        if _lms_record_for_registry_key(rn, lms) is None:
             missing.append(rn)
     return missing
 
@@ -685,7 +685,7 @@ def cmd_quarantine_missing(dry_run: bool = False) -> int:
       3. Entfernte Einträge als YAML-Backup sichern (reversibel).
     Mit ``dry_run=True`` wird nichts geschrieben/verschoben.
     """
-    lms = _run_lms_ls()
+    lms = _benchmark_lms_models(_run_lms_ls())
     if not lms:
         print("[WARN] lms ls lieferte keine Modelle - Quarantäne übersprungen (kein Auto-Löschen).")
         return 1
@@ -839,6 +839,9 @@ def cmd_add(models: list[dict[str, Any]], interactive: bool = False) -> dict[str
     skipped: list[tuple[str, str]] = []
 
     for m in models:
+        if not is_registry_candidate(m):
+            skipped.append((str(m.get("modelKey") or m.get("key") or "?"), "nicht benchmarkfähig"))
+            continue
         mk = str(m.get("key") or m.get("modelKey") or "").strip()
         if not mk:
             skipped.append(("?", "leerer Key"))
@@ -1109,13 +1112,12 @@ def cmd_rm(model_key: str, delete_files: bool = False, assume_yes: bool = False)
 # ── sync-from-configs command ────────────────────────────────────
 
 
-def cmd_sync_from_configs() -> None:
-    """Melde-Modus (Feld-Ownership 09.08.): offload, useUnifiedKvCache,
-    context_length aus JSON-Configs NUR melden, nicht schreiben.
+def cmd_sync_from_configs(write: bool = False) -> None:
+    """Compare GUI load settings and optionally persist them in the registry.
 
-    Config-JSONs sind GUI-Sicht (kann Nutzer absichtlich anders setzen als die
-    Registry-Formel). Abweichungen werden als [MELDEN]-Drift ausgegeben; die
-    Entscheidung bleibt beim Menschen (Konflikt-Kommando folgt).
+    ``write=False`` is the safe report mode. With ``write=True``, only
+    values from LM Studio configs are copied. Conflicting values across
+    configs for one registry entry are reported and skipped.
     """
     if not REGISTRY_PATH.exists():
         print(f"[ERROR] Registry not found: {REGISTRY_PATH}")
@@ -1134,9 +1136,10 @@ def cmd_sync_from_configs() -> None:
     registry_key_map = {normalize_model_name(k): k for k, v in reg.items() if isinstance(v, dict)}
     registry_key_sorted = sorted(registry_key_map.items(), key=lambda x: -len(x[0]))
 
-    print("[3] Registry-Einträge mit Configs abgleichen (Melde-Modus) ...")
+    print(f"[3] Registry-Einträge mit Configs abgleichen ({'Schreibmodus' if write else 'Melde-Modus'}) ...")
     skipped_no_match = 0
     blacklisted = 0
+    observations: dict[str, dict[str, list[tuple[Any, Path]]]] = {}
     for cfg in configs:
         cn = normalize_model_name(cfg["dir_name"])
         match = find_registry_key_for_config(cn, registry_key_sorted)
@@ -1146,30 +1149,53 @@ def cmd_sync_from_configs() -> None:
         if any(kw in match.lower() for kw in BLACKLIST):
             blacklisted += 1
             continue
-        # Entry exists and is not blacklisted — no drift reporting needed
-        # since Registry is SSOT for UKV/offload (np ist seit 13.08. feste Policy).
+        for field, cfg_field in (
+            ("offload", "offload"),
+            ("useUnifiedKvCache", "use_unified_kv"),
+            ("context_length", "context_length"),
+            ("k_cache", "k_cache"),
+            ("v_cache", "v_cache"),
+        ):
+            value = cfg.get(cfg_field)
+            if value is not None:
+                if field == "context_length":
+                    try:
+                        value = int(value)
+                    except (TypeError, ValueError):
+                        print(f"[WARN] {match}: ungueltige context_length in {cfg['json_path']}: {value!r}")
+                        continue
+                observations.setdefault(match, {}).setdefault(field, []).append(
+                    (value, Path(cfg["json_path"]))
+                )
 
-    print(
-        "[OK] sync-from-configs (Melde-Modus): 0 Drifts gemeldet, 0 geschrieben"
-    )
-    print(
-        "[HINWEIS] Keine Aenderung: useUnifiedKvCache/offload sind Registry-SSOT "
-        "(seit 11.08.2026); num_parallel ist seit 13.08. feste Policy (SS>=10 → 4)."
-    )
+    drifts = writes = conflicts = 0
+    for match, fields in observations.items():
+        entry = reg.get(match)
+        if not isinstance(entry, dict):
+            continue
+        for field, values in fields.items():
+            distinct = {repr(value) for value, _path in values}
+            if len(distinct) > 1:
+                conflicts += 1
+                locations = ", ".join(str(path) for _value, path in values)
+                print(f"[KONFLIKT] {match}: {field} hat mehrere GUI-Werte ({locations}); nicht geschrieben")
+                continue
+            gui_value, source_path = values[0]
+            registry_value = entry.get(field)
+            if registry_value == gui_value:
+                continue
+            drifts += 1
+            print(f"[DRIFT] {match}: {field} Registry={registry_value!r} GUI={gui_value!r} ({source_path})")
+            if write:
+                entry[field] = gui_value
+                writes += 1
 
-    print(
-        "[OK] sync-from-configs (Melde-Modus): 0 Drifts gemeldet, 0 geschrieben"
-    )
+    if write and writes:
+        save_registry(reg)
+    print(f"[OK] sync-from-configs: {drifts} Drifts, {writes} geschrieben, {conflicts} Konflikte")
 
 
-# ── sync-ctx command ───────────────────────────────────────────────
-
-
-def _strip_quant(norm_key: str) -> str:
-    idx = norm_key.find("@")
-    return norm_key[:idx] if idx > 0 else norm_key
-
-
+# Context fallback helpers used by fill-ctx/fix-ctx and GGUF-derived setup.
 _CTX_FROM_SIZE: list[tuple[float, int]] = [
     (14, 16384),
     (13, 32768),
@@ -1179,8 +1205,6 @@ _CTX_FROM_SIZE: list[tuple[float, int]] = [
     (9, 131072),
 ]
 
-# Bytes per KV-cache element per quantization type.
-# Read-only after init — treat as immutable (thread-safe by design).
 _KV_BYTES: dict[str, float] = {
     "q8_0": 1.0,
     "q8_1": 2.0,
@@ -1205,17 +1229,10 @@ def _default_ctx_from_size(size_bytes: int, np: int = 1, k_cache: str = "q8_0", 
     if np == 1:
         return base_ctx
 
-    # Scale: np factor x KV-quantization correction
-    # Baseline: 1.5 B/element (q8_0 + iq4_nl, the most common case)
     kv_ref = 1.5
     kv_actual = _KV_BYTES.get(k_cache, 2.0) + _KV_BYTES.get(v_cache, 2.0)
     scale = (kv_ref / kv_actual) / np
     return max(16384, int(base_ctx * scale))
-
-
-# _USABLE_VRAM_GB is now imported from benchmark_config at the top of
-# this file (Code-Review 2026-07-18 §5.1: single source of truth for
-# VRAM constants).
 
 
 def _max_ctx_from_vram(model_gb: float, np_val: int, nl: int, hd: int, kv_bytes: float) -> int:
@@ -1240,67 +1257,183 @@ def _canonical_key(mk: str, pub: str) -> str:
     return s
 
 
-def cmd_sync_ctx() -> None:
-    if not REGISTRY_PATH.exists():
-        print(f"[ERROR] Registry not found: {REGISTRY_PATH}")
-        sys.exit(1)
-
-    print("[1] Registry laden ...")
-    reg = load_registry()
-    if not reg:
-        print("[ERROR] Leere Registry")
-        sys.exit(1)
-
-    print("[2] JSON-Configs scannen ...")
-    configs = read_lms_configs(CONFIG_ROOT)
-    print(f"  -> {len(configs)} Config-Dateien gefunden")
-
-    dir_to_ctx: dict[str, list[int]] = {}
-    dir_broad_to_ctx: dict[str, list[int]] = {}
-    for c in configs:
-        raw = f"{c['publisher']}/{c['dir_name']}"
-        norm_dir = normalize_model_name(raw)
-        broad_dir = normalize_for_config(raw)
-        ctx = c.get("context_length")
-        if ctx is not None:
-            dir_to_ctx.setdefault(norm_dir, []).append(int(ctx))
-            dir_broad_to_ctx.setdefault(broad_dir, []).append(int(ctx))
-    dir_best_ctx = {d: min(ctxs) for d, ctxs in dir_to_ctx.items()}
-    dir_broad_best_ctx = {d: min(ctxs) for d, ctxs in dir_broad_to_ctx.items()}
-    print(f"  -> {len(dir_best_ctx)} eindeutige Modelle mit context_length")
-
-    norm_reg: dict[str, str] = {}
-    for key in reg:
-        if isinstance(reg[key], dict):
-            norm_reg[normalize_model_name(key)] = key
-
-    print("[3] Registry-Einträge ergänzen ...")
-    updated = skipped_no_config = skipped_has_value = 0
-    for norm_key, orig_key in sorted(norm_reg.items()):
-        entry = reg[orig_key]
-        if not isinstance(entry, dict):
+def _benchmark_lms_models(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep only installed records eligible for this benchmark registry."""
+    eligible: list[dict[str, Any]] = []
+    for model in models:
+        if not is_registry_candidate(model):
             continue
-        if "context_length" in entry and entry["context_length"] is not None:
-            skipped_has_value += 1
+        path = str(model.get("path") or model.get("indexedModelIdentifier") or "")
+        size_bytes = model.get("sizeBytes", model.get("size_bytes", 0)) or 0
+        if is_mtp_drafter(str(model.get("modelKey", "")), int(size_bytes or 0)):
             continue
-        base_key = _strip_quant(norm_key)
-        broad_key = normalize_for_config(orig_key)
-        ctx = dir_best_ctx.get(base_key) or dir_best_ctx.get(norm_key) or dir_broad_best_ctx.get(broad_key)
-        if ctx is not None:
-            entry["context_length"] = ctx
-            updated += 1
+        if path and is_support_file(path, str(model.get("architecture") or "")):
+            continue
+        eligible.append(model)
+    return eligible
+
+
+def _identity_aliases(key: str) -> set[str]:
+    """Return stable aliases for publisher/model[@quant] identity matching."""
+    raw = key.strip().lower()
+    base, separator, quant = raw.partition("@")
+    if "/" in base:
+        publisher, model = base.split("/", 1)
+    else:
+        publisher, model = "", base
+    publisher = publisher.strip()
+    model = model.strip()
+    quant = quant.strip()
+    if not model:
+        return set()
+
+    def compact(value: str) -> str:
+        return re.sub(r"[-_.]", "", value)
+
+    aliases: set[str] = set()
+    normalized_model = normalize_model_name(model)
+    for model_alias in (model, normalized_model, compact(model), compact(normalized_model)):
+        base_alias = f"{publisher}/{model_alias}" if publisher else model_alias
+        aliases.add(base_alias)
+        if separator and quant:
+            aliases.add(f"{base_alias}@{compact(quant)}")
+    return aliases
+
+
+def _lms_identity_keys(model: dict[str, Any]) -> set[str]:
+    """Return base and variant-qualified registry identities for one LMS row."""
+    model_key = str(model.get("modelKey", "")).strip()
+    if not model_key:
+        return set()
+    publisher = str(model.get("publisher", "")).strip()
+    base = _canonical_key(model_key, publisher)
+    identities = {base}
+
+    variant_values: list[str] = []
+    selected = str(model.get("selectedVariant") or "").strip()
+    if selected:
+        variant_values.append(selected)
+    raw_variants = model.get("variants") or []
+    if isinstance(raw_variants, list):
+        variant_values.extend(str(value).strip() for value in raw_variants if value)
+    quant = _quant_from_lms_record(model) or ""
+    if quant and "@" not in base:
+        variant_values.append(f"{base}@{quant}")
+
+    for variant in variant_values:
+        if "@" not in variant and quant:
+            variant = f"{variant}@{quant}"
+        identities.add(_canonical_key(variant, publisher))
+    return identities
+
+
+def _lms_record_for_registry_key(
+    registry_key: str,
+    models: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Find an eligible LMS record by base identity and, for variants, quant."""
+    registry_aliases = _identity_aliases(registry_key)
+    has_quant = "@" in registry_key
+    for model in models:
+        if not is_registry_candidate(model):
+            continue
+        for identity in _lms_identity_keys(model):
+            if has_quant and "@" not in identity:
+                continue
+            if not has_quant and "@" in identity:
+                continue
+            identity_aliases = _identity_aliases(identity)
+            if has_quant:
+                registry_aliases_to_compare = {alias for alias in registry_aliases if "@" in alias}
+                identity_aliases = {alias for alias in identity_aliases if "@" in alias}
+            else:
+                registry_aliases_to_compare = {alias for alias in registry_aliases if "@" not in alias}
+                identity_aliases = {alias for alias in identity_aliases if "@" not in alias}
+            if registry_aliases_to_compare.intersection(identity_aliases):
+                return model
+    return None
+
+
+def _lms_matches_registry_key(model: dict[str, Any], registry_key: str) -> bool:
+    """Return whether one LMS row represents a registry base/quant identity."""
+    registry_aliases = _identity_aliases(registry_key)
+    has_quant = "@" in registry_key
+    for identity in _lms_identity_keys(model):
+        if has_quant and "@" not in identity:
+            continue
+        if not has_quant and "@" in identity:
+            continue
+        identity_aliases = _identity_aliases(identity)
+        if has_quant:
+            registry_aliases_to_compare = {alias for alias in registry_aliases if "@" in alias}
+            identity_aliases = {alias for alias in identity_aliases if "@" in alias}
         else:
-            skipped_no_config += 1
+            registry_aliases_to_compare = {alias for alias in registry_aliases if "@" not in alias}
+            identity_aliases = {alias for alias in identity_aliases if "@" not in alias}
+        if registry_aliases_to_compare.intersection(identity_aliases):
+            return True
+    return False
 
-    print(f"  -> {updated} Einträge aktualisiert")
-    print(f"  -> {skipped_has_value} bereits vorhanden")
-    print(f"  -> {skipped_no_config} keine Config gefunden")
 
-    if updated:
-        save_registry(reg)
-    print(
-        f"[OK] sync-ctx: {updated} aktualisiert, {skipped_has_value} bereits vorhanden, {skipped_no_config} keine Config gefunden"
-    )
+def _quant_from_lms_record(model: dict[str, Any]) -> str | None:
+    """Return the selected quantization name from an LMS record, if present."""
+    selected = str(model.get("selectedVariant") or "").strip()
+    if "@" in selected:
+        return selected.rsplit("@", 1)[1].lower()
+    quantization = model.get("quantization") or {}
+    if isinstance(quantization, dict):
+        quant = str(quantization.get("name", "")).strip()
+        if quant:
+            return quant.lower()
+    searchable = " ".join(
+        str(model.get(field, ""))
+        for field in ("modelKey", "path", "indexedModelIdentifier")
+    ).lower()
+    match = re.search(r"(?<![a-z0-9])(iq\d_[a-z0-9]+|q\d(?:_[a-z0-9]+)+|mxfp4|nvfp4|fp16|f16)(?![a-z0-9])", searchable)
+    if match:
+        return match.group(1)
+    return None
+
+
+def _canonical_lms_key(model: dict[str, Any]) -> str:
+    """Build the exact publisher/model@quant key represented by an LMS row."""
+    model_key = str(model.get("modelKey", "")).strip()
+    publisher = str(model.get("publisher", "")).strip()
+    base = _canonical_key(model_key, publisher)
+    selected = str(model.get("selectedVariant") or "").strip()
+    if "@" in selected:
+        return _canonical_key(selected, publisher)
+    quant = _quant_from_lms_record(model)
+    if quant and "@" not in base:
+        return f"{base}@{quant}"
+    return base
+
+
+def _rekey_registry_to_lms(
+    registry: dict[str, Any],
+    models: list[dict[str, Any]],
+) -> int:
+    """Align existing registry keys with current LMS names without changing values."""
+    changed = 0
+    for old_key in list(registry):
+        entry = registry.get(old_key)
+        if not isinstance(entry, dict) or not is_registry_candidate({"modelKey": old_key}):
+            continue
+        model = _lms_record_for_registry_key(old_key, models)
+        if model is None:
+            continue
+        new_key = _canonical_lms_key(model)
+        if not new_key or new_key == old_key:
+            continue
+        if new_key in registry:
+            print(f"  [SKIP] Registry-Key {old_key} -> {new_key}: Ziel-Key existiert bereits")
+            continue
+        registry[new_key] = registry.pop(old_key)
+        changed += 1
+        print(f"  [FIX] Registry-Key {old_key} -> {new_key} (LMS-Identität)")
+    if changed:
+        save_registry(registry)
+    return changed
 
 
 # ── migrate-keys command ───────────────────────────────────────────
@@ -1570,7 +1703,7 @@ def cmd_fill_arch() -> None:
         sys.exit(1)
 
     print("[2] LM Studio-Modelle scannen ...")
-    lms_models = _run_lms_ls()
+    lms_models = _benchmark_lms_models(_run_lms_ls())
     unique: dict[str, str] = {}
     for m in lms_models:
         rp = m.get("path", "")
@@ -1687,7 +1820,7 @@ def cmd_fill_quant() -> None:
         print("[ERROR] Leere Registry")
         sys.exit(1)
 
-    lms_models = _run_lms_ls()
+    lms_models = _benchmark_lms_models(_run_lms_ls())
     if not lms_models:
         print("[WARN] lms ls lieferte keine Modelle - fill-quant übersprungen")
         return
@@ -1716,21 +1849,22 @@ def cmd_fill_quant() -> None:
         if "@" in key:
             continue  # already has quant
 
+        lms_record = _lms_record_for_registry_key(key, lms_models)
         base = normalize_model_name(key)
         gguf_path = lms_by_base.get(base)
-        if gguf_path is None:
-            print(f"  [SKIP] {key}: kein installiertes GGUF gefunden")
-            continue
-
-        # Read GGUF header to get quant (Source of Truth)
-        quant = _gguf_quant_from_header(gguf_path)
+        quant = _quant_from_lms_record(lms_record) if lms_record is not None else None
+        if quant is None and gguf_path is not None:
+            # Fallback for older LMS records without quantization metadata.
+            quant = _gguf_quant_from_header(gguf_path)
         if not quant:
-            print(f"  [SKIP] {key}: Quant konnte nicht aus GGUF-Header gelesen werden")
+            print(f"  [SKIP] {key}: Quant konnte aus LMS/GGUF nicht gelesen werden")
             continue
 
-        pub = lms_pub_base.get(base, key.split("/")[0] if "/" in key else "")
-        model_part = base.split("/", 1)[1] if "/" in base else base
-        new_key = f"{pub}/{model_part}@{quant.lower()}" if pub else f"{model_part}@{quant.lower()}"
+        new_key = _canonical_lms_key(lms_record) if lms_record is not None else ""
+        if not new_key:
+            pub = lms_pub_base.get(base, key.split("/")[0] if "/" in key else "")
+            model_part = base.split("/", 1)[1] if "/" in base else base
+            new_key = f"{pub}/{model_part}@{quant.lower()}" if pub else f"{model_part}@{quant.lower()}"
 
         # Don't overwrite if new key already exists
         if new_key in reg and new_key != key:
@@ -1786,7 +1920,7 @@ def cmd_sync_from_gguf() -> None:
         sys.exit(1)
 
     print("[2] LM Studio-Modelle scannen ...")
-    lms_models = _run_lms_ls()
+    lms_models = _benchmark_lms_models(_run_lms_ls())
     unique: dict[str, str] = {}
     for m in lms_models:
         rp = m.get("path", "")
@@ -1881,7 +2015,7 @@ def cmd_fill_reasoning() -> None:
         sys.exit(1)
 
     print("[2] LM Studio-Modelle scannen ...")
-    lms_models = _run_lms_ls()
+    lms_models = _benchmark_lms_models(_run_lms_ls())
     unique: dict[str, str] = {}
     for m in lms_models:
         rp = m.get("path", "")
@@ -2194,7 +2328,7 @@ def _gguf_drift_errors(reg: dict[str, Any]) -> list[str]:
     reasoning wird bewusst nicht geprueft (Interpretationsspielraum).
     """
     try:
-        lms_models = _run_lms_ls()
+        lms_models = _benchmark_lms_models(_run_lms_ls())
     except Exception as e:  # lms nicht erreichbar: Check ueberspringen
         print(f"[WARN] gguf_header_drift uebersprungen (lms ls fehlgeschlagen: {e})")
         return []
@@ -2497,18 +2631,16 @@ def cmd_sync() -> None:
     Es wird NIE in JSON-Configs geschrieben (die GUI ist die Quelle) und die
     Blueprint-YAML wird nicht regeneriert (sie ist die Quelle für assemble).
     """
-    lms = _run_lms_ls()
+    lms = _benchmark_lms_models(_run_lms_ls())
     reg = load_registry()
-    registry_key_map = {normalize_model_name(k): k for k, v in reg.items() if isinstance(v, dict)}
+    _rekey_registry_to_lms(reg, lms)
+    reg = load_registry()
+    registry_keys = [k for k, v in reg.items() if isinstance(v, dict)]
 
     # Find new models
     new_models = []
     for m in lms:
-        mk = str(m.get("modelKey", "")).strip()
-        if not mk:
-            continue
-        sk = normalize_model_name(mk)
-        if not any(sk == r for r in registry_key_map):
+        if not any(_lms_matches_registry_key(m, key) for key in registry_keys):
             new_models.append(m)
 
     if new_models:
@@ -2530,7 +2662,7 @@ def cmd_sync() -> None:
     cmd_fill_reasoning()
 
     print(
-        "[sync-from-configs] Config-Felder (offload/np/UKV) abgleichen - Melde-Modus (0 geschrieben) ..."
+        "[sync-from-configs] Config-Felder (offload/UKV/context/KV-Quant) abgleichen - Melde-Modus (0 geschrieben) ..."
     )
     cmd_sync_from_configs()
 
@@ -2554,13 +2686,13 @@ def cmd_pipeline(mode: str = "status", ignore_drift: bool = False) -> None:
     Modus:
       status  -> LMS-Modellzahl + compare-Report (Default, schreibt nichts)
       sync    -> status + registry_tool sync + Klassifikation
-      full    -> sync + Prompt-Assembly + Validierung
+      full    -> sync + read-only Prompt-Preview + Validierung
 
     ignore_drift: beendet full NICHT mit Exit-Code 1, auch wenn Melde-Konflikte
     (Feld-Ownership: Config-Felder, GGUF-Header-Drift) offen sind.
     """
     try:
-        lms = _run_lms_ls()
+        lms = _benchmark_lms_models(_run_lms_ls())
         print(f"[1] LMS Modelle: {len(lms)}")
     except Exception as e:
         print(f"[WARN] lms ls fehlgeschlagen: {e}")
@@ -2572,8 +2704,8 @@ def cmd_pipeline(mode: str = "status", ignore_drift: bool = False) -> None:
         return
 
     if mode == "full":
-        print("[2b] Quarantäne nicht-installierter Modelle (missing) ...")
-        cmd_quarantine_missing()
+        print("[2b] Quarantäne nicht-installierter Modelle (missing, DRY-RUN) ...")
+        cmd_quarantine_missing(dry_run=True)
 
     print("[3] Full sync (add + fill-quant + fill-arch + sync-from-gguf + fill-reasoning + sync-from-configs + fmt) ...")
     cmd_sync()
@@ -2582,10 +2714,9 @@ def cmd_pipeline(mode: str = "status", ignore_drift: bool = False) -> None:
     classify_registry()
 
     if mode == "full":
-        print("[5] Prompt-Assembly ...")
-        assemble_prompts(preview_only=False)
-        print("[5a] GLM-Configs verankern (reasoning parsing enabled, kein JSON-Zwang) ...")
-        cmd_patch_glm_configs()
+        print("[5] Prompt-Assembly (PREVIEW, Config-JSONs bleiben unverändert) ...")
+        assemble_prompts(preview_only=True)
+        print("[5a] GLM-Config-Patch übersprungen (pipeline full ist read-only für Config-JSONs) ...")
         print("[6] Validierung ...")
         validate_prompts()
         print("[6a] Registry-Drift-Validierung (Feld-Ownership) ...")
@@ -2906,7 +3037,6 @@ def _run_menu_cmd(cmd: str) -> None:
         "fill-reasoning": cmd_fill_reasoning,
         "fill-ctx": cmd_fill_ctx,
         "fill-size": cmd_fill_size,
-        "sync-ctx": cmd_sync_ctx,
         "sync-from-configs": cmd_sync_from_configs,
         "sync-templates": cmd_sync_templates,
         "migrate-keys": cmd_migrate_keys,
@@ -2959,8 +3089,7 @@ def _interactive_menu() -> None:
         ("fill-ctx", "Add default context_length to missing entries"),
         ("fill-size", "Look up file_size_bytes from LMS"),
         ("fill-quant", "Read @quant from GGUF filename (Source of Truth)"),
-        ("sync-ctx", "Sync context_length from JSON configs into registry"),
-        ("sync-from-configs", "Config-Felder abgleichen (Melde-Modus, schreibt NICHTS)"),
+        ("sync-from-configs", "GUI-Config-Felder melden; --write übernimmt Offload/UKV/Context/KV-Quant"),
         ("migrate-keys", "Re-key entries without publisher prefix"),
         ("quarantine-missing", "Nicht-installierte Modelle: Configs+Eintrag in Quarantäne (Dry-run)"),
         ("rm", "Remove registry entry (optionally files + configs too)"),
@@ -3019,10 +3148,8 @@ def main() -> None:
         cmd_add(models, interactive=True)
     elif cmd == "suggest":
         cmd_suggest()
-    elif cmd == "sync-ctx":
-        cmd_sync_ctx()
     elif cmd == "sync-from-configs":
-        cmd_sync_from_configs()
+        cmd_sync_from_configs(write="--write" in sys.argv[2:])
     elif cmd == "fill-ctx":
         cmd_fill_ctx()
     elif cmd == "fix-np":
