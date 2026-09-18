@@ -420,6 +420,18 @@ def _normalized_lms_key(model_identifier: str) -> str:
     return cast("str", normalized_lms_key(model_identifier))
 
 
+def _registry_entry(model_identifier: str) -> dict[str, Any] | None:
+    """Return the matched Registry entry for a model identifier."""
+    if not model_identifier:
+        return None
+    reg = _load_quant_registry()
+    if not reg:
+        return None
+    key = match_registry_key(model_identifier, list(reg.keys()))
+    entry = reg.get(key) if key is not None else None
+    return entry if isinstance(entry, dict) else None
+
+
 def _registry_sampling_block(model_identifier: str) -> dict[str, Any] | None:
     """Registry-`sampling:`-Block (Variante A) fuer das Modell, falls vorhanden.
 
@@ -427,15 +439,9 @@ def _registry_sampling_block(model_identifier: str) -> dict[str, Any] | None:
     verschachtelten sampling-Dicts oder None. SSOT seit 2026-08-11/13
     (Migration, siehe doc-git/Planung/registry_sampling.md).
     """
-    if not model_identifier:
+    entry = _registry_entry(model_identifier)
+    if entry is None:
         return None
-    reg = _load_quant_registry()
-    if not reg:
-        return None
-    key = match_registry_key(model_identifier, list(reg.keys()))
-    if key is None:
-        return None
-    entry = reg.get(key) or {}
     block = entry.get("sampling")
     if not isinstance(block, dict):
         return None
@@ -497,7 +503,8 @@ def _lms_params_from_entry(entry: dict[str, Any]) -> dict[str, Any] | None:
     for f in fields:
         if not isinstance(f, dict):
             continue
-        target = _LMS_OP_KEY_MAP.get(f.get("key"))
+        raw_key = f.get("key")
+        target = _LMS_OP_KEY_MAP.get(raw_key) if isinstance(raw_key, str) else None
         if target is not None:
             v = _unwrap_lms_value(f.get("value"))
             if v is not None:
@@ -586,12 +593,12 @@ def get_model_config(model_identifier: str, category: str = "coding", is_thinkin
     if is_thinking_model:
         config: dict[str, Any] = dict(BENCHMARK_THINKING_DEFAULTS)
         source = "thinking-default"
-        cell = _sampling_cell(model_identifier, cat)
+        cell = _sampling_cell(model_identifier, cat, prefer_thinking=True)
         if cell:
             config["temperature"], config["top_p"], source = cell
     else:
         config = dict(BENCHMARK_CATEGORY_DEFAULTS[cat])
-        cell = _sampling_cell(model_identifier, cat)
+        cell = _sampling_cell(model_identifier, cat, prefer_thinking=False)
         if cell:
             config["temperature"], config["top_p"], source = cell
         else:
@@ -606,6 +613,11 @@ def get_model_config(model_identifier: str, category: str = "coding", is_thinkin
         for k in ("top_k", "min_p", "enable_thinking", "reasoning_effort"):
             if k in lms:
                 config[k] = lms[k]
+    # A web-researched Registry cell is more authoritative than one GUI
+    # profile.  This applies only to optional non-temperature fields; the
+    # Registry cell already owns temperature/top_p above.
+    for key, value in _registry_sampling_params(model_identifier, cat, prefer_thinking=is_thinking_model).items():
+        config[key] = value
     # Blueprint-SSOT: stop_strings + reasoning_parsing aus blueprint_definitions.yaml
     # (Refactor 14.08. - Registry-`template:`-Feld ist veraltet).
     bp_features = _blueprint_features(model_identifier)
@@ -650,7 +662,11 @@ def _blueprint_features(model_identifier: str) -> dict[str, Any]:
     return cast("dict[str, Any]", blueprint_features(bp_name, model_identifier))
 
 
-def _sampling_cell(model_identifier: str, cat: str) -> tuple[float, float, str] | None:
+def _sampling_cell(
+    model_identifier: str,
+    cat: str,
+    prefer_thinking: bool = False,
+) -> tuple[float, float, str] | None:
     """temperature/top_p + Quelle fuer Modell x Kategorie.
 
     Precedence: Registry-`sampling:`-Block (SSOT) -> None (dann greifen
@@ -658,10 +674,29 @@ def _sampling_cell(model_identifier: str, cat: str) -> tuple[float, float, str] 
     """
     reg = _registry_sampling_block(model_identifier)
     if reg:
-        entry = reg.get(cat)
+        registry_entry = _registry_entry(model_identifier) or {}
+        use_thinking_profile = prefer_thinking and registry_entry.get("sampling_source") == "web-research"
+        entry = reg.get("thinking") if use_thinking_profile and isinstance(reg.get("thinking"), dict) else reg.get(cat)
         if isinstance(entry, dict) and "temperature" in entry and "top_p" in entry:
             return float(entry["temperature"]), float(entry["top_p"]), "registry-sampling"
     return None
+
+
+def _registry_sampling_params(
+    model_identifier: str,
+    cat: str,
+    prefer_thinking: bool = False,
+) -> dict[str, Any]:
+    """Return optional non-temperature parameters from the Registry cell."""
+    block = _registry_sampling_block(model_identifier)
+    if not block:
+        return {}
+    registry_entry = _registry_entry(model_identifier) or {}
+    use_thinking_profile = prefer_thinking and registry_entry.get("sampling_source") == "web-research"
+    cell = block.get("thinking") if use_thinking_profile and isinstance(block.get("thinking"), dict) else block.get(cat)
+    if not isinstance(cell, dict):
+        return {}
+    return {key: cell[key] for key in ("top_k", "min_p") if key in cell}
 
 
 # ── Backward-Compat: THINKING_CONFIG bleibt als Alias ──

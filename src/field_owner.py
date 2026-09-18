@@ -104,6 +104,8 @@ FIELD_OWNERSHIP: dict[str, FieldRule] = {
     "notes": FieldRule("registry", "registry", False),
     "display_name": FieldRule("registry", "registry", False),
     "sampling": FieldRule("registry", "registry", False, description="Sampling data block per registry model (new)"),
+    "sampling_source": FieldRule("registry", "registry", False, description="Sampling provenance classification"),
+    "sampling_sources": FieldRule("registry", "registry", False, description="URLs used for sampling research"),
     "experts": FieldRule("registry", "registry", False),
     "custom_template": FieldRule("registry", "registry", False),
 }

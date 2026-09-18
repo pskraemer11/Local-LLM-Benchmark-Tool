@@ -68,22 +68,22 @@ class TestRegistryBackedSampling:
             assert (cfg["temperature"], cfg["top_p"]) == (temp, top_p)
 
     def test_partial_row_falls_back_to_category_default(self):
-        # qwen2.5-coder: nur knowledge/agentic/math-Zellen belegt
-        cfg = get_model_config("qwen/qwen2.5-coder-14b-instruct@q5_0", category="coding")
+        # Ernie: nur knowledge/agentic/math-Zellen belegt
+        cfg = get_model_config("noctrex/ernie-4.5-21b-a3b-pt_moe", category="coding")
         assert (cfg["temperature"], cfg["top_p"]) == (0.2, 1.0)
         assert cfg["_source"] == "category-default"
-        cfg = get_model_config("qwen/qwen2.5-coder-14b-instruct@q5_0", category="knowledge")
-        assert (cfg["temperature"], cfg["top_p"]) == (0.7, 0.8)
+        cfg = get_model_config("noctrex/ernie-4.5-21b-a3b-pt_moe", category="knowledge")
+        assert (cfg["temperature"], cfg["top_p"]) == (0.8, 1.0)
         assert cfg["_source"] == "registry-sampling"
 
     def test_quant_suffix_still_matches_row(self):
         for key in (
-            "qwen/qwen2.5-coder-14b-instruct",
-            "qwen/qwen2.5-coder-14b-instruct@q5_0",
-            "qwen/qwen2.5-coder-14b-instruct@q6_k",
+            "qwen/qwen3-14b",
+            "qwen/qwen3-14b@q6_k",
+            "qwen/qwen3-14b@q8_0",
         ):
             cfg = get_model_config(key, category="math")
-            assert (cfg["temperature"], cfg["top_p"]) == (0.7, 0.8)
+            assert (cfg["temperature"], cfg["top_p"]) == (0.6, 0.95)
 
     def test_variant_suffix_still_matches_row(self):
         # -qat/-ud/-imatrix-Suffixe werden im normalisierten Key gestrippt
@@ -215,6 +215,30 @@ class TestLmsJsonMerge:
         assert cfg["min_p"] == 0.1
         assert cfg["enable_thinking"] is True
         assert cfg["_source"] == "registry-sampling"
+
+    def test_registry_optional_sampling_fields_override_gui_values(self, mocker):
+        mocker.patch.object(
+            bc,
+            "_load_quant_registry",
+            return_value={
+                "example/model@q4_k_m": {
+                    "sampling": {
+                        "coding": {
+                            "temperature": 0.7,
+                            "top_p": 0.9,
+                            "top_k": 40,
+                            "min_p": 0.05,
+                        }
+                    }
+                }
+            },
+        )
+        mocker.patch.object(bc, "_lms_generation_config", return_value={"top_k": 20, "min_p": 0.1})
+
+        cfg = get_model_config("example/model@q4_k_m", category="coding")
+
+        assert cfg["top_k"] == 40
+        assert cfg["min_p"] == 0.05
 
     def test_non_temp_json_fields_merge_for_category_model(self, mocker):
         lms = {"top_k": 20, "enable_thinking": False}

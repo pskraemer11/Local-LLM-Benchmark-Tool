@@ -15,6 +15,22 @@ class ModelConfig(TypedDict):
     _source: NotRequired[str]
 
 
+class SamplingCell(TypedDict):
+    temperature: float
+    top_p: float
+    top_k: NotRequired[int]
+    min_p: NotRequired[float]
+    enabled: NotRequired[bool]
+
+
+class SamplingBlock(TypedDict, total=False):
+    coding: SamplingCell
+    knowledge: SamplingCell
+    agentic: SamplingCell
+    math: SamplingCell
+    thinking: SamplingCell
+
+
 class AvailableModelInfo(TypedDict):
     key: str
     model_identifier: str
@@ -111,6 +127,9 @@ class RegistryEntry(TypedDict):
     quants: NotRequired[list[str]]
     display_name: NotRequired[str]
     blueprint: NotRequired[str]
+    sampling: NotRequired[SamplingBlock]
+    sampling_source: NotRequired[str]
+    sampling_sources: NotRequired[list[str]]
 
 
 class SystemMetrics(TypedDict):
@@ -176,4 +195,4 @@ class GenerationConfig:
     reasoning_effort: str | None = None
     is_streaming: bool = True
     stop: list[str] | None = None
-    response_format: dict | None = None
+    response_format: dict[str, Any] | None = None

@@ -5,6 +5,8 @@ Consolidated tool for model_registry.yaml and LM Studio JSON config maintenance.
 Commands:
   compare       Compare registry vs LMS vs JSON configs (report only)
   add           Add LMS models to registry from piped JSON (lms ls --json | python registry_tool.py add)
+                Web-research plausible sampling values from HF/official sources;
+                unresolved models keep the category-default fallback.
   suggest       Dry-run: VRAM-based UKV/context recommendation (writes NOTHING)
   sync-from-configs
                 Sync offload, useUnifiedKvCache, context_length and KV-cache
@@ -46,7 +48,8 @@ Commands:
   patch-reasoning-effort
                 Add gpt-oss-20b reasoningEffort/budgetTokens to LMS configs
                 (--dry-run, --wait-for-lock, --effort, --budget)
-  sync          Full sync: add → fill-quant → fill-arch → sync-from-gguf → fill-reasoning → sync-from-configs → fmt
+  sync          Full sync: add + web sampling research → fill-quant → fill-arch
+                → sync-from-gguf → fill-reasoning → sync-from-configs → fmt
 
 Prinzip (seit 13.08.2026): Die **Registry (model_registry.yaml) ist Single Source of Truth**
 für useUnifiedKvCache und context_length. **num_parallel ist eine feste Benchmark-Policy**
@@ -132,6 +135,7 @@ from benchmark_config import (
     USE_UNIFIED_KV_CACHE_THRESHOLD_GB as _USE_UNIFIED_KV_CACHE_THRESHOLD_GB,  # noqa: F401 - re-export for tests
 )
 from model_identity import normalize_variants
+from sampling_research import research_sampling, validate_sampling_block
 
 # ── I/O helpers ────────────────────────────────────────────────────
 
@@ -833,10 +837,21 @@ def _compute_ukv(
 # ── add command ────────────────────────────────────────────────────
 
 
-def cmd_add(models: list[dict[str, Any]], interactive: bool = False) -> dict[str, Any]:
+def cmd_add(
+    models: list[dict[str, Any]],
+    interactive: bool = False,
+    research_web: bool = False,
+) -> dict[str, Any]:
+    """Add eligible LMS models and research a verified sampling profile.
+
+    Web research is best-effort and never changes LM Studio JSON files.  A
+    sampling block is added only when temperature and top_p are found with
+    unambiguous, plausible values in a model card or official source.
+    """
     reg = load_registry()
     added: list[str] = []
     skipped: list[tuple[str, str]] = []
+    sampling_unresolved: list[str] = []
 
     for m in models:
         if not is_registry_candidate(m):
@@ -937,15 +952,68 @@ def cmd_add(models: list[dict[str, Any]], interactive: bool = False) -> dict[str
             else:
                 entry["reasoning"] = "instruct"
 
+        if research_web:
+            research_model = dict(m)
+            research_model.update({"modelKey": canonical, "hf_url": entry["hf_url"]})
+            researched = research_sampling(research_model)
+            if researched is not None:
+                entry.update(researched)
+                print(
+                    f"  [SAMPLING] {canonical}: Web-Profil übernommen "
+                    f"({len(researched['sampling_sources'])} Quelle(n))"
+                )
+            else:
+                sampling_unresolved.append(canonical)
+                print(
+                    f"  [SAMPLING-WARN] {canonical}: keine eindeutige, "
+                    "plausible Temperatur/top_p-Kombination gefunden; "
+                    "Kategorie-Defaults bleiben aktiv"
+                )
+
         reg[canonical] = entry
         added.append(canonical)
 
     if added:
         save_registry(reg)
 
-    result = {"added": added, "skipped": skipped}
+    result = {
+        "added": added,
+        "skipped": skipped,
+        "sampling_unresolved": sampling_unresolved,
+    }
     print(json.dumps(result, ensure_ascii=False))
     return result
+
+
+def _research_missing_sampling(reg: dict[str, Any]) -> list[str]:
+    """Research existing eligible entries that have no sampling block."""
+    unresolved: list[str] = []
+    changed = False
+    for model_key, entry in reg.items():
+        if not isinstance(entry, dict) or "sampling" in entry:
+            continue
+        if not is_registry_candidate({"modelKey": model_key}):
+            continue
+        model = dict(entry)
+        model.update(
+            {
+                "modelKey": model_key,
+                "publisher": entry.get("publisher") or model_key.split("/", 1)[0],
+                "hf_url": entry.get("hf_url") or f"https://huggingface.co/{model_key.split('@', 1)[0]}",
+            }
+        )
+        researched = research_sampling(model)
+        if researched is None:
+            unresolved.append(model_key)
+            print(f"  [SAMPLING-WARN] {model_key}: keine Web-Empfehlung gefunden")
+            continue
+        entry.update(researched)
+        changed = True
+        print(f"  [SAMPLING] {model_key}: fehlender Block aus Web-Quelle ergänzt")
+
+    if changed:
+        save_registry(reg)
+    return unresolved
 
 
 # ── configs command ────────────────────────────────────────────────
@@ -2406,6 +2474,7 @@ def cmd_validate(verbose: bool = False, repro: bool = False, ci: bool = False) -
         "missing_reasoning": [],
         "missing_capabilities": [],
         "missing_blueprint": [],
+        "sampling_invalid": [],
         "registry_no_config": [],
         "reasoning_arch_mismatch": [],
         "config_context_drift": [],
@@ -2473,6 +2542,13 @@ def cmd_validate(verbose: bool = False, repro: bool = False, ci: bool = False) -
             errors["missing_capabilities"].append(model_key)
         if not entry.get("blueprint"):
             errors["missing_blueprint"].append(model_key)
+
+    # ── Check 4a: Sampling schema/ranges ────────────────────────────
+    for model_key, entry in reg.items():
+        if not isinstance(entry, dict) or "sampling" not in entry:
+            continue
+        for issue in validate_sampling_block(entry["sampling"]):
+            errors["sampling_invalid"].append(f"{model_key}: {issue}")
 
     # ── Check 4b: Modell-Identität = Publisher + Modellname + Quantisierung ──
     # Jeder Registry-Key MUSS die Form publisher/modelname@quant haben.
@@ -2625,10 +2701,12 @@ _DRIFT_CHECKS = ("config_context_drift", "config_context_too_small", "gguf_heade
 
 
 def cmd_sync() -> None:
-    """Full sync: add → fill-quant → fill-arch → sync-from-gguf → fill-reasoning → sync-from-configs → fmt.
+    """Full sync including read-only web sampling research.
 
     Nur Registry-Pflege aus unveränderlichen Quellen (GGUF-Header, JSON-Configs).
-    Es wird NIE in JSON-Configs geschrieben (die GUI ist die Quelle) und die
+    Sampling-Werte werden nur aus plausiblen, eindeutigen Web-Quellen übernommen;
+    bei fehlenden/konfligierenden Werten bleiben Kategorie-Defaults aktiv. Es
+    wird NIE in JSON-Configs geschrieben (die GUI ist die Quelle) und die
     Blueprint-YAML wird nicht regeneriert (sie ist die Quelle für assemble).
     """
     lms = _benchmark_lms_models(_run_lms_ls())
@@ -2645,9 +2723,12 @@ def cmd_sync() -> None:
 
     if new_models:
         print(f"[add] {len(new_models)} neue Modelle zur Registry ...")
-        cmd_add(new_models)
+        cmd_add(new_models, research_web=True)
     else:
         print("[add] Keine neuen Modelle")
+
+    print("[sampling] Fehlende Registry-Sampling-Blöcke per Web-Recherche prüfen ...")
+    _research_missing_sampling(load_registry())
 
     print("[fill-quant] fehlende @quant-Suffixe aus GGUF-Headern ergänzen ...")
     cmd_fill_quant()
@@ -3047,12 +3128,12 @@ def _run_menu_cmd(cmd: str) -> None:
             models = json.load(sys.stdin)
             if not isinstance(models, list):
                 models = [models]
-            cmd_add(models, interactive=True)
+            cmd_add(models, interactive=True, research_web=True)
         else:
             print("  [add] Ermittle installierte Modelle via LMS ...")
             models = _run_lms_ls()
             if models:
-                cmd_add(models, interactive=True)
+                cmd_add(models, interactive=True, research_web=True)
             else:
                 print("  [WARN] Keine Modelle von LMS erhalten.")
     elif cmd == "rm":
@@ -3145,7 +3226,7 @@ def main() -> None:
                 sys.exit(1)
         if not isinstance(models, list):
             models = [models]
-        cmd_add(models, interactive=True)
+        cmd_add(models, interactive=True, research_web=True)
     elif cmd == "suggest":
         cmd_suggest()
     elif cmd == "sync-from-configs":
