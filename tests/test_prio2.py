@@ -13,7 +13,6 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-import pytest
 
 from benchmark_config import GPTOSS_REASONING_EFFORT, GPTOSS_REASONING_BUDGET, get_model_config, get_quant
 from custom_benchmark import _supports_chat_template_kwargs, strip_thinking_tokens, _can_use_structured_output
@@ -114,8 +113,7 @@ class TestBootstrapCIPerfAndCorrectness:
 
     def test_numpy_matches_python_simple(self):
         # Compare NumPy and pure-Python paths on the same data + seed
-        from consolidate_results import bootstrap_ci, paired_bootstrap_ci
-        import random
+        from consolidate_results import bootstrap_ci
         scores = [0.5, 0.6, 0.7, 0.8, 0.5, 0.6, 0.7, 0.8, 0.5, 0.6] * 5
         a = scores[:30]
         # Force pure-Python path

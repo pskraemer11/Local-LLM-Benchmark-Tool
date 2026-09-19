@@ -969,7 +969,7 @@ def _ensure_model_still_loaded(model_identifier: str, model_load_key: str, bench
 
 
 # Returns: dict with pipeline="custom", score (0-1).
-def run_custom_benchmark(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_size: int = 5, seed: int | None = None, is_structured_output_disabled: bool = False, should_keep_response: bool = False) -> PipelineResult | None:
+def run_custom_benchmark(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_size: int = 20, seed: int | None = None, is_structured_output_disabled: bool = False, should_keep_response: bool = False) -> PipelineResult | None:
     model_identifier = model_info.get("registry_key", model_info["key"])
     model_display = model_info["display"]
     fp = os.path.join(DATA_DIR, bench["file"])
@@ -1081,7 +1081,7 @@ class _WindowsSignalShim:
         return 0
 
 
-def run_evalplus(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_size: int = 5, seed: int | None = None, is_reasoning_model: bool = False, num_parallel: int = 1) -> PipelineResult | None:
+def run_evalplus(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_size: int = 20, seed: int | None = None, is_reasoning_model: bool = False, num_parallel: int = 1) -> PipelineResult | None:
     # Some models (e.g. DeepSeek Coder) generate regex patterns like "\d+"
     # instead of r"\d+", causing SyntaxWarning spam from Python 3.12+.
     warnings.filterwarnings("ignore", category=SyntaxWarning)
@@ -1120,7 +1120,6 @@ def run_evalplus(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_siz
     t0 = time.time()
 
     # ── Codegen via evalplus Python API ──────────────────────
-    from evalplus.codegen import codegen as evalplus_codegen
     from evalplus.provider import make_model
 
     # Sentinel name required by evalplus; the actual model ID is sent
@@ -1216,14 +1215,11 @@ def run_evalplus(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_siz
                     for fut in futures:
                         fut.result()
             else:
-                evalplus_codegen(
-                    target_path=samples_path,
-                    model=model_obj,  # noqa: F821 - closure variable from enclosing scope
-                    dataset=filtered_tasks,
-                    greedy=gen_temp == 0.0,
-                    n_samples=1,
-                    resume=False,
-                )
+                # Use the same per-task path for one slot as for parallel
+                # codegen. EvalPlus' public codegen() API expects a dataset
+                # name, not the filtered task mapping used for a sample.
+                for task_id, task in filtered_tasks.items():
+                    _gen_one_task(task_id, task)
     def _codegen_progress() -> None:
         import sys as _sys
         dots_printed = [0]
@@ -1648,7 +1644,7 @@ def run_agentic(model_info: AvailableModelInfo, limit: int = 5, mode: str = "ran
 
 
 def save_summary_csv(results: list[dict[str, Any]], model_info: dict[str, Any] | None = None,
-                     sample_size: int = 5, seed: str = "", exclude_benchmarks: str = "",
+                     sample_size: int = 20, seed: str = "", exclude_benchmarks: str = "",
                      no_structured_output: str = "", no_unload_between: str = "") -> Any:
     """Legacy - forwards to csv_writer."""
     return csv_writer.write_accumulative_summary(
@@ -1692,7 +1688,7 @@ _RUN_SPEC_BOOL_KEYS = {"thinking", "unload_between", "unload-between",
 
 # CLI-Defaults je Dest - für Precedence-Check (CLI explizit > YAML).
 RUN_SPEC_PARSER_DEFAULTS: dict[str, Any] = {
-    "sample_size": 5, "model": None, "benchmarks": None, "seed": None,
+    "sample_size": 20, "model": None, "benchmarks": None, "seed": None,
     "thinking": False, "agentic_mode": "random", "exclude_benchmarks": None,
     "no_structured_output": False, "unload_between": False, "keep_response": False,
 }
@@ -1820,8 +1816,8 @@ def _run_spec_yaml() -> Any:
 
 # Argument-Definitionen, geteilt zwischen Haupt- und Probe-Parser.
 _LAUNCHER_ARG_SPECS: list[tuple[tuple[str, ...], dict[str, Any]]] = [
-    (("--sample-size", "-s"), {"type": int, "default": 5,
-                               "help": "Tasks per benchmark (default: 5)"}),
+    (("--sample-size", "-s"), {"type": int, "default": 20,
+                               "help": "Tasks per benchmark (default: 20)"}),
     (("--model", "-m"), {"type": str, "default": None,
                          "help": "Model selection: number(s) like '20', '1,3,5', '1-5', name or 'all'"}),
     (("--benchmarks", "-b"), {"type": str, "default": None,

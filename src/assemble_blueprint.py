@@ -28,7 +28,7 @@ from typing import Any
 
 from ruamel.yaml import YAML
 
-from benchmark_config import BLACKLIST, GPTOSS_REASONING_EFFORT
+from benchmark_config import BLACKLIST, GPTOSS_REASONING_EFFORT, is_support_file
 from model_identity import (
     _arch_reasoning_map,
     normalize_for_config,
@@ -48,13 +48,21 @@ INVENTORY_PATH = PROJECT_ROOT / "prompt_inventory.csv"
 
 # === Reasoning Keywords ===
 REASONING_KEYWORDS = [
-    "r1", "thinker", "thinking", "qwq", "cascade",
-    "cot", "reasoning", "reasoning-plus", "reasoningplus", "rnj",
-    "math", "magistral", "phi-4-reasoning",
+    "r1",
+    "thinker",
+    "thinking",
+    "qwq",
+    "cascade",
+    "cot",
+    "reasoning",
+    "reasoning-plus",
+    "reasoningplus",
+    "rnj",
+    "math",
+    "magistral",
+    "phi-4-reasoning",
 ]
-NON_REASONING_MODELS = [
-    "whisper", "flux", "ocr", "translategemma"
-]
+NON_REASONING_MODELS = ["whisper", "flux", "ocr", "translategemma"]
 
 # Architecture → default reasoning type (priority after GGUF/existing)
 # WICHTIG: Reihenfolge! qwen35moe/qwen35 MUSS vor qwen3moe/qwen3 geprüft werden
@@ -70,10 +78,43 @@ _ARCH_REASONING_MAP = _arch_reasoning_map()
 # normalize_model_name / normalize_for_config werden von dort importiert.
 # _VARIANT_SUFFIXES bleibt als Alias fuer bestehende Nutzungsstellen.
 _VARIANT_SUFFIXES = (
-    "-ud",          # Unsloth distilled
-    "-qat",         # Quantization-aware training variant: wird "qat" geschrieben, nicht "quat"!
-    "-imatrix",     # Importance-matrix quant
+    "-ud",  # Unsloth distilled
+    "-qat",  # Quantization-aware training variant: wird "qat" geschrieben, nicht "quat"!
+    "-imatrix",  # Importance-matrix quant
 )
+
+
+_CONFIG_QUANT_RE = re.compile(
+    r"(?<![a-z0-9])(?:iq\d+(?:[_-](?:xxs|xs|s|m|l|nl|0|1|2))?|q\d+(?:[_-](?:k(?:[_-](?:s|m|l))?|s|m|l|0|1|2))?|mxfp4|nvfp4|fp16|f16)(?![a-z0-9])",
+    re.IGNORECASE,
+)
+
+
+def _normalize_config_quant(value: str) -> str:
+    """Normalize a quant marker from an LM Studio path for identity matching."""
+    return value.strip().lower().replace("-", "_")
+
+
+def _config_quant(config: dict[str, Any]) -> str | None:
+    """Return the GGUF quant marker encoded in a config path, if present."""
+    explicit = config.get("quant")
+    if explicit:
+        return _normalize_config_quant(str(explicit))
+    text = " ".join(str(config.get(field, "")) for field in ("dir_name", "file_name"))
+    matches = _CONFIG_QUANT_RE.findall(text)
+    return _normalize_config_quant(matches[-1]) if matches else None
+
+
+def _registry_publisher(registry_key: str) -> str:
+    """Return the publisher part of a canonical registry key."""
+    return registry_key.split("/", 1)[0].strip().lower() if "/" in registry_key else ""
+
+
+def _registry_quant(registry_key: str) -> str | None:
+    """Return a normalized ``@quant`` suffix from a registry key."""
+    if "@" not in registry_key:
+        return None
+    return _normalize_config_quant(registry_key.rsplit("@", 1)[1])
 
 
 def find_config_for_registry_key(
@@ -100,6 +141,20 @@ def find_all_configs_for_registry_key(
     return _find_all_configs_for_registry_key(registry_key, configs)
 
 
+def _config_quant_match_variants(value: str) -> set[str]:
+    """Return broad config keys with embedded GGUF quant markers removed.
+
+    LM Studio directory names may insert a marker such as ``-IQ4`` before
+    model-name tokens that are also present in the Registry key, e.g.
+    ``...-mini-IQ4-XS-MTP`` versus ``...-mini-XS-MTP@iq4_xs``. Removing the
+    marker but retaining the following token preserves that model identity.
+    """
+    variants = {value}
+    for match in re.finditer(r"-(?:iq|q)\d+(?=-|$)", value):
+        variants.add(value[: match.start()] + value[match.end() :])
+    return variants
+
+
 def _find_all_configs_for_registry_key(
     registry_key: str,
     configs: list[dict],
@@ -111,12 +166,27 @@ def _find_all_configs_for_registry_key(
     cfg_exact: dict[str, list[dict]] = {}
     cfg_broad: dict[str, list[dict]] = {}
     cfg_raw: list[dict] = []
+    registry_publisher = _registry_publisher(registry_key)
+    registry_quant = _registry_quant(registry_key)
     for cfg in configs:
+        # Publisher is part of the model identity.  The old matcher discarded
+        # it through normalize_model_name(), merging equal model names from
+        # different Hub publishers into one conflict group.
+        cfg_publisher = str(cfg.get("publisher", "")).strip().lower()
+        if registry_publisher and cfg_publisher and cfg_publisher != registry_publisher:
+            continue
+        # If both sides expose a quantization, it is identity-bearing too.
+        # A missing config quant remains a compatible fallback for legacy
+        # flat configs such as ``publisher/model.json``.
+        cfg_quant = _config_quant(cfg)
+        if registry_quant and cfg_quant and cfg_quant != registry_quant:
+            continue
         raw = f"{cfg['publisher']}/{cfg['dir_name']}"
         cn = normalize_model_name(raw)
         cb = normalize_for_config(raw)
         cfg_exact.setdefault(cn, []).append(cfg)
-        cfg_broad.setdefault(cb, []).append(cfg)
+        for broad_variant in _config_quant_match_variants(cb):
+            cfg_broad.setdefault(broad_variant, []).append(cfg)
         cfg_raw.append((cn, raw, cfg))
 
     # Level 1: exact match
@@ -145,6 +215,7 @@ def _find_all_configs_for_registry_key(
 def find_registry_key_for_config(
     config_norm: str,
     registry_sorted: list[tuple[str, str]],
+    config: dict[str, Any] | None = None,
 ) -> str | None:
     """Find the best matching registry key for a config name.
 
@@ -154,17 +225,31 @@ def find_registry_key_for_config(
     3. Registry key ends with hyphen + config
     4. Broad match (config vs broad registry key)
     """
-    for rn2, rnk in registry_sorted:
+    candidates = registry_sorted
+    if config is not None:
+        config_publisher = str(config.get("publisher", "")).strip().lower()
+        config_quant = _config_quant(config)
+        filtered: list[tuple[str, str]] = []
+        for rn2, rnk in registry_sorted:
+            if config_publisher and _registry_publisher(rnk) != config_publisher:
+                continue
+            registry_quant = _registry_quant(rnk)
+            if config_quant and registry_quant and config_quant != registry_quant:
+                continue
+            filtered.append((rn2, rnk))
+        candidates = filtered
+
+    for rn2, rnk in candidates:
         if config_norm == rn2:
             return rnk
-    for rn2, rnk in registry_sorted:
+    for rn2, rnk in candidates:
         if config_norm.startswith(rn2 + "-"):
             return rnk
-    for rn2, rnk in registry_sorted:
+    for rn2, rnk in candidates:
         if rn2.endswith("-" + config_norm):
             return rnk
     # Broad match: strip quant from registry keys and retry
-    for rn2, rnk in registry_sorted:
+    for rn2, rnk in candidates:
         rn2_clean = normalize_for_config(rn2)
         if config_norm == rn2_clean:
             return rnk
@@ -233,9 +318,11 @@ def classify_capabilities(model_name: str, arch: str = "", notes: str = "") -> s
 
     # Vision
     vision_indicators = ["vl", "vision", "ocr"]
-    if any(kw in name_lower for kw in vision_indicators) or \
-       any(kw in arch_lower for kw in vision_indicators) or \
-       any(kw in notes_lower for kw in vision_indicators):
+    if (
+        any(kw in name_lower for kw in vision_indicators)
+        or any(kw in arch_lower for kw in vision_indicators)
+        or any(kw in notes_lower for kw in vision_indicators)
+    ):
         caps.append("vision")
 
     # Audio
@@ -244,8 +331,7 @@ def classify_capabilities(model_name: str, arch: str = "", notes: str = "") -> s
 
     # Coding
     coding_indicators = ["coder", "code", "python", "wizardcoder"]
-    if any(kw in name_lower for kw in coding_indicators) or \
-       "(coder)" in arch_lower:
+    if any(kw in name_lower for kw in coding_indicators) or "(coder)" in arch_lower:
         caps.append("coding")
 
     # Gemma-4 models: all support coding + vision (text + image per HF card)
@@ -273,10 +359,23 @@ def classify_capabilities(model_name: str, arch: str = "", notes: str = "") -> s
             break
 
     # Additional model families with coding support only (verified via HF cards)
-    coding_families = ["llama-3", "phi-4", "falcon3", "glm-4.7", "nemotron",
-                       "mistral-nemo", "mistral-small", "solar-pro",
-                       "qwen2.5", "ernie", "mellum",
-                       "acemath", "mathstral", "numina", "gpt-oss"]
+    coding_families = [
+        "llama-3",
+        "phi-4",
+        "falcon3",
+        "glm-4.7",
+        "nemotron",
+        "mistral-nemo",
+        "mistral-small",
+        "solar-pro",
+        "qwen2.5",
+        "ernie",
+        "mellum",
+        "acemath",
+        "mathstral",
+        "numina",
+        "gpt-oss",
+    ]
     for fam in coding_families:
         if fam in name_lower and "coding" not in caps:
             caps.append("coding")
@@ -425,9 +524,7 @@ def blueprint_features(bp_name: str, model_name: str = "") -> dict[str, Any]:
         features["reasoning_parsing"] = parsing
     thinking_cats = bp.get("enable_thinking_by_category")
     if isinstance(thinking_cats, dict) and thinking_cats:
-        features["enable_thinking_by_category"] = {
-            str(k): bool(v) for k, v in thinking_cats.items()
-        }
+        features["enable_thinking_by_category"] = {str(k): bool(v) for k, v in thinking_cats.items()}
     return features
 
 
@@ -533,6 +630,7 @@ def read_lms_configs(config_root: Path) -> list:
     without the cache, every call would re-walk 158+ JSON files.
     """
     import time as _time
+
     key = str(config_root)
     now = _time.time()
     cached = _LMS_CONFIGS_CACHE.get(key)
@@ -564,6 +662,10 @@ def read_lms_configs(config_root: Path) -> list:
                 continue
 
             for json_path in json_files:
+                # MTP drafter, mmproj and imatrix files are auxiliary runtime
+                # artifacts, not independently benchmarkable model configs.
+                if is_support_file(str(json_path)):
+                    continue
                 data = None
                 for enc in ("utf-8", "utf-8-sig"):
                     try:
@@ -588,32 +690,52 @@ def read_lms_configs(config_root: Path) -> list:
                     offload = None
                     num_parallel = None
                     use_unified_kv = None
+                    k_cache = None
+                    v_cache = None
                     for field in data.get("load", {}).get("fields", []):
                         k = field.get("key")
+                        value = field.get("value")
                         if k == "llm.load.contextLength":
-                            ctx_length = field.get("value")
+                            ctx_length = value
                         elif k == "llm.load.llama.acceleration.offloadRatio":
-                            offload = field.get("value")
+                            offload = value
                         elif k == "llm.load.numParallelSessions":
-                            num_parallel = field.get("value")
+                            num_parallel = value
                         elif k == "llm.load.useUnifiedKvCache":
-                            v = field.get("value")
+                            v = value
                             if isinstance(v, bool):
                                 use_unified_kv = v
                             elif isinstance(v, str):
                                 use_unified_kv = v.lower() == "true"
+                        elif k == "llm.load.llama.kCacheQuantizationType":
+                            if isinstance(value, dict):
+                                value = value.get("value")
+                            if isinstance(value, str) and value:
+                                k_cache = value.lower()
+                        elif k == "llm.load.llama.vCacheQuantizationType":
+                            if isinstance(value, dict):
+                                value = value.get("value")
+                            if isinstance(value, str) and value:
+                                v_cache = value.lower()
 
-                    models.append({
-                        "publisher": publisher,
-                        "dir_name": model_dir_name,
-                        "file_name": json_path.name,
-                        "system_prompt": sys_prompt or "",
-                        "context_length": ctx_length,
-                        "offload": offload,
-                        "num_parallel": num_parallel,
-                        "use_unified_kv": use_unified_kv,
-                        "json_path": json_path,
-                    })
+                    models.append(
+                        {
+                            "publisher": publisher,
+                            "dir_name": model_dir_name,
+                            "file_name": json_path.name,
+                            "system_prompt": sys_prompt or "",
+                            "context_length": ctx_length,
+                            "offload": offload,
+                            "num_parallel": num_parallel,
+                            "use_unified_kv": use_unified_kv,
+                            "k_cache": k_cache,
+                            "v_cache": v_cache,
+                            "quant": _config_quant(
+                                {"dir_name": model_dir_name, "file_name": json_path.name}
+                            ),
+                            "json_path": json_path,
+                        }
+                    )
                 except Exception as e:
                     print(f"[WARN] Error parsing {json_path}: {e}")
 
@@ -664,14 +786,11 @@ def classify_registry() -> None:
         # Registry-`template:`-Feld gilt als veraltet und wird ignoriert.
         custom_tpl = resolve_template_name(blueprints.get(blueprint), model_name) is not None
 
-        # Get context length from LM Studio configs
-        ctx_len = None
-        for lms_info in lms_configs:
-            lms_name = lms_info.get("dir_name", "")
-            if normalize_model_name(model_name) in normalize_model_name(lms_name) or \
-               normalize_model_name(lms_name) in normalize_model_name(model_name):
-                ctx_len = lms_info.get("context_length")
-                break
+        # Get context length from the config that represents this exact
+        # publisher/quant identity; do not select a same-basename config from
+        # another Hub publisher or quant variant.
+        ctx_config = find_config_for_registry_key(model_name, lms_configs)
+        ctx_len = ctx_config.get("context_length") if ctx_config else None
 
         # Truncation basiert auf der echten Modellfähigkeit (GGUF max_context_length),
         # nicht auf der in LM Studio eingestellten Config-ctx (VRAM-bedingt).
@@ -698,6 +817,7 @@ def classify_registry() -> None:
 
     # Normalize blank lines (no blanks within entries, one between entries)
     from registry_tool import _format_blank_lines
+
     _format_blank_lines(REGISTRY_PATH)
 
     print(f"[OK] Updated {updated_count} models in {REGISTRY_PATH}")
@@ -753,11 +873,17 @@ def create_blueprint_definitions() -> None:
             "role_template": "You are {name}, a {arch} model{params_label} by {publisher}, specialized in {capabilities}{type_label}.",
             "modules": ["coding_principles", "safety_block", "output_style_technical"],
         },
-         "gemma_assistant": {
+        "gemma_assistant": {
             "description": "Gemma-4 spezifisch (Standard)",
             "role": "You are Gemma-4, a helpful AI assistant.",
             "role_template": "You are {name}, a {arch} model{params_label} by {publisher}, optimized for {capabilities}{type_label}.",
-            "modules": ["instruct_scaffolding", "gemma_capabilities", "coding_principles", "safety_block", "output_style_default"],
+            "modules": [
+                "instruct_scaffolding",
+                "gemma_capabilities",
+                "coding_principles",
+                "safety_block",
+                "output_style_default",
+            ],
             "custom_template": True,
         },
         "gemma_reasoning": {
@@ -767,9 +893,9 @@ def create_blueprint_definitions() -> None:
             "modules": ["gemma_capabilities", "coding_principles", "safety_block", "output_style_default"],
             "custom_template": True,
             "template_map": {
-                "12b": "gemma4_12b_template_minijinja.jinja",
-                "19b": "gemma4-19b-template_minijinja.jinja",
-                "26b": "gemma4-26b-template_minijinja.jinja",
+                "12b": "google_gemma-4-12B-it-qat-q4_0-chat_template.jinja",
+                "19b": "google_gemma-4-26B-A4B-it_chat_template.jinja",
+                "26b": "google_gemma-4-26B-A4B-it_chat_template.jinja",
             },
             "enable_thinking_by_category": {
                 "coding": False,
@@ -863,7 +989,7 @@ def create_blueprint_definitions() -> None:
             "medium": "<reasoning>Analyze step by step. Consider multiple approaches. Distinguish facts from assumptions.</reasoning>",
             "minimal": "",
         },
-         "gemma_capabilities": {
+        "gemma_capabilities": {
             "description": "Gemma-4 capabilities profile (text, code, reasoning)",
             "full": "<capabilities>\n- Text generation and conversation\n- Code generation, completion, and debugging\n- Reasoning and problem-analysis capabilities\n- Function calling and structured tool use\n- Long context: up to 256K tokens\n- Multilingual: 140+ languages\n</capabilities>",
             "medium": "<capabilities>Text generation, coding, reasoning, function calling, long context, multilingual.</capabilities>",
@@ -1003,7 +1129,7 @@ def assemble_prompts(preview_only: bool = False) -> None:
                                 continue
                         else:
                             # search_key in ck: exclude variant-suffixed configs not matching
-                            suffix = ck[len(search_key):].lstrip("-")
+                            suffix = ck[len(search_key) :].lstrip("-")
                             for vs in _VARIANT_SUFFIXES:
                                 vs_clean = vs.lstrip("-")
                                 if suffix.startswith(vs_clean) and not search_key.endswith(vs_clean):
@@ -1035,7 +1161,7 @@ def assemble_prompts(preview_only: bool = False) -> None:
             old_prompt = candidates[0][1].get("system_prompt", "")
             old_len = len(old_prompt)
             new_len = len(assembled_prompt)
-            print(f"\n{'='*60}")
+            print(f"\n{'=' * 60}")
             print(f"[PREVIEW] {model_name}")
             print(f"  Blueprint: {bp_name} | Truncation: {truncation}")
             print(f"  Candidates: {len(candidates)} | Old: {old_len} chars | New: {new_len} chars")
@@ -1083,9 +1209,11 @@ def assemble_prompts(preview_only: bool = False) -> None:
             stats["total_configs_written"] += written
             print(f"[OK] {model_name}: {bp_name}/{truncation} -> {written} config(s) ({len(assembled_prompt)} chars)")
 
-    print(f"\n{'='*60}")
-    print(f"Summary: {stats['assembled']} assembled, {stats['skipped']} skipped, "
-          f"{stats['not_found']} not found, {stats['errors']} errors")
+    print(f"\n{'=' * 60}")
+    print(
+        f"Summary: {stats['assembled']} assembled, {stats['skipped']} skipped, "
+        f"{stats['not_found']} not found, {stats['errors']} errors"
+    )
 
 
 def validate_prompts() -> None:
@@ -1110,7 +1238,7 @@ def validate_prompts() -> None:
         open_tags = []
         for m in re.finditer(r"</?(\w+)>", prompt):
             tag = m.group(1)
-            if prompt[m.start():m.start()+2] == "</":
+            if prompt[m.start() : m.start() + 2] == "</":
                 if open_tags and open_tags[-1] == tag:
                     open_tags.pop()
                 else:
@@ -1132,7 +1260,7 @@ def validate_prompts() -> None:
 
         passed += 1
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"Validation: {checked} checked, {passed} passed, {len(issues)} issues")
     if issues:
         print(f"\nIssues ({len(issues)}):")
@@ -1144,7 +1272,7 @@ def validate_prompts() -> None:
     if prompt_lengths:
         print("\nPrompt length stats:")
         print(f"  Min: {min(prompt_lengths)} chars | Max: {max(prompt_lengths)} chars")
-        print(f"  Avg: {sum(prompt_lengths)//len(prompt_lengths)} chars")
+        print(f"  Avg: {sum(prompt_lengths) // len(prompt_lengths)} chars")
         short = [pl for pl in prompt_lengths if pl < 50]
         long = [pl for pl in prompt_lengths if pl > 2000]
         if short:
@@ -1156,10 +1284,10 @@ def validate_prompts() -> None:
 def _interactive_menu() -> None:
     """Show interactive command selection menu when no args given."""
     cmds = [
-        ("all",      "classify → assemble → validate (full pipeline)"),
+        ("all", "classify → assemble → validate (full pipeline)"),
         ("classify", "Read model registry & GGUF headers, classify blueprint + reasoning"),
         ("assemble", "Build and write system prompts from blueprints"),
-        ("preview",  "Dry-run: compute prompts and print summary without writing"),
+        ("preview", "Dry-run: compute prompts and print summary without writing"),
         ("validate", "Check all system prompts for XML balance, length, Jinja remnants"),
     ]
     print("\n" + "=" * 60)
@@ -1167,7 +1295,7 @@ def _interactive_menu() -> None:
     print("=" * 60)
     for i, (cmd, desc) in enumerate(cmds, 1):
         print(f"  {i:2d}. {cmd:12s} {desc}")
-    print(f"  {len(cmds)+1:2d}. {'quit':12s} Exit")
+    print(f"  {len(cmds) + 1:2d}. {'quit':12s} Exit")
     print("=" * 60)
 
     while True:

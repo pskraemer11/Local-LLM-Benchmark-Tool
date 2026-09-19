@@ -234,6 +234,12 @@ die drei Scientific-Library-Kompatibilitätstests erfolgreich sind.
 
 - NumPy, pandas und matplotlib funktionieren in repräsentativen Coding-
   Benchmark-Fixtures.
+- Bei identischer Modellrevision, Task-Auswahl, Seed, Prompt-/Template-Version,
+  Decoding-Konfiguration und Dependency-Versionen verschlechtert der gehärtete
+  Pfad die Benchmark-Scores gegenüber dem Baseline-Pfad nicht. Der Vergleich
+  erfolgt zusätzlich auf Item-Ebene; jede Abweichung wird klassifiziert, und
+  eine durch Allowlist oder Isolation verursachte Ablehnung von gültigem Code
+  ist ein Akzeptanzfehler.
 - Native Scientific-DLLs funktionieren nur aus den freigegebenen
   Read-only-Pfaden.
 - Kein Zugriff auf Repository, Benutzerprofil, Credentials oder Netzwerk.

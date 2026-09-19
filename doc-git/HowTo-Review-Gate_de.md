@@ -65,14 +65,14 @@ Exit-Code: **0 = alle blockierenden Checks grün** · **1 = Gate rot**.
 
 Die 6 Checks im Überblick:
 
-|No.| Check                     | Blockierend       | Artefakt                                   | Hinweis                                                       |
-|---|---------------------------|-------------------|--------------------------------------------|---------------------------------------------------------------|
-| 1 | Registry-Validierung (`validate --repro`) | **Ja** | `repro_issues.md` | Registry-, GGUF- und Provider-Runtime-Prüfungen |
-| 2 | `ruff check . --no-fix` | **Ja** | `lint_issues.md` | Lint-Fehler blockieren |
-| 3 | `mypy .` | Nein (informativ) | — | Lokaler Vollbaum-Check; Legacy-Typfehler werden nur berichtet |
-| 4 | `pytest -q` | **Ja** | — | Vollsuite; zuletzt 893 Tests bestanden |
-| 5 | GGUF-Header-Check | Nein (informativ) | `gguf_issues.md` | Architektur-Fakten gegen GGUF-Header |
-| 6 | CHANGELOG + LM-Studio-Runtime-Konfiguration | Nein (advisory) | — | Prüft CHANGELOG-Hinweis und `numParallelSessions` |
+|No.| Check                                        | Blockierend        | Artefakt          | Hinweis                                                       |
+|---|----------------------------------------------|--------------------|-------------------|---------------------------------------------------------------|
+| 1 | Registry-Validierung (`validate --repro`)    | **Ja**             | `repro_issues.md` | Registry-, GGUF- und Provider-Runtime-Prüfungen               |
+| 2 | `ruff check . --no-fix`                      | **Ja**             | `lint_issues.md`  | Lint-Fehler blockieren                                        |
+| 3 | `mypy .`                                     | Nein (informativ)  |       —           | Lokaler Vollbaum-Check; Legacy-Typfehler werden nur berichtet |
+| 4 | `pytest -q`                                  | **Ja**             |       —           | Vollsuite; zuletzt 893 Tests bestanden                        |
+| 5 | GGUF-Header-Check                            | Nein (informativ)  | `gguf_issues.md`  | Architektur-Fakten gegen GGUF-Header                          |
+| 6 | CHANGELOG + LM-Studio-Runtime-Konfiguration  | Nein (advisory)    |       —           | Prüft CHANGELOG-Hinweis und `numParallelSessions`             |
 
 > **Praktisch:** Das Gate im Hintergrund starten (`Start-Process` / zweites Terminal),
 > während du mit Phase 2 beginnst.

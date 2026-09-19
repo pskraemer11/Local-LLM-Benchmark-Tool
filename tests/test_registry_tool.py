@@ -8,13 +8,14 @@ Targets:
   5.1  _max_ctx_from_vram() and VRAM constants
   5.2  Match cascade in cmd_configs (registry ↔ JSON config)
 """
+
 from __future__ import annotations
 
 import json
 import os
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 import yaml
@@ -33,9 +34,21 @@ from registry_tool import (
 )
 
 
+def test_help_describes_pipeline_modes() -> None:
+    """The CLI help must explain scope and write behavior for each mode."""
+    help_text = rt.__doc__ or ""
+    assert "Default: pipeline status" in help_text
+    assert "pipeline status" in help_text
+    assert "pipeline sync" in help_text
+    assert "pipeline full" in help_text
+    assert "May write model_registry.yaml; does not write config JSONs." in help_text
+    assert "--ignore-drift keeps it report-only." in help_text
+
+
 # ─────────────────────────────────────────────────────────────────────
 # 5.1 VRAM-Formel
 # ─────────────────────────────────────────────────────────────────────
+
 
 class TestMaxCtxFromVram:
     """ctx = (usable_vram - model_gb) / (np × nl × hd × 2 × kv_bytes / 1e9)"""
@@ -59,9 +72,7 @@ class TestMaxCtxFromVram:
         ctx_1 = _max_ctx_from_vram(11.47, 1, 40, 5120, 1.5)
         ctx_2 = _max_ctx_from_vram(11.47, 2, 40, 5120, 1.5)
         # Allow small tolerance
-        assert 0.45 < (ctx_2 / ctx_1) < 0.55, (
-            f"ctx should halve with np=2: ctx_1={ctx_1}, ctx_2={ctx_2}"
-        )
+        assert 0.45 < (ctx_2 / ctx_1) < 0.55, f"ctx should halve with np=2: ctx_1={ctx_1}, ctx_2={ctx_2}"
 
     def test_returns_minimum_2048(self):
         # Massive model with no room: 14.9 GB of 15.3 GB usable
@@ -125,6 +136,114 @@ class TestHeadlessValidation:
         assert not any(errors.values())
 
 
+class TestGuiConfigRegistrySync:
+    """GUI tuning can be imported explicitly without weakening Registry SSOT."""
+
+    def _registry_and_configs(self, tmp_path):
+        registry = {
+            "publisher/model@q4_k_m": {
+                "offload": 1.0,
+                "useUnifiedKvCache": False,
+                "context_length": 16384,
+                "k_cache": "q8_0",
+                "v_cache": "q8_0",
+            }
+        }
+        registry_path = tmp_path / "model_registry.yaml"
+        registry_path.touch()
+        configs = [
+            {
+                "publisher": "publisher",
+                "dir_name": "model",
+                "offload": 0.75,
+                "use_unified_kv": True,
+                "context_length": 8192,
+                "k_cache": "q5_1",
+                "v_cache": "q5_1",
+                "json_path": tmp_path / "model.json",
+            }
+        ]
+        return registry, registry_path, configs
+
+    def test_report_mode_does_not_write(self, tmp_path, capsys):
+        registry, registry_path, configs = self._registry_and_configs(tmp_path)
+        with (
+            patch.object(rt, "REGISTRY_PATH", registry_path),
+            patch.object(rt, "load_registry", return_value=registry),
+            patch.object(rt, "read_lms_configs", return_value=configs),
+            patch.object(rt, "save_registry") as save_registry,
+        ):
+            rt.cmd_sync_from_configs()
+
+        assert registry["publisher/model@q4_k_m"]["offload"] == 1.0
+        assert registry["publisher/model@q4_k_m"]["useUnifiedKvCache"] is False
+        save_registry.assert_not_called()
+        assert "5 Drifts" in capsys.readouterr().out
+
+    def test_write_mode_persists_gui_values(self, tmp_path):
+        registry, registry_path, configs = self._registry_and_configs(tmp_path)
+        with (
+            patch.object(rt, "REGISTRY_PATH", registry_path),
+            patch.object(rt, "load_registry", return_value=registry),
+            patch.object(rt, "read_lms_configs", return_value=configs),
+            patch.object(rt, "save_registry") as save_registry,
+        ):
+            rt.cmd_sync_from_configs(write=True)
+
+        entry = registry["publisher/model@q4_k_m"]
+        assert entry["offload"] == 0.75
+        assert entry["useUnifiedKvCache"] is True
+        assert entry["context_length"] == 8192
+        assert entry["k_cache"] == "q5_1"
+        assert entry["v_cache"] == "q5_1"
+        save_registry.assert_called_once_with(registry)
+
+    def test_report_mode_detects_kv_quantization_drift(self, tmp_path, capsys):
+        registry, registry_path, configs = self._registry_and_configs(tmp_path)
+        with (
+            patch.object(rt, "REGISTRY_PATH", registry_path),
+            patch.object(rt, "load_registry", return_value=registry),
+            patch.object(rt, "read_lms_configs", return_value=configs),
+            patch.object(rt, "save_registry") as save_registry,
+        ):
+            rt.cmd_sync_from_configs()
+
+        assert registry["publisher/model@q4_k_m"]["k_cache"] == "q8_0"
+        save_registry.assert_not_called()
+        assert "k_cache" in capsys.readouterr().out
+
+    def test_lms_parser_extracts_nested_kv_quantization(self, tmp_path):
+        root = tmp_path / "configs"
+        model_dir = root / "publisher" / "model"
+        model_dir.mkdir(parents=True)
+        path = model_dir / "model.gguf.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "load": {
+                        "fields": [
+                            {
+                                "key": "llm.load.llama.kCacheQuantizationType",
+                                "value": {"checked": True, "value": "q5_1"},
+                            },
+                            {
+                                "key": "llm.load.llama.vCacheQuantizationType",
+                                "value": {"checked": True, "value": "q8_0"},
+                            },
+                        ]
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        ab._LMS_CONFIGS_CACHE.pop(str(root), None)
+
+        configs = rt.read_lms_configs(root)
+
+        assert configs[0]["k_cache"] == "q5_1"
+        assert configs[0]["v_cache"] == "q8_0"
+
+
 class TestKVBytesTable:
     """Byte-per-element mapping for each quantization type."""
 
@@ -145,6 +264,7 @@ class TestKVBytesTable:
 # 5.2 Match-Kaskade in cmd_configs
 # ─────────────────────────────────────────────────────────────────────
 
+
 class TestMatchCascade:
     """Match priority: exact > suffix > base > None."""
 
@@ -160,12 +280,7 @@ class TestMatchCascade:
         dir_path.mkdir(parents=True, exist_ok=True)
         data = {
             "operation": {"fields": []},
-            "load": {
-                "fields": [
-                    {"key": k, "value": v}
-                    for k, v in fields.items()
-                ]
-            },
+            "load": {"fields": [{"key": k, "value": v} for k, v in fields.items()]},
         }
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(data, f)
@@ -174,10 +289,7 @@ class TestMatchCascade:
     def test_no_arch_data_falls_back_to_benchmark_threshold(self, fake_config, capsys):
         # Model with no n_layers/hidden_dim, model_gb >= 12 → UKV on (Empfehlung)
         sub = fake_config / "publisher"
-        json_path = self._make_config(
-            sub, sub / "m.json",
-            **{"llm.load.contextLength": 16384}
-        )
+        json_path = self._make_config(sub, sub / "m.json", **{"llm.load.contextLength": 16384})
         registry = {
             "publisher/m": {
                 "file_size_bytes": 14_000_000_000,  # 14 GB (>= 12 GB threshold)
@@ -188,18 +300,25 @@ class TestMatchCascade:
                 "v_cache": "iq4_nl",
             }
         }
-        with patch.object(rt, "load_registry", return_value=registry), \
-             patch.object(rt, "CONFIG_ROOT", fake_config), \
-             patch.object(rt, "read_lms_configs",
-                          return_value=[{
-                              "dir_name": "m",
-                              "publisher": "publisher",
-                              "context_length": 16384,
-                              "offload": 1.0,
-                              "num_parallel": 1,
-                              "use_unified_kv": True,
-                              "json_path": json_path,
-                          }]):
+        with (
+            patch.object(rt, "load_registry", return_value=registry),
+            patch.object(rt, "CONFIG_ROOT", fake_config),
+            patch.object(
+                rt,
+                "read_lms_configs",
+                return_value=[
+                    {
+                        "dir_name": "m",
+                        "publisher": "publisher",
+                        "context_length": 16384,
+                        "offload": 1.0,
+                        "num_parallel": 1,
+                        "use_unified_kv": True,
+                        "json_path": json_path,
+                    }
+                ],
+            ),
+        ):
             result = rt.cmd_suggest()
         out = capsys.readouterr().out
         # Dry-run: JSON wurde NICHT verändert (kein UKV-Feld geschrieben)
@@ -213,10 +332,7 @@ class TestMatchCascade:
     def test_arch_data_uses_precise_formula(self, fake_config, capsys):
         # Model with arch data, np=1, small context → UKV OFF (Empfehlung)
         sub = fake_config / "publisher"
-        json_path = self._make_config(
-            sub, sub / "m.json",
-            **{"llm.load.contextLength": 2048}
-        )
+        json_path = self._make_config(sub, sub / "m.json", **{"llm.load.contextLength": 2048})
         # 4 GB model, 40 layers × 5120 dim, q8_0+iq4_nl, ctx=2048
         # total = 4 + (40*5120*2*1.5*2048/1e9) = 4 + 0.63 = 4.63 GB
         # 4.63 < 14.0 → UKV OFF
@@ -231,18 +347,25 @@ class TestMatchCascade:
                 "v_cache": "iq4_nl",
             }
         }
-        with patch.object(rt, "load_registry", return_value=registry), \
-             patch.object(rt, "CONFIG_ROOT", fake_config), \
-             patch.object(rt, "read_lms_configs",
-                          return_value=[{
-                              "dir_name": "m",
-                              "publisher": "publisher",
-                              "context_length": 2048,
-                              "offload": 1.0,
-                              "num_parallel": 1,
-                              "use_unified_kv": False,
-                              "json_path": json_path,
-                          }]):
+        with (
+            patch.object(rt, "load_registry", return_value=registry),
+            patch.object(rt, "CONFIG_ROOT", fake_config),
+            patch.object(
+                rt,
+                "read_lms_configs",
+                return_value=[
+                    {
+                        "dir_name": "m",
+                        "publisher": "publisher",
+                        "context_length": 2048,
+                        "offload": 1.0,
+                        "num_parallel": 1,
+                        "use_unified_kv": False,
+                        "json_path": json_path,
+                    }
+                ],
+            ),
+        ):
             result = rt.cmd_suggest()
         out = capsys.readouterr().out
         with open(json_path, "r", encoding="utf-8") as f:
@@ -257,10 +380,7 @@ class TestMatchCascade:
         # contextLength is never touched by cmd_suggest (dry-run):
         # the user's manually set value is preserved.
         sub = fake_config / "publisher"
-        json_path = self._make_config(
-            sub, sub / "m.json",
-            **{"llm.load.contextLength": 16384}
-        )
+        json_path = self._make_config(sub, sub / "m.json", **{"llm.load.contextLength": 16384})
         registry = {
             "publisher/m": {
                 "file_size_bytes": 8_000_000_000,
@@ -273,18 +393,25 @@ class TestMatchCascade:
                 "benchmark_context_limit": 4096,
             }
         }
-        with patch.object(rt, "load_registry", return_value=registry), \
-             patch.object(rt, "CONFIG_ROOT", fake_config), \
-             patch.object(rt, "read_lms_configs",
-                          return_value=[{
-                              "dir_name": "m",
-                              "publisher": "publisher",
-                              "context_length": 16384,
-                              "offload": 1.0,
-                              "num_parallel": 1,
-                              "use_unified_kv": False,
-                              "json_path": json_path,
-                          }]):
+        with (
+            patch.object(rt, "load_registry", return_value=registry),
+            patch.object(rt, "CONFIG_ROOT", fake_config),
+            patch.object(
+                rt,
+                "read_lms_configs",
+                return_value=[
+                    {
+                        "dir_name": "m",
+                        "publisher": "publisher",
+                        "context_length": 16384,
+                        "offload": 1.0,
+                        "num_parallel": 1,
+                        "use_unified_kv": False,
+                        "json_path": json_path,
+                    }
+                ],
+            ),
+        ):
             result = rt.cmd_suggest()
         capsys.readouterr()
         with open(json_path, "r", encoding="utf-8") as f:
@@ -299,10 +426,7 @@ class TestMatchCascade:
         # contextLength is never touched by cmd_suggest (dry-run):
         # the user's manually set value is preserved.
         sub = fake_config / "publisher"
-        json_path = self._make_config(
-            sub, sub / "m.json",
-            **{"llm.load.contextLength": 16384}
-        )
+        json_path = self._make_config(sub, sub / "m.json", **{"llm.load.contextLength": 16384})
         # Tiny model: 4 GB
         registry = {
             "publisher/m": {
@@ -315,18 +439,25 @@ class TestMatchCascade:
                 "v_cache": "iq4_nl",
             }
         }
-        with patch.object(rt, "load_registry", return_value=registry), \
-             patch.object(rt, "CONFIG_ROOT", fake_config), \
-             patch.object(rt, "read_lms_configs",
-                          return_value=[{
-                              "dir_name": "m",
-                              "publisher": "publisher",
-                              "context_length": 16384,
-                              "offload": 1.0,
-                              "num_parallel": 1,
-                              "use_unified_kv": False,
-                              "json_path": json_path,
-                          }]):
+        with (
+            patch.object(rt, "load_registry", return_value=registry),
+            patch.object(rt, "CONFIG_ROOT", fake_config),
+            patch.object(
+                rt,
+                "read_lms_configs",
+                return_value=[
+                    {
+                        "dir_name": "m",
+                        "publisher": "publisher",
+                        "context_length": 16384,
+                        "offload": 1.0,
+                        "num_parallel": 1,
+                        "use_unified_kv": False,
+                        "json_path": json_path,
+                    }
+                ],
+            ),
+        ):
             result = rt.cmd_suggest()
         capsys.readouterr()
         with open(json_path, "r", encoding="utf-8") as f:
@@ -341,6 +472,7 @@ class TestMatchCascade:
 # ─────────────────────────────────────────────────────────────────────
 # 5.3 _infer_num_parallel / _classify_arch
 # ─────────────────────────────────────────────────────────────────────
+
 
 class TestClassifyArch:
     """Classification nach Refactoring 2026-07-31: GGUF expert_count als
@@ -379,6 +511,7 @@ class TestClassifyArch:
 # Integration: cmd_suggest end-to-end
 # ─────────────────────────────────────────────────────────────────────
 
+
 class TestCmdSuggestIntegration:
     """End-to-end cmd_suggest() with mocked registry + LMS configs."""
 
@@ -388,22 +521,32 @@ class TestCmdSuggestIntegration:
         cfg_dir.mkdir(parents=True)
         json_path = cfg_dir / "unmatched.json"
         with open(json_path, "w", encoding="utf-8") as f:
-            json.dump({
-                "operation": {"fields": []},
-                "load": {"fields": []},
-            }, f)
-        with patch.object(rt, "load_registry", return_value={}), \
-             patch.object(rt, "CONFIG_ROOT", tmp_path / "user-concrete-model-default-config"), \
-             patch.object(rt, "read_lms_configs",
-                          return_value=[{
-                              "dir_name": "unmatched",
-                              "publisher": "pub",
-                              "context_length": 16384,
-                              "offload": 1.0,
-                              "num_parallel": 1,
-                              "use_unified_kv": False,
-                              "json_path": json_path,
-                          }]):
+            json.dump(
+                {
+                    "operation": {"fields": []},
+                    "load": {"fields": []},
+                },
+                f,
+            )
+        with (
+            patch.object(rt, "load_registry", return_value={}),
+            patch.object(rt, "CONFIG_ROOT", tmp_path / "user-concrete-model-default-config"),
+            patch.object(
+                rt,
+                "read_lms_configs",
+                return_value=[
+                    {
+                        "dir_name": "unmatched",
+                        "publisher": "pub",
+                        "context_length": 16384,
+                        "offload": 1.0,
+                        "num_parallel": 1,
+                        "use_unified_kv": False,
+                        "json_path": json_path,
+                    }
+                ],
+            ),
+        ):
             # Should not raise, should not modify the file
             result = rt.cmd_suggest()
         with open(json_path, "r", encoding="utf-8") as f:
@@ -418,6 +561,7 @@ class TestCmdSuggestIntegration:
 # cmd_fix_np: exaktes lms-Matching + Duplikat-Kollaps
 # ─────────────────────────────────────────────────────────────────────
 
+
 class TestFixNp:
     """cmd_fix_np — seit 13.08. deprecated: np ist feste Benchmark-Policy
     (SS>=10 → 4, sonst 1) und kein Registry-Feld mehr. Der Stub informiert
@@ -426,8 +570,10 @@ class TestFixNp:
 
     def test_fix_np_is_deprecated_stub(self, capsys):
         saved = {}
-        with patch.object(rt, "load_registry", return_value={"x/y": {"file_size_bytes": 1}}), \
-             patch.object(rt, "save_registry", side_effect=lambda r: saved.update(r)):
+        with (
+            patch.object(rt, "load_registry", return_value={"x/y": {"file_size_bytes": 1}}),
+            patch.object(rt, "save_registry", side_effect=lambda r: saved.update(r)),
+        ):
             rt.cmd_fix_np()
         out = capsys.readouterr().out
         assert "fix-np entfällt" in out
@@ -446,8 +592,10 @@ class TestFixNp:
 # GGUF-Reasoning-Erkennung (_read_gguf_arch / _detect_reasoning_from_template)
 # ─────────────────────────────────────────────────────────────────────
 
-def _make_mini_gguf(block_count: int, embedding_length: int, chat_template: str | None,
-                     context_length: int = 16384) -> bytes:
+
+def _make_mini_gguf(
+    block_count: int, embedding_length: int, chat_template: str | None, context_length: int = 16384
+) -> bytes:
     """Synthetischer GGUF-Header: block_count/embedding_length/context_length VOR chat_template."""
     import struct
 
@@ -490,6 +638,7 @@ class TestReadGgufArchReasoning:
         p.write_bytes(_make_mini_gguf(48, 5120, None))
         nl, hd, is_reasoning, ctx, exp = rt._read_gguf_arch(str(p))
         assert (nl, hd, is_reasoning, ctx) == (48, 5120, False, 16384)
+        assert exp is None
 
     def test_corrupt_file_yields_none(self, tmp_path):
         p = tmp_path / "broken.gguf"
@@ -520,6 +669,7 @@ class TestDetectReasoningFromTemplate:
 # 5.8 rm command (Fix 2026-07-31: Registry bereinigen)
 # ─────────────────────────────────────────────────────────────────────
 
+
 class TestCmdRm:
     """registry_tool.py rm – Registry-Eintrag löschen (+ optional Dateien)."""
 
@@ -529,10 +679,13 @@ class TestCmdRm:
 
     def test_removes_entry_by_full_key(self, tmp_path, monkeypatch):
         reg_path = tmp_path / "registry.yaml"
-        self._write_registry(reg_path, {
-            "Intel/gpt-oss-20b-gguf-q4ks-AutoRound": {"reasoning": "thinking", "offload": 1.0},
-            "openai/gpt-oss-20b": {"reasoning": "thinking"},
-        })
+        self._write_registry(
+            reg_path,
+            {
+                "Intel/gpt-oss-20b-gguf-q4ks-AutoRound": {"reasoning": "thinking", "offload": 1.0},
+                "openai/gpt-oss-20b": {"reasoning": "thinking"},
+            },
+        )
         monkeypatch.setattr(rt, "REGISTRY_PATH", reg_path)
         monkeypatch.setattr(rt, "CONFIG_ROOT", tmp_path / "empty")
         rc = rt.cmd_rm("Intel/gpt-oss-20b-gguf-q4ks-AutoRound", assume_yes=True)
@@ -568,9 +721,12 @@ class TestCmdRm:
 
     def test_delete_files_removes_config_and_backup(self, tmp_path, monkeypatch):
         reg_path = tmp_path / "registry.yaml"
-        self._write_registry(reg_path, {
-            "Intel/gpt-oss-20b-gguf-q4ks-AutoRound": {"reasoning": "thinking"},
-        })
+        self._write_registry(
+            reg_path,
+            {
+                "Intel/gpt-oss-20b-gguf-q4ks-AutoRound": {"reasoning": "thinking"},
+            },
+        )
         cfg_dir = tmp_path / "configs" / "Intel" / "gpt-oss-20b-gguf-q4ks-AutoRound"
         cfg_dir.mkdir(parents=True)
         cfg_file = cfg_dir / "gpt-oss-20b-32x2.4B-Q4_K_S.gguf.json"
@@ -579,8 +735,7 @@ class TestCmdRm:
         backup.write_text("backup", encoding="utf-8")
         monkeypatch.setattr(rt, "REGISTRY_PATH", reg_path)
         monkeypatch.setattr(rt, "CONFIG_ROOT", tmp_path / "configs")
-        assert rt.cmd_rm("Intel/gpt-oss-20b-gguf-q4ks-AutoRound",
-                         delete_files=True, assume_yes=True) == 0
+        assert rt.cmd_rm("Intel/gpt-oss-20b-gguf-q4ks-AutoRound", delete_files=True, assume_yes=True) == 0
         assert not cfg_file.exists()
         assert not backup.exists()
         assert rt.load_registry(reg_path) == {}
@@ -608,7 +763,8 @@ class TestCmdQuarantineMissing:
 
     def test_missing_entry_quarantined(self, tmp_path, monkeypatch):
         reg_path = self._setup(
-            tmp_path, monkeypatch,
+            tmp_path,
+            monkeypatch,
             lms_models=[{"modelKey": "openai/gpt-oss-20b"}],
             entries={
                 "mradermacher/nemotron-cascade-14b-thinking": {"reasoning": "thinking", "blueprint": "full"},
@@ -625,7 +781,8 @@ class TestCmdQuarantineMissing:
 
     def test_missing_kept_when_gguf_exists(self, tmp_path, monkeypatch):
         reg_path = self._setup(
-            tmp_path, monkeypatch,
+            tmp_path,
+            monkeypatch,
             lms_models=[{"modelKey": "openai/gpt-oss-20b"}],
             entries={
                 "mradermacher/nemotron-cascade-14b-thinking": {"reasoning": "thinking", "blueprint": "full"},
@@ -639,7 +796,8 @@ class TestCmdQuarantineMissing:
 
     def test_dry_run_writes_nothing(self, tmp_path, monkeypatch):
         reg_path = self._setup(
-            tmp_path, monkeypatch,
+            tmp_path,
+            monkeypatch,
             lms_models=[{"modelKey": "openai/gpt-oss-20b"}],
             entries={
                 "mradermacher/nemotron-cascade-14b-thinking": {"reasoning": "thinking", "blueprint": "full"},
@@ -651,7 +809,8 @@ class TestCmdQuarantineMissing:
 
     def test_no_lms_data_aborts(self, tmp_path, monkeypatch):
         reg_path = self._setup(
-            tmp_path, monkeypatch,
+            tmp_path,
+            monkeypatch,
             lms_models=[],
             entries={
                 "mradermacher/nemotron-cascade-14b-thinking": {"reasoning": "thinking", "blueprint": "full"},
@@ -663,7 +822,8 @@ class TestCmdQuarantineMissing:
 
     def test_quant_variant_quarantined_when_not_installed(self, tmp_path, monkeypatch):
         reg_path = self._setup(
-            tmp_path, monkeypatch,
+            tmp_path,
+            monkeypatch,
             lms_models=[{"modelKey": "unsloth/ernie-4.5-21b-a3b-pt"}],
             entries={
                 "unsloth/ernie-4.5-21b-a3b-pt@iq4_nl": {"reasoning": "thinking", "blueprint": "full"},
@@ -679,7 +839,8 @@ class TestCmdQuarantineMissing:
 
     def test_config_shared_with_survivor_stays(self, tmp_path, monkeypatch):
         reg_path = self._setup(
-            tmp_path, monkeypatch,
+            tmp_path,
+            monkeypatch,
             lms_models=[{"modelKey": "unsloth/gemma-4-26b-a4b-it@iq3_s"}],
             entries={
                 "google/gemma-4-26b-a4b-it-qat": {"reasoning": "thinking", "blueprint": "full"},
@@ -702,6 +863,7 @@ class TestCmdQuarantineMissing:
 # MTP-Drafter / mmproj: Zusatzdateien ≠ eigenständige Modelle
 # ─────────────────────────────────────────────────────────────────────
 
+
 class TestIsSupportFile:
     """_is_support_file(): mtp-* und mmproj* sind Zusatzdateien,
     legitime MTP-Modelle (qwen3.6-27b-mtp, ...-MTP-...) nicht."""
@@ -720,8 +882,7 @@ class TestIsSupportFile:
         assert not rt._is_support_file("unsloth/Qwen3.6-27B-MTP-GGUF/Qwen3.6-27B-UD-IQ3_XXS.gguf")
 
     def test_standalone_mtp_model_with_dash_not_detected(self):
-        assert not rt._is_support_file(
-            "vinpix/Ternary-Bonsai-27B-Stock-MTP-GGUF/Ternary-Bonsai-27B-MTP-Q2_K.gguf")
+        assert not rt._is_support_file("vinpix/Ternary-Bonsai-27B-Stock-MTP-GGUF/Ternary-Bonsai-27B-MTP-Q2_K.gguf")
 
     def test_normal_model_not_detected(self):
         assert not rt._is_support_file("unsloth/gemma-4-12B-it-qat-GGUF/gemma-4-12B-it-qat-UD-Q4_K_XL.gguf")
@@ -733,15 +894,12 @@ class TestIsSupportFile:
 
     def test_assistant_architecture_detected(self):
         # MTP-Drafter haben eigene Architektur-Klasse (gemma4-assistant)
-        assert rt._is_support_file("unsloth/gemma-4-12B-it-qat-GGUF/model.gguf",
-                                   architecture="gemma4-assistant")
+        assert rt._is_support_file("unsloth/gemma-4-12B-it-qat-GGUF/model.gguf", architecture="gemma4-assistant")
 
     def test_plain_architecture_not_detected(self):
         # Normale Modelle (gemma4, qwen3moe, ...) sind keine Zusatzdateien
-        assert not rt._is_support_file("unsloth/gemma-4-12B-it-qat-GGUF/model.gguf",
-                                       architecture="gemma4")
-        assert not rt._is_support_file("unsloth/qwen3.6-27b-mtp/model.gguf",
-                                       architecture="qwen35")
+        assert not rt._is_support_file("unsloth/gemma-4-12B-it-qat-GGUF/model.gguf", architecture="gemma4")
+        assert not rt._is_support_file("unsloth/qwen3.6-27b-mtp/model.gguf", architecture="qwen35")
 
 
 class TestCmdAddSkipsSupportFiles:
@@ -754,14 +912,20 @@ class TestCmdAddSkipsSupportFiles:
         monkeypatch.setattr(rt, "MODELS_CACHE", tmp_path / "models")
 
         models = [
-            {"key": "gemma-4-12b-it-qat@q4_k_xl", "publisher": "unsloth",
-             "path": "unsloth/gemma-4-12B-it-qat-GGUF/gemma-4-12B-it-qat-UD-Q4_K_XL.gguf",
-             "architecture": "gemma4",
-             "size_bytes": 6716356800},
-            {"key": "gemma-4-12b-it-qat@q8_0", "publisher": "unsloth",
-             "path": "unsloth/gemma-4-12B-it-qat-GGUF/mtp-gemma-4-12B-it-Q8_0.gguf",
-             "architecture": "gemma4-assistant",
-             "size_bytes": 674650176},
+            {
+                "key": "gemma-4-12b-it-qat@q4_k_xl",
+                "publisher": "unsloth",
+                "path": "unsloth/gemma-4-12B-it-qat-GGUF/gemma-4-12B-it-qat-UD-Q4_K_XL.gguf",
+                "architecture": "gemma4",
+                "size_bytes": 6716356800,
+            },
+            {
+                "key": "gemma-4-12b-it-qat@q8_0",
+                "publisher": "unsloth",
+                "path": "unsloth/gemma-4-12B-it-qat-GGUF/mtp-gemma-4-12B-it-Q8_0.gguf",
+                "architecture": "gemma4-assistant",
+                "size_bytes": 674650176,
+            },
         ]
         result = rt.cmd_add(models)
         reg = rt.load_registry(reg_path)
@@ -776,14 +940,17 @@ class TestCmdAddSkipsSupportFiles:
         monkeypatch.setattr(rt, "MODELS_CACHE", tmp_path / "models")
 
         models = [
-            {"key": "qwen3.6-27b-mtp", "publisher": "unsloth",
-             "path": "unsloth/Qwen3.6-27B-MTP-GGUF/Qwen3.6-27B-UD-IQ3_XXS.gguf",
-             "size_bytes": 12203615360},
+            {
+                "key": "qwen3.6-27b-mtp",
+                "publisher": "unsloth",
+                "path": "unsloth/Qwen3.6-27B-MTP-GGUF/Qwen3.6-27B-UD-IQ3_XXS.gguf",
+                "size_bytes": 12203615360,
+            },
         ]
         result = rt.cmd_add(models)
         reg = rt.load_registry(reg_path)
-        assert "unsloth/qwen3.6-27b-mtp" in reg
-        assert result["added"] == ["unsloth/qwen3.6-27b-mtp"]
+        assert "unsloth/qwen3.6-27b-mtp@iq3_xxs" in reg
+        assert result["added"] == ["unsloth/qwen3.6-27b-mtp@iq3_xxs"]
 
     def test_add_skips_embeddings_and_ocr_records(self, tmp_path, monkeypatch):
         reg_path = tmp_path / "registry.yaml"
@@ -817,6 +984,30 @@ class TestCmdAddSkipsSupportFiles:
         assert "mradermacher/chandra-ocr-2" not in reg
         assert len(result["skipped"]) == 2
 
+    def test_add_keeps_a_new_quant_variant_of_an_existing_base(self, tmp_path, monkeypatch):
+        reg_path = tmp_path / "registry.yaml"
+        reg_path.write_text(
+            "qwen/qwen3.5-9b@q6_k:\n  blueprint: default_chat\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(rt, "REGISTRY_PATH", reg_path)
+        monkeypatch.setattr(rt, "MODELS_CACHE", tmp_path / "models")
+
+        result = rt.cmd_add(
+            [
+                {
+                    "type": "llm",
+                    "modelKey": "qwen3.5-9b",
+                    "publisher": "qwen",
+                    "quantization": {"name": "Q5_K_S"},
+                }
+            ]
+        )
+
+        registry = rt.load_registry(reg_path)
+        assert result["added"] == ["qwen/qwen3.5-9b@q5_k_s"]
+        assert "qwen/qwen3.5-9b@q6_k" in registry
+        assert "qwen/qwen3.5-9b@q5_k_s" in registry
 
 def test_registry_matching_accepts_lms_punctuation_and_quant_metadata(monkeypatch):
     registry = {
@@ -834,6 +1025,47 @@ def test_registry_matching_accepts_lms_punctuation_and_quant_metadata(monkeypatc
     ]
 
     assert rt._missing_registry_keys(lms) == ["byteshape/qwen3-6-35b-a3b@q3_k_s"]
+
+
+def test_sync_from_configs_keeps_provider_and_quant_variants_separate(tmp_path, monkeypatch, capsys):
+    registry = {
+        "openai/gpt-oss-20b@mxfp4": {"context_length": 65536},
+        "unsloth/gpt-oss-20b-GGUF@q8_0": {"context_length": 65536},
+    }
+    configs = [
+        {
+            "publisher": "openai",
+            "dir_name": "gpt-oss-20b",
+            "file_name": "gpt-oss-20b.json",
+            "context_length": 131072,
+            "json_path": tmp_path / "openai.json",
+        },
+        {
+            "publisher": "unsloth",
+            "dir_name": "gpt-oss-20b-GGUF",
+            "file_name": "gpt-oss-20b-Q8_0.gguf.json",
+            "context_length": 65536,
+            "json_path": tmp_path / "unsloth.json",
+        },
+    ]
+    registry_path = tmp_path / "registry.yaml"
+    registry_path.touch()
+    saved: dict[str, dict] = {}
+    monkeypatch.setattr(rt, "REGISTRY_PATH", registry_path)
+    monkeypatch.setattr(rt, "load_registry", lambda: registry)
+    monkeypatch.setattr(rt, "read_lms_configs", lambda _root: configs)
+    monkeypatch.setattr(rt, "save_registry", lambda value: saved.update(value))
+
+    rt.cmd_sync_from_configs(
+        write=True,
+        installed_models=[{"modelKey": "gpt-oss-20b", "publisher": "openai"}],
+    )
+
+    assert registry["openai/gpt-oss-20b@mxfp4"]["context_length"] == 131072
+    assert registry["unsloth/gpt-oss-20b-GGUF@q8_0"]["context_length"] == 65536
+    output = capsys.readouterr().out
+    assert "0 Konflikte" in output
+    assert "Veraltete Config" in output
 
 
 def test_fill_quant_uses_lms_quantization_without_gguf_path(monkeypatch):
@@ -888,6 +1120,7 @@ def test_rekey_registry_to_exact_lms_identity(monkeypatch):
 # cmd_sync_from_gguf: Auto-Fix aus GGUF-Headern (Feld-Ownership)
 # ─────────────────────────────────────────────────────────────────────
 
+
 def _write_registry(tmp_path, data):
     path = tmp_path / "registry.yaml"
     path.write_text(yaml.dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
@@ -936,10 +1169,15 @@ class TestCmdSyncFromGguf:
         return str(full)
 
     def test_fixes_drift_from_gguf(self, tmp_path):
-        reg = {"unsloth/glm-4.7-flash": {
-            "arch": "dense", "n_layers": 60, "hidden_dim": 5000,
-            "max_context_length": 65536, "reasoning": "instruct",
-        }}
+        reg = {
+            "unsloth/glm-4.7-flash": {
+                "arch": "dense",
+                "n_layers": 60,
+                "hidden_dim": 5000,
+                "max_context_length": 65536,
+                "reasoning": "instruct",
+            }
+        }
         gguf_path = self._gguf_path(tmp_path, "unsloth/GLM-4.7-Flash-GGUF/x.gguf")
         lms = [self._lms("GLM-4.7-Flash", "unsloth/GLM-4.7-Flash-GGUF/x.gguf")]
         gguf = {gguf_path: (61, 5120, True, 131072)}
@@ -952,17 +1190,25 @@ class TestCmdSyncFromGguf:
         assert e["reasoning"] == "instruct"  # gesetzt -> unangetastet
 
     def test_conformant_entries_untouched(self, tmp_path):
-        reg = {"unsloth/glm-4.7-flash": {
-            "arch": "moe", "n_layers": 61, "hidden_dim": 5120,
-            "max_context_length": 131072, "reasoning": "thinking",
-        }}
+        reg = {
+            "unsloth/glm-4.7-flash": {
+                "arch": "moe",
+                "n_layers": 61,
+                "hidden_dim": 5120,
+                "max_context_length": 131072,
+                "reasoning": "thinking",
+            }
+        }
         gguf_path = self._gguf_path(tmp_path, "unsloth/GLM-4.7-Flash-GGUF/x.gguf")
         lms = [self._lms("GLM-4.7-Flash", "unsloth/GLM-4.7-Flash-GGUF/x.gguf")]
         gguf = {gguf_path: (61, 5120, True, 131072)}
         out = self._run(tmp_path, reg, lms, gguf, {gguf_path: True})
         assert out["unsloth/glm-4.7-flash"] == {
-            "arch": "moe", "n_layers": 61, "hidden_dim": 5120,
-            "max_context_length": 131072, "reasoning": "thinking",
+            "arch": "moe",
+            "n_layers": 61,
+            "hidden_dim": 5120,
+            "max_context_length": 131072,
+            "reasoning": "thinking",
         }
 
     def test_models_without_gguf_match_untouched(self, tmp_path):
@@ -985,6 +1231,7 @@ class TestCmdSyncFromGguf:
 # ─────────────────────────────────────────────────────────────────────
 # pipeline full: Exit-Code-Logik bei offenen Melde-Konflikten
 # ─────────────────────────────────────────────────────────────────────
+
 
 class TestPipelineDriftExitCode:
     """pipeline full endet mit Exit 1, wenn Melde-Konflikte (Feld-Ownership)
@@ -1109,11 +1356,12 @@ def test_assemble_adds_system_prompt_without_touching_load_fields(tmp_path, monk
 # _registry_template_name (Blueprint SSOT, Refactor 14.08.)
 # =========================================================================
 
+
 class TestRegistryTemplateName:
     def test_resolves_from_blueprint_template_map(self):
         # gemma4-26b -> gemma_reasoning -> template_map 26b
         name = rt._registry_template_name("unsloth/gemma-4-26b-a4b-it@iq3_s")
-        assert name == "gemma4-26b-template_minijinja.jinja"
+        assert name == "google_gemma-4-26B-A4B-it_chat_template.jinja"
 
     def test_resolves_from_blueprint_direct_template(self):
         # openai/gpt-oss-20b@mxfp4 -> gptoss_reasoning -> template
@@ -1136,8 +1384,10 @@ class TestRegistryTemplateName:
     def test_legacy_registry_field_fallback(self):
         # Blueprint ohne Template -> Fallback auf das (veraltete) Registry-Feld.
         fake_reg = {"unsloth/legacy-model@q4_k_m": {"blueprint": "default_chat", "template": "legacy.jinja"}}
-        with patch.object(rt, "load_registry", return_value=fake_reg), \
-             patch.object(rt, "_load_blueprints", return_value={"default_chat": {"role": "r"}}):
+        with (
+            patch.object(rt, "load_registry", return_value=fake_reg),
+            patch.object(rt, "_load_blueprints", return_value={"default_chat": {"role": "r"}}),
+        ):
             name = rt._registry_template_name("unsloth/legacy-model@q4_k_m")
         assert name == "legacy.jinja"
 
@@ -1150,14 +1400,17 @@ class TestRegistryTemplateName:
 # glm_patch_config (Fix 14.08.: GLM sind Reasoning-Modelle -> parsing enabled)
 # =========================================================================
 
+
 class TestGlmPatchConfig:
     def _config(self, enabled: bool | None = None) -> dict:
         fields = [{"key": "llm.prediction.structured", "value": {"type": "json_object"}}]
         if enabled is not None:
-            fields.append({"key": "llm.prediction.reasoning.parsing",
-                           "value": {"enabled": enabled,
-                                     "startString": " thinking",
-                                     "endString": " response"}})
+            fields.append(
+                {
+                    "key": "llm.prediction.reasoning.parsing",
+                    "value": {"enabled": enabled, "startString": " thinking", "endString": " response"},
+                }
+            )
         return {"operation": {"fields": fields}}
 
     def _write(self, tmp_path, data) -> Path:
@@ -1166,8 +1419,7 @@ class TestGlmPatchConfig:
         return p
 
     def _parsing(self, data) -> dict:
-        return next(f for f in data["operation"]["fields"]
-                    if f["key"] == "llm.prediction.reasoning.parsing")
+        return next(f for f in data["operation"]["fields"] if f["key"] == "llm.prediction.reasoning.parsing")
 
     def test_sets_parsing_enabled_when_false(self, tmp_path: Path) -> None:
         p = self._write(tmp_path, self._config(enabled=False))

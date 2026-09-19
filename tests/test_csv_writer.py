@@ -11,15 +11,11 @@ from __future__ import annotations
 
 import csv
 import os
-import re
 import sys
-from datetime import datetime
 
-import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-import csv_writer
 from csv_writer import (
     COMPARE_FIELDS,
     CONSOLIDATED_FIELDS,

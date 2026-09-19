@@ -1,250 +1,132 @@
-# Long-Term Planning & Open Items
+# Planung: pragmatische, score-kompatible Prozessisolation
 
-Status: 2026-08-18. Legend: [ ] open, [~] in progress, [x] done/checked.
+Status: 2026-08-28. Prioritaet: Score-Kompatibilitaet vor zusaetzlicher Sicherheitskomplexitaet.
 
-## Active Items
+## Leitentscheidung
 
-- [x] **1. Create Planung.md** — done 05.08., maintained continuously.
-- [x] **2. Revise `Parallel-Slots-Optimization_en.md`** — done 05.08.: outdated Dense=np=1 table marked as historical, new rules (04.08.) incorporated, Recommendation section updated to priority algorithm.
-- [x] **3. Fix CI failures on GitHub** — checked 05.08.: all 5 latest runs `success` (incl. `a73c15b2`); ruff with CI flags (`--select E,F`) green locally. No action needed.
-- [x] **4. `fill-arch` should read `max_context_length` from GGUF** — already implemented: `cmd_fill_arch` in `src/registry_tool.py:1329-1438`, fills `max_context_length` from GGUF header when `None` (lines 1382-1396, via `_read_gguf_arch` 4-tuple `(block_count, embedding_length, is_reasoning, context_length)`). Done via fix from 05.08. 08:20.
-- [x] **5. Fallback `max_context_length: None`** — no 8192 hardcode found anymore; `cmd_suggest`/`_compute_np_ukv` (`src/registry_tool.py:810-844`) use `entry.get("max_context_length") or 262144`, `MIN_CONTEXT_LENGTH = 32768` (`src/benchmark_config.py:563`). Fallback 256k is well above the required 16k lower bound.
-- [x] **6. Update `thinking-config_en.md`** — done 05.08.: priority chain corrected to 05.08. state (LMS JSON config is the ONLY source, `MODEL_TEMP_OVERRIDES`/Knowledge-Floor removed), current-patterns table, `--thinking` table (keyword matching via REASONING_PATTERNS), configuration flow and history updated.
-- [x] **7. Clarify native `max_token_length`** — registry values are correct and match the LMS GUI: `noctrex/lfm2-24b-a2b_moe` → max 128000 (**128k tokens**, not 128), `mradermacher/gemma-4-26b-a4b-it-i1` → max 262144 (**262k tokens**, not 262!). User's correction from 05.08. adopted.
-- [x] **8. Real benchmarks run with 1 slot instead of 4** — **FIXED + VERIFIED (05.08.):** TWO pipeline bugs, not the load:
-  1. **`run_evalplus()`** (run_benchmarks.py:1038): had no `num_parallel` parameter, evalplus `codegen()` submits strictly sequentially (ThreadPool max_workers=1). **Fix:** `num_parallel` passed through (call at line 1988) + own parallel codegen loop with `ThreadPoolExecutor(max_workers=num_parallel)`, identical JSONL format (sanitized+raw) per task under write lock.
-  2. **`lmeval_proxy.py`**: used `HTTPServer` (synchronous, 1 request at a time) → lm_eval `num_concurrent>1` was serialized at the proxy. **Fix:** `ThreadingHTTPServer`.
-  - **Test run verification (05.08., Rnj 1@Q8_0 + ERNIE-4.5-21B-A3B-PT, HumanEval+/HellaSwag/DS1000 SS=20 np=4):** evalplus ran with 4 parallel workers, DS1000-Custom still 4 workers. HellaSwag failed in the first run (lm_eval `NameError: TCPConnector` — aiohttp too old for Python 3.14, uses removed `cgi`).
-  - **lm_eval TCPConnector fix (05.08.):** `pip install --upgrade aiohttp` → 3.14.3. **HellaSwag verification run successful:** 100 tasks in 149s, score 0.34 (Rnj 1). **Slot proof from server log 19:38-19:41: slots 0/1/2/3 active (12/12/8/6 events)** — before the fix: all 384 requests on slot 3. Thus ALL 3 pipeline types are parallelized and verified: evalplus (ThreadPool), lmeval (ThreadingHTTPServer + aiohttp), custom (was already ThreadPool).
-  - **ERNIE case study (evidence for VRAM>np ranking):** ERNIE IQ4_NL ran 934s/20 tasks (ctx=131k + UKV=False → 15,5 GB VRAM + 7,3 GB shared RAM → PCIe paging). After GUI restart ctx=32k + UKV=True: 13,3 GB VRAM, 0 GB shared, **5-10× faster**. This **REFUTES** the old ERNIE-np=1 hypothesis (shared experts/CUDA kernels) — the cause was VRAM overflow, not architecture. MXFP4 variant separately slow (605s) — presumably MXFP4 slow path, not KV/ctx-related.
-  - Verification: 717/717 tests green, py_compile OK. **Item 8 completed.**
-- [x] **9. Quarantine folder** — 137 orphan configs in `~\.lmstudio\.internal\user-concrete-model-default-config\_quarantine_orphans_20260805\`; decision 05.08.: keep quarantine permanently as trash (no deletion). Completed by decision.
+Die lokale Benchmark-Suite verwendet kein Docker- oder Podman-Pflichtsetup und keine vollstaendige Mock-Tool-Welt. Die Modelle sollen fuer gueltige Benchmark-Aufgaben dieselben Bibliotheken und Python-Funktionen nutzen koennen wie bisher.
 
-## 2026-08-06 – Registry Validation, README, Help Text
+Die Schutzschicht besteht aus:
 
-- [x] **10. Registry validation to 0 problems** — commits `0eca0867`, `d2cc53f7`, `1ec72067`: 48 registry `context_length` values cleared + sync-ctx, 8 configs raised to 32768, `gemma-4-12b-it-qat` UKV drift fixed, `unsloth/phi-4` + `mradermacher/deepseek-coder-33b-instruct` capped at native GGUF limit 16384, missing promptTemplate fields added. Validation logic in `src/registry_tool.py` corrected: only `cfg_ctx > max_ctx` and `cfg_ctx <= 0` remain — NO arithmetic minimums (8192/32768); user: "There is no such defined minimum!" Small max_ctx models (<16k) are only for Embedding/RAG/RIG/Math and belong on the blacklist.
-- [x] **11. README.md updated** — commit `166b5cf7`, 7 points: (1) thinking support generally for all pipelines, (2) stratified subsampling broader (DS1000, CoderEval, others), (3) quickstart to `qwen3-30b-a3b-instruct --thinking` (Gemma-4 is always in thinking mode), (4) dev deps complete, (5) `--num-parallel` in CLI table, (6) registry tool section with real commands + principle (05.08.), (7) new section "Consolidate Results (src/consolidate_results.py)". The CLI table was cross-checked against the real `--help` output: `--bootstrap`, `--non-interactive`, `--output-dir` do **not** exist as flags (the quickstart call `consolidate_results.py --bootstrap` would have crashed), duplicate `--unload-between` line removed; bootstrap CIs run automatically, paired only via `--compare`.
-- [x] **12. Thinking help text to "all pipelines"** — commit `7a8ac4d7`: 3 places in `src/run_benchmarks.py` (CLI help line 1756, comment line 753, summary print line 1838).
-- [x] **13. Unjustified ResourceExhausted changes reverted** — `src/custom_benchmark.py` + `src/tools/lmeval_proxy.py` via `git checkout`; the 502/ResourceExhausted errors came from the NVIDIA provider (Nemotron 3 Ultra Free), not from the benchmark code.
-- [x] **14. Cleaned up (Git dirtiness)** — 4 untracked `logs_3098*.zip` + `src/utils/modeling_gguf_pytorch_utils.py.lnk` deleted; `logs/` remains covered via `.gitignore`.
-- [x] **15. Manual-corrections table + VRAM rule** — in `doc-git/Model-Parameters-and-Benchmarks_en.md` (05.08.): manual overrides (np/UKV/ctx) + general rule: ≥12 GB model size ⇒ UKV=true at np=4 (16 GB GPU). VRAM rule also in README.md (06.08., commit `888b22a0`).
+1. einmalig nach dem Download geprueften Benchmark-Inputs;
+2. einem separaten Python-Worker-Prozess;
+3. einem Windows Job Object mit Ressourcenlimits;
+4. Timeout, begrenzter Ausgabe und bereinigter Umgebung.
 
-## Open
+Die Prozessgrenze ist eine pragmatische Begrenzung gegen Fehlverhalten und Ressourcenprobleme, keine vollstaendige Sicherheits-Sandbox. Eine harte Import-Allowlist, Dunder-Blockade oder aggressive Dateipfad-Sperre gehoert nicht in den Standardpfad, weil sie gueltigen Code blockieren und Scores verfaelschen kann.
 
-- [~] **22. Qwen-Nachlauf + Top-Candidates-Neuauflage** — **in progress (11.08.)**: Die aktuelle Konsolidierung `konsolidiert_20260810_073857` ist **nicht abschließend** (Nutzer-Feedback 10.08., bestätigt): Qwen-Modelle fehlen bzw. stammen aus alten Läufen (≤04.08., andere Temperaturen, nur teilweise np). Fehlende Modelle mit aktuellem Setup (SS=30, np=4, aktuelle Temperaturen) nachlaufen lassen: `qwen2.5-coder-14b-instruct` @q5_0/@q5_k_m/@q6_k (DS1000/CoderEval/Agentic liefen bereits 09.08. mit SS=30, aber EvalPlus/LM-Eval nur vom 27.07.), `qwen3-30b-a3b-instruct-2507@Q3_K_S`, `qwen3-coder-30b-a3b-instruct@Q3_K_S`, `qwen3-coder-reap-25b-a3b(-i1)@Q3_K_M`, `qwen3.6-27b(-i1/-mtp)`, `qwen3.6-28b-reap-i1`. Anschließend neu konsolidieren (mit `--no-installed` ODER nach Entfernen des Installed-Filters — 07:38-Lauf hatte `installed-only` und verwarf 5 Modelle inkl. aller 3 qwen2.5-coder-Quants; Verifikationslauf `--no-installed` lieferte 36 Modelle) und Top-Candidates-Tabelle in `Model-Parameters-and-Benchmarks_en.md` neu übertragen (derzeit PROVISIONAL markiert). Hinweis: `Qwen3 30B A3B 2507 q2ks` hatte DS1000/CoderEval = 0 („No code generated" für alle Tasks) → Harness-Problem prüfen.
+## Abgeschlossene erste Umsetzung
 
-### Offene ToDos aus den Compactions (12.08. 08:14 + 10:43, übernommen 13.08.)
+- [x] Bestehende Planung vor der Umstellung gesichert: `PLANUNG.md.backup-20260828-1130.md`.
+- [x] JSON-Worker und Windows Job Object fuer Custom-Benchmarks vorhanden.
+- [x] EvalPlus-Auswertung laeuft ebenfalls ueber `run_bounded_subprocess()` und Windows Job Object.
+- [x] Import-Allowlist und harte Dunder-/Native-Loader-Pruefungen aus dem normalen Workerpfad entfernt. Bibliotheks- und Standardbibliotheksimporte bleiben score-kompatibel.
+- [x] Einmaliges Manifest-Werkzeug in `src/task_manifest.py` und `src/prepare_task_manifests.py` angelegt.
+- [x] Das Manifest speichert nur Quelle, SHA-256, Anzahl sowie bestehende Aufgaben-IDs/Positionen und offensichtliche Warnungen. Es gibt keine separate Datenbank und keine laufende Pflegeinstanz.
+- [x] Warnungen beschraenken sich auf offensichtliche Prompt-Injection-Muster, insbesondere das Ignorieren vorheriger Benchmark-Regeln und den Zugriff auf Secrets.
 
-Aus den letzten beiden Compaction-Summaries zusätzlich offen:
+## Inputs einmalig pruefen
 
-- [x] **C1. Pass 2 (4 Modelle, SS=10, np=4)** — **DONE 13.08.**: Registry-Einträge für die 4 fehlenden Modelle angelegt (f2llm-v2-4b@q6_k, f2llm-v2-1.7b@q8_0, em_german_13b_v01@q6_k, em_german_leo_mistral@q4_k_m). **F2LLM-v2 = Embedding-Modelle** (HF-Tags feature-extraction/sentence-transformers) → **aus Pass-2-Spec entfernt** (Registry-Einträge bleiben für Inventar). **Fix 1 (`model_manager.py`):** `registry_only`-Filter → Basis-Key-Matching (deckt `@mixed` vs. LMS `Q3_K` ab). **Fix 2 (`benchmark_config.py`):** `em_german` aus BLACKLIST entfernt. **Nutzer-Entscheidungen:** em_german ×2 ebenfalls raus (Embedding/RAG, kein Text-Generator) → 4 Modelle; SampleSize=10 statt 30. **np-Policy (13.08.):** np komplett aus der Registry entfernt – feste Regel SS≥10→4, sonst 1 (hardcoded, kein `--num-parallel`-CLI). Lauf **abgeschlossen 13.08.** (Log `Doku-intern\Terminalausgabe Benchmark-Qwen-Pass2_20260813_210111.log`, PID 19776): 4 Modelle (Glm 4.6v Flash@Q6_K, Gemma4-26B-A4B-REAP-25@Mixed@Q3_K, Phi-4@Q5_K_M, RNJ-1@Q8_0), alle 10 Benchmarks, seed 2026, SS=10, np=4. **Commit `4ed39479`** (np-Refactor + Registry-Auflösungs-Fixes + Pass-2).
-- [x] **C2. Konsolidierung auswerten + Top-Candidates-Tabelle** — **DONE 13.08.**: Konsolidierung `--no-installed --all-runs --sample-size 30` → **64 Modelle mit voller Pipeline** (`ergebnisse/konsolidiert_20260813_224036.md`). Top-35-Tabelle in `Model-Parameters-and-Benchmarks_en.md` neu übertragen, PROVISIONAL-Markierung aufgelöst: Qwen3-Modelle führen jetzt (Qwen3 Coder 30B@q3_k_s 78%, Qwen3 30B 2507@q3_k_s 77%); Granite 4.1 8B@q8_0 überholt q6_k; Gemma 4 19B REAP@q4_k_s = Effizienz-Winner; RNJ-1 + Qwen3.5 9B neu aus Pass-2. Hinweis: `latest-run`-Modus ohne `--all-runs` verwarf DS1000-Paare (Timestamp-Split) → für die Tabelle zwingend `--all-runs` (bzw. `--merge`) nutzen.
-- [x] **C3. Unsloth-Fragen** — **DONE 13.08.**: Recherche in `doc-git/Model Specific Hints/Unsloth GGUF Workflow - Tools, Jinja, gguf_dump_en.md`: `gguf_dump.py` (gguf 0.19.0) im venv `C:\Users\pskra\Python-Projekte\.venv` einsatzbereit (System-Python hat es nicht); Jinja: GGUF-`tokenizer.chat_template` ist SSOT für llama.cpp/minja, Unsloth mappt beim Export auf Ollama-Templates, Override via `--chat-template-file`/`get_chat_template.py`; llama.cpp-Tools-Tabelle (llama-server/-cli, test-chat-template, gguf_editor_gui u.a.).
-- [x] **C4. Validate-Rest-Datenpflege** — **DONE 13.08.**: 5 Drifts bereinigt: `unsloth/qwen3-30b-a3b-instruct-2507` → `@q3_k_s` + ctx 43690→49152; `intel/...@q2_k` → `@q2_k_s` + quants Q2_K_S + ctx 32768→131072; `jetbrains/mellum2-12b-a2-5b-instruct@q4_k_m` → `a2.5b`; `mradermacher/qwen3-coder-reap-25b-a3b@q3_k_m` (ohne -i1) entfernt (Phantom, echtes Modell = -i1). `_QUANT_DIR_SUFFIXES` um 3-teilige Quants erweitert (JetBrains `-GGUF-Q4_K_M` matcht jetzt). `validate` = **0 Probleme**. Details: `registry_sampling_log.md`.
-- [x] **C5. Compaction-Workflow.md löschen/behalten** — **DONE 13.08.**: Datei bleibt git-gelöscht (`D`). Workflow ist in `~/.agents/skills/compaction/SKILL.md` dokumentiert; separate Doku-Datei wäre redundant (Entscheidung Nutzer).
-- [ ] **C6. Sampling-Lesepfade** — **DONE 13.08.** (Registry-`sampling:`-SSOT, siehe `doc-git/Planung/registry_sampling.md`; nur noch Doku-Rest in Schritt 7).
-- [ ] **C7. `MODEL_CATEGORY_SAMPLING` abwickeln** — **DONE 13.08.**: bleibt als Fallback (Entscheidung Nutzer).
-- [ ] **C8. Regressionstests finalisieren** — neue Registry-Sampling-Tests ergänzt (7 Tests, 13.08.); volle Suite 790 passed / 3 pre-existing TabbyAPI-Fehler.
-- [ ] **C9. Doku/CHANGELOG** — **DONE 13.08.**: CHANGELOG-Eintrag, `thinking-config_en.md` + `Temperature Recommondations_en.md` aktualisiert.
-- [x] **C10. Ruff-Fehler-Check** — **DONE 13.08.**: Die 7 „neuen“ Ruff-Fehler sind exakt die 7 neuen Registry-Sampling-Testmethoden in `tests/test_benchmark_config.py` (`test_registry_block_reads_researched_values`, `-per_category_ernie`, `-partial_row_falls_back`, `test_registry_glm_46v`, `test_quant_suffix_matches_registry_block`, `test_no_sampling_block_falls_back_to_table`, `test_unknown_model_no_registry_no_table`) — alle **ANN201** (fehlende Return-Type-Annotation), identisches Muster wie die 29 pre-existing Fehler derselben Datei (baseline HEAD: 29, heute: 36). **Als konsistent mit bestehendem Style dokumentiert** (ganze Datei annotiert keine Testmethoden; nur die 7 neuen zu fixen wäre inkonsistent). `src/benchmark_config.py` ist ruff-clean.
-- [x] **C11. Abschluss-Check** — **DONE 13.08.**: `validate` = 0 Probleme; 150 relevante Tests grün, volle Suite 792 passed / 3 pre-existing TabbyAPI-Fehler; Git-Status + uncommitted Änderungen in `registry_sampling_log.md` festgehalten.
-- [ ] **C12. Fix-Verifikation der 3 bekannten Benchmark-Fehler** — **DONE 14.08.**: Die 3 pre-existing Fehler behoben (Commit `db52ecef`): (1) **EvalPlus `make_model` `max_new_tokens`** (`run_benchmarks.py`) — evalplus 0.3.1 forwardet das Kwarg nicht, `model_obj.max_new_tokens` nach Erzeugung gesetzt; (2) **REAP DS1000/CoderEval kein Score** (`custom_benchmark.py` `_resolve_models` + `_model_supports_reasoning`) — tolerantes Basis-Key-Matching für `@mixed`-Registry-Keys (vorher `Model not found` → leerer Lauf „Benchmark complete" in 3s); (3) **Agentic `tool_eval_bench` ModuleNotFoundError** — Paket war nur unter Python 3.14 installiert, Launcher nutzt 3.12 → v2.0.7 (Commit `f8117c3`) in 3.12 nachinstalliert. **Zusätzlich (Commit `74a277e2`)**: **EvalPlus-Windows-SIGALRM-Fix `_WindowsSignalShim`** — evalplus `make_auto_request` nutzt `signal.alarm`/`SIGALRM` (UNIX-only); auf Windows `AttributeError`, das `except Exception` **endlos retried** → HumanEval+/MBPP+ liefen auf Windows nie durch (echte Ursache, erst nach Fix 1 sichtbar). Shim ersetzt Modul-`signal` durch No-Ops (analog MATH-500-Fix 15.07.) + 2 Tests `TestWindowsSignalShim`. **Verifikationslauf 3 (09:02, PID 7120) komplett durchgelaufen:** `run.verify-fixes.yaml` (Gemma4-REAP, DS1000/CoderEval/HumanEval+/MBPP+/Agentic, SS=10, np=4, seed 2026), Log `Doku-intern\Terminalausgabe Benchmark-FixVerify3_20260814_090222.log`. DS1000 3.5%, CoderEval 90.0%, HumanEval+/MBPP+ Codegen mit echten Lösungen (signal.alarm-Fix wirkt; 2. Iteration `47e044e` ergänzte das SIGALRM-Attribut), Agentic ok. **Rest: EvalPlus-Evaluation** — evalplus `evaluate()` lädt immer das volle Dataset und assertiert `len(completion_id) == len(problems)` → `AssertionError: Missing problems in samples` bei SS=10. **Gefixt (neues Modul `src/evalplus_subset_eval.py`):** Subset-Evaluation nur über die gesampelten Tasks (pass@1 aus Lauf-3-Samples: HumanEval+ 0.600, MBPP+ 0.800). Dabei 2 weitere Windows-Sandbox-Bugs gefixt (`import resource` in `reliability_guard` via `EVALPLUS_MAX_MEMORY_BYTES=-1`; `time_limit` `signal.setitimer`/`SIGALRM` via `_WindowsSignalTimerShim`). Hinweis: 4/10 HumanEval-Lösungen waren leer (Modell liefert bei `temp=1.0` sporadisch leeren Content — Gemma-4-Hints-Doku); MBPP+ 0/10 leer. 83 relevante Tests grün, src ruff-clean. **Verifikationslauf 4 (09:35, PID 22420) komplett erfolgreich:** alle 5 Benchmarks mit echten Scores in der Zusammenfassung `modell_20260814_093924_...csv`: DS1000 0.1 (1/10), CoderEval 0.7, **HumanEval+ 0.6**, **MBPP+ 0.8** (Subset-Evaluator), Agentic 0.75 (pass-rate). `_eval_results.json` für beide evalplus-Datasets geschrieben. Damit sind alle 3 bekannten Fehler + 3 evalplus-Windows-Sandbox-Bugs Ende-zu-Ende verifiziert.
-
-- [x] **23. Quarantäne nicht-installierter Registry-Einträge (quarantine-missing)** — **COMPLETED (10.08.)**: Neues Kommando `quarantine-missing` in `src/registry_tool.py` (+ `--dry-run`, eingebunden in `pipeline full` als Schritt [2b], Exit-Code 2 bei nur-gemeldeten Fällen): Entfernt Registry-Einträge nicht-installierter Modelle **reversibel** (Configs → `_quarantine_missing_<ts>\`, Einträge → YAML-Backup `doc-git/Review-Artifacts/quarantine_registry_<ts>.yaml`, nichts hart gelöscht). Strenge @-Quant-Erkennung: `x@iq4_nl` nur installiert, wenn LMS exakt diese Variante führt (`normalize_variants` strippt @-Suffixe → Basis-Varianten maskieren keine fehlenden Quants). Sicherheitsnetz `_gguf_for_key_exists` (wort-basiert, MODELS_CACHE + hub/models): GGUF physisch vorhanden → nur gemeldet (Index-Problem wie GLM-4.6V), kein Auto-Entfernen. Configs nur verschieben, wenn kein verbleibender Registry-Key sie beansprucht (`_config_claimed_by_other` — verhinderte fälschliche Mitnahme von `unsloth/gemma-4-26B-A4B-it`-Config durch `google/gemma-4-26b-a4b-it-qat`). **Lauf 10.08. 11:18:** 9 Modelle quarantänt (gabriellarson/mamba-codestral-7b, google/gemma-4-26b-a4b-it-qat, intel/mirothinker-30b-q2ks, lmstudio-community/deepseek-coder-v2-lite + deepseek-r1-distill-qwen-14b, mistralai/codestral-22b-v0.1, mradermacher/deepseek-coder-33b + nemotron-cascade-14b-thinking, tiiuae/falcon3-mamba-7b — GGUF-Abwesenheit vorher physisch verifiziert), 8 Configs verschoben, Backup geschrieben; 9 nur gemeldet (physisch vorhanden, z.B. `unsloth/ernie-4.5-21b-a3b-pt@iq4_nl`, `Qwen/Qwen3.5-9B-GGUF@q6_k` — keine Aktion, Prüfung manuell offen). Registry 64→55 Einträge. **Verifikation `pipeline full` (10.08.): `missing: 0`, Assembly 56/56 (0 not found), Validation 74/74 passed, Schritt [2b] idempotent (0 Aktionen im 2. Lauf)**. Testlauf: 81 Tests grün (6 neue in TestCmdQuarantineMissing), ruff 0. Rest: GLM-4.6V-Index-Problem (Item 20) betrifft auch die 9 gemeldeten @-Varianten — nach LM-Studio-Neustart `lms ls`-Abgleich, ggf. manuelle Bereinigung.
-
-- [x] **24. Registry als SSOT + np=4 Fix** — **COMPLETED (11.08.)**:
-  - `model_registry.yaml` ist jetzt Single Source of Truth für alle Benchmark-Parameter (np, UKV, temp, ctx, system_prompt)
-  - Alle Modelle: `num_parallel=4` (explizit via API, nicht via JSON-Config)
-  - 99 LMS-Configs korrigiert: `numParallelSessions=4` in `load.fields` (nicht `operation.fields`)
-  - UKV: `USE_UNIFIED_KV_CACHE_THRESHOLD_GB = 12.0` (war 14.0)
-  - Spezialfälle `UKV_FORCE_TRUE_MODELS = {gemma-4, kimi-linear, gpt-oss}` (immer UKV=True, keine KV-Quant vertragen)
-  - `validate`: np/ukv-Drift-Check entfernt (Configs irrelevant, Registry ist SSOT)
-  - GitHub Push: `6cb86492`
-
-- [x] **25. Compaction Skill + Workflow** — **COMPLETED (11.08.)**:
-  - Skill-Datei: `~/.agents/skills/compaction/SKILL.md` (Event-basiert: commit/push, Entscheidungen, ~20-30 msgs)
-  - Workflow-Doku: `doc-git/Developer-Docs/Compaction-Workflow.md`
-  - CHANGELOG = *was* (Datei-Ebene), Compaction = *warum* (Session-Ebene) — keine Redundanz
-  - CHANGELOG.md + Compaction für 11.08. erstellt
-
-- [x] **26. Review-Findings I1 + I2 + imatrix/MTP-Blacklist** — **COMPLETED (11.08.)**:
-  - **I1:** `cmd_sync_from_configs` — np/UKV/offload-Drift-Checks entfernt (Registry ist SSOT)
-  - **I2:** `is_support_file`-Filter in `_gguf_drift_errors` + `cmd_sync_from_gguf` (MTP-Drafter-Filter)
-  - **imatrix:** 7 imatrix-Dateien (39-147 MB) als Begleitdateien → `BLACKLIST` Pattern "imatrix" hinzugefügt
-  - **MTP:** 2 Drafter-Dateien (mtp-gemma-4-*) bereits durch `is_support_file` gefiltert
-  - `validate`: **0 Probleme** nach Fixes
-  - Review-Agent + Pre-Review-Script aktualisiert
-  - GitHub Push: `720cc62f`
-
-- [x] **21. Feld-Ownership-Verifikation nach Testreihen-Ende** — **COMPLETED (10.08.)**: `pipeline full` (Teil A–C: Feld-Ownership + sync + validate-Drift-Gate) am 10.08. ausgeführt (nach Quarantäne-Lauf): Assembly 56/56 (0 skipped/not found/errors), Validierung 74/74 passed, **Exit-Gate konvergiert (keine offenen Melde-Konflikte, keine Config-Writes)**; Quarantäne-Schritt [2b] idempotent. `[6a]`-Schritt (LMS-Drift-Vergleich) hing am lms-Server-Timeout in `_is_lmstudio_running()` (bekanntes Umgebungsproblem, keine Code-Fehlfunktion; 09.08.-Lauf lieferte 0 Drifts). Rest wie Item 20/19: nach LM-Studio-Neustart `lms ls | grep -i glm` für GLM-4.6V + GLM-Verifikationslauf.
-- [ ] **19. GLM-Verifikationslauf mit sauberem Setup** — geplant 09.08.: nach Fix 1 (`@quant`-NOT-FOUND in `assemble_blueprint.py`, Broad-Keys) + Fix 4 (`patch-glm-configs` verankert in `pipeline full` 5a: `reasoning.parsing: disabled`, kein `structured`, stopStrings leer, JSON-Zeilen aus SystemPrompt entfernt; verifiziert: 64 assembled / 0 not found / GLM-Configs nach `pipeline full` unverändert). Lauf: GLM-4.7-Flash@Q3_K_S + GLM-4.7-Flash-REAP@Q4_K_S, DS1000 SS=10 np=4, Ergebnis gegen 07.08. halten (Flash 30%, REAP 0% — REAP-Budget-Frage offen, max_tokens=2000 → Content kam). Warten bis laufende Testreihe fertig ist.
-- [x] **20. Fix 2: GLM-4.6V fehlt in LM-Studio-Index** — **ROOT CAUSE GEFUNDEN (09.08.)**: `~\.lmstudio\hub\models\zai-org\glm-4.6v-flash\manifest.json` enthielt Trailing-Comma (Zeile 10: `"lmstudio-community/glm-4.6v-flash-gguf",`) → ungültiges JSON → `model-index-cache.json` loggt `Unexpected token ']' ... is not valid JSON` unter `errors` → Modell wird übersprungen (nicht in `lms ls`/GUI, obwohl GGUF valide). **Fix angewendet**: Comma entfernt, Backup `manifest.json.bak_20260809`, valide (Python json.loads OK). Rest: Index wird erst beim Neustart/Rescan von LM Studio neu gebaut — nach der laufenden Testreihe neu starten und `lms ls | grep -i glm` prüfen (erwartet: GLM-4.6V-Flash erscheint). **Verifiziert (14.08.):** Nach LM-Studio-Neustart erscheint `zai-org/glm-4.6v-flash` in der API-Modellliste (`/v1/models`), ebenso `glm-4.7-flash` - Index-Problem behoben.
-- [x] **27. Framework-Unabhängigkeit + QUANT_MAP-Entfernung** — **COMPLETED (11.08. abends)**:
-  - QUANT_MAP entfernt (redundant — Quant immer im Key: `publisher/model@quant`)
-  - `get_quant()` extrahiert @quant direkt aus dem Key, zurückhaltend ohne Fallback
-  - `fill-quant`: Liest Quant aus GGUF-Dateiname (Source of Truth)
-  - `fill-size`: Dateisystem als Primärquelle, LMS als Fallback
-  - `fix_np`: Dateisystem-basiert (kein LMS erforderlich)
-  - `model_identity_triple()`: (publisher, model, quant) als kanonische Identität
-  - `is_support_file`: Filtert `*imatrix*` Dateien
-  - Review-Agent + Pre-Review-Script + Compaction-Skill aktualisiert
-  - Tests: 783/783 grün (3 pre-existent in test_model_manager.py)
-  - GitHub Push: `999a29fe`
-
-- [x] **16. Update top-candidates table** — **COMPLETED (10.08.), table PROVISIONAL**: table in `doc-git/Model-Parameters-and-Benchmarks_en.md` regenerated from new consolidation `ergebnisse/konsolidiert_20260810_073857.md` (31 models, SampleSize=30, runs since 07.08.2026) — replaces the old SS=100 table (15 models, 11.07.–03.08.). Scoring formula unchanged (Coding 35% | Math 25% | Agentic & Instr. 25% | Knowledge 15%); Agentic column shows the **raw** Agentic score (as in the source table), Overall blends Agentic 50% + IFEval 50%. New winner: **Granite 4.1 8B@q6_k / 30B@q3_k_s (tied 69%)**. 11 models affected by HS/TQA=0 issue (was 7). GLM-4.7-Flash (+REAP) and Nemotron-3-Nano-REAP near-0 Coding scores — harness issue suspected, retest planned. **⚠️ NOT FINAL (user note 10.08.):** Qwen models missing from current run — only Qwen3-14B@q6_k (full, 09.08.) + Qwen3-30B-2507-q2ks (DS1000/CoderEval=0 harness issue, EvalPlus/LM-Eval/Agentic from 04.08.); qwen2.5-coder-14b (q5_0/q5_k_m/q6_k) ran 09.08. with SS=30 but was dropped by the installed-only filter (verified: `--no-installed` run yields 36 models incl. all 3 quants; EvalPlus/LM-Eval only 27.07.); qwen3-30b-a3b@Q3_K_S, qwen3-coder-30b, qwen3-coder-reap-25b(-i1), qwen3.6-27b(-i1/-mtp), qwen3.6-28b-reap-i1 only have old runs (≤04.08., other temps, partial np). **Qwen re-run planned → re-consolidate → update table.** **Rest commit** (incl. manual-corrections table 05.08. + SS=4 removal, still uncommitted in `Model-Parameters-and-Benchmarks_en.md`).
-- [x] **17. Central alias map for model family names** — **COMPLETED (09.08.)** als `src/model_identity.py`: alle 5 verstreuten Stellen konsolidiert — `_ARCH_REASONING_MAP` (assemble_blueprint.py, jetzt `_arch_reasoning_map()` aus model_identity), `normalize_model_name`/`normalize_for_config` (assemble_blueprint.py 69/93 → Import), `_normalize_lms_model_name` (benchmark_config.py:553 → Delegate mit `@[a-z0-9_?]+$`-Regex), `_normalized_lms_key` (benchmark_config.py:645 → Delegate mit `-(ud|qat|imatrix)$`-Strip), `_normalize_variants` (registry_tool.py:392 → Delegate). Neu: `MODEL_FAMILIES` (9 Familien, Reihenfolge signifikant: qwen35 ⊂ qwen3-Overlap), `classify_reasoning_by_family` (Qwen-Sonderlogik), `match_registry_key` (deterministisch: Exact → Broad → Präfix/Suffix nur bei genau 1 Kandidat, sonst None — konservativ, nie falsch matchen). Verhalten identisch zur alten Streuung (35 Unit-Tests grün, 788 gesamt). Alias-Map-Grundidee (HF-GGUF-Alias-Tabelle) bleibt als Option für spätere Erweiterung offen.
-- [x] **18. qwen3.5-9b: clarify reasoning classification vs. hub** — **COMPLETED (06.08.)** — registry `qwen/qwen3.5-9b` aligned to `reasoning: thinking` + `max_context_length: 262144` added (hub value); comment `assemble_blueprint.py:248-249` corrected (dual mode, default thinking — `enableThinking.defaultValue: true` per hub model.yaml/Qwen model card); enable_thinking handling checked: `get_model_config` forces `enable_thinking: True` in thinking runs (REASONING_PATTERNS contains qwen3.5/qwen3.6), `run_benchmarks` already had `_is_qwen3_6_model()`, `custom_benchmark._model_supports_reasoning()` now correctly reads `thinking` — no further code change needed. Verified: `validate --repro` = **0 hub deviations**, ruff 0, 741 tests green. Background remains documented:
-  - **Applies to ALL Qwen 3.5/3.6 models** (user confirmation 06.08.): dual mode, thinking controllable via toggle, as stated on the Qwen model card.
-  - **Registry is internally inconsistent**: all other Qwen3.5/3.6 entries (`Qwen/Qwen3.5-9B-GGUF@q6_k`, `unsloth/qwen3.6-27b`, `-mtp`, `mradermacher/qwen3.6-27b-i1`, `qwen3.6-28b-reap-i1@iq3_s/@q3_k_s`) have `reasoning: thinking` — only `qwen/qwen3.5-9b` has `instruct` (same file_size_bytes 8281142495 as the @q6_k variant).
-  - `max_context_length` is missing from the entry (hub: 262144) — although `fill-arch` should have filled it in per planning item 4.
-  - Code comment `assemble_blueprint.py:248-249` ("Qwen3.6 Default Non-Thinking, enable_thinking=False Default") contradicts the hub model.yaml (`defaultValue: true`).
-  - Pipeline effect (`custom_benchmark.py:907-909`): with `is_thinking_enabled=False`, `enable_thinking: False` is explicitly sent → qwen3.5-9b benchmark results (if run) would be produced without thinking, although the model is thinking-capable.
-  - All four subtasks (a)–(d) completed: (a) registry aligned to `thinking`, (b) `max_context_length: 262144` added, (c) comment corrected, (d) handling checked (no code change needed).
-
-## Done (Feld-Ownership & Robustheit, 09.08.)
-
-- [x] **A. Feld-Ownership-Tabelle im Code** — `src/field_owner.py`: `FieldRule(source, target, auto_fix, checks, description)` + `FIELD_OWNERSHIP` (24 Felder, alle Registry-Felder abgedeckt), `auto_fix` nur für unveränderliche Quellen (gguf/lms, erzwingt via `__post_init__`), `resolve/auto_fix_fields/report_only_fields`, `Drift`-Dataclass mit `report_line()` (`[AUTO-FIX]`/`[MELDEN]`). Bewusst im Code statt YAML (Regeländerung = Code + Test).
-- [x] **B. Identitäts-Modul** — `src/model_identity.py` (siehe Item 17): Konsolidierung der 5 Normalisierungs-/Match-Stellen; Import-Kette zyklenfrei (model_identity ← benchmark_config/assemble_blueprint/registry_tool); Verhalten identisch (verifiziert + 35 Tests).
-- [x] **C. Sync-Verhalten** — neu `cmd_sync_from_gguf` (Auto-Fix n_layers/hidden_dim/max_context_length/arch aus GGUF-Headern, MoE via `expert_count`, Bericht je Fix; in `cmd_sync` als Schritt zwischen fill-arch und fill-reasoning); `cmd_sync_from_configs` → **Melde-Modus** (schreibt NICHTS mehr, `Drift`-Report); `cmd_validate` → neuer Check `gguf_header_drift` (read-only, gleiche Quelle wie Auto-Fix); `pipeline full` → nach Validierung Exit-Code 1 bei offenen Melde-Konflikten (`_DRIFT_CHECKS` = config_context_drift, config_np_ukv_drift, config_context_too_small, gguf_header_drift), `--ignore-drift` unterdrückt; CLI-Kommandos `sync-from-gguf`, Menü + Help aktualisiert.
-- [x] **D. Tests** — `tests/test_model_identity.py` (35) + `tests/test_registry_tool.py` erweitert (GGUF-Auto-Fix, Exit-Code-Logik): **788 Tests grün**, ruff 0.
-- [x] **Erster Einsatz (09.08., Testreihe läuft)** — `sync-from-gguf`: 6 Korrekturen (GLM-4.7-Flash + REAP: n_layers 61→47, hidden_dim 5120→2048, max_context_length 131072→202752 — Arbeitskopie wich vom HEAD ab, GGUF ist SSOT); 2 Config-Drifts (nemotron-cascade-14b-thinking, nemotron-3-nano-reap-21b-a3b: useUnifiedKvCache False→True) auf Nutzerentscheid Registry an Config angeglichen; `validate` = **0 Probleme** (konvergiert).
-
-
-
-- P2 judge as second scoring instance.
-- `temperatura`/`top_p` overrides in the run spec (stay at default).
-
-## Final Registry Cleanup (05.08., committed `a73c15b2`)
-
-- 3 orphan keys removed (no GGUF anymore): `intel/qwen3-8b-q4km-autoround-inc-v1`, `prism-ml/bonsai-27b`, `prism-ml/bonsai-27b@q1_0`.
-- 9 entries: `context_length` capped to `max_context_length` (rnj-1, phi-4, falcon3-10b, mellum2 ×2, nerdsking-python-coder-7b, internlm2_5-20b, bonsai-8b, granite-4.1-8b).
-- Registry: 70 entries, 0 inconsistencies, tests 717/717 green.
-
-## Provider-Architektur und LM-Studio-Entkopplung (Zwischenstand 17.08.2026)
-
-### Zielbild
-
-Die Benchmark-Suite soll Inferenz und Modell-Lifecycle getrennt behandeln:
-
-    Benchmark Runner
-      -> InferenceClient: chat/completions, completions, models
-      -> ModelManager: list, load, unload, current
-      -> ModelRegistry: benchmark metadata, sampling, reasoning, quant, ctx
-
-Der Runner soll keine Provider-spezifischen Endpunkte mehr kennen. OpenAI-Kompatibilitaet ist dabei nur der Inferenzvertrag. Laden, Entladen und der Status eines aktuell geladenen Modells bleiben optionale Provider-Faehigkeiten, weil /v1/models keinen standardisierten Load-/Unload-Vertrag definiert.
-
-### Verbindliche Entscheidungen
-
-- model_manager.py bleibt vorerst eine oeffentliche Kompatibilitaets-Fassade. Bestehende Importe aus run_benchmarks.py, custom_benchmark.py und den Tests bleiben erhalten.
-- Provider-Auswahl erfolgt ueber LLM_PROVIDER: lmstudio (Default), tabbyapi oder openai_compat. Aliase lms, openai und openai-compatible werden akzeptiert.
-- Phase 1 ist abgeschlossen. Seit Phase 2 liegt der LM-Studio-Codepfad im `LMStudioProvider`; die bisherigen Test- und Aufrufer-Seams (`_rest_request`, `_tabbyapi_*`, `API_BASE`) bleiben in `model_manager.py` als Kompatibilitaetsadapter erhalten.
-- LM Studio, TabbyAPI und Unsloth werden nicht als gleichartige Lifecycle-APIs behandelt. Unsloth kann sowohl als OpenAI-kompatibler Endpoint als auch als eigener, vom Runner gestarteter `unsloth_server`-Prozess betrieben werden. Unsloth Studio bleibt als separater interaktiver Endpoint verfuegbar.
-- doc-git/model_registry.yaml bleibt die Source of Truth fuer Benchmark-Policy: Sampling, Reasoning, Benchmark-Context und Quant-Identitaet. GGUF-Header bleiben die Source of Truth fuer technische Modelldaten wie Architektur, native Context-Grenze und ggf. EOS-/Template-Metadaten.
-- LM-Studio-JSON-Configs sind Runtime-Artefakte fuer LM Studio. Sie duerfen nicht als universelle Provider-Konfiguration vorausgesetzt werden.
-
-### Provider-Vertraege
-
-src/providers/base.py definiert die gemeinsame Grenze:
-
-- InferenceClient: base_url, list_models(), is_available().
-- ModelManager: current_model(), load_model(), unload_all(), wait_ready().
-- ProviderCapabilities: explizite Flags fuer List/Load/Unload/Current sowie Chat-/Completion-Unterstuetzung.
-- ProviderError und UnsupportedOperation: gemeinsame Fehlerkategorien fuer spaetere Runner-Fehlerbehandlung.
-
-Die Provider liefern weiterhin die bestehenden dict-kompatiblen Modellinformationen, damit der Launcher in Phase 1 keine breitere Datenmigration benoetigt.
-
-### Einzelschritte
-
-#### Phase 1 – Provider-Grenze und rueckwaertskompatible Fassade [x]
-
-1. src/providers/ mit base.py, lmstudio_provider.py, tabbyapi_provider.py und openai_compat_provider.py anlegen.
-2. Provider-Fabrik in model_manager.py einfuehren; Auswahl erst zur Laufzeit aus LLM_PROVIDER lesen.
-3. Nicht-LM-Studio-Aufrufe aus der Fassade an den ausgewaehlten Provider delegieren: is_api_available, list, current, load, unload, wait_ready.
-4. Default lmstudio unveraendert ueber den bisherigen Pfad bedienen; vorhandene Tests und CLI-Aufrufer bleiben damit stabil.
-5. Provider-Import-, Auswahl- und Minimalverhalten testen, ohne einen echten Server oder eine GPU vorauszusetzen.
-
-Abnahmekriterien Phase 1: Provider koennen importiert werden; unbekannte Provider werden frueh und verstaendlich abgewiesen; TabbyAPI und OpenAI-kompatible Server verwenden keinen lms-Subprozess; der bestehende LM-Studio-Testbestand bleibt gruen. Erfuellt am 17.08.2026.
-
-#### Phase 2 – LM Studio vollstaendig extrahieren [x]
-
-1. lms ls --json und lms ps --json nach lmstudio_provider.py verschieben.
-2. Native REST-Aufrufe fuer Load/Unload und LM-Studio-Serverstart dorthin verschieben.
-3. model_manager.py auf reine Fassade reduzieren; Legacy-Helfer nur bis zum Abschluss der Migration als Alias erhalten.
-4. run_benchmarks.py auf provider.load_model() bzw. provider.unload_all() umstellen; load_model_via_lms bleibt zunaechst als Kompatibilitaetsalias.
-
-Abnahmekriterien Phase 2: `LMStudioProvider` besitzt die LMS-CLI-/REST-Lifecycle-Implementierung; `model_manager.py` vermittelt nur noch Provideraufrufe und Registry-/Validierungs-Kompatibilitaet; der Launcher verwendet provider-neutrale `load_model()`/`unload_all()`; alte LMS-benannte Aufrufe bleiben als Aliase verfuegbar; ein impliziter LM-Studio-zu-Tabby-Fallback existiert nicht mehr. Erfuellt am 17.08.2026. Ein echter Server-Smoke-Test bleibt bewusst Phase 3/4 vorbehalten.
-
-#### Phase 3 – TabbyAPI produktionsfaehig machen [x]
-
-1. [x] `/v1/model`, `/v1/model/load`, `/v1/model/unload` und `/v1/models` gegen die lokal installierte TabbyAPI-Version verifizieren.
-2. [x] API-/Admin-Key getrennt konfigurierbar machen.
-3. [x] `max_seq_len`, `cache_size`, `cache_mode` und weitere ExLlamaV3-Parameter aus Registry-Runtimewerten ableiten; `config.yml` nur als Fallback verwenden.
-4. [x] Modellnamen, Ordnerpfade, kanonische Registry-Keys und geladene API-IDs trennen.
-5. [x] Einen echten `sample_size=1`-Smoke-Test mit `run.tabbyapi.yaml` als Integrationsnachweis ausfuehren.
-
-Abnahme Phase 3 (17.08.2026): Die lokale TabbyAPI-Version ist Commit `3d2848d0` mit ExLlamaV3 `1.4.1` und Torch `2.10.0+cu128`. Discovery meldet beide lokalen Modellordner; `/v1/model` liefert verschachtelte `parameters`; Load ist SSE-/detached und Unload liefert HTTP 200 mit JSON `null`. Der Provider behandelt diese Semantik korrekt, trennt Inference- und Admin-Key und meldet `unload_all()` nach der Korrektur zuverlässig. Der Registry-Key `unsloth/gemma-4-26b-a4b-it@iq3_s` wird vom technischen Tabby-Namen `google_gemma-4-26b-a4b-it` getrennt. Der echte Run-Spec-Smoke `HellaSwag`, `sample_size=1`, lief mit `32768` Kontext und `FP16`-KV-Cache, beantwortete 101 interne Chat-Anfragen, erzielte `0.23` und entlud das Modell anschliessend sauber.
-
-#### Phase 4 – OpenAI-kompatibler Provider [x]
-
-1. [x] `/v1/models` als Discovery verwenden und Modell-IDs ohne LMS-Normalisierung weiterreichen.
-2. [x] Load/Unload als unsupported bzw. Availability-Check modellieren; keine impliziten LMS-Aufrufe.
-3. [x] `LLM_API_KEY` und provider-spezifische Auth-Konfiguration ueber Header zufuehren.
-4. [x] Unsloth Desktop/API zunaechst mit diesem Provider testen. Ein eigener `unsloth_provider.py` ist nicht erforderlich; die belegte Unsloth-Erweiterung wird im OpenAI-Provider explizit aktiviert.
-
-Abnahme Phase 4 (18.08.2026): Authentifizierter Unsloth-Endpoint mit `UNSLOTH_API_BASE`/`UNSLOTH_API_KEY` verifiziert. `/v1/models` liefert 69 Modelle mit explizitem `loaded`-Status; `unsloth/Qwen3.6-27B-MTP-GGUF` war geladen. Eine Chat-Anfrage ueber `OpenAICompatProvider` lief in 2,28 Sekunden. Die authentifizierte OpenAPI beschreibt `/v1/load` mit `model_path` sowie `/v1/unload` mit `model_path`; beide Lifecycle-Endpunkte werden fuer `LLM_PROVIDER=unsloth` aktiviert und gepollt. Ein destruktiver Live-Load/Unload wurde gegen das aktuell verwendete Modell nicht ausgefuehrt; die Semantik ist durch OpenAPI und Mock-Contract-Tests verifiziert. Der normale Aufruf `py -3.12 src\\run_benchmarks.py --help` funktioniert ohne `PYTHONPATH`.
-
-#### Phase 4b – Eigenstaendiger Unsloth-Serverprozess [x]
-
-1. [x] Lokale GGUFs ueber `src/local_model_resolver.py` aus `~\\.lmstudio\\models` aufloesen; die zentrale `BLACKLIST`, `is_support_file()` und `is_mtp_drafter()`-Logik aus `benchmark_config.py` wiederverwenden.
-2. [x] Embedding-, F2LLM-, OCR-, Vision-, Audio- und RAG-Modelle sowie `mmproj`-/MTP-/imatrix-Begleitdateien aus der Benchmark-Inventarliste ausschliessen. Eigenstaendige Modelle mit `mtp` im Ordnernamen bleiben erhalten.
-3. [x] Die Modellauflösung auf `~\\.lmstudio\\models` begrenzen. Der separate LM-Studio-Konfigurationspfad `~\\.lmstudio\\hub` enthaelt laut lokaler Pruefung nur Zusatz-Configs; Unsloth legt seine lokalen GGUFs dagegen unter `~\\.lmstudio\\models\\hub\\models--<org>--<repo>\\snapshots\\<revision>` ab. Dieser Unsloth-Cache wird als lokale GGUF-Quelle erkannt und auf die logische Modell-ID zurueckgefuehrt.
-4. [x] Identische lokale Pfade deduplizieren und Registry-Key, Quantisierung und lokalen GGUF-Pfad als getrennte Metadaten fuehren.
-5. [x] `src/providers/unsloth_server_provider.py` einfuehren. Der Provider startet den installierten `llama-server.exe` selbst mit `--model`, `--offline`, `--host`, `--port`, `--alias`, Registry-`--ctx-size`/KV-/Unified-KV-Werten sowie der Geschwindigkeits-Policy `--parallel 4`, `--gpu-layers all`, `--flash-attn on` und `--cont-batching`.
-6. [x] Load/Unload als Prozess-Lifecycle implementieren: anderer Modellprozess wird beendet, neuer lokaler Server gestartet, Readiness ueber `/v1/models` geprueft und beim Unload der Prozess beendet.
-7. [x] Provider-Fabrik und API-Basis fuer `LLM_PROVIDER=unsloth_server` sowie die Aliase `unsloth-local`/`unsloth_local` ergaenzen. Standardport ist `8890`, waehrend Unsloth Studio `8888` weiterverwenden kann.
-8. [x] Provider-, Resolver- und Filtertests ergaenzen; echter Load/Inference/Unload-Smoke mit zwei Modellen erfolgreich ausfuehren.
-
-Aktivierung:
+Nach jedem neuen Download wird einmalig ausgefuehrt:
 
 ```powershell
-$env:LLM_PROVIDER = "unsloth_server"
-$env:UNSLOTH_LOCAL_API_BASE = "http://127.0.0.1:8890/v1"
-# optional: abweichender GGUF-Root, Serverpfad, Slotzahl oder GPU-Layer-Wert
-# $env:UNSLOTH_MODEL_ROOT = "C:\\Users\\pskra\\.lmstudio\\models"
-# $env:UNSLOTH_SERVER_EXE = "C:\\Users\\pskra\\.unsloth\\llama.cpp\\build\\bin\\Release\\llama-server.exe"
-# $env:UNSLOTH_SERVER_PARALLEL = "4"
-# $env:UNSLOTH_SERVER_GPU_LAYERS = "all"
+py -3.12 src\prepare_task_manifests.py `
+  --input DS1000=simple_evals\data_science.jsonl `
+  --input CoderEval=simple_evals\codereval_selfcontained.jsonl `
+  --output ergebnisse\task_manifest.json
 ```
 
-Abnahme Phase 4b (18.08.2026): **42 registry-gueltige lokale Modelle** gefunden; weitere 17 lokale GGUFs bleiben wegen fehlendem Registry-Key bewusst ausserhalb der Benchmark-Inventarliste. Ein echter Smoke mit `ibm-granite/granite-4-1-8b@q6_k` lud den lokalen Pfad ohne Download, antwortete mit `Smoke ok`, entlud den Prozess und gab Port `8890` frei. Der Wechseltest mit `TheBloke/em_german_leo_mistral@q4_k_m` lud Modell B nach Modell A erfolgreich und beantwortete beide Anfragen. Fokussierte Provider-/Resolvertests: **36 bestanden**, Ruff fuer geaenderte Dateien: **sauber**. Suite ohne den alten `tests/test_model_manager.py`-Kompatibilitaetsblock: **808 bestanden, 2 bestehende Sampling-/Thinking-Fehler** in `tests/test_benchmark_config.py`; diese stehen nicht mit Variante B in Zusammenhang. Die vollstaendige Legacy-Kompatibilitaetssuite bleibt wegen der bereits migrierten `time.monotonic()`-/Mock-Seam und weiterer alter `model_manager`-Erwartungen separat offen.
+Bei Warnungen beendet das Werkzeug den Lauf mit einem Warnstatus. Die verantwortliche Person muss die Aufgabe pruefen und den Vorgang mit `--allow-warnings` bewusst freigeben. Das Manifest wird anschliessend als Ergebnisartefakt archiviert und nicht bei jedem Modelllauf neu erzeugt.
 
-#### Phase 5 – Registry-/GGUF-Runtime-Kontrakt [x]
+Geprueft werden nur Textfelder und nur diese offensichtlichen Muster:
 
-1. ModelRegistry.resolve(model_key) als zentralen Aufloesepunkt einfuehren.
-2. Provider-neutrale Runtimewerte (context_length, Sampling, Reasoning, Quant, Parallelitaet) von Provider-spezifischen Overrides trennen.
-3. GGUF-Header einmalig lesen und technische Grenzen validieren; Registry bestimmt den Benchmark-Wert innerhalb dieser Grenzen.
-4. LM-Studio-JSON nur noch im LM-Studio-Provider fuer dessen eigene Runtime-Artefakte verwenden.
+- `ignore previous instructions/rules`;
+- `ignore the benchmark rules/instructions`;
+- Aufforderungen, Secrets, Tokens, Passwoerter, Credentials oder API-Keys zu lesen, auszugeben oder zu uebertragen;
+- Aufforderungen, den System-Prompt offenzulegen.
 
-Abnahme Phase 5 (18.08.2026): `src/model_registry.py` ist der zentrale Aufloesepunkt fuer Registry-Aliase und provider-neutrale Runtimewerte; `src/model_manager.py` delegiert Runtime-Auswahl an `ModelRegistry`; `src/providers/lmstudio_provider.py` beschraenkt LM-Studio-spezifische JSON-Artefakte auf den LM-Studio-Provider; `src/run_benchmarks.py` nutzt den Provider-Hook statt direkter JSON-Auswertung; fokussierte Registry-/Provider-Tests und Ruff waren gruendlich gruen.
+Das Werkzeug interpretiert keine Aufgabe um, entfernt keinen Inhalt und veraendert keine Benchmarkdaten.
 
-#### Phase 6 – Runner und Inferenzclients
+## Prozessausfuehrung
 
-1. run_benchmarks.py bekommt einen Provider-/Client-Kontext statt direkter LMS-Namen.
-2. API_BASE bleibt kurzfristig als Kompatibilitaetswert, wird spaeter aus InferenceClient.base_url bezogen.
-3. Custom-, EvalPlus-, lm-eval- und Agentic-Pipelines nutzen nur OpenAI-kompatible Inferenzaufrufe.
-4. Parallelitaet wird aus Provider-Capabilities und Registry-Runtimewerten abgeleitet; kein Backend darf stillschweigend eine zweite Slot-/KV-Policy einfuehren.
+### Standardablauf
 
-### Risiken und offene Verifikation
+1. Der Benchmark erzeugt den Modellcode wie bisher.
+2. Der Parent-Prozess startet pro Auswertung einen Worker mit JSON ueber stdin.
+3. Der Worker fuehrt Code und Tests in derselben Python-Umgebung aus, damit die wissenschaftlichen Bibliotheken kompatibel bleiben.
+4. Der Worker schreibt genau ein begrenztes JSON-Ergebnis ueber stdout.
+5. Der Parent-Prozess beendet, bewertet und raeumt den Worker anschliessend auf.
 
-- Ein /v1/models-Eintrag bedeutet je nach Server nur "servable" oder "geladen"; current_model darf daraus nicht pauschal abgeleitet werden.
-- TabbyAPI-Load kann als Stream/Detached-Task antworten. Polling und Timeout muessen gegen die lokal installierte Version getestet werden.
-- OpenAI-Kompatibilitaet deckt keine standardisierte Modellumschaltung ab. Bei unload_between muss der Runner eine klare Fehlermeldung statt eines stillen No-op liefern.
-- GGUF-Dateien im .lmstudio\models-Verzeichnis koennen von mehreren Frameworks gelesen werden; die Dateipfad-Aufloesung gehoert in Registry-/Inventarcode, nicht in den Inferenzclient.
-- CUDA-Versionen (LM Studio CUDA 12.8, Unsloth/andere Runtimes ggf. CUDA 13) sind fuer die Benchmark-Vergleichbarkeit zu protokollieren. Ein neuer CUDA-Stack ist nicht automatisch schneller: Kernel, KV-Cache, Quantisierung, Kontextlaenge und PCIe-Auslagerung bleiben messentscheidend.
+### Ressourcenlimits
 
-### Verifikation nach jeder Phase
+Die bestehenden Limits werden zentral und benchmarkfreundlich weiterverwendet:
 
-- Import-/Syntaxcheck mit der fuer den Launcher relevanten Python-Version.
-- betroffene Pytest-Tests und anschliessend Ruff fuer geaenderte src/-Dateien.
-- Mock-basierte Provider-Contract-Tests ohne laufenden Server.
-- Erst danach ein lokaler Smoke-Test mit sample_size=1; keine lange Benchmark-Reihe waehrend der Provider-Migration.
+- Wall-clock-Timeout pro Auswertung;
+- Speicherlimit im Windows Job Object;
+- maximale Zahl aktiver Prozesse im Job;
+- Beenden des gesamten Prozessbaums bei Timeout oder Fehler;
+- begrenzte stdout-/stderr-Ausgabe;
+- temporaeres Arbeitsverzeichnis und bereinigte Umgebung.
+
+Die Limits muessen gross genug fuer Matplotlib, NumPy, Pandas, SciPy und scikit-learn sein. Ein Limit darf nicht wegen eines einzelnen langsamen Modells so klein gewaehlt werden, dass gueltige Aufgaben als Sicherheitsfehler erscheinen.
+
+### Code-Benchmarks
+
+- [x] DS1000 und CoderEval verwenden den vorhandenen JSON-Worker mit Job Object.
+- [x] HumanEval+ und MBPP+ verwenden die bestehende separate EvalPlus-Auswertung mit Job Object.
+- [ ] Nach der Worker-Aenderung je Benchmark einen kleinen Kompatibilitaetstest mit SampleSize 1 ausfuehren.
+- [ ] Danach gepaarte Vorher-/Nachher-Laeufe auf exakt demselben gespeicherten Task-Satz ausfuehren.
+
+## Vergleichbarkeit und Abnahme
+
+Ein Kompatibilitaetsvergleich verwendet:
+
+- dasselbe Modell und dieselbe Quantisierung;
+- dieselben Sampling-Parameter;
+- denselben Seed;
+- dasselbe einmalig erzeugte Manifest;
+- dieselbe Aufgabenreihenfolge;
+- dieselben Test- und Ressourcenlimits.
+
+Ausgewiesen werden Score, bestandene/fehlgeschlagene Aufgaben, Worker-Fehler, Timeouts, Laufzeit und Ressourcenverbrauch. Ein Scoreverlust gilt erst dann als Härtungsregression, wenn der gepaarte Vergleich denselben Task-Satz verwendet und die Ursache nicht durch Modell-, Daten- oder Laufzeitunterschiede erklaert werden kann.
+
+## Nicht Bestandteil dieser Planung
+
+- kein Docker- oder Podman-Zwang;
+- kein vollstaendiges Mocking aller denkbaren Agent-Tools;
+- keine laufende Datenbank fuer Aufgabenmarker;
+- keine harte Import-Allowlist im Standardlauf;
+- keine zusaetzliche optionale Hochsicherheitsvariante.
+
+Agentic-Benchmarks bleiben vorerst bei den vorhandenen Inspect-AI-Tools und dem pragmatischen Prozessmodell. Echte Datei-, Shell- oder Netzwerkaktionen werden nicht durch eine universelle Attrappenwelt ersetzt.
+
+## Offene Punkte aus der bisherigen Planung
+
+### Modell- und Registry-Arbeiten
+
+- [ ] Qwen3.8-Unsloth-Empfehlungen und neue Modelle in Blueprint/Assembly integrieren. Qwen3.6-Kompatibilitaet und die kanonische Identitaet `publisher/model@quant` erhalten.
+- [ ] Konfigurierbaren GGUF-Modellroot mit primaerer neuer Quelle und kompatiblem altem Fallback umsetzen; Junction-Unterstuetzung bleibt erhalten.
+- [~] Qwen-Nachlauf und Top-Candidates-Neuauflage mit aktuellem Setup, vollstaendiger Modellabdeckung und korrekter Konsolidierung abschliessen.
+
+### Provider-Architektur
+
+- [ ] Phase 6 abschliessen: Runner vollstaendig ueber Provider-/Client-Kontext fuehren, API-Basis aus dem InferenceClient beziehen, OpenAI-kompatible Inferenzpfade vereinheitlichen und Parallelitaet nur aus Provider-Capabilities/Registry ableiten.
+- [ ] Offene echte Server-Smoke-Tests und Lifecycle-Verifikation fuer die jeweils betroffenen Provider nachziehen.
+
+### Benchmark- und Qualitaetsverifikation
+
+- [ ] Task-Manifeste fuer die tatsaechlich verwendeten Code-Benchmark-Datensaetze erzeugen und auffaellige Aufgaben vor dem naechsten Referenzlauf bewerten.
+- [ ] SampleSize-1-Smoke der Workerpfade ausfuehren.
+- [ ] Gepaarte Kompatibilitaetslaeufe vor/nach der Import-Blockaden-Entfernung mit identischem Manifest ausfuehren.
+- [ ] Manifest- und Worker-Funktionen mit Ruff, Python-3.12-Syntaxcheck und fokussierten Pytest-Tests verifizieren.
+- [ ] Nach Abschluss die Ergebnisse und die Entscheidung zur Score-Neutralitaet in `ergebnisse/` dokumentieren.
+
+## Verifikation vor Commit
+
+```powershell
+py -3.12 -m pytest tests\test_task_manifest.py tests\test_sandbox_worker.py tests\test_custom_benchmark_io.py -q --basetemp=.pytest-temp
+ruff check src\task_manifest.py src\prepare_task_manifests.py src\sandbox_worker.py tests\test_task_manifest.py tests\test_sandbox_worker.py
+py -3.12 -m py_compile src\task_manifest.py src\prepare_task_manifests.py src\sandbox_worker.py
+```
+
+Anschliessend folgt ein SampleSize-1-Smoke mit laufendem LM-Studio-Server. Erst danach wird ein groesserer gepaarter Benchmark-Lauf gestartet.

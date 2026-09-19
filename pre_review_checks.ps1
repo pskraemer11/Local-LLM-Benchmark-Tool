@@ -6,8 +6,8 @@
     Fuehrt die Gate-Checks vor einem Review/Commit aus und erzeugt
     Transparenz-Artefakte in doc-git\Review-Artifacts\:
 
-      1. registry_tool.py validate --repro
-         -> repro_issues.md (Registry, GGUF-Header und Provider-Runtime-Drift)
+      1. registry_tool.py validate --ci --repro
+         -> repro_issues.md (statische Registry-Pruefung und Hub-Abgleich)
          -> BLOCKIERT bei Validierungsproblemen (Exit 1)
       2. ruff check . --no-fix
          -> lint_issues.md
@@ -78,7 +78,6 @@ New-Item -ItemType Directory -Path $runTemp -Force | Out-Null
 $pytestTempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("Benchmarks-PreReview-PytestRoot-{0}" -f [Guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $pytestTempRoot -Force | Out-Null
 $pytestBaseTemp = Join-Path $pytestTempRoot "base"
-New-Item -ItemType Directory -Path $pytestBaseTemp -Force | Out-Null
 
 $artifactsDir = if ($NoArtifacts) {
     Join-Path $runTemp "review-artifacts"
@@ -99,12 +98,12 @@ Write-Host "=== Pre-Review Checks v3 - $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
 $blockingFails = 0
 $warnings = 0
 
-# ── 1. registry_tool.py validate --repro ──────────────────────────
-Write-Host "`n[1/6] validate --repro (Registry + GGUF + Provider-Runtime) ..." -ForegroundColor Cyan
+# ── 1. registry_tool.py validate --ci --repro ─────────────────────
+Write-Host "`n[1/6] validate --ci --repro (statische Registry + Hub-Abgleich) ..." -ForegroundColor Cyan
 if ($SkipRepro) {
     Write-Host "  UEBERSPRUNGEN (-SkipRepro)" -ForegroundColor Yellow
 } else {
-    $validateArgs = @("src\registry_tool.py", "validate")
+    $validateArgs = @("src\registry_tool.py", "validate", "--ci")
     if (-not $NoArtifacts) { $validateArgs += "--repro" }
     & python @validateArgs 2>&1 | Tee-Object -Variable validateOut | Out-Host
     $validateExit = $LASTEXITCODE
@@ -159,24 +158,8 @@ Write-Host "`n[4/6] pytest -q ..." -ForegroundColor Cyan
 if ($SkipPytest) {
     Write-Host "  UEBERSPRUNGEN (-SkipPytest)" -ForegroundColor Yellow
 } else {
-    $pytestTempNames = @("TMP", "TEMP", "TMPDIR")
-    $pytestPreviousTemp = @{}
-    foreach ($name in $pytestTempNames) {
-        $pytestPreviousTemp[$name] = [Environment]::GetEnvironmentVariable($name, "Process")
-        Set-Item -Path "Env:$name" -Value $pytestTempRoot
-    }
-    try {
-        & python -m pytest -q --basetemp $pytestBaseTemp 2>&1 | Tee-Object -Variable pytestOut | Out-Host
-        $pytestExit = $LASTEXITCODE
-    } finally {
-        foreach ($name in $pytestTempNames) {
-            if ($null -eq $pytestPreviousTemp[$name]) {
-                Remove-Item -Path "Env:$name" -ErrorAction SilentlyContinue
-            } else {
-                Set-Item -Path "Env:$name" -Value $pytestPreviousTemp[$name]
-            }
-        }
-    }
+    & python -m pytest -q --basetemp $pytestBaseTemp 2>&1 | Tee-Object -Variable pytestOut | Out-Host
+    $pytestExit = $LASTEXITCODE
     if ($pytestExit -ne 0) {
         Write-Host "  [FEHLER] pytest fehlgeschlagen (siehe oben)." -ForegroundColor Red
         $blockingFails++

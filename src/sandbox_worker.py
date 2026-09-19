@@ -7,7 +7,6 @@ result marker over stdout. The parent owns the stronger Windows process limits.
 
 from __future__ import annotations
 
-import ast
 import builtins
 import io
 import json
@@ -28,36 +27,23 @@ SANDBOX_SAFE_BUILTINS = frozenset({
     "None", "staticmethod", "classmethod", "memoryview", "ascii", "__build_class__",
 })
 
-# These libraries are needed by DS1000 setup/reference code. They are an
-# explicit compatibility allowlist, not a claim that third-party modules are
-# safe to expose to hostile model output.
+# Kept as documentation for the benchmark dependencies. The normal worker no
+# longer uses an import allowlist; the process boundary and Job Object provide
+# the practical protection without blocking valid benchmark code.
 SANDBOX_ALLOWED_MODULES = frozenset({
     "collections", "decimal", "fractions", "functools", "itertools", "math",
     "matplotlib", "numpy", "pandas", "PIL", "random", "scipy", "seaborn",
     "sklearn", "statistics",
 })
 
+# Deprecated compatibility metadata for callers that imported these names.
+# They are informational only; imports are no longer blocked in this worker.
 SANDBOX_BLOCKED_MODULES = frozenset({
-    "asyncio", "antigravity", "code", "codeop", "ctypes", "distutils", "ftplib",
-    "http", "inspect", "importlib", "multiprocessing", "os", "pathlib", "pdb",
-    "pickle", "platform", "shutil", "signal", "smtplib", "socket", "subprocess",
-    "sys", "sysconfig", "telnetlib", "threading", "tkinter", "traceback", "urllib",
-    "warnings", "webbrowser",
+    "asyncio", "code", "ctypes", "ftplib", "http", "inspect", "importlib",
+    "multiprocessing", "os", "pathlib", "pickle", "shutil", "socket",
+    "subprocess", "sys", "threading", "urllib", "warnings",
 })
 
-# These modules/functions are not needed by the benchmark fixtures and expose
-# native loaders or arbitrary memory-mapped/file-backed code.  The allowlist is
-# still compatibility-oriented for scientific fixtures, but these escape
-# routes are rejected both statically and by the import hook.
-SANDBOX_BLOCKED_IMPORT_PREFIXES = frozenset({
-    "cffi", "ctypes", "numpy.ctypeslib", "numpy.f2py",
-    "numpy.core._multiarray_umath", "numpy._core._multiarray_umath",
-    "scipy._lib._ccallback", "scipy.LowLevelCallable",
-})
-SANDBOX_BLOCKED_ATTRIBUTE_NAMES = frozenset({
-    "CDLL", "WinDLL", "OleDLL", "PyDLL", "dlopen", "load_library",
-    "find_library", "memmap",
-})
 
 
 class _BoundedTextWriter(io.TextIOBase):
@@ -82,69 +68,10 @@ class _BoundedTextWriter(io.TextIOBase):
         return None
 
 
-def _validate_source(code: str) -> None:
-    """Reject obvious interpreter-recovery syntax before execution."""
-    tree = ast.parse(code, mode="exec")
-    aliases: dict[str, str] = {}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                aliases[alias.asname or alias.name.split(".", 1)[0]] = alias.name
-        elif isinstance(node, ast.ImportFrom):
-            module = node.module or ""
-            for alias in node.names:
-                aliases[alias.asname or alias.name] = f"{module}.{alias.name}".strip(".")
-
-    def dotted_name(node: ast.AST) -> str | None:
-        if isinstance(node, ast.Name):
-            return aliases.get(node.id, node.id)
-        if isinstance(node, ast.Attribute):
-            parent = dotted_name(node.value)
-            return f"{parent}.{node.attr}" if parent else node.attr
-        return None
-
-    def is_blocked_path(path: str) -> bool:
-        return any(path == prefix or path.startswith(prefix + ".") for prefix in SANDBOX_BLOCKED_IMPORT_PREFIXES)
-
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.Name, ast.Attribute)):
-            identifier = node.id if isinstance(node, ast.Name) else node.attr
-            if identifier.startswith("__") or identifier.endswith("__"):
-                raise ValueError("dunder access is not allowed in sandbox code")
-        if isinstance(node, (ast.Import, ast.ImportFrom)):
-            imports = [alias.name for alias in node.names] if isinstance(node, ast.Import) else [
-                f"{node.module or ''}.{alias.name}".strip(".") for alias in node.names
-            ]
-            if any(is_blocked_path(path) for path in imports):
-                raise ImportError("native loader modules are not allowed by the sandbox allowlist")
-        if isinstance(node, ast.Attribute):
-            path = dotted_name(node)
-            if path and (is_blocked_path(path) or node.attr in SANDBOX_BLOCKED_ATTRIBUTE_NAMES):
-                raise ValueError("native loader APIs are not allowed in sandbox code")
-
-
 def _make_builtins() -> dict[str, Any]:
-    real_import = builtins.__import__
-
-    def safe_import(name: str, globals_dict: dict[str, Any] | None = None,
-                    locals_dict: dict[str, Any] | None = None,
-                    fromlist: tuple[str, ...] = (), level: int = 0) -> Any:
-        if level != 0:
-            raise ImportError("relative imports are not allowed")
-        if any(name == prefix or name.startswith(prefix + ".") for prefix in SANDBOX_BLOCKED_IMPORT_PREFIXES):
-            raise ImportError("native loader modules are not allowed by the sandbox allowlist")
-        top_level = name.split(".", 1)[0]
-        if top_level not in SANDBOX_ALLOWED_MODULES:
-            raise ImportError(f"Module {name!r} is not on the sandbox allowlist")
-        return real_import(name, globals_dict, locals_dict, fromlist, level)
-
-    safe = {
-        name: getattr(builtins, name)
-        for name in SANDBOX_SAFE_BUILTINS
-        if hasattr(builtins, name)
-    }
-    safe["__import__"] = safe_import
-    return safe
+    # The worker is intentionally compatibility-first. It is not the security
+    # boundary; the parent process owns the timeout and Windows Job Object.
+    return dict(vars(builtins))
 
 
 def _execute(request: dict[str, Any]) -> dict[str, Any]:
@@ -155,7 +82,6 @@ def _execute(request: dict[str, Any]) -> dict[str, Any]:
     if tests is not None and not all(isinstance(test, str) for test in tests):
         raise ValueError("sandbox tests must be strings")
 
-    _validate_source(code)
     namespace: dict[str, Any] = {"__builtins__": _make_builtins(), "__name__": "__sandbox__"}
     result: dict[str, Any] = {
         "ok": True,
@@ -182,7 +108,6 @@ def _execute(request: dict[str, Any]) -> dict[str, Any]:
         details: list[dict[str, Any]] = []
         for index, test in enumerate(tests):
             try:
-                _validate_source(test)
                 exec(test, namespace, namespace)  # noqa: S102 - intentional worker boundary
                 details.append({"index": index, "passed": True})
             except BaseException as exc:

@@ -129,7 +129,10 @@ class RegistryEntry(TypedDict):
     blueprint: NotRequired[str]
     sampling: NotRequired[SamplingBlock]
     sampling_source: NotRequired[str]
+    sampling_research_status: NotRequired[str]
+    sampling_researched_at: NotRequired[str]
     sampling_sources: NotRequired[list[str]]
+    sampling_evidence: NotRequired[list[dict[str, Any]]]
 
 
 class SystemMetrics(TypedDict):

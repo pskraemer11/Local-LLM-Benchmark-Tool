@@ -93,10 +93,10 @@ They **must not** be built into the Jinja chat template – the template exclusi
 
 | Model              | Template File                       |
 |--------------------|-------------------------------------|
-| 12B (QAT)          | `gemma4_12b_template_minijinja.jinja` |
-| 19B (REAP)         | `gemma4-19b-template_minijinja.jinja` |
-| 26B (all quantizations) | `gemma4-26b-template_minijinja.jinja` |
-| 31B                | `gemma4-26b-template_minijinja.jinja` |
+| 12B (QAT)          | `google_gemma-4-12B-it-qat-q4_0-chat_template.jinja` |
+| 19B (REAP)         | `google_gemma-4-26B-A4B-it_chat_template.jinja` |
+| 26B (all quantizations) | `google_gemma-4-26B-A4B-it_chat_template.jinja` |
+| 31B                | `google_gemma-4-26B-A4B-it_chat_template.jinja` |
 
 ### 4.2 Token Reference (per Technical Report Appendix Table 11)
 

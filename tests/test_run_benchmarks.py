@@ -11,12 +11,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
 import run_benchmarks as rb
 from run_benchmarks import (
     ALL_BENCHMARKS,
-    ALL_BENCH_NAMES,
     API_BASE,
-    BENCH_LOOKUP,
-    EXCLUDE_KEYWORDS,
     SAFE_CONTEXT_FALLBACK as SAFE_CONTEXT,
-    IS_THINKING_ENABLED,
     _build_lmeval_cmd,
     _ensure_model_still_loaded,
     _get_evaluation_parameters,
@@ -38,6 +34,7 @@ from run_benchmarks import (
 # ======================================================================
 # Detection helpers
 # ======================================================================
+
 
 class TestModelDetection:
     def test_qwen3_6_detection(self):
@@ -107,6 +104,7 @@ class TestModelDetection:
 # Model utility helpers
 # ======================================================================
 
+
 class TestModelHelpers:
     def test_model_short_name_basic(self):
         assert _model_short_name("plain-model") == "plain-model"
@@ -143,6 +141,7 @@ class TestModelHelpers:
 # ======================================================================
 # resolve_models
 # ======================================================================
+
 
 class TestResolveModels:
     @pytest.fixture
@@ -214,6 +213,7 @@ class TestResolveModels:
 # resolve_benchmarks
 # ======================================================================
 
+
 class TestResolveBenchmarks:
     def test_none_returns_all(self):
         result = resolve_benchmarks(None)
@@ -253,6 +253,7 @@ class TestResolveBenchmarks:
 # _get_evaluation_parameters
 # ======================================================================
 
+
 class TestLmevalParams:
     """Tests fuer _get_evaluation_parameters() (Sampling-Design 2026-08-06).
 
@@ -267,6 +268,7 @@ class TestLmevalParams:
     @pytest.fixture(autouse=True)
     def _no_lms_configs(self, tmp_path, monkeypatch):
         import benchmark_config as bc
+
         monkeypatch.setattr(bc, "LMS_CONFIG_ROOT", tmp_path / "no-lms-configs")
 
     @staticmethod
@@ -297,13 +299,13 @@ class TestLmevalParams:
     # Region: Category-Defaults (Fallback ohne JSON-Config) ----------------
     def test_coding_default_is_deterministic(self):
         params = _get_evaluation_parameters("plain-7b-model", "coding")
-        assert params["temperature"] == 0.2        # coding (Research 06.08.)
+        assert params["temperature"] == 0.2  # coding (Research 06.08.)
         assert params["top_p"] == 1.0
         assert params["max_tokens"] == 4096
 
     def test_math_default_has_higher_max_tokens(self):
         params = _get_evaluation_parameters("plain-7b-model", "math")
-        assert params["max_tokens"] == 4096        # math erlaubt mehr Tokens
+        assert params["max_tokens"] == 4096  # math erlaubt mehr Tokens
 
     def test_knowledge_default(self):
         params = _get_evaluation_parameters("plain-7b-model", "arc")
@@ -312,19 +314,19 @@ class TestLmevalParams:
 
     def test_agentic_default(self):
         params = _get_evaluation_parameters("plain-7b-model", "ifeval")
-        assert params["temperature"] == 0.6        # leicht stochastisch fuer tool-use
+        assert params["temperature"] == 0.6  # leicht stochastisch fuer tool-use
         assert params["max_tokens"] == 4096
 
     def test_registry_sampling_replaces_model_overrides(self):
         # MODEL_TEMP_OVERRIDES sind entfernt; stattdessen entscheidet
         # Registry-Sampling (Modell x Kategorie) ueber die Defaults.
         expected = {
-            "unsloth/phi-4": 0.0,                       # Zeile phi-4
-            "unsloth/gpt-oss-20b": 1.0,                 # Zeile gpt-oss
-            "vinpix/bonsai-8b-llama.cpp": 0.2,          # Bonsai 06.08. entfernt -> Kategorie-Default
+            "unsloth/phi-4": 0.0,  # Zeile phi-4
+            "unsloth/gpt-oss-20b": 1.0,  # Zeile gpt-oss
+            "vinpix/bonsai-8b-llama.cpp": 0.2,  # Bonsai 06.08. entfernt -> Kategorie-Default
             "unsloth/qwen3-coder-30b-a3b-instruct": 0.7,  # Registry-Sampling
-            "qwen3.5-72b-instruct": 0.2,                # keine Zeile -> Kategorie-Default
-            "gemma-3-12b": 0.2,                         # keine Zeile -> Kategorie-Default
+            "qwen3.5-72b-instruct": 0.2,  # keine Zeile -> Kategorie-Default
+            "gemma-3-12b": 0.2,  # keine Zeile -> Kategorie-Default
         }
         for model, temp in expected.items():
             params = _get_evaluation_parameters(model, "coding")
@@ -356,10 +358,11 @@ class TestLmevalParams:
     def test_lms_temp_ignored_non_temp_merged(self, tmp_path):
         # JSON-temperature zaehlt nicht mehr (2026-08-06); min_p aus der
         # Config wird weiterhin uebernommen.
-        self._write_lms_config(tmp_path, "pub1", "fake-model-7b",
-                               {"llm.prediction.temperature": 0.6,
-                                "llm.prediction.minPSampling": 0.02})
+        self._write_lms_config(
+            tmp_path, "pub1", "fake-model-7b", {"llm.prediction.temperature": 0.6, "llm.prediction.minPSampling": 0.02}
+        )
         import benchmark_config as bc
+
         with patch.object(bc, "LMS_CONFIG_ROOT", tmp_path):
             params = _get_evaluation_parameters("pub1/fake-model-7b", "coding")
         assert params["temperature"] == 0.2
@@ -369,9 +372,9 @@ class TestLmevalParams:
         # Gleiche Config -> Kategorie-Differenzierung greift (2026-08-06):
         # ohne Registry-Zeile gelten pro Kategorie die Defaults, nicht der
         # eine GUI-Wert.
-        self._write_lms_config(tmp_path, "pub1", "fake-model-7b",
-                               {"llm.prediction.temperature": 0.6})
+        self._write_lms_config(tmp_path, "pub1", "fake-model-7b", {"llm.prediction.temperature": 0.6})
         import benchmark_config as bc
+
         expected = {"arc": 0.6, "ifeval": 0.6, "ds1000": 0.2, "math-500": 0.7}
         with patch.object(bc, "LMS_CONFIG_ROOT", tmp_path):
             for bench, temp in expected.items():
@@ -379,9 +382,9 @@ class TestLmevalParams:
                 assert params["temperature"] == temp, bench
 
     def test_lms_thinking_enabled_emits_chat_template_kwargs(self, tmp_path):
-        self._write_lms_config(tmp_path, "pub1", "fake-model-7b",
-                               {"llm.prediction.reasoning.enableThinking": True})
+        self._write_lms_config(tmp_path, "pub1", "fake-model-7b", {"llm.prediction.reasoning.enableThinking": True})
         import benchmark_config as bc
+
         with patch.object(bc, "LMS_CONFIG_ROOT", tmp_path):
             params = _get_evaluation_parameters("pub1/fake-model-7b", "coding")
         chat_template_kwargs = params.get("chat_template_kwargs", {})
@@ -412,9 +415,11 @@ class TestLmevalParams:
 # _build_lmeval_cmd
 # ======================================================================
 
+
 class TestBuildLmevalCmd:
-    def test_basic_command(self):
-        cmd = _build_lmeval_cmd("plain-model", "api/my-model", "task1", 10, "/tmp/out")
+    def test_basic_command(self, tmp_path):
+        out_path = str(tmp_path / "out")
+        cmd = _build_lmeval_cmd("plain-model", "api/my-model", "task1", 10, out_path)
         assert "--model" in cmd
         assert cmd[cmd.index("--model") + 1] == "local-chat-completions"
         assert "--tasks" in cmd
@@ -422,26 +427,25 @@ class TestBuildLmevalCmd:
         assert "--limit" in cmd
         assert cmd[cmd.index("--limit") + 1] == "10"
         assert "--output_path" in cmd
-        assert cmd[cmd.index("--output_path") + 1] == "/tmp/out"
+        assert cmd[cmd.index("--output_path") + 1] == out_path
         assert "--apply_chat_template" in cmd
         assert "--log_samples" in cmd
 
-    def test_gptoss_adds_eos_string_when_no_until(self):
+    def test_gptoss_adds_eos_string_when_no_until(self, tmp_path):
         # The eos_string is only added when "until" is NOT already in
         # evaluation_parameters. The default gpt-oss branch sets until=[<|return|>]
         # (Blueprint-SSOT), so we override _get_evaluation_parameters to drop until.
-        with patch.object(rb, "_get_evaluation_parameters",
-                          return_value={"max_tokens": 4096, "temperature": 1.0}):
-            cmd = _build_lmeval_cmd("gpt-oss-20b", "gpt-oss-20b", "task1", 5, "/tmp/out")
+        with patch.object(rb, "_get_evaluation_parameters", return_value={"max_tokens": 4096, "temperature": 1.0}):
+            cmd = _build_lmeval_cmd("gpt-oss-20b", "gpt-oss-20b", "task1", 5, str(tmp_path / "out"))
             idx = cmd.index("--model_args")
             args_json = json.loads(cmd[idx + 1])
             assert args_json["eos_string"] == "<|return|>"
 
-    def test_gptoss_default_has_until_from_blueprint(self):
+    def test_gptoss_default_has_until_from_blueprint(self, tmp_path):
         # Seit 14.08.: stop_strings aus Blueprint (SSOT). gptoss_reasoning
         # liefert until=["<|return|>"], daher greift der eos_string-Fallback
         # fuer gpt-oss NICHT mehr (bis 13.08.: eos_string=<|endoftext|>).
-        cmd = _build_lmeval_cmd("gpt-oss-20b", "gpt-oss-20b", "task1", 5, "/tmp/out")
+        cmd = _build_lmeval_cmd("gpt-oss-20b", "gpt-oss-20b", "task1", 5, str(tmp_path / "out"))
         idx = cmd.index("--gen_kwargs")
         kwargs = json.loads(cmd[idx + 1])
         assert kwargs["until"] == ["<|return|>"]
@@ -449,14 +453,14 @@ class TestBuildLmevalCmd:
         args_json = json.loads(cmd[idx + 1])
         assert "eos_string" not in args_json
 
-    def test_non_gptoss_no_eos_string(self):
-        cmd = _build_lmeval_cmd("plain-7b", "plain-7b", "task1", 5, "/tmp/out")
+    def test_non_gptoss_no_eos_string(self, tmp_path):
+        cmd = _build_lmeval_cmd("plain-7b", "plain-7b", "task1", 5, str(tmp_path / "out"))
         idx = cmd.index("--model_args")
         args_json = json.loads(cmd[idx + 1])
         assert "eos_string" not in args_json
 
-    def test_model_args_includes_chat_url(self):
-        cmd = _build_lmeval_cmd("plain-7b", "api/pl", "task1", 5, "/tmp/out")
+    def test_model_args_includes_chat_url(self, tmp_path):
+        cmd = _build_lmeval_cmd("plain-7b", "api/pl", "task1", 5, str(tmp_path / "out"))
         idx = cmd.index("--model_args")
         args_json = json.loads(idx + 1 and cmd[idx + 1])
         assert args_json["base_url"] == f"{API_BASE}/chat/completions"
@@ -479,6 +483,7 @@ class TestBuildLmevalCmd:
 # _parse_subset_score
 # ======================================================================
 
+
 class TestParseSubsetScore:
     def test_returns_score_from_result_json(self, tmp_path):
         subset = "arc-challenge"
@@ -486,14 +491,18 @@ class TestParseSubsetScore:
         sub_dir = tmp_path / subset
         sub_dir.mkdir()
         results_file = sub_dir / "results_20260101_000000.json"
-        results_file.write_text(json.dumps({
-            "results": {
-                subset: {
-                    "exact_match,remove_whitespace": 0.42,
-                    "exact_match,strict-match": 0.99,
+        results_file.write_text(
+            json.dumps(
+                {
+                    "results": {
+                        subset: {
+                            "exact_match,remove_whitespace": 0.42,
+                            "exact_match,strict-match": 0.99,
+                        }
+                    }
                 }
-            }
-        }))
+            )
+        )
         score = _parse_subset_score(str(tmp_path), subset)
         assert score == pytest.approx(0.42)
 
@@ -505,9 +514,7 @@ class TestParseSubsetScore:
         subset = "taskx"
         sub_dir = tmp_path / subset
         sub_dir.mkdir()
-        (sub_dir / "results.json").write_text(json.dumps({
-            "results": {subset: {"some_other_metric": 0.5}}
-        }))
+        (sub_dir / "results.json").write_text(json.dumps({"results": {subset: {"some_other_metric": 0.5}}}))
         score = _parse_subset_score(str(tmp_path), subset)
         assert score is None
 
@@ -515,6 +522,7 @@ class TestParseSubsetScore:
 # ======================================================================
 # _ensure_model_still_loaded
 # ======================================================================
+
 
 class TestEnsureModelStillLoaded:
     def test_already_loaded_does_nothing(self, capsys):
@@ -562,6 +570,7 @@ class TestEnsureModelStillLoaded:
 # ======================================================================
 # run_agentic – JSON-Pfad (Fix 2026-07-31)
 # ======================================================================
+
 
 class TestWindowsSignalShim:
     """Regressionstest für den evalplus-Windows-Fix (14.08.2026).
@@ -626,6 +635,52 @@ class TestEvalplusSubsetEval:
         assert shim.setitimer(shim.ITIMER_REAL, 5) == 0
         assert shim.signal(shim.SIGALRM, None) is None
 
+    def test_subset_eval_uses_parallel_workers(self, monkeypatch) -> None:
+        import json
+        import threading
+        import time
+        from types import SimpleNamespace
+
+        import evalplus_subset_eval as ese
+
+        task_ids = [f"HumanEval/{i}" for i in range(4)]
+        samples = [{"task_id": task_id, "solution": "solution", "_identifier": task_id} for task_id in task_ids]
+        problems = {task_id: {"prompt": "", "base_input": [], "plus_input": []} for task_id in task_ids}
+        active = 0
+        max_active = 0
+        lock = threading.Lock()
+
+        def fake_worker(*args, **kwargs):
+            nonlocal active, max_active
+            with lock:
+                active += 1
+                max_active = max(max_active, active)
+            time.sleep(0.05)
+            with lock:
+                active -= 1
+            payload = json.loads(kwargs["input"])
+            return SimpleNamespace(
+                returncode=0,
+                stdout=json.dumps(
+                    {
+                        "completion_id": payload["completion_id"],
+                        "solution": payload["solution"],
+                        "base": [ese.PASS, []],
+                        "plus": [ese.PASS, []],
+                    }
+                ),
+                stderr="",
+            )
+
+        monkeypatch.setattr(ese, "load_solutions", lambda _: samples)
+        monkeypatch.setattr(ese, "get_groundtruth", lambda *args: {task_id: {} for task_id in task_ids})
+        monkeypatch.setattr(ese.subprocess, "run", fake_worker)
+
+        score = ese._evaluate_subset("humaneval", "unused", problems, "hash", [], parallel=4)
+
+        assert score == 1.0
+        assert max_active >= 2
+
 
 class TestRunAgentic:
     def test_json_path_uses_safe_identifier_not_slash(self, monkeypatch, tmp_path):
@@ -659,7 +714,7 @@ class TestRunAgentic:
             rb.run_agentic(model_info, limit=13, mode="safety", seed=42)
         cmd = popen.call_args.args[0]
         sc_idx = cmd.index("--scenarios")
-        selected = set(cmd[sc_idx + 1:sc_idx + 1 + 13])
+        selected = set(cmd[sc_idx + 1 : sc_idx + 1 + 13])
         assert selected == set(rb.AGENTIC_SAFETY_SCENARIO_IDS)
 
     def test_safety_mode_honours_limit(self, monkeypatch, tmp_path):
@@ -673,13 +728,14 @@ class TestRunAgentic:
             rb.run_agentic(model_info, limit=3, mode="safety", seed=42)
         cmd = popen.call_args.args[0]
         sc_idx = cmd.index("--scenarios")
-        selected = cmd[sc_idx + 1:sc_idx + 1 + 3]
+        selected = cmd[sc_idx + 1 : sc_idx + 1 + 3]
         assert len(selected) == 3
         assert all(s in rb.AGENTIC_SAFETY_SCENARIO_IDS for s in selected)
 
     def test_seed_reproduces_selection(self, monkeypatch, tmp_path):
         monkeypatch.setattr(rb, "RESULTS_DIR", str(tmp_path))
         calls = []
+
         def _fake_popen(cmd, *args, **kwargs):
             fake = MagicMock()
             fake.returncode = 0
@@ -687,13 +743,16 @@ class TestRunAgentic:
             fake.stderr = io.StringIO("")
             calls.append(cmd)
             return fake
+
         with patch.object(rb.subprocess, "Popen", side_effect=_fake_popen):
             rb.run_agentic({"key": "m1", "display": "M1"}, limit=6, seed=2026)
             rb.run_agentic({"key": "m1", "display": "M1"}, limit=6, seed=2026)
             rb.run_agentic({"key": "m1", "display": "M1"}, limit=6, seed=7)
+
         def _selected(cmd):
             sc_idx = cmd.index("--scenarios")
-            return tuple(cmd[sc_idx + 1:sc_idx + 1 + 6])
+            return tuple(cmd[sc_idx + 1 : sc_idx + 1 + 6])
+
         assert _selected(calls[0]) == _selected(calls[1])
         assert _selected(calls[0]) != _selected(calls[2])
 
@@ -701,6 +760,7 @@ class TestRunAgentic:
 # ======================================================================
 # Single-Instance Lock (Fix 2026-07-31: parallele Launcher)
 # ======================================================================
+
 
 class TestSingleInstanceLock:
     DEAD_PID = 2147483647  # max int32 – no live process
@@ -755,8 +815,10 @@ class TestSingleInstanceLock:
 # Run-Spec (YAML) support
 # ======================================================================
 
+
 class _RunSpecArgs:
     """Minimales Namespace-Objekt mit den CLI-Defaults des Launchers."""
+
     def __init__(self, **overrides):
         for dest, default in rb.RUN_SPEC_PARSER_DEFAULTS.items():
             setattr(self, dest, default)
@@ -772,14 +834,17 @@ class TestRunSpec:
         return p
 
     def test_load_basic_spec(self, tmp_path):
-        p = self._write_spec(tmp_path, """\
+        p = self._write_spec(
+            tmp_path,
+            """\
 models: ["m1", "m2"]
 benchmarks: ["DS1000", "Agentic"]
 sample_size: 3
 seed: 2026
 agentic_mode: safety
 thinking: true
-""")
+""",
+        )
         spec = rb._load_run_spec(p)
         assert spec == {
             "model": "m1,m2",
@@ -841,6 +906,10 @@ thinking: true
         assert args.sample_size == 3
         assert args.seed == 2026
 
+    def test_parse_args_default_sample_size_is_20(self):
+        args, _ = rb._parse_args([])
+        assert args.sample_size == 20
+
     def test_parse_args_unknown_key_warns(self, tmp_path, capsys):
         p = self._write_spec(tmp_path, "sample_size: 3\nbogus_flag: true\n")
         rb._parse_args(["--run-spec", p])
@@ -857,13 +926,13 @@ thinking: true
 # _check_registry_for_model (Fix 14.08.: Template-Skip-Bug)
 # ======================================================================
 
+
 class TestCheckRegistryForModel:
     """Template-Skip-Bug: `return None` stand auf falscher Ebene und übersprang
     ALLE Modelle mit Template (auch wenn die Template-Datei existierte)."""
 
     def _registry(self, template=None, blueprint="default_chat"):
-        entry = {"reasoning": "thinking", "capabilities": ["chat"],
-                 "blueprint": blueprint}
+        entry = {"reasoning": "thinking", "capabilities": ["chat"], "blueprint": blueprint}
         if template:
             entry["template"] = template
         reg = {"unsloth/gemma-4-26b-a4b-it": entry}
@@ -875,11 +944,13 @@ class TestCheckRegistryForModel:
         reg, norm = self._registry(blueprint="default_chat")
         with (
             patch.object(rb, "_load_registry_for_context", return_value=(reg, norm)),
-            patch("assemble_blueprint.resolve_template_name", return_value="gemma4-26b-template_minijinja.jinja"),
+            patch(
+                "assemble_blueprint.resolve_template_name", return_value="google_gemma-4-26B-A4B-it_chat_template.jinja"
+            ),
             patch("registry_tool._load_blueprints", return_value={"default_chat": {}}),
             patch("registry_tool.TEMPLATE_DIR", tmp_path),
         ):
-            (tmp_path / "gemma4-26b-template_minijinja.jinja").write_text("{{ x }}", encoding="utf-8")
+            (tmp_path / "google_gemma-4-26B-A4B-it_chat_template.jinja").write_text("{{ x }}", encoding="utf-8")
             result = rb._check_registry_for_model("unsloth/gemma-4-26b-a4b-it", "Gemma 4")
         assert result is not None
 

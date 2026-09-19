@@ -40,16 +40,35 @@ Commands:
   sync-templates
                 Write promptTemplate from registry template files into config
                 JSONs that are missing it (fixes validate template_missing_config)
-  pipeline      One-shot maintenance (replaces sync_model_configs.ps1):
-                pipeline [status|sync|full] -> compare, +sync, +classify,
-                +preview+validate (full). Config-JSONs bleiben unverändert.
-                Exit 1 bei offenen Melde-Konflikten,
-                --ignore-drift unterdrückt den Exit-Code.
+  sync-template-from-gguf <model-key>
+                Copy tokenizer.chat_template from the matching GGUF into the
+                matching LM Studio config (explicit runtime-artifact repair)
+  pipeline      One-shot maintenance (replaces sync_model_configs.ps1).
+                Default: pipeline status
+                pipeline status
+                  Read-only status report: query the benchmarkable LMS models
+                  and compare Registry, LMS inventory and config JSONs.
+                  Does not write model_registry.yaml or config JSONs.
+                pipeline sync
+                  Run status plus the full Registry sync: add new models,
+                  research sampling for new models, fill quant/architecture/
+                  reasoning fields, reconcile GGUF metadata, import config
+                  drift in report mode and format model_registry.yaml.
+                  May write model_registry.yaml; does not write config JSONs.
+                pipeline full
+                  Run sync plus a dry-run quarantine report, blueprint and
+                  reasoning classification, read-only prompt assembly preview,
+                  prompt validation and Registry-drift validation.
+                  Does not write config JSONs. Exits with code 1 when blocking
+                  ownership drift remains; --ignore-drift keeps it report-only.
+                Optional: --refresh-sampling repeats terminal sampling research
+                for unresolved/new models during the sync stage.
   patch-reasoning-effort
                 Add gpt-oss-20b reasoningEffort/budgetTokens to LMS configs
                 (--dry-run, --wait-for-lock, --effort, --budget)
   sync          Full sync: add + web sampling research → fill-quant → fill-arch
                 → sync-from-gguf → fill-reasoning → sync-from-configs → fmt
+                --refresh-sampling: terminale Sampling-Status einmalig erneut prüfen
 
 Prinzip (seit 13.08.2026): Die **Registry (model_registry.yaml) ist Single Source of Truth**
 für useUnifiedKvCache und context_length. **num_parallel ist eine feste Benchmark-Policy**
@@ -62,6 +81,14 @@ die Quelle für Systemprompts; assemble_blueprint.py generiert die Prompts und
 schreibt sie in die JSON-Configs (systemPrompt, promptTemplate). Dieser Code
 überschreibt keine Benchmark-Parameter in JSON-Configs (UKV/ctx kommen aus
 der Registry).
+
+Sampling-Onboarding ist ein einmaliger Web-Recherche-Schritt für neue Modelle:
+Hugging-Face-Modellkarten, Base-Model-Metadaten und begrenzte offizielle
+Dokumentationspfade werden geprüft. Das Ergebnis wird als `confirmed`,
+`unresolved`, `conflict` oder `not_found` mit Quellen/Evidenz gespeichert.
+Benchmark-Läufe lesen ausschließlich lokale Registry-Werte und führen keine
+Websuche aus. Terminale Recherche-Status werden bei späterem `sync` übersprungen;
+`--refresh-sampling` erzwingt einen bewussten Neuversuch.
 """
 
 from __future__ import annotations
@@ -75,7 +102,7 @@ import struct
 import subprocess
 import sys
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -135,7 +162,14 @@ from benchmark_config import (
     USE_UNIFIED_KV_CACHE_THRESHOLD_GB as _USE_UNIFIED_KV_CACHE_THRESHOLD_GB,  # noqa: F401 - re-export for tests
 )
 from model_identity import normalize_variants
-from sampling_research import research_sampling, validate_sampling_block
+from sampling_research import (
+    RESEARCH_STATUSES,
+    research_sampling,
+    research_sampling_report,
+    validate_sampling_block,
+)
+
+_DEFAULT_RESEARCH_SAMPLING = research_sampling
 
 # ── I/O helpers ────────────────────────────────────────────────────
 
@@ -162,6 +196,67 @@ def save_registry(reg: dict[str, Any], path: Path | None = None) -> None:
         y.dump(reg, f)
     _format_blank_lines(path)
     _normalize_quants_flow_style(path)
+
+
+def _sampling_researched_at() -> str:
+    """Return a stable UTC timestamp for one onboarding research attempt."""
+    return datetime.now(UTC).isoformat(timespec="seconds")
+
+
+def _run_sampling_research(model: dict[str, Any]) -> dict[str, Any]:
+    """Run the detailed researcher, preserving the old patchable test seam."""
+    if research_sampling is not _DEFAULT_RESEARCH_SAMPLING:
+        result = research_sampling(model)
+        if result is None:
+            return {"sampling_research_status": "unresolved", "sampling_sources": []}
+        report = dict(result)
+        report.setdefault("sampling_research_status", "confirmed")
+        report.setdefault("sampling_evidence", [])
+        return report
+    return research_sampling_report(model)
+
+
+def _apply_sampling_report(entry: dict[str, Any], report: dict[str, Any]) -> bool:
+    """Persist a confirmed or terminal sampling research result in an entry."""
+    status = str(report.get("sampling_research_status") or "unresolved")
+    if status not in {"confirmed", "unresolved", "conflict", "not_found"}:
+        status = "unresolved"
+    entry["sampling_research_status"] = status
+    entry["sampling_researched_at"] = _sampling_researched_at()
+    entry["sampling_sources"] = list(report.get("sampling_sources") or [])
+    entry["sampling_evidence"] = list(report.get("sampling_evidence") or [])
+    if status == "confirmed" and isinstance(report.get("sampling"), dict):
+        entry["sampling"] = report["sampling"]
+        entry["sampling_source"] = report.get("sampling_source", "web-research")
+        return True
+    return False
+
+
+def apply_sampling_review(
+    model_key: str,
+    sampling: dict[str, Any],
+    sources: list[str],
+    evidence: list[dict[str, Any]],
+) -> None:
+    """Apply an explicitly reviewed sampling result through the Registry API.
+
+    This is the write seam for the manual Codex review workflow. It validates
+    the submitted block and never touches LM Studio configuration files.
+    """
+    issues = validate_sampling_block(sampling)
+    if issues:
+        raise ValueError("Ungültiger Sampling-Block: " + "; ".join(issues))
+    reg = load_registry()
+    entry = reg.get(model_key)
+    if not isinstance(entry, dict):
+        raise KeyError(f"Registry-Key nicht gefunden: {model_key}")
+    entry["sampling"] = sampling
+    entry["sampling_source"] = "manual-web-review"
+    entry["sampling_research_status"] = "confirmed"
+    entry["sampling_researched_at"] = _sampling_researched_at()
+    entry["sampling_sources"] = list(sources)
+    entry["sampling_evidence"] = list(evidence)
+    save_registry(reg)
 
 
 def load_lms_json(path: str | Path) -> list[Any]:
@@ -549,15 +644,18 @@ def cmd_compare() -> dict[str, Any]:
             missing.append(rn)
 
     orphan: set[str] = set()
-    registry_key_map = {normalize_model_name(k): k for k in registry_keys}
+    registry_key_sorted = sorted(
+        [(normalize_model_name(k), k) for k in registry_keys],
+        key=lambda x: -len(x[0]),
+    )
     for c in cfgs:
         n = normalize_model_name(c["dir_name"])
-        if not any(n in r or r in n for r in registry_key_map):
+        if find_registry_key_for_config(n, registry_key_sorted, config=c) is None:
             orphan.add(f"{c['publisher']}/{c['dir_name']}")
 
     report = {
         "lms": len(lms),
-        "reg": len(registry_key_map),
+        "reg": len(registry_keys),
         "cfg": len(cfgs),
         "new": len(new_models),
         "missing": len(missing),
@@ -862,8 +960,13 @@ def cmd_add(
             skipped.append(("?", "leerer Key"))
             continue
         pub = str(m.get("publisher", "unknown")).strip()
-        canonical = _canonical_key(mk, pub)
-        sk = normalize_model_name(mk)
+        # LM Studio often reports the base model in ``modelKey`` and stores
+        # the selected quant only in ``quantization``/``selectedVariant``.
+        # Use the complete identity here, otherwise a new quant is mistaken
+        # for an already-installed base as soon as another @quant exists.
+        canonical = _canonical_lms_key(m)
+        canonical_base = canonical.split("@", 1)[0]
+        sk = normalize_model_name(canonical)
         # Exact match (including @quant) — always a duplicate
         if sk in (normalize_model_name(k) for k in reg):
             skipped.append((mk, "bereits vorhanden"))
@@ -914,7 +1017,7 @@ def cmd_add(
         size_bytes = m.get("size_bytes", 0) or m.get("sizeBytes", 0)
         entry = {
             "publisher": pub,
-            "hf_url": f"https://huggingface.co/{canonical}",
+            "hf_url": f"https://huggingface.co/{canonical_base}",
             "arch": classification,
             "k_cache": "q8_0",
             "v_cache": "iq4_nl",
@@ -955,17 +1058,17 @@ def cmd_add(
         if research_web:
             research_model = dict(m)
             research_model.update({"modelKey": canonical, "hf_url": entry["hf_url"]})
-            researched = research_sampling(research_model)
-            if researched is not None:
-                entry.update(researched)
+            report = _run_sampling_research(research_model)
+            if _apply_sampling_report(entry, report):
                 print(
                     f"  [SAMPLING] {canonical}: Web-Profil übernommen "
-                    f"({len(researched['sampling_sources'])} Quelle(n))"
+                    f"({len(report.get('sampling_sources', []))} Quelle(n))"
                 )
             else:
                 sampling_unresolved.append(canonical)
                 print(
-                    f"  [SAMPLING-WARN] {canonical}: keine eindeutige, "
+                    f"  [SAMPLING-WARN] {canonical}: Status "
+                    f"{entry['sampling_research_status']} - keine eindeutige, "
                     "plausible Temperatur/top_p-Kombination gefunden; "
                     "Kategorie-Defaults bleiben aktiv"
                 )
@@ -985,12 +1088,14 @@ def cmd_add(
     return result
 
 
-def _research_missing_sampling(reg: dict[str, Any]) -> list[str]:
-    """Research existing eligible entries that have no sampling block."""
+def _research_missing_sampling(reg: dict[str, Any], force: bool = False) -> list[str]:
+    """Research missing sampling once, unless an explicit refresh is requested."""
     unresolved: list[str] = []
     changed = False
     for model_key, entry in reg.items():
         if not isinstance(entry, dict) or "sampling" in entry:
+            continue
+        if not force and entry.get("sampling_research_status"):
             continue
         if not is_registry_candidate({"modelKey": model_key}):
             continue
@@ -1002,13 +1107,16 @@ def _research_missing_sampling(reg: dict[str, Any]) -> list[str]:
                 "hf_url": entry.get("hf_url") or f"https://huggingface.co/{model_key.split('@', 1)[0]}",
             }
         )
-        researched = research_sampling(model)
-        if researched is None:
-            unresolved.append(model_key)
-            print(f"  [SAMPLING-WARN] {model_key}: keine Web-Empfehlung gefunden")
-            continue
-        entry.update(researched)
+        report = _run_sampling_research(model)
+        confirmed = _apply_sampling_report(entry, report)
         changed = True
+        if not confirmed:
+            unresolved.append(model_key)
+            print(
+                f"  [SAMPLING-WARN] {model_key}: Status "
+                f"{entry['sampling_research_status']} - keine Web-Empfehlung gefunden"
+            )
+            continue
         print(f"  [SAMPLING] {model_key}: fehlender Block aus Web-Quelle ergänzt")
 
     if changed:
@@ -1028,31 +1136,17 @@ def cmd_suggest() -> dict[str, Any]:
     """
     reg = load_registry()
     cfgs = read_lms_configs(CONFIG_ROOT)
-    registry_key_map = {normalize_model_name(k): k for k, v in reg.items() if isinstance(v, dict)}
-    # Sort by descending normalized key length: more specific keys match first
-    registry_key_sorted = sorted(registry_key_map.items(), key=lambda x: -len(x[0]))
+    # Keep duplicate normalized names: publisher and quant are resolved by
+    # find_registry_key_for_config instead of collapsing them in a dict.
+    registry_key_sorted = sorted(
+        [(normalize_model_name(k), k) for k, v in reg.items() if isinstance(v, dict)],
+        key=lambda x: -len(x[0]),
+    )
 
     shown = skipped = blacklisted = errors = 0
     for cfg in cfgs:
         cn = normalize_model_name(cfg["dir_name"])
-        match = None
-        # Phase 1: exact match
-        for rn2, rnk in registry_key_sorted:
-            if cn == rn2:
-                match = rnk
-                break
-        # Phase 2: config name has extra quantization suffix (e.g. -mxfp4, -Q3_K_M)
-        if not match:
-            for rn2, rnk in registry_key_sorted:
-                if cn.startswith(rn2 + "-"):
-                    match = rnk
-                    break
-        # Phase 3: config name stripped publisher that is embedded in registry key
-        if not match:
-            for rn2, rnk in registry_key_sorted:
-                if rn2.endswith("-" + cn):
-                    match = rnk
-                    break
+        match = find_registry_key_for_config(cn, registry_key_sorted, config=cfg)
         if not match:
             skipped += 1
             continue
@@ -1180,12 +1274,17 @@ def cmd_rm(model_key: str, delete_files: bool = False, assume_yes: bool = False)
 # ── sync-from-configs command ────────────────────────────────────
 
 
-def cmd_sync_from_configs(write: bool = False) -> None:
+def cmd_sync_from_configs(
+    write: bool = False,
+    installed_models: list[dict[str, Any]] | None = None,
+) -> None:
     """Compare GUI load settings and optionally persist them in the registry.
 
     ``write=False`` is the safe report mode. With ``write=True``, only
     values from LM Studio configs are copied. Conflicting values across
-    configs for one registry entry are reported and skipped.
+    configs for one registry entry are reported and skipped. When
+    ``installed_models`` is provided by ``sync``, configs with no matching
+    current LMS inventory entry are ignored as stale runtime artifacts.
     """
     if not REGISTRY_PATH.exists():
         print(f"[ERROR] Registry not found: {REGISTRY_PATH}")
@@ -1200,9 +1299,22 @@ def cmd_sync_from_configs(write: bool = False) -> None:
     print("[2] JSON-Configs scannen ...")
     configs = read_lms_configs(CONFIG_ROOT)
     print(f"  -> {len(configs)} Config-Dateien gefunden")
+    if installed_models is not None:
+        active_configs: list[dict[str, Any]] = []
+        for cfg in configs:
+            if any(_config_matches_lms_model(cfg, model) for model in installed_models):
+                active_configs.append(cfg)
+            else:
+                print(f"[SKIP] Veraltete Config nicht im LMS-Inventar: {cfg['json_path']}")
+        configs = active_configs
+        print(f"  -> {len(configs)} aktive Config-Dateien nach LMS-Abgleich")
 
-    registry_key_map = {normalize_model_name(k): k for k, v in reg.items() if isinstance(v, dict)}
-    registry_key_sorted = sorted(registry_key_map.items(), key=lambda x: -len(x[0]))
+    # Do not collapse equal normalized model names: publisher and quantization
+    # are part of the identity and are resolved per config below.
+    registry_key_sorted = sorted(
+        [(normalize_model_name(k), k) for k, v in reg.items() if isinstance(v, dict)],
+        key=lambda x: -len(x[0]),
+    )
 
     print(f"[3] Registry-Einträge mit Configs abgleichen ({'Schreibmodus' if write else 'Melde-Modus'}) ...")
     skipped_no_match = 0
@@ -1210,7 +1322,7 @@ def cmd_sync_from_configs(write: bool = False) -> None:
     observations: dict[str, dict[str, list[tuple[Any, Path]]]] = {}
     for cfg in configs:
         cn = normalize_model_name(cfg["dir_name"])
-        match = find_registry_key_for_config(cn, registry_key_sorted)
+        match = find_registry_key_for_config(cn, registry_key_sorted, config=cfg)
         if not match:
             skipped_no_match += 1
             continue
@@ -1465,7 +1577,7 @@ def _quant_from_lms_record(model: dict[str, Any]) -> str | None:
 
 def _canonical_lms_key(model: dict[str, Any]) -> str:
     """Build the exact publisher/model@quant key represented by an LMS row."""
-    model_key = str(model.get("modelKey", "")).strip()
+    model_key = str(model.get("modelKey") or model.get("key") or "").strip()
     publisher = str(model.get("publisher", "")).strip()
     base = _canonical_key(model_key, publisher)
     selected = str(model.get("selectedVariant") or "").strip()
@@ -1475,6 +1587,19 @@ def _canonical_lms_key(model: dict[str, Any]) -> str:
     if quant and "@" not in base:
         return f"{base}@{quant}"
     return base
+
+
+def _config_matches_lms_model(config: dict[str, Any], model: dict[str, Any]) -> bool:
+    """Return whether a local config belongs to an installed LMS model.
+
+    Configs can outlive deleted LM Studio models.  Reuse the same publisher,
+    base-name and quant-aware matcher as registry/config synchronization so a
+    stale JSON cannot create a false drift or conflict during ``sync``.
+    """
+    model_key = _canonical_lms_key(model)
+    if not model_key:
+        return False
+    return find_config_for_registry_key(model_key, [config]) is not None
 
 
 def _rekey_registry_to_lms(
@@ -1709,6 +1834,20 @@ def _detect_reasoning_from_template(template: str) -> bool:
     if "enable_thinking" in template or "reasoning_effort" in template:
         return True
     return bool(_REASONING_TOKEN_RE.search(template))
+
+
+def _read_gguf_chat_template(model_path: str | Path) -> str | None:
+    """Read the embedded ``tokenizer.chat_template`` from a GGUF file."""
+    try:
+        from gguf import GGUFReader
+
+        field = GGUFReader(str(model_path)).fields.get("tokenizer.chat_template")
+        if field is None:
+            return None
+        value = field.contents()
+        return value if isinstance(value, str) and value.strip() else None
+    except (ImportError, OSError, ValueError, RuntimeError):
+        return None
 
 
 MODELS_CACHE = Path.home() / ".lmstudio" / "models"
@@ -2242,6 +2381,68 @@ def cmd_sync_templates() -> None:
     print(f"\n[OK] sync-templates: {added} Configs aktualisiert, {skipped} übersprungen, {errors} Fehler")
 
 
+def _find_lms_gguf_for_registry_key(model_key: str) -> Path | None:
+    """Resolve the installed LM Studio GGUF for a Registry key."""
+    target = normalize_model_name(model_key).split("@")[0]
+    target_suffix = target.rsplit("/", 1)[-1]
+    for model in _benchmark_lms_models(_run_lms_ls()):
+        candidate = normalize_model_name(str(model.get("modelKey", ""))).split("@")[0]
+        if candidate not in {target, target_suffix} and candidate.rsplit("/", 1)[-1] != target_suffix:
+            continue
+        relative_path = str(model.get("path", ""))
+        candidate_path = MODELS_CACHE / relative_path
+        if candidate_path.is_file() and not _is_support_file(relative_path):
+            return candidate_path
+    return None
+
+
+def cmd_sync_template_from_gguf(model_key: str) -> int:
+    """Copy one GGUF-embedded chat template into its LM Studio config.
+
+    This is an explicit runtime-artifact repair. It never writes the Registry
+    and refuses to replace an already populated config template.
+    """
+    configs = read_lms_configs(CONFIG_ROOT)
+    config = find_config_for_registry_key(model_key, configs)
+    if config is None:
+        print(f"[ERROR] {model_key}: keine passende LM-Studio-Config gefunden")
+        return 1
+
+    gguf_path = _find_lms_gguf_for_registry_key(model_key)
+    if gguf_path is None:
+        print(f"[ERROR] {model_key}: keine passende lokale GGUF-Datei gefunden")
+        return 1
+    template = _read_gguf_chat_template(gguf_path)
+    if template is None:
+        print(f"[ERROR] {model_key}: GGUF enthält kein lesbares tokenizer.chat_template")
+        return 1
+
+    json_path = Path(config["json_path"])
+    try:
+        data = json.loads(json_path.read_text(encoding="utf-8"))
+        fields = data.setdefault("operation", {}).setdefault("fields", [])
+        for field in fields:
+            if field.get("key") != "llm.prediction.promptTemplate":
+                continue
+            if field.get("value"):
+                print(f"[SKIP] {model_key}: promptTemplate ist bereits befüllt ({json_path})")
+                return 0
+            field["value"] = template
+            break
+        else:
+            fields.append({"key": "llm.prediction.promptTemplate", "value": template})
+        json_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    except (OSError, TypeError, ValueError) as exc:
+        print(f"[ERROR] {model_key}: Config konnte nicht aktualisiert werden: {exc}")
+        return 1
+
+    print(
+        f"[FIX] {model_key}: tokenizer.chat_template aus {gguf_path.name} "
+        f"in {json_path.name} übernommen ({len(template)} Zeichen)"
+    )
+    return 0
+
+
 # ── validate command ───────────────────────────────────────────────
 
 
@@ -2475,6 +2676,7 @@ def cmd_validate(verbose: bool = False, repro: bool = False, ci: bool = False) -
         "missing_capabilities": [],
         "missing_blueprint": [],
         "sampling_invalid": [],
+        "sampling_research_status_invalid": [],
         "registry_no_config": [],
         "reasoning_arch_mismatch": [],
         "config_context_drift": [],
@@ -2550,6 +2752,13 @@ def cmd_validate(verbose: bool = False, repro: bool = False, ci: bool = False) -
         for issue in validate_sampling_block(entry["sampling"]):
             errors["sampling_invalid"].append(f"{model_key}: {issue}")
 
+    for model_key, entry in reg.items():
+        if not isinstance(entry, dict):
+            continue
+        status = entry.get("sampling_research_status")
+        if status is not None and status not in RESEARCH_STATUSES:
+            errors["sampling_research_status_invalid"].append(f"{model_key}: {status!r}")
+
     # ── Check 4b: Modell-Identität = Publisher + Modellname + Quantisierung ──
     # Jeder Registry-Key MUSS die Form publisher/modelname@quant haben.
     # Base-Entries ohne @quant sind nicht eindeutig und gehören entfernt.
@@ -2602,26 +2811,14 @@ def cmd_validate(verbose: bool = False, repro: bool = False, ci: bool = False) -
     # Die JSON-Configs sind die Quelle (LMS GUI). Registry weicht ab?
     # context_length: nur WARNEN wenn Config < Registry-Erwartung oder
     # Context > native max_context_length (dann ist Config inkonsistent).
-    registry_key_map = {normalize_model_name(k): k for k, v in reg.items() if isinstance(v, dict)}
-    registry_key_sorted = sorted(registry_key_map.items(), key=lambda x: -len(x[0]))
+    registry_key_sorted = sorted(
+        [(normalize_model_name(k), k) for k, v in reg.items() if isinstance(v, dict)],
+        key=lambda x: -len(x[0]),
+    )
 
     for cfg in cfgs:
         cn = normalize_model_name(cfg["dir_name"])
-        match = None
-        for rn2, rnk in registry_key_sorted:
-            if cn == rn2:
-                match = rnk
-                break
-        if not match:
-            for rn2, rnk in registry_key_sorted:
-                if cn.startswith(rn2 + "-"):
-                    match = rnk
-                    break
-        if not match:
-            for rn2, rnk in registry_key_sorted:
-                if rn2.endswith("-" + cn):
-                    match = rnk
-                    break
+        match = find_registry_key_for_config(cn, registry_key_sorted, config=cfg)
         if not match:
             continue
         entry = reg[match]
@@ -2700,7 +2897,7 @@ _DRIFT_CHECKS = ("config_context_drift", "config_context_too_small", "gguf_heade
 # ── sync command (full) ────────────────────────────────────────────
 
 
-def cmd_sync() -> None:
+def cmd_sync(refresh_sampling: bool = False) -> None:
     """Full sync including read-only web sampling research.
 
     Nur Registry-Pflege aus unveränderlichen Quellen (GGUF-Header, JSON-Configs).
@@ -2708,6 +2905,8 @@ def cmd_sync() -> None:
     bei fehlenden/konfligierenden Werten bleiben Kategorie-Defaults aktiv. Es
     wird NIE in JSON-Configs geschrieben (die GUI ist die Quelle) und die
     Blueprint-YAML wird nicht regeneriert (sie ist die Quelle für assemble).
+    Terminale Recherche-Status werden nicht erneut versucht; dafür gibt es
+    --refresh-sampling.
     """
     lms = _benchmark_lms_models(_run_lms_ls())
     reg = load_registry()
@@ -2728,7 +2927,9 @@ def cmd_sync() -> None:
         print("[add] Keine neuen Modelle")
 
     print("[sampling] Fehlende Registry-Sampling-Blöcke per Web-Recherche prüfen ...")
-    _research_missing_sampling(load_registry())
+    if refresh_sampling:
+        print("  [sampling] Expliziter Refresh auch für terminale Recherche-Status ...")
+    _research_missing_sampling(load_registry(), force=refresh_sampling)
 
     print("[fill-quant] fehlende @quant-Suffixe aus GGUF-Headern ergänzen ...")
     cmd_fill_quant()
@@ -2745,7 +2946,7 @@ def cmd_sync() -> None:
     print(
         "[sync-from-configs] Config-Felder (offload/UKV/context/KV-Quant) abgleichen - Melde-Modus (0 geschrieben) ..."
     )
-    cmd_sync_from_configs()
+    cmd_sync_from_configs(installed_models=lms)
 
     print("[fmt] Blank lines normalisieren ...")
     cmd_fmt()
@@ -2761,7 +2962,9 @@ def cmd_sync() -> None:
 # Status-Report, AutoAdd und FullSync - ohne PowerShell-Wrapper.
 
 
-def cmd_pipeline(mode: str = "status", ignore_drift: bool = False) -> None:
+def cmd_pipeline(
+    mode: str = "status", ignore_drift: bool = False, refresh_sampling: bool = False
+) -> None:
     """Ein-Aufruf-Wartungspipeline (ersetzt sync_model_configs.ps1).
 
     Modus:
@@ -2789,7 +2992,7 @@ def cmd_pipeline(mode: str = "status", ignore_drift: bool = False) -> None:
         cmd_quarantine_missing(dry_run=True)
 
     print("[3] Full sync (add + fill-quant + fill-arch + sync-from-gguf + fill-reasoning + sync-from-configs + fmt) ...")
-    cmd_sync()
+    cmd_sync(refresh_sampling=refresh_sampling)
 
     print("[4] Klassifikation (blueprint + reasoning) ...")
     classify_registry()
@@ -3230,7 +3433,11 @@ def main() -> None:
     elif cmd == "suggest":
         cmd_suggest()
     elif cmd == "sync-from-configs":
-        cmd_sync_from_configs(write="--write" in sys.argv[2:])
+        installed_models = _benchmark_lms_models(_run_lms_ls())
+        cmd_sync_from_configs(
+            write="--write" in sys.argv[2:],
+            installed_models=installed_models,
+        )
     elif cmd == "fill-ctx":
         cmd_fill_ctx()
     elif cmd == "fix-np":
@@ -3275,6 +3482,11 @@ def main() -> None:
         sys.exit(cmd_quarantine_missing(dry_run=dry_run))
     elif cmd == "sync-templates":
         cmd_sync_templates()
+    elif cmd == "sync-template-from-gguf":
+        if len(sys.argv) < 3:
+            print("[ERROR] Nutzung: python registry_tool.py sync-template-from-gguf <model-key>")
+            sys.exit(1)
+        sys.exit(cmd_sync_template_from_gguf(sys.argv[2]))
     elif cmd == "pipeline":
         mode = sys.argv[2] if len(sys.argv) > 2 else "status"
         if mode.startswith("-"):
@@ -3283,7 +3495,8 @@ def main() -> None:
             print(f"[ERROR] Unbekannter pipeline-Modus: {mode} (status|sync|full)")
             sys.exit(1)
         ignore_drift = "--ignore-drift" in sys.argv[2:]
-        cmd_pipeline(mode, ignore_drift=ignore_drift)
+        refresh_sampling = "--refresh-sampling" in sys.argv[2:]
+        cmd_pipeline(mode, ignore_drift=ignore_drift, refresh_sampling=refresh_sampling)
     elif cmd == "patch-reasoning-effort":
         flags = set(sys.argv[2:])
         effort = budget = None
@@ -3300,7 +3513,7 @@ def main() -> None:
     elif cmd == "patch-glm-configs":
         cmd_patch_glm_configs(dry_run="--dry-run" in sys.argv)
     elif cmd == "sync":
-        cmd_sync()
+        cmd_sync(refresh_sampling="--refresh-sampling" in sys.argv[2:])
     else:
         print(f"[ERROR] Unknown command: {cmd}")
         print(__doc__)

@@ -20,7 +20,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 import model_manager as mm
 from model_manager import (
     API_BASE,
-    TIMEOUT_HEALTH_CHECK,
     parse_selection,
     is_api_available,
     get_current_loaded_model,
@@ -486,6 +485,7 @@ class TestLoadModelViaLMS:
         mocker.patch("model_manager._is_lmstudio_running", return_value=True)
         ok, identifier = load_model_via_lms("test")
         assert ok is True
+        assert identifier == "test@q4"
 
     def test_load_failure_returns_false(self, mocker):
         # Generic failure (returns None)

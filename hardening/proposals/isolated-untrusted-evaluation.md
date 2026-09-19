@@ -134,7 +134,7 @@ We should first add a feature flag and telemetry, without changing benchmark res
 - Static: verify the final import/wrapper surface and all evaluator subprocess creation sites.
 - Escape tests: attempt file reads/writes outside the assigned root, native-library loading, process creation, network access, credential reads, and interpreter recovery.
 - Resource tests: allocate memory, spawn descendants, emit large output, and exceed wall-clock limits; verify the complete tree is terminated.
-- Compatibility: run representative DS1000, HumanEval+, and MBPP+ fixtures and compare scores, failure classifications, throughput, p95 latency, and peak RSS.
+- Compatibility: run representative DS1000, HumanEval+, and MBPP+ fixtures through baseline and hardened paths with identical model revision, task IDs, sample, seed, prompts, decoding parameters, and dependency versions. Record aggregate scores and item-level outcomes. Every baseline pass must remain a pass under hardening; a security-induced rejection of valid code is a blocking failure. Compare throughput, p95 latency, and peak RSS separately so performance cost is visible without masking score regressions.
 - Lifecycle: interrupt the parent, kill the worker, corrupt the result channel, and confirm temporary directories and child processes are cleaned up.
 
 ## Implementation Work Packages

@@ -271,6 +271,7 @@ class TestStripThinkingTokens:
 
     def test_empty_text_returns_zero_count(self):
         cleaned, count = strip_thinking_tokens(None)
+        assert cleaned is None
         assert count == 0
 
 
@@ -526,6 +527,7 @@ class TestEvaluateCode:
         # No tests, no reference → falls through to bare execution
         score, msg = evaluate_code("x = 1", "f", [], setup_code="import os")
         assert score == 1.0
+        assert "OK" in msg
 
 
 # ======================================================================

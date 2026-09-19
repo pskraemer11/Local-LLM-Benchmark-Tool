@@ -115,6 +115,7 @@ unfixable = ["ANN", "S", "PERF", "TCH", "FBT", "RUF"]
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["E402"]
 "**/{tests,docs,tools}" = ["E402"]
+"tests/**/*.py" = ["ANN001", "ANN201"]
 
 [tool.ruff.lint.flake8-quotes]
 docstring-quotes = "double"

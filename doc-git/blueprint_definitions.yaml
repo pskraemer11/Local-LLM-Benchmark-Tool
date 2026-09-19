@@ -63,9 +63,9 @@ blueprints:
       - output_style_default
     custom_template: true
     template_map:
-      12b: gemma4_12b_template_minijinja.jinja
-      19b: gemma4-19b-template_minijinja.jinja
-      26b: gemma4-26b-template_minijinja.jinja
+      12b: google_gemma-4-12B-it-qat-q4_0-chat_template.jinja
+      19b: google_gemma-4-26B-A4B-it_chat_template.jinja
+      26b: google_gemma-4-26B-A4B-it_chat_template.jinja
     reasoning_parsing:
       enabled: false
       startString: " thinking"
@@ -82,9 +82,9 @@ blueprints:
       - output_style_default
     custom_template: true
     template_map:
-      12b: gemma4_12b_template_minijinja.jinja
-      19b: gemma4-19b-template_minijinja.jinja
-      26b: gemma4-26b-template_minijinja.jinja
+      12b: google_gemma-4-12B-it-qat-q4_0-chat_template.jinja
+      19b: google_gemma-4-26B-A4B-it_chat_template.jinja
+      26b: google_gemma-4-26B-A4B-it_chat_template.jinja
     enable_thinking_by_category:
       coding: false
       agentic: false

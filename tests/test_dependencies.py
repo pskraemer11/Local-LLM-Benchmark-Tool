@@ -6,7 +6,6 @@ Without these dependencies, IFEval and MATH-500 will fail with
 ModuleNotFoundError on every model (see Terminalausgabe Benchmark Run
 12.07.2026 for the full error stack traces).
 """
-import sys
 import pytest
 
 

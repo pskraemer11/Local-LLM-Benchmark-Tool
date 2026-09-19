@@ -13,8 +13,8 @@ import registry_tool as rt
 def test_cmd_sync_repairs_missing_quant_before_arch_sync() -> None:
     calls: list[str] = []
 
-    def record(name: str) -> Callable[[], None]:
-        def callback() -> None:
+    def record(name: str) -> Callable[..., None]:
+        def callback(*_args: object, **_kwargs: object) -> None:
             calls.append(name)
 
         return callback

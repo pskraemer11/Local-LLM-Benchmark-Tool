@@ -86,6 +86,8 @@ class TestPatchConfig:
         _write_config(path, [])
         changed, added, updated, backup = gptoss_patch_config(path, dry_run=True)
         assert changed is True
+        assert len(added) == 3
+        assert updated == []
         assert backup is None
         with open(path, "r", encoding="utf-8") as f:
             assert json.load(f)["operation"]["fields"] == []
@@ -100,6 +102,8 @@ class TestPatchConfig:
         assert changed is True
         assert added == []
         assert len(updated) == 2  # effort + budget nachgezogen
+        assert backup is not None
+        assert os.path.exists(backup)
         with open(path, "r", encoding="utf-8") as f:
             values = {f["key"]: f["value"] for f in json.load(f)["operation"]["fields"]}
         assert values[_PRE_EFFORT_FIELD["key"]] == _PRE_EFFORT_FIELD["value"]

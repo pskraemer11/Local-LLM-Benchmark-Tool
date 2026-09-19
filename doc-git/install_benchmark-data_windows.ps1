@@ -1,107 +1,131 @@
-<#
+#requires -Version 5.1
+
+<##
 .SYNOPSIS
-    Legacy Windows bootstrap helper for benchmark dependencies and dataset setup.
-    The canonical benchmark entrypoint is src\run_benchmarks.py.
-    Provider setup is handled by registry_tool.py and the provider-specific launchers.
+    Legacy-Vorschau für die globalen Benchmark-Python-Abhängigkeiten.
+
+.DESCRIPTION
+    Das Benchmarks-Projekt wird nicht weiter aktiv gepflegt und besitzt bewusst
+    keine eigene venv. Dieses Skript verwendet deshalb explizit Python 3.12,
+    ändert standardmäßig aber nichts. Vor einer optionalen Installation werden
+    pip check und ein gemeinsamer Resolver-Dry-Run über alle vorhandenen Pakete
+    ausgeführt. Eine echte Änderung erfordert ausdrücklich -Apply.
 #>
 
-$ErrorActionPreference = "Stop"
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$RepoRoot = Resolve-Path (Join-Path $ScriptDir "..")
-$DownloadScript = Join-Path $RepoRoot "download_real_benchmarks.py"
+[CmdletBinding()]
+param([switch]$Apply)
 
-Write-Host "=" * 60
-Write-Host "  Install-Skript fuer lokale LLM-Benchmarks (Windows)"
-Write-Host "=" * 60
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
 
-# ─── 1. Python-Pruefung ───
-Write-Host "`n[1/4] Pruefe Python-Installation (3.12+ empfohlen)..."
-try {
-    $pyVersion = & python --version 2>&1
-    Write-Host "  [OK] $pyVersion"
-} catch {
-    Write-Host "  [ERROR] Python nicht gefunden. Installiere Python 3.12+ von:"
-    Write-Host "          https://www.python.org/downloads/"
-    Write-Host "  Stelle sicher, dass 'python' im PATH ist."
-    exit 1
-}
-
-# ─── 2. LM Studio-Pruefung ───
-Write-Host "`n[2/4] Pruefe LM Studio (optional, lms.exe)..."
-try {
-    $lmsVersion = & lms --version 2>&1
-    Write-Host "  [OK] $lmsVersion"
-} catch {
-    Write-Host "  [WARN] lms.exe nicht im PATH."
-    Write-Host "  LM Studio ist fuer die aktuelle Architektur optional."
-    Write-Host "  Fuer TabbyAPI oder Unsloth brauchst du es nicht zwingend."
-    Write-Host "  Installiere LM Studio von: https://lmstudio.ai/"
-    Write-Host "  Nach Installation: 'lms' muss im System-PATH sein."
-    Write-Host "  (Standard: C:\Users\$env:USERNAME\AppData\Local\LM Studio\LM Studio)"
-}
-
-# ─── 3. Python-Pakete installieren ───
-Write-Host "`n[3/4] Installiere Python-Abhaengigkeiten..."
-$packages = @(
-    "requests"
-    "datasets"
-    "numpy"
-    "pandas"
-    "matplotlib"
-    "seaborn"
-    "psutil"
-    "nvidia-ml-py"
-    # ── lm-eval-harness Dependencies ──
-    # Ohne diese schlagen IFEval und MATH-500 mit ModuleNotFoundError fehl
-    # (siehe Terminalausgabe Benchmark Run 12.07.2026):
-    #   - IFEval:       'No module named langdetect' + 'immutabledict'
-    #                   (lm_eval/tasks/ifeval/instructions.py:36, instructions_util.py:23)
-    #   - MATH-500:     'No module named math_verify' + 'antlr4-python3-runtime==4.11'
-    #                   (lm_eval/tasks/minerva_math/utils.py:16,19)
-    "langdetect"
-    "immutabledict"
-    "antlr4-python3-runtime==4.11"
-    "lm-eval[math]"
-    # nltk wird von lm_eval für TruthfulQA benötigt
-    "nltk"
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$repoRoot = (Resolve-Path (Join-Path $scriptDir '..')).Path
+$downloadScript = Join-Path $repoRoot 'download_real_benchmarks.py'
+$requestedPackages = @(
+    'requests'
+    'datasets'
+    'numpy'
+    'pandas'
+    'matplotlib'
+    'seaborn'
+    'psutil'
+    'nvidia-ml-py'
+    'langdetect'
+    'immutabledict'
+    'antlr4-python3-runtime==4.11'
+    'lm-eval[math]'
+    'nltk'
 )
-foreach ($pkg in $packages) {
-    Write-Host "  Installiere $pkg ..." -NoNewline
-    try {
-        & python -m pip install --quiet $pkg 2>&1 | Out-Null
-        Write-Host " OK"
-    } catch {
-        Write-Host " FEHLGESCHLAGEN"
-        Write-Host "  [WARN] $pkg konnte nicht installiert werden."
-        Write-Host "         Manuelle Installation: python -m pip install $pkg"
+
+function Invoke-Python312 {
+    param([Parameter(Mandatory)][string[]]$Arguments)
+    & py '-3.12' @Arguments
+    if ($LASTEXITCODE -ne 0) { throw "Python 3.12 ist mit Exit-Code $LASTEXITCODE fehlgeschlagen." }
+}
+
+function Get-PipJson {
+    param([Parameter(Mandatory)][string[]]$Arguments)
+    $output = @(& py '-3.12' -m pip @Arguments)
+    if ($LASTEXITCODE -ne 0) { throw "Die Pip-Abfrage ist fehlgeschlagen: $($Arguments -join ' ')" }
+    try { return @((($output -join [Environment]::NewLine) | ConvertFrom-Json)) }
+    catch { throw "Die JSON-Ausgabe von Pip konnte nicht gelesen werden: $($_.Exception.Message)" }
+}
+
+function Test-PipDependencies {
+    $output = @(& py '-3.12' -m pip check 2>&1)
+    $exitCode = $LASTEXITCODE
+    if ($output.Count -gt 0) { $output | ForEach-Object { Write-Host $_ } }
+    if (($exitCode -ne 0) -or ($output -match 'Ignoring invalid distribution')) {
+        throw 'Die globale Python-3.12-Umgebung ist vor der Änderung nicht konsistent.'
     }
 }
 
-# NLTK Daten herunterladen (für TruthfulQA Tokenisierung)
-Write-Host "  Lade NLTK-Daten (punkt, punkt_tab) ..." -NoNewline
+function Get-RequirementName {
+    param([Parameter(Mandatory)][string]$Requirement)
+    return (($Requirement -replace '\[.*$', '') -replace '[<>=!~].*$', '').Trim().ToLowerInvariant()
+}
+
+function Save-Freeze {
+    param([Parameter(Mandatory)][ValidateSet('before','after')][string]$Phase)
+    $backupDirectory = Join-Path $scriptDir 'pip-backups'
+    New-Item -ItemType Directory -Path $backupDirectory -Force | Out-Null
+    $file = Join-Path $backupDirectory "global-python312-freeze-$Phase-$(Get-Date -Format yyyyMMdd-HHmmss).txt"
+    $freeze = @(& py '-3.12' -m pip freeze)
+    if ($LASTEXITCODE -ne 0) { throw 'pip freeze konnte nicht erstellt werden.' }
+    $freeze | Set-Content -LiteralPath $file -Encoding UTF8
+    Write-Host "Freeze-Sicherung: $file"
+    return $file
+}
+
+Write-Host 'Prüfe Python 3.12 ...'
+Invoke-Python312 -Arguments @('--version')
+Write-Host 'Hinweis: Dieses Legacy-Skript nutzt keine Benchmark-venv und ist standardmäßig nur eine Vorschau.' -ForegroundColor Yellow
+
+Test-PipDependencies
+$installed = @(Get-PipJson -Arguments @('list', '--format=json'))
+$desiredByName = @{}
+foreach ($package in $requestedPackages) { $desiredByName[(Get-RequirementName $package)] = $package }
+$installedNames = @{}
+foreach ($package in $installed) { $installedNames[([string]$package.name).ToLowerInvariant()] = $true }
+
+$transactionLines = @(
+    $installed | Sort-Object -Property name | ForEach-Object {
+        $name = ([string]$_.name).ToLowerInvariant()
+        if ($desiredByName.ContainsKey($name)) { $desiredByName[$name] }
+        else { '{0}=={1}' -f $_.name, $_.version }
+    }
+    foreach ($package in $requestedPackages) {
+        if (-not $installedNames.ContainsKey((Get-RequirementName $package))) { $package }
+    }
+)
+
+$requirementsFile = Join-Path ([System.IO.Path]::GetTempPath()) ("benchmark-legacy-$([guid]::NewGuid()).txt")
 try {
-    & python -c "import nltk; nltk.download('punkt', quiet=True); nltk.download('punkt_tab', quiet=True)" 2>&1 | Out-Null
-    Write-Host " OK"
-} catch {
-    Write-Host " FEHLGESCHLAGEN"
-    Write-Host "  [WARN] NLTK-Daten fehlen. TruthfulQA kann fehlschlagen."
+    $transactionLines | Set-Content -LiteralPath $requirementsFile -Encoding UTF8
+    $pipPlan = @('-m', 'pip', 'install', '--upgrade-strategy', 'only-if-needed', '--requirement', $requirementsFile)
+    $dryRunPlan = [string[]]$pipPlan + '--dry-run'
+    Write-Host 'Prüfe den vollständigen Benchmark-Paketplan mit pip --dry-run ...'
+    Invoke-Python312 -Arguments $dryRunPlan
+
+    if (-not $Apply) {
+        Write-Host 'Nur Vorschau. Wegen des Legacy-Status wird keine Installation ausgeführt.' -ForegroundColor Yellow
+        return
+    }
+
+    Save-Freeze -Phase before | Out-Null
+    Invoke-Python312 -Arguments $pipPlan
+    Test-PipDependencies
+    Invoke-Python312 -Arguments @('-c', "import datasets, langdetect, nltk, numpy, pandas, requests, seaborn")
+    Save-Freeze -Phase after | Out-Null
+
+    Write-Host 'Lade NLTK-Daten (punkt, punkt_tab) ...'
+    Invoke-Python312 -Arguments @('-c', "import sys, nltk; ok = nltk.download('punkt', quiet=True) and nltk.download('punkt_tab', quiet=True); sys.exit(0 if ok else 1)")
+    Write-Host 'Installation abgeschlossen.' -ForegroundColor Green
+} finally {
+    if (Test-Path -LiteralPath $requirementsFile) { Remove-Item -LiteralPath $requirementsFile -Force }
 }
 
-# ─── 4. Benchmark-Daten herunterladen ───
-# DEPRECATED 12.07.2026: download_real_benchmarks.py ist nicht mehr
-# in der aktiven Pipeline. Die simple_evals/ JSONL-Dateien sollten
-# manuell via evalplus / HuggingFace CLI bezogen werden.
-Write-Host "`n[4/4] Benchmark-Datensaetze..."
-Write-Host "  [INFO] download_real_benchmarks.py ist Legacy-only."
-Write-Host "  [INFO] Der aktuelle Runner ist src\run_benchmarks.py."
-if (Test-Path $DownloadScript) {
-    Write-Host "  [INFO] $DownloadScript existiert noch fuer Legacy-Zwecke."
-    Write-Host "  [WARN] Datenformate entsprechen NICHT dem v13-Schema."
+if (Test-Path -LiteralPath $downloadScript -PathType Leaf) {
+    Write-Host "Legacy-Datenskript vorhanden, aber nicht Teil der aktiven Pipeline: $downloadScript"
 }
-
-Write-Host "`n" + "=" * 60
-Write-Host "  Installation abgeschlossen."
-Write-Host "  Starte das Benchmark-Skript mit:"
-Write-Host "    python src\run_benchmarks.py --help"
-Write-Host "    python src\run_benchmarks.py --run-spec <lokale-run-spec.yaml>"
-Write-Host "=" * 60
+Write-Host 'Aktiver Benchmark-Einstiegspunkt: src\run_benchmarks.py'

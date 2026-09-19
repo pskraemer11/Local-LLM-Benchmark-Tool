@@ -20,14 +20,11 @@ from __future__ import annotations
 import csv
 import os
 import sys
-from typing import Any
 
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-import consolidate_results as cr
-from benchmark_config import CAT_WEIGHTS, OVERALL_WEIGHTS, extract_quant_from_key
 from consolidate_results import (
     _align_decimal_cells,
     _auto_delimiter,
@@ -225,6 +222,8 @@ class TestPairedBootstrapCI:
         b = [0.4]
         md, lo, hi = paired_bootstrap_ci(a, b, n_resamples=100)
         assert md != md
+        assert lo != lo
+        assert hi != hi
 
     def test_identical_data_mean_diff_zero(self):
         # If a == b, the paired diff is 0 for every item → mean diff = 0
@@ -673,6 +672,7 @@ class TestCompareTwoQuantsSign:
         # With 500 resamples and 100% sign agreement, lo should be
         # very close to 1.0
         assert lo > 0.9
+        assert hi == pytest.approx(1.0)
 
 
 # ─────────────────────────────────────────────────────────────────────

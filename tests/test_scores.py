@@ -2,7 +2,6 @@ import os
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 import pytest
-from benchmark_config import CAT_WEIGHTS, OVERALL_WEIGHTS
 from consolidate_results import compute_category_scores, _percentile
 
 class TestComputeCategoryScores:

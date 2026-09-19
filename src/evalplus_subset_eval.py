@@ -18,9 +18,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 from collections import Counter, defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
+
+if hasattr(sys, "set_int_max_str_digits"):
+    sys.set_int_max_str_digits(0)
 
 import numpy as np
 
@@ -75,7 +80,7 @@ from evalplus.data.mbpp import mbpp_serialize_inputs
 from evalplus.data.utils import load_solutions
 from evalplus.eval import PASS, estimate_pass_at_k
 from evalplus.eval._special_oracle import MBPP_OUTPUT_NOT_NONE_TASKS
-from evalplus.evaluate import check_correctness, get_groundtruth
+from evalplus.evaluate import get_groundtruth
 
 
 def _load_problems(dataset: str) -> dict[str, dict[str, Any]]:
@@ -139,7 +144,7 @@ def _evaluate_subset(
         subset_problems, subset_hash, tasks_only_output_not_none
     )
 
-    eval_results: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    jobs: list[tuple[str, int, str, str]] = []
     completion_id: Counter[str] = Counter()
     for sample in samples:
         task_id = sample["task_id"]
@@ -150,18 +155,56 @@ def _evaluate_subset(
             if "solution" in sample
             else problems[task_id]["prompt"] + sample["completion"]
         )
-        res = check_correctness(
-            dataset,
-            completion_id[task_id],
-            subset_problems[task_id],
-            solution,
-            expected_output[task_id],
-            base_only=False,
-            fast_check=True,
-            identifier=sample["_identifier"],
-        )
-        eval_results[task_id].append(res)
+        jobs.append((task_id, completion_id[task_id], solution, sample["_identifier"]))
         completion_id[task_id] += 1
+
+    # check_correctness() keeps the actual untrusted execution in its own
+    # process.  Parallelize only the orchestration here; the old loop waited
+    # for every task serially, making a full 164-task run appear stalled.
+    eval_results: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    worker_count = max(1, int(parallel))
+
+    def _evaluate_job(job: tuple[str, int, str, str]) -> tuple[str, dict[str, Any]]:
+        task_id, task_completion_id, solution, identifier = job
+        payload = json.dumps(
+            {
+                "dataset": dataset,
+                "task_id": task_id,
+                "completion_id": task_completion_id,
+                "problem": subset_problems[task_id],
+                "solution": solution,
+                "expected": expected_output[task_id],
+                "identifier": identifier,
+            }
+        )
+        worker = os.path.join(os.path.dirname(__file__), "evalplus_task_worker.py")
+        completed = subprocess.run(
+            [sys.executable, worker],
+            input=payload,
+            capture_output=True,
+            text=True,
+            timeout=int(os.environ.get("EVALPLUS_TASK_TIMEOUT", "180")),
+            encoding="utf-8",
+            errors="replace",
+        )
+        if completed.returncode != 0:
+            raise RuntimeError(completed.stderr[-1000:] or "EvalPlus task worker failed")
+        data = json.loads(completed.stdout)
+        return task_id, {
+            "completion_id": data["completion_id"],
+            "solution": data["solution"],
+            "base": tuple(data["base"]),
+            "plus": tuple(data["plus"]),
+        }
+
+    completed = 0
+    with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="evalplus") as pool:
+        futures = [pool.submit(_evaluate_job, job) for job in jobs]
+        for future in as_completed(futures):
+            task_id, result = future.result()
+            eval_results[task_id].append(result)
+            completed += 1
+            print(f"  [evaluate] {dataset}: {completed}/{len(jobs)}", flush=True)
 
     if not eval_results:
         return None

@@ -11,11 +11,8 @@ from __future__ import annotations
 import json
 import os
 import sys
-import time
 from pathlib import Path
-from unittest.mock import MagicMock
 
-import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
@@ -30,6 +27,7 @@ from assemble_blueprint import (
     format_publishers,
     format_capabilities,
     truncation_from_context,
+    find_config_for_registry_key,
     find_registry_key_for_config,
 )
 
@@ -319,6 +317,21 @@ class TestReadLmsConfigsCaching:
         # Same list object (cached)
         assert r2 is r1
 
+    def test_support_configs_are_not_model_configs(self, tmp_path):
+        cfg_dir = tmp_path / "user-concrete-model-default-config" / "publisher" / "model"
+        cfg_dir.mkdir(parents=True)
+        for name in ("model-Q4_K_M.gguf.json", "model.imatrix.gguf.json"):
+            (cfg_dir / name).write_text(
+                json.dumps({"operation": {"fields": []}, "load": {"fields": []}}),
+                encoding="utf-8",
+            )
+
+        ab._LMS_CONFIGS_CACHE.clear()
+        configs = read_lms_configs(tmp_path / "user-concrete-model-default-config")
+
+        assert [config["file_name"] for config in configs] == ["model-Q4_K_M.gguf.json"]
+        assert configs[0]["quant"] == "q4_k_m"
+
     def test_cache_expires(self, tmp_path, monkeypatch):
         cfg_dir = tmp_path / "user-concrete-model-default-config"
         cfg_dir.mkdir()
@@ -409,6 +422,75 @@ class TestFindRegistryKeyForConfig:
         )
         assert find_registry_key_for_config(self._norm("unsloth/ernie-4.5-21b-a3b-pt"), reg) == {"context_length": 45371}
 
+    def test_publisher_and_quant_are_used_when_config_metadata_is_available(self):
+        reg = self._sorted([
+            "openai/gpt-oss-20b@mxfp4",
+            "unsloth/gpt-oss-20b-GGUF@q8_0",
+        ])
+        config = {
+            "publisher": "openai",
+            "dir_name": "gpt-oss-20b",
+            "file_name": "gpt-oss-20b.json",
+        }
+
+        assert find_registry_key_for_config(self._norm("gpt-oss-20b"), reg, config=config) == (
+            "openai/gpt-oss-20b@mxfp4"
+        )
+
+        config.update(
+            publisher="unsloth",
+            dir_name="gpt-oss-20b-GGUF",
+            file_name="gpt-oss-20b-Q8_0.gguf.json",
+        )
+        assert find_registry_key_for_config(self._norm(config["dir_name"]), reg, config=config) == (
+            "unsloth/gpt-oss-20b-GGUF@q8_0"
+        )
+
+
+class TestFindConfigForRegistryKey:
+    """LM Studio quant markers may be embedded in directory names."""
+
+    def test_qwen36_mini_mtp_config_matches_registry_quant(self):
+        configs = [
+            {
+                "publisher": "tooltd",
+                "dir_name": "Qwen3.6-27B-mini-IQ4-XS-MTP-16GB-VRAM-GGUF",
+                "json_path": Path("qwen.json"),
+            }
+        ]
+        match = find_config_for_registry_key(
+            "tooltd/qwen3.6-27b-mini-xs-mtp-16gb-vram@iq4_xs", configs
+        )
+        assert match == configs[0]
+
+    def test_same_basename_uses_publisher_and_quant(self):
+        configs = [
+            {
+                "publisher": "bartowski",
+                "dir_name": "mistralai_Magistral-Small-2509-GGUF",
+                "file_name": "mistralai_Magistral-Small-2509-IQ4_XS.gguf.json",
+                "json_path": Path("iq4.json"),
+            },
+            {
+                "publisher": "bartowski",
+                "dir_name": "mistralai_Magistral-Small-2509-GGUF",
+                "file_name": "mistralai_Magistral-Small-2509-Q3_K_M.gguf.json",
+                "json_path": Path("q3.json"),
+            },
+            {
+                "publisher": "mradermacher",
+                "dir_name": "Magistral-Small-2509-Vision-i1-GGUF",
+                "file_name": "Magistral-Small-2509-Vision.i1-IQ4_XS.gguf.json",
+                "json_path": Path("other-provider.json"),
+            },
+        ]
+
+        match = find_config_for_registry_key(
+            "bartowski/mistralai-magistral-small-2509@q3_k_m", configs
+        )
+
+        assert match == configs[1]
+
 
 # =========================================================================
 # resolve_template_name / blueprint_features (Blueprint SSOT, Refactor 14.08.)
@@ -464,7 +546,7 @@ class TestBlueprintFeatures:
 
     def test_gemma_template_map_and_parsing(self):
         f = ab.blueprint_features("gemma_reasoning", "gemma4-26b-a4b")
-        assert f["template"] == "gemma4-26b-template_minijinja.jinja"
+        assert f["template"] == "google_gemma-4-26B-A4B-it_chat_template.jinja"
         assert f["reasoning_parsing"]["enabled"] is False
 
     def test_generic_coding_blueprint_has_no_granite_template(self):
@@ -503,7 +585,7 @@ class TestBlueprintFeatures:
 
     def test_gemma_12b_picks_smaller_template(self):
         f = ab.blueprint_features("gemma_reasoning", "gemma-4-12b-it")
-        assert f["template"] == "gemma4_12b_template_minijinja.jinja"
+        assert f["template"] == "google_gemma-4-12B-it-qat-q4_0-chat_template.jinja"
 
     def test_no_features_returns_empty(self):
         assert ab.blueprint_features("reasoning_assistant", "plain-7b") == {}

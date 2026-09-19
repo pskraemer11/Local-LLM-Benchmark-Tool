@@ -209,10 +209,10 @@ def _can_use_structured_output(model_identifier: str | None) -> bool:
     return True
 
 
-SAMPLE_SIZE = 10
+SAMPLE_SIZE = 20
 random.seed()
 
-MAX_TASKS_PER_BENCHMARK = 100
+MAX_TASKS_PER_BENCHMARK = 1000
 
 MAX_TOKENS_GENERAL = 4096
 MAX_TOKENS_MC = 64
@@ -1936,6 +1936,40 @@ def benchmark_model(model_info: Any, tasks: list[dict[str, Any]], task_type: str
                             "output_status": "empty", "entry_point_found": None,
                             "response": None,
                         }
+                except Exception as e:
+                    # Keep unexpected task failures observable in the per-task CSV.
+                    # Letting them escape from a pool worker discards all results
+                    # from the benchmark and makes the failure look like no data.
+                    detail = "".join(traceback.format_exception(type(e), e, e.__traceback__, limit=12))
+                    error(f"Unexpected task failure ({type(e).__name__}: {e})")
+                    result = {
+                        "score": 0.0,
+                        "score_detail": f"Unexpected exception: {type(e).__name__}: {e}",
+                        "error_type": "unexpected_exception",
+                        "error_detail": detail[-8000:],
+                        "latency": 0.0,
+                        "tokens_in": 0, "tokens_out": 0, "tokens_per_sec": 0,
+                        "thinking_tokens": 0,
+                        "truncated": False,
+                        "thinking_anteil": 0,
+                        "output_status": "empty", "entry_point_found": None,
+                        "response": None,
+                    }
+                    break
+            if result is None:
+                result = {
+                    "score": 0.0,
+                    "score_detail": "Task returned no result",
+                    "error_type": "empty_result",
+                    "error_detail": "run_task returned None after retries",
+                    "latency": 0.0,
+                    "tokens_in": 0, "tokens_out": 0, "tokens_per_sec": 0,
+                    "thinking_tokens": 0,
+                    "truncated": False,
+                    "thinking_anteil": 0,
+                    "output_status": "empty", "entry_point_found": None,
+                    "response": None,
+                }
             return result
         finally:
             _progress.step()

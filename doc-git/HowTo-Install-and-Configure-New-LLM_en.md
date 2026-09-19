@@ -8,11 +8,11 @@ This guide reflects the current provider-split architecture in the benchmark sta
 
 ## 1. Resolution model
 
-| Layer | Owns | Examples |
-| --- | --- | --- |
-| GGUF header | Immutable technical facts | `n_layers`, `hidden_dim`, max context, embedded chat template |
-| `model_registry.yaml` | Benchmark policy and neutral runtime settings | reasoning, capabilities, blueprint, truncation, KV policy, template policy |
-| Provider adapter | Provider-specific runtime behavior | LM Studio JSON, TabbyAPI, Unsloth `llama-server.exe` args |
+| Layer                 | Owns                                          | Examples                                                                   |
+| --------------------- | --------------------------------------------- | -------------------------------------------------------------------------- |
+| GGUF header           | Immutable technical facts                     | `n_layers`, `hidden_dim`, max context, embedded chat template              |
+| `model_registry.yaml` | Benchmark policy and neutral runtime settings | reasoning, capabilities, blueprint, truncation, KV policy, sampling, template policy |
+| Provider adapter      | Provider-specific runtime behavior            | LM Studio JSON, TabbyAPI, Unsloth `llama-server.exe` args                  |
 
 Important:
 
@@ -60,18 +60,22 @@ If the model is already known and only needs a partial refresh, the lower-level 
 
 ## 3. What is derived from where
 
-| Field or decision | Source | Notes |
-| --- | --- | --- |
-| `n_layers` | GGUF header | Read automatically from the model file |
-| `hidden_dim` | GGUF header | Read automatically from the model file |
-| `context_length` | GGUF + registry policy | Derived from architecture and runtime policy |
-| `reasoning` / `thinking` | GGUF chat template | No more keyword fallback for the default path |
-| `capabilities` | Registry classification | For example coding, text, vision, audio exclusions |
-| `blueprint` | Registry classification | Derived from reasoning plus capability hints |
-| `truncation` | Registry / context policy | Based on effective context length |
-| `num_parallel` | Fixed policy | No longer a registry field; current policy is 4 for sample sizes >= 10, otherwise 1 |
-| `k_cache` / `v_cache` | Registry policy | Used to derive the runtime settings |
-| `useUnifiedKvCache` | VRAM formula | Derived from model size, KV settings, and available VRAM |
+| Field or decision        | Source                    | Notes                                                    |
+| ------------------------ | ------------------------- | -------------------------------------------------------- |
+| `n_layers`               | GGUF header               | Read automatically from the model file                   |
+| `hidden_dim`             | GGUF header               | Read automatically from the model file                   |
+| `context_length`         | GGUF + registry policy    | Derived from architecture and runtime policy             |
+| `reasoning` / `thinking` | GGUF chat template        | No more keyword fallback for the default path            |
+| `sampling`              | HF card/API + official docs | Accepted only after plausibility, profile and conflict checks |
+| `sampling_research_status` | Onboarding/review       | `confirmed`, `unresolved`, `conflict`, or `not_found`      |
+| `sampling_sources/evidence` | Onboarding/review    | Provenance for accepted or investigated values             |
+| `capabilities`           | Registry classification   | For example coding, text, vision, audio exclusions       |
+| `blueprint`              | Registry classification   | Derived from reasoning plus capability hints             |
+| `truncation`             | Registry / context policy | Based on effective context length                        |
+| `num_parallel`           | Fixed policy              | No longer a registry field;                              |
+|                                                         current policy is 4 for sample sizes >= 10, otherwise 1 |
+| `k_cache` / `v_cache`    | Registry policy           | Used to derive the runtime settings                      |
+| `useUnifiedKvCache`      | VRAM formula              | Derived from model size, KV settings, and available VRAM |
 
 ## 4. Provider-specific behavior
 
@@ -108,6 +112,19 @@ template: gpt-oss-20b-template_unsloth.jinja
 That is the preferred way to pin the template for a model where the embedded GGUF template is not the one we want to benchmark.
 
 Legacy registry `template:` entries should be treated as fallback only.
+
+If LM Studio shows that a model has an embedded Jinja template but its local
+Config JSON is missing `promptTemplate`, repair that runtime artifact explicitly
+from the GGUF:
+
+```powershell
+python src\registry_tool.py sync-template-from-gguf <publisher/model@quant>
+```
+
+The command copies `tokenizer.chat_template` from the matching local GGUF,
+writes only the matching LM Studio Config JSON, and refuses to overwrite an
+already populated template. It does not edit `model_registry.yaml` and is not
+called by `sync` or `pipeline full`.
 
 Blacklisted families such as embed, OCR, vision, audio, RAG, and other non-benchmark model groups are skipped by the registry pipeline.
 
@@ -148,6 +165,7 @@ python src\registry_tool.py compare
 python src\registry_tool.py validate
 python src\registry_tool.py fill-arch
 python src\registry_tool.py fill-reasoning
+python src\registry_tool.py sync-template-from-gguf <publisher/model@quant>
 python src\registry_tool.py rm <model-key> [--delete-files] [--yes]
 ```
 

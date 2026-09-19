@@ -130,7 +130,7 @@ These models hit their native GGUF context limit, not VRAM:
 
 | Model                             | np | UKV    | ctx   | Reason                                                    |
 |-----------------------------------|----|--------|-------|-----------------------------------------------------------|
-| Gemma-4-26B (all 3 variants)      |  4 | *True* | 32768 | no KV quantisation => too large without UKV               |
+| Gemma-4-26B (all 3 variants)      |  4 | *True* | 32768 | KV quantisation symmetr. Q8_0 => too large without UKV    |
 | DeepSeek-Coder-33B                |  4 |  True  | 16384 | before np=1 → after: np=4 with UKV                        |
 | Codestral-22B                     |  4 |  True  | 32768 | UKV required for np=4                                     |
 | DeepSeek-R1-Distill-14B           |  4 |  True  | 49152 | UKV required for np=4                                     |
@@ -157,43 +157,43 @@ These models hit their native GGUF context limit, not VRAM:
 
 Only models with full pipeline run (DS1000 + CoderEval + EvalPlus + LMEval + MathQA + Agentic).
 
-|Rank| Model (best quant.)                         | MoE | VRAM    | Overall | Effiz.   | Coding | Knowl. | Math  | Agentic | Strength                                                        |
-|----|---------------------------------------------|-----|---------|---------|----------|--------|--------|-------|---------|-----------------------------------------------------------------|
-|  1 | Qwen3 Coder 30B A3B Instruct@q3_k_s   | yes |  13.3 | *78%* | 10.3 %p/h | 70% | 73% | *80%* | 80% | NEW overall winner; top Coding/Knowledge/Math; fast (4.5 min) |
-|  2 | Qwen3 30B A3B Instruct 2507 128x1.8B@q3_k_s | yes |  13.3 | *77%* | 11.8 %p/h | 68% | 78% | *80%* | 70% | Top-2; strongest Knowledge (78%); IFEval/HEval+ winners |
-|  3 | Gemma 4 19B A4B Instruct REAP@q4_k_s  | yes |  12.3 | 70% | *50.2 %p/h* | 63% | 72% | *80%* | 63% | Efficiency winner (50.2 %p/h); best runtime (0.8 min) |
-|  4 | Qwen3 Coder REAP 25B A3B I1@q3_k_m    | yes |  12.0 | 70% | 10.5 %p/h | *76%* | 64% | 53% | 65% | Top Coding (76%); fast (4.0 min) |
-|  5 | Qwen3 30B A3B 2507 q2ks Mixed AR@q2_k_s | yes |  10.7 | 70% | 5.9 %p/h | 64% | 67% | 60% | *100%* | Raw Agentic winner (100%); 131K ctx |
-|  6 | Granite 4.1 8B@q8_0                   | no |   7.2 | 70% | 11.8 %p/h | 68% | 64% | 60% | 83% | Best compact (7.2 GB); strong Coding+Agentic |
-|  7 | Granite 4.1 8B@q6_k                   | no |   7.2 | 70% | 1.4 %p/h | 68% | 64% | 60% | 83% | Twin of q8_0; very slow runtime (30.8 min) |
-|  8 | Qwen3 Coder REAP 25B A3B@q3_k_m       | yes |  12.0 | 69% | 10.0 %p/h | 72% | 54% | 69% | *90%* | Top-3 Coding; raw Agentic 90% |
-|  9 | Granite 4.1 30B@q3_k_s                | no |  12.6 | 69% | 3.6 %p/h | 69% | 64% | 60% | 77% | Balanced; slower than 8B |
-| 10 | Devstral Small 2 24B Instruct 2512@q3_k_s | no |  12.2 | 68% | 1.9 %p/h | 68% | 58% | 60% | *90%* | Strong Coding+Agentic; slow (20.9 min) |
-| 11 | GPT-OSS 20B@q8_0                      | yes |  12.1 | 67% | 8.6 %p/h | 57% | 70% | 77% | 68% | Strong Math+Knowledge; fast (83.3 tok/s) |
-| 12 | Gemma 4 26B A4B Instruct UD@iq3_s     | yes |  13.6 | 65% | 1.3 %p/h | 53% | [32%] | *80%* | 75% | High Math; Knowledge distorted [x] |
-| 13 | Mellum2 12B A2.5B Instruct@q4_k_m     | yes |   8.1 | 65% | 6.4 %p/h | 59% | 60% | 70% | 73% | Compact MoE; good efficiency |
-| 14 | Falcon3 10B Instruct@q8_0             | no |  11.0 | 65% | 1.2 %p/h | 62% | 63% | *80%* | 28% | Strong Math; weak Agentic; slow (31.7 min) |
-| 15 | Qwen2.5 Coder 14B Instruct@q5_k_m     | no |  10.5 | 64% | 4.6 %p/h | *81%* | 64% | 60% | 22% | Top Coding (81%); weak Agentic |
-| 16 | Magistral Small 2509@q3_k_m           | no |  11.5 | 64% | 0.6 %p/h | 58% | 49% | 67% | *92%* | Very strong raw Agentic (92%); very slow (67.9 min) |
-| 17 | Qwen2.5 Coder 14B Instruct@q6_k       | no |  12.1 | 64% | 4.8 %p/h | *80%* | 64% | 60% | 22% | Top Coding (80%); weak Agentic |
-| 18 | RNJ-1@q8_0                            | no |   8.8 | 64% | *29.2 %p/h* | 74% | 54% | 60% | 70% | High efficiency (29.2 %p/h); strong Coding+Math |
-| 19 | Gemma 4 26B A4B Instruct I1@iq4_xs    | yes |  13.9 | 64% | 1.3 %p/h | 54% | [32%] | 70% | 83% | Fast (18.5 tok/s); Knowledge distorted [x] |
-| 20 | Qwen2.5 Coder 14B Instruct@q5_0       | no |  10.3 | 64% | 5.0 %p/h | *79%* | 64% | 60% | 22% | Top Coding (79%); weak Agentic |
-| 21 | Google Gemma 4 12B It Qat@q4_0        | no |     – | 63% | 0.9 %p/h | 52% | [31%] | 70% | 82% | Balanced; Knowledge distorted [x]; slow (41.7 min) |
-| 22 | Qwen3 Coder 30B A3B q2ks Mixed AR@q2_k_s | yes |  10.7 | 62% | 7.8 %p/h | 43% | 64% | 60% | 80% | IFEval/Agentic strong; weaker Coding |
-| 23 | Unsloth Gemma 4 12B It Qat@q4_0       | no |   6.9 | 62% | 13.6 %p/h | 58% | [21%] | 70% | 72% | Compact (6.9 GB); fast; Knowledge distorted [x] |
-| 24 | Unsloth Gemma 4 12B It Qat@q4_k_xl    | no |   6.7 | 62% | 1.0 %p/h | 57% | [21%] | 70% | 72% | Compact (6.7 GB); slow runtime; Knowledge [x] |
-| 25 | Bonsai 8B Requantized@q2_k            | no |     – | 61% | 8.6 %p/h | 53% | 59% | 60% | 74% | Solid all-round; balanced |
-| 26 | LFM2 24B A2B MXFP4 MoE                | yes |  13.3 | 60% | *20.1 %p/h* | 56% | 58% | 53% | 68% | High efficiency; fast runtime (1.8 min) |
-| 27 | ERNIE 4.5 21B A3B PT@iq4_nl           | yes |  12.5 | 60% | 8.1 %p/h | 66% | 68% | 53% | 37% | Good Coding+Knowledge; fast (4.4 min) |
-| 28 | Google Gemma 4 26B A4B Instruct@q3_k_s | yes |  13.8 | 60% | 1.0 %p/h | 52% | [0%] | *83%* | 75% | Math winner (83%); Knowledge distorted [x] |
-| 29 | Qwen3.6 27B MTP@iq3_xxs               | yes |  12.2 | 58% | 14.1 %p/h | 36% | [33%] | 60% | *100%* | Raw Agentic winner (100%); weak Coding |
-| 30 | Unsloth Phi 4@q5_k_m                  | no |  10.4 | 57% | 3.2 %p/h | 68% | 31% | *80%* | 60% | Strong Coding+Math; weak IFEval |
-| 31 | ERNIE 4.5 21B A3B PT MXFP4 MoE        | yes |  12.4 | 57% | 6.4 %p/h | 67% | 63% | 50% | 32% | MXFP4 sibling; weaker Math/Agentic |
-| 32 | JanusCoder 14B@q6_k                   | no |  12.1 | 56% | 2.8 %p/h | 58% | 58% | 53% | 42% | Solid all-round coder |
-| 33 | Ministral 3 14B Instruct 2512@q6_k    | no |  12.0 | 56% | 4.3 %p/h | 58% | 57% | 40% | 77% | Solid Coding + Agentic |
-| 34 | Nerdsking Python Coder 7B I@q8_0      | no |   8.1 | 55% | 4.2 %p/h | 69% | 69% | 37% | 18% | Good Coding+Knowledge; weak Agentic |
-| 35 | Qwen3.5 9B@q6_k                       | no |   8.3 | 55% | 4.0 %p/h | 32% | [32%] | 73% | 80% | Strong Math+Agentic; Knowledge distorted [x] |
+|Rank| Model (best quant.)                         | MoE | VRAM  |Overall| Effiz.     | Coding | Knowl. | Math  | Agentic | Strength                                                      |
+|----|---------------------------------------------|-----|-------|-------|------------|--------|--------|-------|---------|---------------------------------------------------------------|
+|  1 | Qwen3 Coder 30B A3B Instruct@q3_k_s         | yes |  13.3 | *78%* |  10.3 %p/h |   70%  |   73%  | *80%* |   80%   | NEW overall winner; top Coding/Knowledge/Math; fast (4.5 min) |
+|  2 | Qwen3 30B A3B Instruct 2507 128x1.8B@q3_k_s | yes |  13.3 | *77%* |  11.8 %p/h |   68%  |   78%  | *80%* |   70%   | Top-2; strongest Knowledge (78%); IFEval/HEval+ winners       |
+|  3 | Gemma 4 19B A4B Instruct REAP@q4_k_s        | yes |  12.3 |  70%  | *50.2 %p/h*|   63%  |   72%  | *80%* |   63%   | Efficiency winner (50.2 %p/h); best runtime (0.8 min)         |
+|  4 | Qwen3 Coder REAP 25B A3B I1@q3_k_m          | yes |  12.0 |  70%  |  10.5 %p/h |  *76%* |   64%  |  53%  |   65%   | Top Coding (76%); fast (4.0 min)                              |
+|  5 | Qwen3 30B A3B 2507 q2ks Mixed AR@q2_k_s     | yes |  10.7 |  70%  |   5.9 %p/h |   64%  |   67%  |  60%  |  *100%* | Raw Agentic winner (100%); 131K ctx                 |
+|  6 | Granite 4.1 8B@q8_0                         |  no |   7.2 |  70%  |  11.8 %p/h |   68%  |   64%  |  60%  |   83%   | Best compact (7.2 GB); strong Coding+Agentic        |
+|  7 | Granite 4.1 8B@q6_k                         |  no |   7.2 |  70%  |   1.4 %p/h |   68%  |   64%  |  60%  |   83%   | Twin of q8_0; very slow runtime (30.8 min)          |
+|  8 | Qwen3 Coder REAP 25B A3B@q3_k_m             | yes |  12.0 |  69%  |  10.0 %p/h |   72%  |   54%  |  69%  |  *90%*  | Top-3 Coding; raw Agentic 90%                       |
+|  9 | Granite 4.1 30B@q3_k_s                      |  no |  12.6 |  69%  |   3.6 %p/h |   69%  |   64%  |  60%  |   77%   | Balanced; slower than 8B                            |
+| 10 | Devstral Small 2 24B Instruct 2512@q3_k_s   |  no |  12.2 |  68%  |   1.9 %p/h |   68%  |   58%  |  60%  |  *90%*  | Strong Coding+Agentic; slow (20.9 min)              |
+| 11 | GPT-OSS 20B@q8_0                            | yes |  12.1 |  67%  |   8.6 %p/h |   57%  |   70%  |  77%  |   68%   | Strong Math+Knowledge; fast (83.3 tok/s)            |
+| 12 | Gemma 4 26B A4B Instruct UD@iq3_s           | yes |  13.6 |  65%  |   1.3 %p/h |   53%  |  [32%] | *80%* |   75%   | High Math; Knowledge distorted [x]                  |
+| 13 | Mellum2 12B A2.5B Instruct@q4_k_m           | yes |   8.1 |  65%  |   6.4 %p/h |   59%  |   60%  |  70%  |   73%   | Compact MoE; good efficiency                        |
+| 14 | Falcon3 10B Instruct@q8_0                   |  no |  11.0 |  65%  |   1.2 %p/h |   62%  |   63%  | *80%* |   28%   | Strong Math; weak Agentic; slow (31.7 min)          |
+| 15 | Qwen2.5 Coder 14B Instruct@q5_k_m           |  no |  10.5 |  64%  |   4.6 %p/h |  *81%* |   64%  |  60%  |   22%   | Top Coding (81%); weak Agentic                      |
+| 16 | Magistral Small 2509@q3_k_m                 |  no |  11.5 |  64%  |   0.6 %p/h |   58%  |   49%  |  67%  |  *92%*  | Very strong raw Agentic (92%); very slow (67.9 min) |
+| 17 | Qwen2.5 Coder 14B Instruct@q6_k             |  no |  12.1 |  64%  |   4.8 %p/h |  *80%* |   64%  |  60%  |   22%   | Top Coding (80%); weak Agentic                      |
+| 18 | RNJ-1@q8_0                                  |  no |   8.8 |  64%  | *29.2 %p/h*|   74%  |   54%  |  60%  |   70%   | High efficiency (29.2 %p/h); strong Coding+Math     |
+| 19 | Gemma 4 26B A4B Instruct I1@iq4_xs          | yes |  13.9 |  64%  |   1.3 %p/h |    54% |  [32%] |  70%  |   83%   | Fast (18.5 tok/s); Knowledge distorted [x]          |
+| 20 | Qwen2.5 Coder 14B Instruct@q5_0             |  no |  10.3 |  64%  |   5.0 %p/h |  *79%* |   64%  |  60%  |   22%   | Top Coding (79%); weak Agentic                      |
+| 21 | Google Gemma 4 12B It Qat@q4_0              |  no |     – |  63%  |   0.9 %p/h |   52%  |  [31%] |  70%  |   82%   | Balanced; Knowledge distorted [x]; slow (41.7 min)  |
+| 22 | Qwen3 Coder 30B A3B q2ks Mixed AR@q2_k_s    | yes |  10.7 |  62%  |   7.8 %p/h |   43%  |   64%  |  60%  |   80%   | IFEval/Agentic strong; weaker Coding                |
+| 23 | Unsloth Gemma 4 12B It Qat@q4_0             |  no |   6.9 |  62%  |  13.6 %p/h |   58%  |  [21%] |  70%  |   72%   | Compact (6.9 GB); fast; Knowledge distorted [x]     |
+| 24 | Unsloth Gemma 4 12B It Qat@q4_k_xl          |  no |   6.7 |  62%  |   1.0 %p/h |   57%  |  [21%] |  70%  |   72%   | Compact (6.7 GB); slow runtime; Knowledge [x]       |
+| 25 | Bonsai 8B Requantized@q2_k                  |  no |     – |  61%  |   8.6 %p/h |   53%  |   59%  |  60%  |   74%   | Solid all-round; balanced                           |
+| 26 | LFM2 24B A2B MXFP4 MoE                      | yes |  13.3 |  60%  | *20.1 %p/h*|   56%  |   58%  |  53%  |   68%   | High efficiency; fast runtime (1.8 min)             |
+| 27 | ERNIE 4.5 21B A3B PT@iq4_nl                 | yes |  12.5 |  60%  |   8.1 %p/h |   66%  |   68%  |  53%  |   37%   | Good Coding+Knowledge; fast (4.4 min)               |
+| 28 | Google Gemma 4 26B A4B Instruct@q3_k_s      | yes |  13.8 |  60%  |   1.0 %p/h |   52%  |   [0%] | *83%* |   75%   | Math winner (83%); Knowledge distorted [x]          |
+| 29 | Qwen3.6 27B MTP@iq3_xxs                     | yes |  12.2 |  58%  |  14.1 %p/h |   36%  |  [33%] |  60%  | *100%*  | Raw Agentic winner (100%); weak Coding              |
+| 30 | Unsloth Phi 4@q5_k_m                        |  no |  10.4 |  57%  |   3.2 %p/h |   68%  |   31%  | *80%* |   60%   | Strong Coding+Math; weak IFEval                     |
+| 31 | ERNIE 4.5 21B A3B PT MXFP4 MoE              | yes |  12.4 |  57%  |   6.4 %p/h |   67%  |   63%  |  50%  |   32%   | MXFP4 sibling; weaker Math/Agentic                  |
+| 32 | JanusCoder 14B@q6_k                         |  no |  12.1 |  56%  |   2.8 %p/h |   58%  |   58%  |  53%  |   42%   | Solid all-round coder                               |
+| 33 | Ministral 3 14B Instruct 2512@q6_k          |  no |  12.0 |  56%  |   4.3 %p/h |   58%  |   57%  |  40%  |   77%   | Solid Coding + Agentic                              |
+| 34 | Nerdsking Python Coder 7B I@q8_0            |  no |   8.1 |  55%  |   4.2 %p/h |   69%  |   69%  |  37%  |   18%   | Good Coding+Knowledge; weak Agentic                 |
+| 35 | Qwen3.5 9B@q6_k                             |  no |   8.3 |  55%  |   4.0 %p/h |   32%  |  [32%] |  73%  |   80%   | Strong Math+Agentic; Knowledge distorted [x]        |
 
 [x] = HellaSwag/TruthfulQA ≈ 0 (known HS/TQA issue) → Knowledge score distorted.
 Affects 8 models in this table: Gemma-4-26B variants (UD@iq3_s, I1@iq4_xs), Google Gemma 4 26B@q3_k_s, Google Gemma 4 12B Qat@q4_0, Unsloth Gemma 4 12B Qat (q4_0 + q4_k_xl), Qwen3.6 27B MTP@iq3_xxs, Qwen3.5 9B@q6_k.
@@ -297,13 +297,13 @@ All models now load with GPU acceleration. If a model doesn't fit in 16 GB VRAM,
 | Topic                        | Document                                                    |
 |------------------------------|-------------------------------------------------------------|
 | Thinking/Reasoning config    | `thinking-config_en.md`                                     |
-| Parallel slots (np)          | `Parallel-Slots-Optimization_en.md`                        |
+| Parallel slots (np)          | `Parallel-Slots-Optimization_en.md`                         |
 | Model registry (metadata)    | `model_registry.yaml`                                       |
 | Blueprint definitions        | `blueprint_definitions.yaml`                                |
 | Architecture & flow          | `Architecture, Flow & ChangeLog_en.md`                      |
-| How to add new models        | `HowTo-Install-and-Configure-New-LLM_en.md`                |
+| How to add new models        | `HowTo-Install-and-Configure-New-LLM_en.md`                 |
 | A/B: GPT-OSS parallel slots | `A-B-Vergleich 1-2-4 Slots parallel_(GPT-OSS)_20260801_004539.md` |
 | A/B: GLM-Flash thread pool  | `A-B-Vergleich Thread-Pool vs sequenziell_(GLM-4.7-Flash)_20260804_122724.md` |
-| Benchmark datasets           | `Datasets-17-07-2026_en.md`                                |
+| Benchmark datasets           | `Datasets-17-07-2026_en.md`                                 |
 | PandasEval vs CoderEval      | `PandasEval versus CoderEval - Evaluation Guidebook_en.md`  |
 | MMLU-Plus subjects           | `MMLU-Plus-Subject-Classification_en.md`                    |

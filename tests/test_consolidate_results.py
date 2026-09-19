@@ -1,17 +1,14 @@
 import csv
-import json
 import math
 import os
 import sys
-import tempfile
-from unittest.mock import MagicMock, patch
 
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 
 import consolidate_results as cr
-from benchmark_config import CAT_WEIGHTS, OVERALL_WEIGHTS, extract_quant_from_key
+from benchmark_config import CAT_WEIGHTS, OVERALL_WEIGHTS
 from consolidate_results import (
     _auto_delimiter,
     _find_newest_by_mtime,
@@ -102,7 +99,7 @@ class TestComputeCategoryScores:
     def _all_categories_with_data(self):
         # one value per benchmark across all 4 categories, weighted
         out = {}
-        for cat, bench_weights in CAT_WEIGHTS.items():
+        for bench_weights in CAT_WEIGHTS.values():
             for b in bench_weights:
                 out[b] = 1.0
         return out
@@ -322,6 +319,8 @@ class TestPairedBootstrapCI:
         scores = [0.3, 0.5, 0.7, 0.4, 0.6]
         mean_diff, lo, hi = paired_bootstrap_ci(scores, scores, n_resamples=500, seed=42)
         assert mean_diff == pytest.approx(0.0)
+        assert lo == pytest.approx(0.0)
+        assert hi == pytest.approx(0.0)
 
 
 # ======================================================================
