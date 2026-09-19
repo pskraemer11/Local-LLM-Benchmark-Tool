@@ -872,3 +872,30 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 - `.githooks/pre_push.ps1`, `pre_review_checks.ps1`: isolierter pytest-Aufruf und Gate-Ausführung.
 - `.githooks/pre_commit.ps1`, `pyproject.toml`, `tests/conftest.py`: per-run Temp-Umgebung ohne geteilte Cache-/Temp-Umleitung.
 - `.github/workflows/ci.yml`, `.github/workflows/review.yml`, `.gitignore`: CI-Dokumentation und Ignorieren generierter pytest-Artefakte.
+
+=============== Compaction 19.09.2026 / 21:33 ================
+## Objective
+- (Current) README und Architektur-Dokumentation als verständliche Einstiegs- und Workflow-Dokumente strukturieren.
+- (Completed) Datenhoheit, Modell-Onboarding, Registry-Pipeline und Benchmark-Ausführung aus Nutzersicht neu beschrieben.
+
+## Important Details
+- **Decision:** Die beiden zentralen PowerShell-Einstiegspunkte werden ausdrücklich getrennt: `registry_tool.py` bereitet Registry und Prompt-Policy vor; `run_benchmarks.py` führt die Benchmarks aus.
+- **Pipeline distinction:** `status` ist read-only; `sync` pflegt die Registry; `pipeline sync` ergänzt Vergleich und Klassifikation; `pipeline full` ergänzt Preview und Validierung, schreibt aber keine LM-Studio-Config-JSONs.
+- **Data model:** `publisher/model@quant`, Registry als Benchmark-SSOT, GGUF als technische Quelle und LM-Studio-JSONs als backend-lokale Runtime-Artefakte.
+
+## Work State
+### Completed / Active / Blocked
+- Completed: README und `doc-git/Architecture, Flow & ChangeLog_en.md` vollständig auf Nutzerworkflow, Datenstruktur, Sampling-Onboarding, Provider, Ergebnisse und Prüfungen ausgerichtet.
+- Verification: CLI-Hilfe für beide Programme, zentrale Dokumentbegriffe und `git diff --check` geprüft.
+- Active: Dokumentationsänderung für fokussierten Commit vorbereitet.
+- Blocked: Keine technische Blockade.
+
+## Next Move
+1. Nur die beiden Dokumente sowie diesen Compaction-/Changelog-Nachweis committen.
+2. Pre-Commit- und Pre-Push-Hooks ausführen.
+3. Nach erfolgreichem Push den Remote-Stand verifizieren.
+
+## Relevant Files
+- `README.md`: Einsteigerorientierter Setup-, Registry- und Benchmark-Workflow.
+- `doc-git/Architecture, Flow & ChangeLog_en.md`: Datenhoheit, Kontrollfluss, Pipeline-Semantik und Architektur.
+- `CHANGELOG.md`: Eintrag `User-facing Workflow Documentation` für diesen Vorgang.

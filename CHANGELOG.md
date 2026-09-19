@@ -437,3 +437,9 @@ Die Hooks erzeugen CHANGELOG-Eintraege nicht automatisch; dieser Eintrag dokumen
 | 19.09. | `.githooks/pre_push.ps1`, `pre_review_checks.ps1` | **FIX:** pytest verwendet pro Lauf ein eigenes OS-Tempverzeichnis; das Review-Gate vermeidet die gemeinsam genutzte Workspace-Tempumgebung. Siehe Compaction 19.09.2026 / 16:45. |
 | 19.09. | `pyproject.toml`, `tests/conftest.py`, `.githooks/pre_commit.ps1` | **TEST:** Gemeinsamer pytest-Cache und globale Temp-Umleitung entfernt; Commit-Prüfungen laufen isoliert. Siehe Compaction 19.09.2026 / 16:45. |
 | 19.09. | `.github/workflows/ci.yml`, `.github/workflows/review.yml`, `.gitignore` | **CI:** Isolierte pytest-Ausführung und generierte Temp-Artefakte dokumentiert bzw. ignoriert. Siehe Compaction 19.09.2026 / 16:45. |
+
+## User-facing Workflow Documentation (19.09.2026)
+| Date   | File | Change |
+|--------|------|--------|
+| 19.09. | `README.md` | **DOC:** Einsteigerorientierten Ablauf von LM-Studio-Modellaufnahme über Registry-Sync bis Benchmark- und Ergebnisprüfung neu strukturiert. |
+| 19.09. | `doc-git/Architecture, Flow & ChangeLog_en.md` | **DOC:** Datenhoheit, Modellidentität, Sampling-Onboarding, Provider-/Benchmark-Fluss und die Unterschiede zwischen `status`, `sync`, `pipeline sync` und `pipeline full` vollständig neu beschrieben. Siehe Compaction 19.09.2026 / 21:33. |
