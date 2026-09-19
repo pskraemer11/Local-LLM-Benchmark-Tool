@@ -730,3 +730,120 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 - `src/model_manager.py`: Provider-spezifische API-Basisauflösung mit Rückwärtskompatibilität.
 - `tests/test_provider_architecture.py`: Regressionstest für die neuen Endpunkt-Aliase.
 - `README.md`: Bedienung und Provider-Endpunkte.
+
+=============== Compaction 21.08.2026 / 01:06 ================
+## Objective
+- (Current) Eine belastbare Referenz vor der Security-Haertung herstellen, damit spaetere Score-Verluste der Allowlist/Worker-Haertung messbar sind.
+- (Completed) Den ungueltigen DS1000-Baseline-Lauf diagnostiziert, die fehlende lokale Harness-Quelle ergaenzt und den korrigierten Lauf mit vier Modellen und SampleSize 30 abgeschlossen.
+
+## Important Details
+- **User intent:** Die Baseline darf vor der Security-Haertung liegen, aber keinen unabhaengigen DS1000-Ausgabe-/Ausfuehrungsfehler enthalten. Nullwerte oder fehlende Ergebniszeilen sind keine Referenz.
+- **Root cause:** Im isolierten alten Baseline-Worktree fehlte `ds1000_official/execution.py`; der ungehaertete DS1000-Pfad scheiterte deshalb mit `ModuleNotFoundError: No module named 'execution'`.
+- **Correction:** Die lokale `ds1000_official`-Quelle wurde per Junction in den Baseline-Worktree eingebunden. Die temporaere task-lokale Fehlerprotokollierung stellte zudem sicher, dass Fehlerzeilen erhalten bleiben; die Security-Haertung blieb fuer die Referenz ausgeschlossen.
+- **Evidence:** Der korrigierte Lauf schrieb fuer jedes Modell 30 DS1000-Aufgaben ohne unerwartete Task-Fehler. Ergebnisse: Phi 4 66,7 %, Qwen3 Coder 66,7 %, Gemma 4 66,7 %, Granite 4.1 60,0 %. CoderEval: 75,0 %, 75,0 %, 66,7 %, 75,0 %.
+- **Limitation:** Das lokale `simple_evals/codereval_selfcontained.jsonl` enthaelt nur 12 CoderEval-Aufgaben. `--sample-size 30` kann dort nicht mehr als 12 Aufgaben ausfuehren. Das ist eine Daten-/Benchmark-Grenze, kein Laufzeitfehler.
+- **Decision:** DS1000-S30 ist jetzt die gueltige Vergleichsreferenz. CoderEval bleibt ein 12-Aufgaben-Kompatibilitaets-Smoke-Test; fuer eine groessere Coding-Stichprobe muss ein anderes lokales Set wie HumanEval+/MBPP+ verwendet oder der offizielle CoderEval-Datensatz samt Projektabhaengigkeiten ohne Docker adaptiert werden.
+
+## Work State
+### Completed / Active / Blocked
+- Completed: Korrigierter Baseline-Lauf und Report `ergebnisse/baseline_security_compat_s30_20260820.md` aktualisiert; die acht Task-CSV-Artefakte und Modellzusammenfassungen liegen in `ergebnisse/`.
+- Active: Weitere Hardening-Vergleiche muessen gegen genau diese korrigierte Referenz laufen.
+- Blocked: Eine statistisch groessere CoderEval-S30-Referenz ist mit dem lokalen 12-Aufgaben-Datensatz nicht moeglich.
+
+## Next Move
+1. Fuer Security-Kompatibilitaet DS1000-S30 gegen die korrigierte Baseline vergleichen.
+2. Fuer Coding-Scores ein groesseres, klar anders benanntes Referenzset ausfuehren oder zuerst den offiziellen CoderEval-Datensatz adaptieren.
+3. Beim Vergleich Security-bedingte Ablehnungen (`os`, `re`, `textwrap`, `lxml`) getrennt von Modellfehlern ausweisen.
+
+## Relevant Files
+- `ergebnisse/baseline_security_compat_s30_20260820.md`: Korrigierter Baseline-Bericht und methodische Einschraenkungen.
+- `src/custom_benchmark.py`: Task-lokale Fehler-/Traceback-Erfassung, die auch bei Ausfuehrungsfehlern Ergebniszeilen schreibt.
+- `simple_evals/codereval_selfcontained.jsonl`: Lokale CoderEval-Quelle mit nur 12 Aufgaben.
+- `ds1000_official/`: Benoetigte lokale Harness-Quelle fuer den ungehaerteten DS1000-Baseline-Pfad.
+
+=============== Compaction 21.08.2026 / 15:05 ================
+## Objective
+- (Current) Die ausgewogene Baseline mit DS1000, HumanEval+ und MBPP+ fortsetzen und die EvalPlus-Auswertung unter Windows belastbar und beobachtbar machen.
+- (Completed) Den scheinbar inaktiven Qwen-Lauf untersucht und den ersten fehlerhaften Thread-Parallelisierungsansatz ersetzt.
+
+## Important Details
+- **User intent:** Ein geladener LLM-Prozess ohne CPU-/GPU-Aktivitaet darf nicht als laufende Auswertung missverstanden werden; bei reiner Ergebnispruefung muss wenigstens der Evaluator nachvollziehbar arbeiten.
+- **Root cause:** Der erste Parallelisierungsversuch rief EvalPlus aus ThreadPool-Threads auf, obwohl EvalPlus intern `multiprocessing.Process` verwendet. Unter Windows blieb der Parent praktisch untätig (ca. 2,89 CPU-Sekunden, keine Kindprozesse und keine neuen Ergebniszeilen).
+- **Decision:** EvalPlus-Aufgaben werden nun aus dem Parent heraus als unabhaengige Python-Worker-Subprozesse gestartet. Dadurch werden Threads nicht mehr mit verschachteltem Multiprocessing kombiniert; vier Worker sind im Prozessbaum sichtbar.
+- **Evidence:** Der aktuelle Qwen-HumanEval-Evaluator (PID 1624) hat vier Kinder `evalplus_task_worker.py`, startet aus vorhandenen 164 Modellantworten und erzeugt bisher weder Fehlerausgabe noch Fortschrittszeile. Das ist ein echter Prozessstart, aber noch kein abgeschlossener Task-Nachweis.
+- **Tradeoff:** Die Worker vermeiden den Windows-Deadlock, verursachen aber pro Aufgabe Prozessstart- und Serialisierungskosten. CPU-Leerlauf zwischen einzelnen Aufgaben ist moeglich; dauerhaftes Leerlaufen ohne Workerwechsel waere weiterhin ein Fehlerbild.
+
+## Work State
+### Completed / Active / Blocked
+- Completed: Worker-Modul und Parent-Delegation implementiert; fokussierte Tests (89) bestanden, Ruff und `py_compile` bestanden.
+- Active: Qwen-HumanEval+-Auswertung mit vier Worker-Prozessen laeuft bzw. wird diagnostisch beobachtet.
+- Blocked: Noch kein belastbarer Qwen-HumanEval-Score, solange keine Ergebniszeilen oder ein sauberer Abschluss vorliegen.
+
+## Next Move
+1. Worker- und Parent-Logs sowie Prozesswechsel beobachten; bei fehlendem Fortschritt einen einzelnen Worker-Payload direkt reproduzieren.
+2. Nach erfolgreichem Abschluss das EvalPlus-Ergebnis ins Projekt-`ergebnisse` uebernehmen.
+3. Danach Qwen-MBPP+ und die noch offenen Modelle abarbeiten; die LLM-Inferenz muss dafuer nicht erneut laufen, wenn die JSONL-Antworten vorhanden sind.
+
+## Relevant Files
+- `src/evalplus_subset_eval.py`: Startet pro EvalPlus-Aufgabe einen unabhaengigen Worker und protokolliert Fortschritt.
+- `src/evalplus_task_worker.py`: Fuehrt genau eine EvalPlus-Aufgabe aus und liefert ein JSON-Ergebnis.
+- `tests/test_run_benchmarks.py`: Testet die parallele Worker-Ausfuehrung.
+- `ergebnisse/evalplus_humaneval_qwen_parallel.stdout.log`: Aktueller Qwen-Evaluator-Log.
+- `ergebnisse/evalplus_humaneval_qwen_parallel.stderr.log`: Aktueller Fehlerlog.
+
+=============== Compaction 18.09.2026 / 23:37 ================
+## Objective
+- (Current) Registry-Wartungsbefehle sollen die LM-Studio-JSON-Configs nicht verändern.
+- (Completed) Die Ursache für verschwundene Systemprompts und KV-Cache-Werte wurde gefunden und im Code abgesichert.
+
+## Important Details
+- **Root cause:** `pipeline full` rief `assemble_prompts(preview_only=False)`, `cmd_patch_glm_configs()` und eine nicht-dry-run Missing-Quarantäne auf. Der Assembly-Schreibpfad schrieb komplette JSON-Dateien neu; fehlende `systemPrompt`-Felder wurden nicht ergänzt.
+- **Decision:** `sync` bleibt Config-lesend. `pipeline full` verwendet nur noch Quarantäne-Dry-Run und Prompt-Preview und überspringt den GLM-Config-Patch. Explizite Assembly-/Patch-Kommandos bleiben bewusst schreibend.
+- **Protection:** Beim expliziten Assembly werden vorhandene `load.fields` und unbekannte Felder erhalten; ein fehlendes `llm.prediction.systemPrompt` wird ergänzt. Siehe CHANGELOG.md, Abschnitt `LM-Studio-Config-Schreibschutz`.
+
+## Work State
+### Completed / Active / Blocked
+- Completed: Read-only-Grenze für `pipeline full`, Systemprompt-Ergänzung, Regressionstests.
+- Verification: 170 fokussierte Tests bestanden; Ruff für Produktivdateien und `py_compile` sauber.
+- Active: Bereits veränderte LM-Studio-Configs, insbesondere `mistralai/ministral-3-14b-reasoning.json`, sind noch nicht rekonstruiert.
+- Blocked: Keine belastbare Sicherung für jede beschädigte Config identifiziert.
+
+## Next Move
+1. Verlässliche Backups oder frühere Config-Inhalte für die Wiederherstellung auswählen.
+2. Optional eine separate read-only Config-Differenzprüfung ergänzen.
+3. Die alte schreibende Pipeline-Version nicht erneut ausführen.
+
+## Relevant Files
+- `src/registry_tool.py`: `pipeline full` nutzt Dry-Run/Preview und schreibt keine LM-Studio-Configs.
+- `src/assemble_blueprint.py`: Explizites Assembly bewahrt Load-/Unbekannte Felder und ergänzt fehlende Systemprompts.
+- `tests/test_registry_tool.py`: Regression für Config-Schreibschutz und Feld-Erhaltung.
+
+=============== Compaction 19.09.2026 / 09:34 ================
+## Objective
+- (Current) Sampling-Recherche als einmaligen, reproduzierbaren Registry-Onboarding-Schritt ausführen; Benchmark-Läufe bleiben vollständig lokal.
+- (Completed) Recherche, Statuspersistenz, Base-Model-Auflösung, begrenztes Hersteller-Crawling und manueller Codex-Review-Pfad umgesetzt.
+
+## Important Details
+- **Decision:** `registry_tool.py add/sync` recherchiert neue Modelle einmalig; `confirmed`, `unresolved`, `conflict` und `not_found` werden mit Zeitstempel, URLs und Evidenz gespeichert. Terminale Status werden bei späteren `sync`-Läufen übersprungen; `--refresh-sampling` ist der explizite Neuversuch.
+- **Architecture:** Hugging-Face-Modellkarten werden über API-/`base_model`-Metadaten und alternative Repository-Namen aufgelöst. Offizielle Links werden nur über HTTPS, bekannte Domains und eine begrenzte Seiten-/Tiefenfrontier verfolgt.
+- **Safety:** Sampling-Werte werden nur bei plausibler, profilbewusster und widerspruchsfreier Evidenz übernommen. LM-Studio-JSONs werden nicht geschrieben; die Registry wird nur über `registry_tool` aktualisiert.
+- **Escalation:** `.codex/skills/registry-sampling-review/SKILL.md` unterstützt manuelle Prüfung ungelöster Fälle und schreibt nach Freigabe über `apply_sampling_review`, nicht direkt in YAML.
+- **Evidence:** Live-Auflösung für Qwen3.6, Bonsai, Ministral und Darwin erfolgreich; Registry-Validierung meldete 0 blockierende Probleme.
+
+## Work State
+### Completed / Active / Blocked
+- Completed: 933 Tests bestanden; 136 fokussierte Registry-/Sampling-/Config-Tests bestanden; Ruff, Format, Mypy-Scope und Skill-Validierung grün.
+- Active: Die bestehende, nutzereigene `model_registry.yaml` wurde nach dieser Implementierung nicht durch einen produktiven `sync`-Lauf verändert.
+- Blocked: Keine technische Blockade; der erste produktive `sync`-Lauf schreibt die einmaligen Recherche-Statuswerte in die Registry.
+
+## Next Move
+1. `py -3.12 .\src\registry_tool.py sync` einmalig für die aktuellen Modelle ausführen.
+2. Für verbleibende `unresolved`/`conflict`-Einträge den Review-Skill verwenden.
+3. `--refresh-sampling` nur bei bewusst gewünschter erneuter Web-Recherche einsetzen.
+
+## Relevant Files
+- `src/sampling_research.py`: API-/Base-Model-Auflösung, strukturierte Extraktion, Crawler und Evidenz.
+- `src/registry_tool.py`: Einmal-Status, Refresh-Schalter, Validierung und manueller Schreibpfad.
+- `src/benchmark_config.py`: Lokale Nutzung von Web-/manuell bestätigten Sampling-Profilen.
+- `.codex/skills/registry-sampling-review/SKILL.md`: Manuelle Codex-Eskalation.
+- `doc-git/Planung/registry_sampling.md`: Architektur- und Betriebsdokumentation. Siehe CHANGELOG-Eintrag `Registry Sampling Onboarding`.

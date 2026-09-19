@@ -12,25 +12,34 @@ Thinking is controlled on three levels:
     Populated automatically from GGUF `tokenizer.chat_template` (Source of Truth for architecture) via `registry_tool.py fill-reasoning` (part of the `sync` pipeline).
     Existing values are **never overwritten** (`skipped_has`) — manual corrections persist.
     
-2. **`get_model_config()`** (`benchmark_config.py:495`): Since 06.08 the temperature/top_p come from
-    the **Registry `sampling:` field (SSOT, 13.08.)** or the `MODEL_CATEGORY_SAMPLING` fallback table,
-    then the category/thinking defaults. The LMS JSON-Config supplies only **non-temperature** fields
-    (top_k, min_p, enable_thinking, reasoning_effort). `MODEL_TEMP_OVERRIDES` and the Knowledge-Floor were **removed**
-    (no Python override anymore). Used by both pipelines (custom via `custom_benchmark.py`, lm_eval via `run_benchmarks.py:_get_evaluation_parameters`).
+2. **`get_model_config()`** (`benchmark_config.py`): Temperature/top_p and optional top_k/min_p come from
+    the **Registry `sampling:` field (SSOT)** when present, otherwise from the category/thinking defaults.
+    Web-researched and manually reviewed entries may contain a separate `thinking` profile. LM Studio JSON
+    values remain runtime artifacts; Registry sampling wins for confirmed Registry fields. Used by both
+    pipelines (custom via `custom_benchmark.py`, lm_eval via `run_benchmarks.py:_get_evaluation_parameters`).
     
 3. **`--thinking` CLI flag**: Forces `enable_thinking=True` for models matching `REASONING_PATTERNS`.
 
 ### Priority chain in `get_model_config()` (verified 13.08. against code)
 
 ```
-1. Registry `sampling:` block (model_registry.yaml, SSOT)      (temperature/top_p per category)
-2. MODEL_CATEGORY_SAMPLING fallback table                      (temperature/top_p per category)
-3. BENCHMARK_THINKING_DEFAULTS (0.6/0.95) in --thinking run,   (temperature/top_p)
+1. Registry `sampling:` block (model_registry.yaml, SSOT)      (temperature/top_p/optional top_k/min_p per category)
+2. BENCHMARK_THINKING_DEFAULTS (0.6/0.95) in --thinking run,
    else BENCHMARK_CATEGORY_DEFAULTS[category]
-4. LM Studio JSON-Config (operation.fields)                    (NON-temperature: top_k/min_p/enable_thinking/reasoning_effort)
-5. --thinking flag + REASONING_PATTERNS                        (force enable_thinking=True)
-Result contains _source ("registry-sampling" | "benchmark-table" | "thinking-default" | "category-default") for display.
+3. LM Studio JSON-Config (operation.fields)                    (runtime fallback: top_k/min_p/enable_thinking/reasoning_effort)
+4. --thinking flag + REASONING_PATTERNS                        (force enable_thinking=True)
+Result contains _source ("registry-sampling" | "thinking-default" | "category-default") for display.
 ```
+
+### Sampling research boundary
+
+Sampling web research is performed only during model onboarding by
+`registry_tool.py add/sync`. The search uses Hugging Face cards/API/base-model
+metadata and bounded official documentation links. It stores status, timestamp,
+URLs and evidence in the Registry. Benchmark execution never performs this web
+search. Entries with `confirmed`, `unresolved`, `conflict` or `not_found` status
+are not retried by ordinary `sync`; use `--refresh-sampling` or the manual
+`.codex/skills/registry-sampling-review/SKILL.md` workflow for an explicit retry.
 
 Thinking detection from JSON-Config (`benchmark_config.py:448-462`):
 `enableThinking` > `budgetTokens` (checked + value>0) > `parsing.enabled`.
@@ -137,41 +146,41 @@ For **gpt-oss models**, `reasoning.effort` is used (not `chat_template_kwargs`):
 
 ## Gemma-4 Special Case
 
-- **Registry:** ALL Gemma-4 variants (19B-REAP-I1, 26B I1/REAP, google/unsloth 26B, 12B-QAT)
-  are `reasoning: thinking` — Gemma-4 is a natively reasoning model.
-- Gemma-4 models ignore `enable_thinking=False` via API because `<|channel>thought` is
-  hard-wired in the GGUF-Jinja template.
-- `strip_thinking_tokens()` (`custom_benchmark.py:748-785`) strips the
-  `<|channel>thought\n...<channel|>` sections from the final answer.
-- **No system-prompt override anymore** (the former `"Do NOT use thinking..."` prompt in
-  `generate_answer()` was removed; thinking is handled purely via registry config +
-  post-processing).
+1. **Registry:** ALL Gemma-4 variants (19B-REAP-I1, 26B I1/REAP, google/unsloth 26B, 12B-QAT) are `reasoning: thinking` — Gemma-4 is a natively reasoning model.
+
+2.  Gemma-4 models ignore `enable_thinking=False` via API because `<|channel>thought` is hard-wired in the GGUF-Jinja template.
+
+3. `strip_thinking_tokens()` (`custom_benchmark.py:748-785`) strips the `<|channel>thought\n...<channel|>` sections from the final answer.
+
+4. **No system-prompt override anymore** (the former `"Do NOT use thinking..."` prompt in `generate_answer()` was removed; thinking is handled purely via registry config + post-processing).
 
 
-## Current Patterns — effective `enable_thinking` (JSON-Config / registry, since 05.08.)
+## Current Patterns — effective `enable_thinking` (Registry / Blueprint / runtime fields)
 
-Since v13, `max_tokens` is determined by the **benchmark category** (variant C+, p6):
-**coding**: 2048 | **math**: 4096 | **knowledge**: 2048 | **agentic**: 4096
+Since v13, `max_tokens` is determined by the **benchmark category** (4096 for
+all four current categories; an explicit thinking run uses the thinking default):
+**coding**: 4096 | **math**: 4096 | **knowledge**: 4096 | **agentic**: 4096
 
-The table below documents the **effective** values (source: LMS JSON-Config
-`operation.fields` → `get_model_config()`, plus registry `reasoning` for the
-family default). `MODEL_TEMP_OVERRIDES` no longer exists (removed 05.08.);
-all per-model values now come from the JSON-Config (matches the GUI).
+The table below documents the family-level behavior. Confirmed per-model
+`temperature`/`top_p`/optional `top_k`/`min_p` values come from the Registry
+`sampling:` block. LM Studio JSON-Config fields are local runtime artifacts:
+`get_model_config()` may use them for non-temperature fallback fields, while
+Registry and Blueprint policy remain authoritative for benchmark sampling and
+thinking behavior.
 
 | Pattern                       | enable_thinking | max_tokens | Special Notes                                                                                      |
 |-------------------------------|-----------------|------------|----------------------------------------------------------------------------------------------------|
 | default (category)            |  *False*        |      –     | Category defaults since 2026-07-11                                                                 |
-| qwen3.5                       |   False         |      –     | temp=0.2, top_p=0.9, no_system_msg; installed qwen3.5-9b is `instruct` in registry                 |
-|                                                              |      ... (GGUF variant would be thinking)                                                          |
+| qwen3.5                       |  *True* (reg.)  |      –     | Registry sampling cells differ by category; the installed qwen3.5-9b is `thinking` in the current Registry |
 | qwen3.6 (all)                 |  *True* (reg.)  |      –     | Registry `thinking` wins — no override anymore                                                     |
 | gemma (all)                   |  *True* (reg.)  |      –     | Registry `thinking` wins — no override anymore                                                     |
 | gpt-oss                       |  *True* (reg.)  |    4096    | stop: <\|return\|>, <\|call\|>, reasoning_effort central (GPTOSS_REASONING_EFFORT, default medium) |
-| phi-4                         |  *True* (reg.)  |      –     | unsloth/phi-4 is `thinking` in registry; JSON-Config only sets temp=0.8/top_k=50                   |
-| deepseek-r1-distill           |   False         |      –     | Registry `instruct` (Qwen2.5 base, manually set 04.08.); JSON-Config only temp=0.0                 |
-| deepseek-coder                |   False         |      –     | temp=0.6, min_p=0.02; registry `instruct`                                                          |
+| phi-4                         |  *True* (reg.)  |      –     | unsloth/phi-4 is `thinking` in Registry; confirmed Registry sampling is used for benchmarks         |
+| deepseek-r1-distill           |   False         |      –     | Registry `instruct` (Qwen2.5 base, manually set 04.08.); category fallback applies unless researched |
+| deepseek-coder                |   False         |      –     | Registry sampling or category fallback; Registry `instruct`                                       |
 | kimi                          |   False         |      –     | enable_thinking=True → "Content-only format" error                                                 |
 | rnj                           |  *True* (reg.)  |      –     | THOUGHT:/RESPONSE: parsing format (hub model.yaml)                                                 |
-| magistral/ministral/nemotron  | (reg.)          |      –     | temp=0.7, top_p=0.95                                                                               |
+| magistral/ministral/nemotron  | (reg.)          |      –     | Registry sampling where confirmed; otherwise category/thinking fallback                            |
 
 > `–` in the max_tokens column = category default applies (no override).
 > `(reg.)` = no `enable_thinking` in the JSON-Config; the registry value decides
@@ -271,8 +280,11 @@ Since v13, the thinking parameters are managed centrally in `get_model_config()`
 - `run_benchmarks.py:_get_evaluation_parameters()` (lm_eval pipeline)
 
 This avoids duplicate configuration between the custom pipeline and the lm_eval pipeline.
-Since 05.08. the **LMS JSON-Config is the only source** for generation parameters;
-`MODEL_CONFIG`/`THINKING_CONFIG` in `custom_benchmark.py` is now only a backward-compatible alias for `BENCHMARK_CATEGORY_DEFAULTS`.
+The Registry `sampling:` block is the source for confirmed benchmark sampling;
+`BENCHMARK_CATEGORY_DEFAULTS` and `BENCHMARK_THINKING_DEFAULTS` are fallbacks.
+`MODEL_CONFIG`/`THINKING_CONFIG` in `custom_benchmark.py` is only a
+backward-compatible alias for category defaults. LM Studio JSON-Config values
+are not modified by `sync` or `pipeline full`.
 
 The registry lookup (`reasoning: thinking`) is reflected in the JSON-Config's
 `enableThinking` (via `configs` command); `--thinking` force-overrides it

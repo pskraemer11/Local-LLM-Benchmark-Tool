@@ -399,3 +399,34 @@ Die Hooks erzeugen CHANGELOG-Eintraege nicht automatisch; dieser Eintrag dokumen
 | 20.08. | `src/model_manager.py` | **ENHANCEMENT:** Add `TABBYAPI_API_BASE` and `LMSTUDIO_API_BASE` with `LLM_API_BASE` fallback. |
 | 20.08. | `tests/test_provider_architecture.py` | **TEST:** Cover provider-specific API-base aliases. |
 | 20.08. | `README.md` | **DOC:** Document the shared exllamav3 environment, TabbyAPI test model, and separate provider endpoints. See Compaction 20.08.2026 / 14:20. |
+
+## Corrected Security-Compatibility Baseline (21.08.2026)
+| Date   | File | Change |
+|--------|------|--------|
+| 21.08. | `src/custom_benchmark.py` | **DIAGNOSTIC:** Preserve task-local execution errors and tracebacks so failed benchmark tasks still produce result rows. |
+| 21.08. | `ergebnisse/baseline_security_compat_s30_20260820.md` | **DOC:** Record the corrected pre-hardening DS1000/CoderEval baseline, the missing `ds1000_official` root cause, and the 12-task local CoderEval limit. See Compaction 21.08.2026 / 01:06. |
+| 21.08. | `ergebnisse/tasks_20260821_*`, `ergebnisse/model_20260821_*`, `ergebnisse/modell_20260821_*` | **ARTIFACTS:** Store the four-model corrected baseline task results and summaries for DS1000 and CoderEval. |
+
+## EvalPlus Windows Worker Evaluation (21.08.2026)
+| Date   | File | Change |
+|--------|------|--------|
+| 21.08. | `src/evalplus_subset_eval.py` | **FIX:** Run EvalPlus task checks in independent subprocess workers instead of invoking nested multiprocessing from thread-pool threads. |
+| 21.08. | `src/evalplus_task_worker.py` | **NEW:** JSON stdin/stdout worker for one EvalPlus task. |
+| 21.08. | `tests/test_run_benchmarks.py` | **TEST:** Verify bounded parallel worker execution. |
+
+## LM-Studio-Config-Schreibschutz (18.09.2026)
+| Date   | File | Change |
+|--------|------|--------|
+| 18.09. | `src/registry_tool.py` | **FIX:** `pipeline full` uses quarantine dry-run and prompt preview; it no longer patches or writes LM-Studio JSON configs. |
+| 18.09. | `src/assemble_blueprint.py` | **FIX:** Preserve existing `load.fields`/unknown fields and add a missing `llm.prediction.systemPrompt` during explicit assembly. |
+| 18.09. | `tests/test_registry_tool.py` | **TEST:** Cover the read-only pipeline boundary and preservation of KV/load fields. See Compaction 18.09.2026 / 23:37. |
+
+## Registry Sampling Onboarding (19.09.2026)
+| Date   | File | Change |
+|--------|------|--------|
+| 19.09. | `src/sampling_research.py` | **ENHANCEMENT:** Hugging-Face-API/Base-Model-Auflösung, strukturierte Profil-Extraktion, begrenztes offizielles HTTPS-Crawling, Evidenz und Konfliktprüfung. |
+| 19.09. | `src/registry_tool.py` | **ENHANCEMENT:** Einmalige Sampling-Recherche mit `confirmed`/`unresolved`/`conflict`/`not_found`, Zeitstempel, Quellen, Evidenz und `--refresh-sampling`; keine LM-Studio-Config-Schreibvorgänge. |
+| 19.09. | `src/benchmark_config.py` | **FIX:** Web- und manuell bestätigte Thinking-Profile werden ausschließlich aus der lokalen Registry gelesen. |
+| 19.09. | `src/type_defs.py`, `src/field_owner.py` | **SCHEMA:** Recherche-Status, Zeitstempel und Evidenz als Registry-Felder ergänzt. |
+| 19.09. | `.codex/skills/registry-sampling-review/SKILL.md` | **NEW:** Manuelle Review-Eskalation für ungelöste oder widersprüchliche Quellen über die Registry-API. Siehe Compaction 19.09.2026 / 09:34. |
+| 19.09. | `tests/test_sampling_research.py` | **TEST:** Base-Model-Auflösung, Hersteller-Unterseiten, Statuspersistenz, Einmaligkeit und manueller Schreibpfad. |

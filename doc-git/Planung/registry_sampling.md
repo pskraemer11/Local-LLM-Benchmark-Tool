@@ -158,3 +158,27 @@ Einem Modell recherchierte Sampling-Parameter geben (SSOT = Registry):
 3. Verifizieren: `python src/registry_tool.py validate` (keine neuen Probleme), Tests
    (`python -m pytest tests/test_benchmark_config.py -q`).
 4. Migration-Log-Eintrag ergänzen (`doc-git/Planung/registry_sampling_log.md`).
+
+## H. Onboarding-Recherche und manuelle Eskalation (2026-09-19)
+
+Die Sampling-Recherche ist ein einmaliger Onboarding-Schritt und kein Teil eines
+Benchmark-Laufs. `registry_tool.py add` recherchiert neue Modelle. `sync` prüft
+fehlende Blöcke einmalig und speichert danach den Status `confirmed`, `unresolved`,
+`conflict` oder `not_found` mit Zeitstempel, URLs und Evidenz. Terminale Status
+werden bei späteren `sync`-Aufrufen übersprungen; `--refresh-sampling` ist ein
+bewusster manueller Neuversuch.
+
+Die Recherchekette lautet:
+
+1. direkte Hugging-Face-Modellkarte,
+2. Hugging-Face-API und `base_model`-Kette für Quantizer-/Alias-Repositories,
+3. offizielle Links aus der Modellkarte,
+4. begrenztes HTTPS-Crawling zugelassener Hersteller-Domains,
+5. strukturierte und profilbewusste Extraktion mit Plausibilitäts- und
+   Konfliktprüfung.
+
+Ungelöste oder widersprüchliche Fälle werden nicht geraten. Der projektgebundene
+Codex-Skill `.codex/skills/registry-sampling-review/SKILL.md` dient als manuelle
+Review-Eskalation. Nach Nutzerfreigabe schreibt er über
+`registry_tool.apply_sampling_review(...)`; `model_registry.yaml` wird nicht
+direkt editiert und LM-Studio-Config-JSONs bleiben unverändert.

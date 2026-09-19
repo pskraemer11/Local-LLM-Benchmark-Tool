@@ -403,56 +403,59 @@ for attempt in range(1, MAX_RETRIES + 1):
 
 **Reference:** `run_benchmarks.py:709-754`, `openai_completions.py:189-206` (LocalChatCompletion._create_payload)
 
-### 2.9 Sampling Parameters: Variant C+ (p6, 15.07.2026)
+### 2.9 Sampling Parameters: Registry-first policy and onboarding (19.09.2026)
 
-**Problem:** Previously, sampling parameters (`temperature`, `top_p`, `max_tokens`) were assigned either model-specifically in `THINKING_CONFIG` (43 entries) or via if-else cascade in `_get_lmeval_params()` (7+ branches). This was maintenance-intensive and scientifically questionable: Coding benchmarks run deterministically (`temp=0.0`), while reasoning benchmarks need sampling (`temp=0.6–1.0`).
+**Problem:** Sampling recommendations are model-specific and may differ between
+normal and thinking profiles. Keeping those values only in Python overrides or in
+LM Studio GUI JSONs caused drift and made a newly downloaded model incomplete for
+repeatable benchmarks.
 
-**Solution (Variant C+):** The temperature is now determined by the **benchmark category**, not by the model:
+**Solution:** `doc-git/model_registry.yaml:sampling` is the benchmark SSOT. The
+registry may contain category cells (`coding`, `math`, `knowledge`, `agentic`) and,
+when the source explicitly distinguishes it, a `thinking` profile. Each cell owns
+the validated `temperature`, `top_p` and optional `top_k`/`min_p` values. Category
+and thinking defaults remain fallbacks for entries without a confirmed Registry
+cell; LM Studio JSON values are runtime artifacts and are not used as the source
+for benchmark temperature/top_p.
+
+The values are populated during model onboarding, not during benchmark execution:
 
 ```
-BENCHMARK_CATEGORY_DEFAULTS  (global, 4 entries)
-  ├── "coding":    temp=0.0,  top_p=1.0,   max_tokens=2048, enable_thinking=False
-  ├── "math":      temp=0.7,  top_p=0.95,  max_tokens=8192, enable_thinking=True
-  ├── "knowledge": temp=0.0,  top_p=1.0,   max_tokens=2048, enable_thinking=False
-  └── "agentic":   temp=0.3,  top_p=0.95,  max_tokens=4096, enable_thinking=False
-                          │
-                 MODEL_TEMP_OVERRIDES  (additive merge)
-                          │
-              (e.g. phi-4-reasoning: temp=0.8, top_k=50)
-                          │
-               --thinking flag  (forces enable_thinking)
+registry_tool.py add/sync
+  ├── filter benchmark candidates (OCR and embedding models excluded)
+  ├── inspect HF card/API/base-model metadata
+  ├── follow a bounded set of official HTTPS documentation pages
+  ├── validate coherent sampling groups and record status/source/evidence
+  └── write only the Registry; LM Studio Config-JSONs remain untouched
+                                      │
+                              get_model_config()
+                                      │
+              Registry sampling → thinking/category defaults →
+              LM Studio runtime-only fields (top_k/min_p/thinking metadata)
 ```
 
 **Category Mapping:**
 
-| Pipeline | Benchmarks | Category |
-|----------|------------|----------|
-| Custom | DS1000, CoderEval | `coding` |
-| EvalPlus | HumanEval+, MBPP+ | `coding` |
-| LM-Eval | ARC-Challenge, HellaSwag, TruthfulQA | `knowledge` |
-| LM-Eval | MATH-500 | `math` |
-| LM-Eval | IFEval | `agentic` |
-| Agentic | tool-eval-bench | `agentic` |
+| Pipeline | Benchmarks                           | Category    |
+|----------|--------------------------------------|-------------|
+| Custom   | DS1000, CoderEval                    | `coding`    |
+| EvalPlus | HumanEval+, MBPP+                    | `coding`    |
+| LM-Eval  | ARC-Challenge, HellaSwag, TruthfulQA | `knowledge` |
+| LM-Eval  | MATH-500                             | `math`      |
+| LM-Eval  | IFEval                               | `agentic`   |
+| Agentic  | tool-eval-bench                      | `agentic`   |
 
-**Model overrides** (only when manufacturer recommendation differs from category default):
-
-| Pattern | Overrides | Reason |
-|---------|----------|--------|
-| `phi-4-reasoning` | temp=0.8, top_k=50 | Model Card: "do_sample=True for all tasks" |
-| `gpt-oss` | temp=1.0, top_k=0, stop/Harmony | Harmony format requires sampling |
-| `magistral` | temp=0.7 | Mistral recommendation |
-| `ministral` | temp=0.7 | Mistral recommendation |
-| `nemotron` | temp=0.7 | [THINK]-token-based reasoning |
-| `apriel` | temp=0.6 | [BEGIN FINAL RESPONSE] format |
-| `deepseek` | temp=0.6, min_p=0.02 | Reasoning needs moderate temp |
-| `qwen3.6` | enable_thinking=False | Thinking tokens block token budget |
-| `qwen3.5` | temp=0.2, no_system_msg | System-less prompt embedding |
-| `gemma` | enable_thinking=False | Thinking disrupts coding benchmarks |
+Historical model-specific override tables are retained only in the changelog as
+history. They are no longer a runtime source; new evidence belongs in the matched
+Registry entry and is traceable through `sampling_sources` and `sampling_evidence`.
 
 **Merge order** (higher wins):
-1. `BENCHMARK_CATEGORY_DEFAULTS[category]` – global default
-2. `MODEL_TEMP_OVERRIDES[pattern]` – model override (additive, via substring match)
-3. `--thinking` CLI flag – forces `enable_thinking=True` for reasoning models
+1. Confirmed Registry sampling cell for the model/category/profile.
+2. `BENCHMARK_THINKING_DEFAULTS` for an explicit thinking run, otherwise
+   `BENCHMARK_CATEGORY_DEFAULTS[category]`.
+3. LM Studio JSON runtime-only fields (`top_k`, `min_p`, reasoning metadata).
+4. Blueprint category policy and an explicit `--thinking` force for applicable
+   reasoning models.
 
 **Implementation:**
 - `src/benchmark_config.py`: `get_model_config(model_key, category, thinking)` – single merge function
@@ -621,23 +624,27 @@ the model stays loaded – useful for many small benchmarks, but risky for model
 
 **`src/registry_tool.py`** consolidates three previously separate code locations for registry and JSON config maintenance:
 
-| Command | Origin | Function |
-|---------|--------|----------|
-| `compare` | Previously embedded Python in `sync_model_configs.ps1` | Compare Registry vs LMS vs JSON configs |
-| `add` | Previously embedded Python in `sync_model_configs.ps1` | Add new LMS models to registry (canonical Key = `publisher/model-name`), **reads n_layers/hidden_dim automatically from GGUF header**. **24.07.:** interactive prompt question when GGUF is missing (`[i]nstruct/[t]hinking/[n]one`). **03.08. (F1):** `_is_support_file()` check centralized in `benchmark_config.py` – MTP drafter (`mtp-*` files, `MTP/` folder, `-assistant` architecture) and `mmproj*` are skipped (also in `_resolve_model_path_multi`) |
-| `configs` | Previously embedded Python in `sync_model_configs.ps1` | Write `load.fields` (offloadRatio, numParallelSessions, useUnifiedKvCache) to JSON configs. **useUnifiedKvCache decision via VRAM formula** (see below) |
-| `fix-np` | **NEW 17.07.** | **DEPRECATED seit 13.08.:** np ist feste Policy (SS≥10→4, sonst 1), kein Registry-Feld – Stub zeigt nur Info, schreibt nichts |
-| `fix-ctx` | **NEW 17.07.** | Re-calculate `context_length` for ALL entries based on np policy (=4)/KV-quant values |
-| `sync-ctx` | `sync_context_length.py` | Adopt `context_length` from JSON configs into Registry |
-| `sync-from-configs` | **NEW 17.07.** | Melde-Modus: offload, useUnifiedKvCache **aus JSON configs** reporten (skips context_length to preserve native model limit; schreibt nichts) |
-| `fill-ctx` | `fmt_registry.py` | Fill missing `context_length` in the registry (size-based formula) |
-| `fill-size` | **NEW 15.07.** | Fill `file_size_bytes` from LMS cache for registry entries without size |
-| `fill-arch` | **NEW 17.07.** | Write `n_layers`/`hidden_dim` from **local GGUF files** (header reader, ~1ms/file) into registry |
-| `fill-reasoning` | **NEW 21.07., extended 24.07.** | Fill missing `reasoning` field in registry from GGUF chat_template (`_detect_reasoning_from_template()` with Regex instead of substring) |
-| `migrate-keys` | **NEW 15.07.** | Migrate entries without publisher prefix to `publisher/model-name` (119 keys migrated) |
-| `fmt` | `fmt_registry.py` | Normalize blank lines (none within, one between entries) |
-| **`validate`** | **NEW 24.07.** | **7 Checks:** template file exists, Config JSON promptTemplate set, override_overlap, missing_reasoning/capabilities/blueprint, registry_no_config, orphan_override, reasoning_arch_mismatch |
-| `sync` | All of the above | **24.07.:** add → fill-arch → fill-reasoning → configs → sync-from-configs → sync-ctx → fill-ctx → fmt → **classify** → **assemble** → **validate** |
+| Command            | Origin                            | Function                                                                                                                                     |
+|--------------------|-----------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------|
+| `compare`          | Prev. embed. Python in `sync_model_configs.ps1` | Compare Registry vs LMS vs JSON configs                                                                                        |
+| `add`              |          - dito -                 | Add new LMS models to registry (canonical Key = `publisher/model-name`), **reads n_layers/hidden_dim automatically from GGUF header**.       |
+|                                                        |   **24.07.:** interactive prompt question when GGUF is missing (`[i]nstruct/[t]hinking/[n]one`).                                             |
+|                                                        |   **03.08. (F1):** `_is_support_file()` check centralized in `benchmark_config.py` - MTP drafter                                             |
+                                                             (`mtp-*` files, `MTP/` folder, `-assistant` architecture) and `mmproj*` are skipped (also in `_resolve_model_path_multi`)                  |
+| `configs`          |          - dito -                 | Write `load.fields` (offloadRatio, numParallelSessions, useUnifiedKvCache) to JSON configs.                                                  |
+|                                                        |      **useUnifiedKvCache decision via VRAM formula** (see below)                                                                             |
+| `fix-np`           | **NEW 17.07.**                    | **DEPRECATED seit 13.08.:** np ist feste Policy (SS≥10→4, sonst 1), kein Registry-Feld – Stub zeigt nur Info, schreibt nichts                |
+| `fix-ctx`          | **NEW 17.07.**                    | Re-calculate `context_length` for ALL entries based on np policy (=4)/KV-quant values                                                        |
+| `sync-from-configs`| **NEW 17.07.**                    | JSON -> Registry: offload, useUnifiedKvCache, context_length und KV-cache quantization; report-only ohne `--write` |
+| `fill-ctx`         | `fmt_registry.py`                 | Fill missing `context_length` in the registry (size-based formula)                                                                           |
+| `fill-size`        | **NEW 15.07.**                    | Fill `file_size_bytes` from LMS cache for registry entries without size                                                                      |
+| `fill-arch`        | **NEW 17.07.**                    | Write `n_layers`/`hidden_dim` from **local GGUF files** (header reader, ~1ms/file) into registry                                             |
+| `fill-reasoning`   | **NEW 21.07., extended 24.07.**   | Fill missing `reasoning` field in registry from GGUF chat_template (`_detect_reasoning_from_template()` with Regex instead of substring)     |
+| `migrate-keys`     | **NEW 15.07.**                    | Migrate entries without publisher prefix to `publisher/model-name` (119 keys migrated)                                                       |
+| `fmt`              | `fmt_registry.py`                 | Normalize blank lines (none within, one between entries)                                                                                     |
+| **`validate`**     | **NEW 24.07.**                    | Template/config/Registry consistency, sampling schema/status, missing reasoning/capabilities/blueprint, and drift checks. |
+|                                                        |               registry_no_config, orphan_override, reasoning_arch_mismatch                                                                   |
+| `sync`             | All of the above                  | Add new LMS models, perform one-time web sampling onboarding, fill GGUF/Registry metadata, report config drift, and format Registry. |
 
 **The one command for everything** (after a new model or changes):
 ```bash
@@ -647,46 +654,59 @@ python src/registry_tool.py sync
 `python -m src.registry_tool sync` (sys.path bootstrap in `run_benchmarks.py`, `custom_benchmark.py`,
 `consolidate_results.py`, `registry_tool.py`).
 This command automatically invokes:
-1. `add` – new models from LMS
-2. `fill-arch` – n_layers/hidden_dim/reasoning from GGUF
-3. `fill-reasoning` – reasoning from GGUF chat_template
-4. `configs` – load.fields into JSON configs
-5. `sync-from-configs` – JSON→Registry
-6. `sync-ctx` – context_length from JSON
-7. `fill-ctx` – default context_length
-8. `fmt` – blank lines
-9. **`classify_registry()`** – set reasoning, capabilities, blueprint, truncation
-10. **`assemble_prompts()`** – write prompt into JSON configs
-11. **`validate_prompts()`** – syntax check
+1. `add` – new benchmark-candidate models from LMS; OCR and embedding models are filtered out
+2. Sampling onboarding – Hugging Face card/API/base-model resolution plus bounded official HTTPS documentation search; results are stored with status, sources, timestamp and evidence
+3. `fill-arch` – n_layers/hidden_dim from GGUF
+4. `fill-reasoning` – reasoning from GGUF chat_template
+5. `sync-from-gguf` – immutable GGUF architecture/header corrections
+6. `sync-from-configs` – report GUI load/context/KV drift; no Config-JSON write by default
+7. `fill-quant` and `fmt` – quant suffixes and Registry formatting
+
+`sync` does not perform web research during benchmark execution. Entries with a
+terminal sampling status are skipped on later runs. Use
+`python src/registry_tool.py sync --refresh-sampling` only for an explicit
+renewed attempt. `pipeline full` adds classification, prompt preview and
+validation, but remains read-only for LM-Studio Config-JSONs.
 
 **Further invocations:**
 ```bash
-python src/registry_tool.py validate      # 7 checks (see above)
+python src/registry_tool.py validate      # consistency, sampling/status and drift checks
 python src/registry_tool.py compare       # Report only
 python src/registry_tool.py add <file>    # New models from JSON file
 python src/registry_tool.py configs       # Write load.fields only
-python src/registry_tool.py sync-ctx      # Sync context_length only
+python src/registry_tool.py sync-from-configs --write  # GUI load settings + context + KV quantization
+python src/registry_tool.py pipeline full --refresh-sampling  # explicit sampling refresh + full preview/validation
 ```
 
-**`sync_model_configs.ps1`** was converted to `src/registry_tool.py` (no more embedded Python). The old scripts `sync_context_length.py` and `fmt_registry.py` are thin wrappers that delegate to `src/registry_tool.py`. **`fmt_registry.py` was removed** (function duplicated in `registry_tool._format_blank_lines()`).
+**`sync_model_configs.ps1`** was converted to `src/registry_tool.py` (no more embedded Python). The old scripts `sync_context_length.py` and `fmt_registry.py` are thin wrappers
+that delegate to `src/registry_tool.py`.
+**`fmt_registry.py` was removed** (function duplicated in `registry_tool._format_blank_lines()`).
 
 ### model_registry.yaml – Fields
 
-| Field | Type | Default | Set By | Description |
-|-------|------|---------|--------|-------------|
-| `offload` | int (0-1) | 1 | `add` / registry manual | GPU offload ratio (1 = full GPU offload) |
-| `k_cache` | str | `q8_0` | registry manual | KV cache quantization (K) – Gemma-4/GPT-OSS: `f16` |
-| `v_cache` | str | `iq4_nl` | registry manual | KV cache quantization (V) – Gemma-4/GPT-OSS: `f16` |
-| `file_size_bytes` | int | – | `add` / `fill-size` | GGUF file size (for context_length formula + useUnifiedKvCache formula) |
-| `context_length` | int | Formula-based | `fill-ctx` / `sync-ctx` | Calculated from `file_size_bytes`, np policy (=4), KV quant (default 16384 when size missing) |
-| `useUnifiedKvCache` | bool | VRAM formula | `configs` | Written to JSON config via `configs` (not permanently in Registry) |
-| `n_layers` | int | – | `add` / `fill-arch` | Number of transformer layers (from GGUF header `block_count`) |
-| `hidden_dim` | int | – | `add` / `fill-arch` | Embedding dimension (from GGUF header `embedding_length`) |
-| `reasoning` | str | – | `add` / `fill-reasoning` | `thinking` (model has reasoning/thinking capability) or `instruct` (no reasoning). Read from GGUF `tokenizer.chat_template` via `_detect_reasoning_from_template()` (Regex) |
-| `capabilities` | str | – | `classify_registry()` | Comma-separated: `text`, `coding`, `vision`, `audio`, `agentic`. Auto-detected via name + arch + notes |
-| `blueprint` | str | – | `classify_registry()` | Prompt blueprint name (e.g. `default_chat`, `coding_agent`, `reasoning_assistant`). From `reasoning` + `capabilities` |
-| `truncation` | str | – | `classify_registry()` | `full` / `medium` / `minimal` (depending on context_length) |
-| `custom_template` | bool | – | `classify_registry()` | `True` if YAML `template:` is set (Jinja override active) |
+| Field             | Type      | Default       | Set By                    | Description                                                                                   |
+|-------------------|-----------|---------------|---------------------------|-----------------------------------------------------------------------------------------------|
+| `offload`         | int (0-1) | 1             | `add` / registry manual   | GPU offload ratio (1 = full GPU offload)                                                      |
+| `k_cache`         | str       | `q8_0`        | registry manual           | KV cache quantization (K) – Gemma-4/GPT-OSS: `f16`                                            |
+| `v_cache`         | str       | `iq4_nl`      | registry manual           | KV cache quantization (V) – Gemma-4/GPT-OSS: `f16`                                            |
+| `file_size_bytes` | int       | –             | `add` / `fill-size`       | GGUF file size (for context_length formula + useUnifiedKvCache formula)                       |
+| `context_length`  | int       | Formula-based / GUI | `fill-ctx` / `sync-from-configs` | GUI value is imported explicitly with `--write`; otherwise filled by policy |
+| `useUnifiedKvCache` | bool    | VRAM formula  | `configs`                 | Written to JSON config via `configs` (not permanently in Registry)                            |
+| `n_layers`        | int       | –             | `add` / `fill-arch`       | Number of transformer layers (from GGUF header `block_count`)                                 |
+| `hidden_dim`      | int       | –             | `add` / `fill-arch`       | Embedding dimension (from GGUF header `embedding_length`)                                     |
+| `reasoning`       | str       | –             | `add` / `fill-reasoning`  | `thinking` (model has reasoning/thinking capability) or `instruct` (no reasoning).            |
+|                                                                           |      Read from GGUF `tokenizer.chat_template` via `_detect_reasoning_from_template()` (Regex) |
+| `sampling`        | mapping   | category defaults | `registry_tool add/sync` / reviewed Registry | Per-category `temperature`, `top_p`, optional `top_k`/`min_p`; optional `thinking` profile. |
+| `sampling_research_status` | str | – | `registry_tool add/sync` / review | `confirmed`, `unresolved`, `conflict` or `not_found`; terminal statuses suppress repeat search. |
+| `sampling_researched_at` | ISO timestamp | – | onboarding/review | UTC time of the last accepted or terminal research attempt. |
+| `sampling_sources` | list[str] | [] | onboarding/review | URLs used for the accepted or investigated evidence. |
+| `sampling_evidence` | list[mapping] | [] | onboarding/review | Field/profile, URL and excerpt supporting the decision. |
+| `capabilities`    | str       | –             | `classify_registry()`     | Comma-separated: `text`, `coding`, `vision`, `audio`, `agentic`.                              |
+|                                                                           |                   Auto-detected via name + arch + notes                                       |
+| `blueprint`       | str       | –             | `classify_registry()`     | Prompt blueprint name (e.g. `default_chat`, `coding_agent`, `reasoning_assistant`).           |
+|                                                                           |        From `reasoning` + `capabilities`                                                      |
+| `truncation`      | str       | –             | `classify_registry()`     | `full` / `medium` / `minimal` (depending on context_length)                                   |
+| `custom_template` | bool      | –             | `classify_registry()`     | `True` if YAML `template:` is set (Jinja override active)                                     |
 
 > **`num_parallel` ist seit 13.08. KEIN Registry-Feld mehr** – feste Benchmark-Policy:
 > `_resolve_num_parallel(SS)` = 4 bei SS≥10, sonst 1 (run_benchmarks.py). Kein CLI-Override,
@@ -694,7 +714,26 @@ python src/registry_tool.py sync-ctx      # Sync context_length only
 > Vom verfügbaren Speicher, der Kontextlänge und der KV-Quantisierung hängt nur noch
 > `useUnifiedKvCache` ab – nicht np.
 
-**Architecture data (n_layers, hidden_dim):** Are automatically read from the GGUF header when adding new models (`add`). Can be retroactively filled for existing models via `fill-arch`. The lightweight header reader takes ~1ms per file (no memory-mapping of the entire ~12GB model). Models without GGUF files (uninstalled) receive no architecture data.
+**Architecture data (n_layers, hidden_dim):** Are automatically read from the GGUF header when adding new models (`add`).
+Can be retroactively filled for existing models via `fill-arch`. The lightweight header reader takes ~1ms per file (no memory-mapping of the entire ~12GB model).
+Models without GGUF files (uninstalled) receive no architecture data.
+
+### Sampling Onboarding Boundary (19.09.2026)
+
+Sampling web research belongs to model onboarding, not to benchmark execution.
+`registry_tool.py add` always performs the first bounded search for a new
+benchmark candidate; `sync` performs the initial backfill for entries without a
+research status. The search checks the Hugging Face model card, Hugging Face
+API/base-model metadata, linked official documentation and a bounded set of
+known manufacturer HTTPS pages. OCR and embedding models are excluded by the
+existing benchmark-candidate filter.
+
+The resolver accepts only plausible and profile-consistent values. It stores
+the result and its evidence in the Registry. `confirmed` entries are consumed
+locally by `benchmark_config.py`; `unresolved`, `conflict` and `not_found` are
+not guessed and are not retried by ordinary `sync`. An explicit
+`--refresh-sampling` or the project review skill may trigger another attempt.
+The benchmark path performs no network access for sampling.
 
 ### useUnifiedKvCache – VRAM Formula (17.07.)
 
@@ -841,34 +880,33 @@ exec_sandboxed(code, timeout=30)
 
 ## 9. lm-eval Integration
 
-| Task | Description |
-|------|-------------|
-| math500_gen | MATH-500 (generation) |
+| Task               | Description                     |
+|--------------------|---------------------------------|
+| math500_gen        | MATH-500 (generation)           |
 | arc_challenge_chat | ARC-Challenge (multiple choice) |
-| hellaswag_gen | HellaSwag (multiple choice) |
-| truthfulqa_gen | TruthfulQA (generation) |
+| hellaswag_gen      | HellaSwag (multiple choice)     |
+| truthfulqa_gen     | TruthfulQA (generation)         |
 
 **Model ID:** `model = model_info.get("_api_model") or model_key` - exact ID from `lms ps`.
 
-**Parameters via `--gen_kwargs` (v13, Variant C+ p6):**
-Since p6, sampling parameters are assigned **benchmark-category-based**. The category defaults
-from `BENCHMARK_CATEGORY_DEFAULTS` are supplemented by `MODEL_TEMP_OVERRIDES` (model-specific).
-See §2.9 for details.
+**Parameters via `--gen_kwargs`:**
+`get_model_config()` resolves the confirmed Registry sampling cell for the exact
+model/category/profile. If no cell is available, it uses the documented category
+or thinking fallback. Optional `top_k`/`min_p` can also come from the Registry;
+LM Studio Config-JSON values are runtime fallbacks for non-temperature fields only.
+See §2.9 for the onboarding boundary and merge order.
 
-| Category | temperature | top_p | max_tokens | enable_thinking |
-|----------|-------------|-------|------------|-----------------|
-| **coding** | 0.0 | 1.0 | 2048 | False |
-| **math** | 0.7 | 0.95 | 8192 | True |
-| **knowledge** | 0.0 | 1.0 | 2048 | False |
-| **agentic** | 0.3 | 0.95 | 4096 | False |
+| Category       | temperature | top_p | max_tokens | enable_thinking |
+|----------------|-------------|-------|------------|-----------------|
+| **coding**     |     0.2     | 1.0   |     4096   | False           |
+| **math**       |     0.7     | 0.95  |     4096   | False           |
+| **knowledge**  |     0.6     | 1.0   |     4096   | False           |
+| **agentic**    |     0.6     | 0.95  |     4096   | False           |
 
-Model overrides (from `MODEL_TEMP_OVERRIDES`) overwrite individual fields, e.g.:
-`deepseek` → temp=0.6, min_p=0.02 | `gpt-oss` → temp=1.0, top_k=0 | `qwen3.6` → enable_thinking=False
-
-**Important (v13):** `--thinking` ONLY has effect with:
-- **Gemma 4** (for MATH-500) – activates `<|channel>thought` tags
-- **Reasoning models** (detected via name: reasoning/think/r1) – increases timeout ×2
-- **All other models** (Qwen3.6, GPT-OSS, Qwen3.5) – `--thinking` is ignored, since `enable_thinking=False` is forced
+`--thinking` is evaluated after the resolved sampling profile and can force
+`enable_thinking=True` for applicable reasoning models. The exact effective
+configuration is therefore model/category/profile dependent; it must not be
+inferred from an old model-name override table.
 
 ---
 

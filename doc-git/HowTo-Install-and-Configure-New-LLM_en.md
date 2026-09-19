@@ -24,21 +24,37 @@ Important:
 ## 2. Recommended onboarding flow
 
 1. Make sure the GGUF is available in a folder the chosen provider can see.
-2. Add or update the registry entry in `doc-git\model_registry.yaml` if needed.
+2. Let `registry_tool.py` add or update the Registry entry. Do not edit the YAML directly for onboarding.
 3. Run:
 
 ```powershell
-python src\registry_tool.py pipeline full
+python src\registry_tool.py sync
 ```
 
-This is the canonical one-shot maintenance command for a new or changed model. It:
+This is the canonical onboarding/maintenance command for a new model. It:
 
-- resolves the registry entry
-- reads the GGUF header once for architecture facts
-- classifies reasoning, capabilities, blueprint, and truncation
-- derives runtime values such as context length, KV cache policy, and provider-specific settings
-- writes the provider artifacts for the current stack
-- validates the result
+- discovers benchmark-candidate models from LM Studio; OCR and embedding models are filtered out
+- performs one bounded web search for sampling recommendations in the Hugging Face card/API/base-model chain and official documentation
+- stores `sampling`, source URLs, evidence, timestamp, and a terminal research status in the Registry
+- reads the GGUF header for architecture facts and fills Registry-owned metadata
+- reports LM Studio config drift without writing LM Studio JSON files
+- formats and validates the Registry
+
+`pipeline full` adds classification, prompt preview and validation. It is
+read-only for LM Studio Config-JSONs. Neither `sync` nor a benchmark run
+replaces or rewrites existing LM Studio sampling, system-prompt, or KV-cache
+settings.
+
+Sampling research is not repeated for entries with `confirmed`, `unresolved`,
+`conflict`, or `not_found` status. If a deliberate retry is needed, use:
+
+```powershell
+python src\registry_tool.py sync --refresh-sampling
+```
+
+For unresolved or conflicting sources, use the project review workflow in
+`.codex\skills\registry-sampling-review\SKILL.md`. It requires evidence and
+user approval before applying values through the Registry API.
 
 If the model is already known and only needs a partial refresh, the lower-level commands still exist, but `pipeline full` is the safest default.
 
@@ -101,6 +117,8 @@ If a model was deleted and then reinstalled, rerun:
 
 ```powershell
 python src\registry_tool.py pipeline full
+python src\registry_tool.py sync
+python src\registry_tool.py sync --refresh-sampling
 ```
 
 To remove only the registry entry:

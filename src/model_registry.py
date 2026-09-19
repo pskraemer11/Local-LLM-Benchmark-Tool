@@ -1,7 +1,16 @@
-"""Central registry resolution and runtime derivation for benchmark models."""
+"""Central, read-only Registry resolution and runtime derivation.
+
+``model_registry.py`` is the provider-neutral runtime reader. It resolves
+aliases, context limits, cache policy, reasoning and locally stored sampling
+blocks from ``doc-git/model_registry.yaml``. It does not perform web research,
+modify the Registry, or write LM Studio configuration files. New-model
+onboarding is handled by ``registry_tool.py add/sync``; unresolved web evidence
+is reviewed through the project sampling-review workflow.
+"""
 
 from __future__ import annotations
 
+import argparse
 import copy
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -241,8 +250,20 @@ class ModelRegistry:
     def provider_runtime(self, model_key: str, provider_name: str) -> dict[str, Any]:
         """Return provider-specific runtime overrides for one model key."""
         resolved = self.resolve(model_key)
-        return (
-            resolved.provider_runtime(provider_name, template_root=self._template_root)
-            if resolved
-            else {}
+        return resolved.provider_runtime(provider_name, template_root=self._template_root) if resolved else {}
+
+
+def _main() -> None:
+    """Expose the module boundary and its read-only role through ``--help``."""
+    parser = argparse.ArgumentParser(
+        description=(
+            "Read-only provider-neutral model registry resolver. "
+            "Benchmark runs consume local Registry data only; use "
+            "registry_tool.py add/sync for one-time model onboarding and web sampling research."
         )
+    )
+    parser.parse_args()
+
+
+if __name__ == "__main__":
+    _main()
