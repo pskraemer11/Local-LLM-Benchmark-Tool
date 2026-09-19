@@ -56,4 +56,6 @@ jobs:
           python -m pip install "lm-eval[api,math]" evalplus nvidia-ml-py3 psutil ruamel.yaml
           python -m pip install pytest pytest-cov pytest-mock responses
           python -m pip install langdetect immutabledict "antlr4-python3-runtime==4.11" nltk
+      # pyproject.toml disables pytest's workspace cache; each runner keeps
+      # its own OS-managed numbered temp root.
       - run: python -m pytest tests/ -v --tb=short

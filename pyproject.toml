@@ -11,8 +11,7 @@ minversion = "8.0"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
-addopts = "-v --tb=short"
-cache_dir = ".pytest-temp/pytest-cache"
+addopts = "-v --tb=short -p no:cacheprovider"
 
 [tool.ruff]
 line-length = 120

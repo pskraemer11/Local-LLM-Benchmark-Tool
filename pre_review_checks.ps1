@@ -73,16 +73,15 @@ Set-Location -LiteralPath $projectPath
 $env:PYTHONUTF8 = "1"
 $env:PYTHONIOENCODING = "utf-8"
 
-$workspaceTemp = Join-Path $projectPath ".pytest-temp"
-if (-not (Test-Path -LiteralPath $workspaceTemp)) {
-    New-Item -ItemType Directory -Path $workspaceTemp -Force | Out-Null
-}
-$env:TMP = $workspaceTemp
-$env:TEMP = $workspaceTemp
-$env:TMPDIR = $workspaceTemp
+$runTemp = Join-Path ([System.IO.Path]::GetTempPath()) ("Benchmarks-PreReview-{0}-{1}" -f $PID, [Guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Path $runTemp -Force | Out-Null
+$pytestTempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("Benchmarks-PreReview-PytestRoot-{0}" -f [Guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Path $pytestTempRoot -Force | Out-Null
+$pytestBaseTemp = Join-Path $pytestTempRoot "base"
+New-Item -ItemType Directory -Path $pytestBaseTemp -Force | Out-Null
 
 $artifactsDir = if ($NoArtifacts) {
-    Join-Path $env:TEMP "Benchmarks-PreReview-$PID"
+    Join-Path $runTemp "review-artifacts"
 } else {
     Join-Path $projectPath "doc-git\Review-Artifacts"
 }
@@ -160,8 +159,24 @@ Write-Host "`n[4/6] pytest -q ..." -ForegroundColor Cyan
 if ($SkipPytest) {
     Write-Host "  UEBERSPRUNGEN (-SkipPytest)" -ForegroundColor Yellow
 } else {
-    & python -m pytest -q 2>&1 | Tee-Object -Variable pytestOut | Out-Host
-    $pytestExit = $LASTEXITCODE
+    $pytestTempNames = @("TMP", "TEMP", "TMPDIR")
+    $pytestPreviousTemp = @{}
+    foreach ($name in $pytestTempNames) {
+        $pytestPreviousTemp[$name] = [Environment]::GetEnvironmentVariable($name, "Process")
+        Set-Item -Path "Env:$name" -Value $pytestTempRoot
+    }
+    try {
+        & python -m pytest -q --basetemp $pytestBaseTemp 2>&1 | Tee-Object -Variable pytestOut | Out-Host
+        $pytestExit = $LASTEXITCODE
+    } finally {
+        foreach ($name in $pytestTempNames) {
+            if ($null -eq $pytestPreviousTemp[$name]) {
+                Remove-Item -Path "Env:$name" -ErrorAction SilentlyContinue
+            } else {
+                Set-Item -Path "Env:$name" -Value $pytestPreviousTemp[$name]
+            }
+        }
+    }
     if ($pytestExit -ne 0) {
         Write-Host "  [FEHLER] pytest fehlgeschlagen (siehe oben)." -ForegroundColor Red
         $blockingFails++
@@ -341,10 +356,14 @@ if ($blockingFails -gt 0) {
     Write-Host "    (API-Pfad /v1/model vs /v1/chat/completions — wird separat gefixt)" -ForegroundColor DarkGray
     if (-not $NoTranscript) { Stop-Transcript }
     if ($NoArtifacts) { Remove-Item -LiteralPath $artifactsDir -Recurse -Force -ErrorAction SilentlyContinue }
+    Remove-Item -LiteralPath $runTemp -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $pytestTempRoot -Recurse -Force -ErrorAction SilentlyContinue
     exit 1
 }
 Write-Host "`n=== Alle blockierenden Checks bestanden ===" -ForegroundColor Green
 Write-Host "[HINWEIS] Nach Push: Compaction + CHANGELOG-Eintrag nicht vergessen (Trigger: commit/push)." -ForegroundColor Cyan
 if (-not $NoTranscript) { Stop-Transcript }
 if ($NoArtifacts) { Remove-Item -LiteralPath $artifactsDir -Recurse -Force -ErrorAction SilentlyContinue }
+Remove-Item -LiteralPath $runTemp -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $pytestTempRoot -Recurse -Force -ErrorAction SilentlyContinue
 exit 0

@@ -73,6 +73,9 @@ prompt_inventory.csv
 *.swp
 *.lnk
 .pytest-temp/
+.pytest-temp-local/
+.pytest-run-*/
+.pytest-push-*/
 
 # Review-Gate-Logs (Artefakte in doc-git/Review-Artifacts/ werden committet)
 pre_review_checks_*.log

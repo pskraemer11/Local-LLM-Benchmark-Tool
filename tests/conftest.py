@@ -41,7 +41,6 @@ from __future__ import annotations
 import json
 import os
 import sys
-import tempfile
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
@@ -61,17 +60,9 @@ if _SRC_DIR not in sys.path:
     sys.path.insert(0, _SRC_DIR)
 
 
-# Keep pytest and tempfile traffic inside the workspace.
-_TEST_TEMP_ROOT = Path(_REPO_ROOT) / ".pytest-temp"
-_TEST_TEMP_ROOT.mkdir(parents=True, exist_ok=True)
-
-
 @pytest.fixture(autouse=True)
 def isolate_test_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep tests isolated from live provider credentials and temp paths."""
-    for _env_var in ("TMP", "TEMP", "TMPDIR"):
-        monkeypatch.setenv(_env_var, str(_TEST_TEMP_ROOT))
-    monkeypatch.setattr(tempfile, "tempdir", str(_TEST_TEMP_ROOT))
+    """Keep tests isolated from live provider credentials."""
 
     for _env_var in (
         "UNSLOTH_API_BASE",

@@ -68,7 +68,9 @@ jobs:
 
       - name: Run tests
         run: |
-          # Quick smoke test (do not require LM Studio server)
+          # Quick smoke test (do not require LM Studio server). pytest's
+          # cacheprovider is disabled in pyproject.toml so runners never
+          # share a workspace cache between jobs.
           python -m pytest tests/ -v --tb=short
 
   lint:

@@ -11,6 +11,12 @@ Set-Location -LiteralPath $repoRoot
 
 $env:PYTHONUTF8 = "1"
 $env:PYTHONIOENCODING = "utf-8"
+$commitPytestRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("Benchmarks-PreCommit-PytestRoot-{0}" -f [Guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Path $commitPytestRoot -Force | Out-Null
+$env:TMP = $commitPytestRoot
+$env:TEMP = $commitPytestRoot
+$env:TMPDIR = $commitPytestRoot
+$commitPytestBase = Join-Path ([System.IO.Path]::GetTempPath()) ("Benchmarks-PreCommit-Pytest-{0}" -f [Guid]::NewGuid().ToString("N"))
 
 function Stop-Hook([string]$Message) {
     Write-Host "[PRE-COMMIT BLOCKED] $Message" -ForegroundColor Red
