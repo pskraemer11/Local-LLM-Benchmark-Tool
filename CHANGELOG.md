@@ -443,3 +443,10 @@ Die Hooks erzeugen CHANGELOG-Eintraege nicht automatisch; dieser Eintrag dokumen
 |--------|------|--------|
 | 19.09. | `README.md` | **DOC:** Einsteigerorientierten Ablauf von LM-Studio-Modellaufnahme über Registry-Sync bis Benchmark- und Ergebnisprüfung neu strukturiert. |
 | 19.09. | `doc-git/Architecture, Flow & ChangeLog_en.md` | **DOC:** Datenhoheit, Modellidentität, Sampling-Onboarding, Provider-/Benchmark-Fluss und die Unterschiede zwischen `status`, `sync`, `pipeline sync` und `pipeline full` vollständig neu beschrieben. Siehe Compaction 19.09.2026 / 21:33. |
+
+## Registry/Pipeline and Hook Consolidation (19.09.2026)
+| Date   | File | Change |
+|--------|------|--------|
+| 19.09. | `src/registry_tool.py`, `src/sampling_research.py`, `doc-git/model_registry.yaml` | **CONSOLIDATION:** Registry-Sync, einmaliges Sampling-Onboarding, Feld-Ownership und read-only LM-Studio-Grenze gemeinsam versioniert. |
+| 19.09. | `src/assemble_blueprint.py`, `src/run_benchmarks.py`, `src/sandbox_worker.py`, `src/task_manifest.py` | **PIPELINE:** Blueprint-/Benchmark-/Sandbox-/Manifest-Pfade und die zugehörigen Tests gemeinsam aktualisiert. |
+| 19.09. | `.githooks/pre_commit.ps1`, `.githooks/pre_push.ps1`, `pre_review_checks.ps1` | **FIX:** Windows-Pytest verwendet frische, von Pytest erzeugte `--basetemp`-Pfade; lokale LM-Studio-Config-Drifts blockieren den CI-Review-Pfad nicht. Siehe Compaction `19.09.2026 / 21:51`. |

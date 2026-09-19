@@ -899,3 +899,34 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 - `README.md`: Einsteigerorientierter Setup-, Registry- und Benchmark-Workflow.
 - `doc-git/Architecture, Flow & ChangeLog_en.md`: Datenhoheit, Kontrollfluss, Pipeline-Semantik und Architektur.
 - `CHANGELOG.md`: Eintrag `User-facing Workflow Documentation` für diesen Vorgang.
+
+=============== Compaction 19.09.2026 / 21:51 ================
+## Objective
+- (Completed) Den gesamten gemeinsam erarbeiteten Code-, Registry-, Test-, Hardening- und Dokumentationsstand committen und nach `origin/main` pushen.
+- (Completed) Die Windows-Pytest-Temp-Isolation so korrigieren, dass Commit und Push künftig ohne `WinError 5` in der Pytest-Aufräumlogik laufen.
+
+## Important Details
+- **Scope:** 53 projektbezogene Dateien wurden in den Gesamtcommit aufgenommen, darunter Registry-/Blueprint-/Sampling-Code, Benchmark- und Sandbox-Code, Tests, Hardening-Vorschläge, Hooks, Review-Gate, README und Architektur-Dokumentation.
+- **Excluded:** Lokale Backups, `.compat-baseline-20260828`, generierte Security-Scan-Ausgaben, lokale Konflikt-/Notizdateien und der ausdrücklich fremde `utils/`-Bestand blieben uncommitted.
+- **Hook fix:** Pytest verwendet pro Lauf einen eindeutigen `--basetemp`-Pfad, lässt diesen von Pytest selbst erzeugen, verändert `TMP`/`TEMP` nicht und wird im Pre-Push-Hook direkt mit Python statt über `Start-Process` ausgeführt.
+- **Gate policy:** Das Review-Gate verwendet für die erste Registry-Prüfung `validate --ci --repro`; lokale LM-Studio-Config-Drifts blockieren damit keinen Repository-Push. Der separate GGUF-Abgleich bleibt aktiv.
+
+## Validation
+- Commit-Hook: bestanden; Registry-Validierung 0 blockierende Probleme; fokussierte Registry-Tests 94/94.
+- Pre-Push-Hook und tatsächlicher Push: 940 Tests bestanden, Ruff 0 Probleme, GGUF 0 Abweichungen bei 55 Einträgen, fokussierter mypy-Check bestanden.
+- Nicht blockierend: ein `pynvml`-FutureWarning und zwei LM-Studio-`numParallelSessions`-Hinweise.
+
+## Work State
+### Completed / Active / Blocked
+- Completed: Commit `158ce379` ist auf `origin/main`.
+- Active: Der Arbeitsbaum enthält weiterhin bewusst nicht einbezogene lokale Artefakte/Notizen.
+- Blocked: Keine technische Blockade für Commit oder Push.
+
+## Next Move
+1. Künftige Änderungen normal über `pre_commit.ps1` und `pre_push.ps1` prüfen lassen.
+2. Die beiden advisory LM-Studio-Parallel-Session-Hinweise bei Bedarf separat untersuchen; keine Config-Dateien im Hook automatisch ändern.
+
+## Relevant Files
+- `.githooks/pre_commit.ps1`, `.githooks/pre_push.ps1`, `pre_review_checks.ps1`: stabile per-run Pytest-Basis und drift-tolerante CI-Registry-Prüfung.
+- `src/registry_tool.py`, `src/sampling_research.py`, `doc-git/model_registry.yaml`: Registry-/Sampling-Onboarding und Policy.
+- `src/task_manifest.py`, `src/evalplus_task_worker.py`, `tests/test_task_manifest.py`: neue Integritäts-/Worker-Pfade mit Tests.
