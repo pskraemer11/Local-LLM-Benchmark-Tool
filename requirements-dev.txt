@@ -18,3 +18,4 @@ ruff>=0.4
 mypy>=1.10
 types-requests
 types-PyYAML
+nvidia-ml-py>=13.0  # NVIDIA NVML bindings; import namespace remains pynvml

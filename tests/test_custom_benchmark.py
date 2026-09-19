@@ -1,6 +1,8 @@
 import json
 import os
 import sys
+from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -13,11 +15,11 @@ from custom_benchmark import (
     _patch_matplotlib_compat,
     _repair_indentation,
     _unwrap_solution_for_insert,
+    classify_output,
     collect_system_metrics,
     evaluate_code,
     exec_sandboxed,
     extract_code,
-    classify_output,
     get_task_type,
     load_jsonl,
     parse_resource_avgs,
@@ -26,6 +28,27 @@ from custom_benchmark import (
     strip_thinking_tokens,
     subsample_tasks,
 )
+
+# ======================================================================
+# Monitor / nvidia-ml-py binding
+# ======================================================================
+
+class TestMonitorNvmlBinding:
+    def test_reads_gpu_metrics_through_nvidia_ml_py_binding(self, monkeypatch):
+        fake_nvml = SimpleNamespace(
+            NVMLError=RuntimeError,
+            nvmlInit=lambda: None,
+            nvmlDeviceGetCount=lambda: 1,
+            nvmlDeviceGetHandleByIndex=lambda index: f"gpu-{index}",
+            nvmlDeviceGetUtilizationRates=lambda handle: SimpleNamespace(gpu=55),
+            nvmlDeviceGetMemoryInfo=lambda handle: SimpleNamespace(used=2 * 1024**3),
+        )
+        monkeypatch.setattr(cb, "_nvml", fake_nvml)
+
+        monitor = cb.Monitor()
+
+        assert monitor._is_nvml_ok is True
+        assert monitor._read_gpu() == (55, 2.0)
 
 
 # ======================================================================
@@ -108,8 +131,9 @@ class TestUnwrapSolutionForInsert:
 class TestPatchMatplotlibCompat:
     def test_patches_set_xticklabels(self):
         # Find the actual pattern
-        import custom_benchmark as cb
         import inspect as _i
+
+        import custom_benchmark as cb
         _i.getsource(cb._patch_matplotlib_compat)
         # Just verify it exists and doesn't crash on simple code
         result = _patch_matplotlib_compat("x = 1")
@@ -257,7 +281,7 @@ class TestStripThinkingTokens:
     def test_strips_channel_thought(self):
         # Same pattern as above (channel>thought are alternate names
         # for the Gemma 4 format -- verifying either branch works).
-        open_tag = "<|channel>thought"  # noqa
+        open_tag = "<|channel>thought"
         text = f"before {open_tag}\ninner thought\n<channel|> after"
         cleaned, count = strip_thinking_tokens(text)
         assert "inner thought" not in cleaned
@@ -604,7 +628,7 @@ class _Args:
     def __init__(self, model_key=None, api_model=None, sample_size=10,
                  benchmark="DS1000", non_interactive=True, qwen_prompt=False,
                  thinking=False, no_structured_output=False,
-                 keep_response=False, seed=2026):
+                 keep_response=False, seed=2026) -> None:
         self.model_key = model_key
         self.api_model = api_model
         self.sample_size = sample_size
@@ -617,7 +641,7 @@ class _Args:
         self.seed = seed
 
 
-def _fake_model(key, display=None):
+def _fake_model(key, display=None) -> dict[str, Any]:
     return {
         "key": key, "model_identifier": key,
         "display": display or key, "variant": key,

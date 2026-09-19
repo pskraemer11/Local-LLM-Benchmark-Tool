@@ -75,7 +75,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 import psutil
-import pynvml
+import pynvml as _nvml
 import requests
 
 import csv_writer as csv_writer
@@ -108,6 +108,10 @@ from utils.terminal import (
     ok,
     warn,
 )
+
+# nvidia-ml-py exposes the NVIDIA Management Library API under the historical
+# ``pynvml`` module name. Keep the package dependency on nvidia-ml-py; do not
+# depend on the deprecated PyPI wrapper package named ``pynvml``.
 
 # ── Registry Reasoning Check ────────────────────────────────────────────
 # Used to check if a model supports reasoning (thinking/instruct/unknown).
@@ -333,8 +337,9 @@ class Monitor:
     def __init__(self) -> None:
         """Initialize rolling resource-history buffers and NVML if available.
 
-        Tries pynvml for GPU/VRAM readings; when unavailable, GPU metrics
-        stay empty and a warning is issued. CPU/RAM come from psutil.
+        Tries the nvidia-ml-py bindings for GPU/VRAM readings; when
+        unavailable, GPU metrics stay empty and a warning is issued. CPU/RAM
+        come from psutil.
         """
         self.cpu_percent = []
         self.gpu_percent = []
@@ -344,12 +349,12 @@ class Monitor:
         self._peak = {"cpu": 0, "ram": 0, "gpu": 0, "vram": 0}
         self._is_nvml_ok = False
         try:
-            pynvml.nvmlInit()
-            count = pynvml.nvmlDeviceGetCount()
+            _nvml.nvmlInit()
+            count = _nvml.nvmlDeviceGetCount()
             if count > 0:
-                self._nvml_handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+                self._nvml_handle = _nvml.nvmlDeviceGetHandleByIndex(0)
                 self._is_nvml_ok = True
-        except (pynvml.NVMLError, OSError):
+        except (_nvml.NVMLError, OSError):
             pass
         if not self._is_nvml_ok:
             warn("GPU/VRAM monitoring via NVML not available")
@@ -359,10 +364,10 @@ class Monitor:
         if not self._is_nvml_ok:
             return None, None
         try:
-            util = pynvml.nvmlDeviceGetUtilizationRates(self._nvml_handle)
-            mem = pynvml.nvmlDeviceGetMemoryInfo(self._nvml_handle)
+            util = _nvml.nvmlDeviceGetUtilizationRates(self._nvml_handle)
+            mem = _nvml.nvmlDeviceGetMemoryInfo(self._nvml_handle)
             return util.gpu, mem.used / (1024 ** 3)
-        except (pynvml.NVMLError, OSError):
+        except (_nvml.NVMLError, OSError):
             return None, None
 
     def _read_cpu_ram(self, interval: float = 0.3) -> tuple[float, float]:
@@ -409,13 +414,13 @@ class Monitor:
                 self._peak["ram"] = max(self._peak["ram"], ram)
                 if self._is_nvml_ok:
                     try:
-                        util = pynvml.nvmlDeviceGetUtilizationRates(self._nvml_handle)
-                        mem = pynvml.nvmlDeviceGetMemoryInfo(self._nvml_handle)
+                        util = _nvml.nvmlDeviceGetUtilizationRates(self._nvml_handle)
+                        mem = _nvml.nvmlDeviceGetMemoryInfo(self._nvml_handle)
                         gpu_val = util.gpu
                         vram_val = mem.used / (1024 ** 3)
                         self._peak["gpu"] = max(self._peak["gpu"], gpu_val)
                         self._peak["vram"] = max(self._peak["vram"], vram_val)
-                    except (pynvml.NVMLError, OSError):
+                    except (_nvml.NVMLError, OSError):
                         pass
 
         self._sampler = _thr.Thread(target=_sample_loop, daemon=True)

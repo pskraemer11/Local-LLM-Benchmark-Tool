@@ -930,3 +930,29 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 - `.githooks/pre_commit.ps1`, `.githooks/pre_push.ps1`, `pre_review_checks.ps1`: stabile per-run Pytest-Basis und drift-tolerante CI-Registry-Prüfung.
 - `src/registry_tool.py`, `src/sampling_research.py`, `doc-git/model_registry.yaml`: Registry-/Sampling-Onboarding und Policy.
 - `src/task_manifest.py`, `src/evalplus_task_worker.py`, `tests/test_task_manifest.py`: neue Integritäts-/Worker-Pfade mit Tests.
+
+=============== Compaction 20.09.2026 / 00:40 ================
+## Objective
+- (Completed) `custom_benchmark.py` von der veralteten `pynvml`-Wrapper-Abhängigkeit auf die NVIDIA-Bindings aus `nvidia-ml-py` umstellen und die Änderung verifizieren.
+
+## Important Details
+- **Package/import distinction:** Die Distribution heißt `nvidia-ml-py`, stellt ihre öffentliche Python-API aber weiterhin unter dem Modulnamen `pynvml` bereit. Deshalb verwendet der Code `import pynvml as _nvml`; ein Import `nvidia_ml_py` existiert nicht.
+- **Environment cleanup:** Die zusätzlich installierte, veraltete Distribution `pynvml==13.0.1` wurde entfernt. `nvidia-ml-py==13.610.43` blieb installiert; dadurch verschwand die FutureWarning beim Import.
+- **Regression protection:** Der Monitor-Test simuliert NVML-Initialisierung, GPU-Auslastung und VRAM-Auslesung über den `_nvml`-Binding-Punkt.
+
+## Work State
+### Completed / Active / Blocked
+- Completed: Code, Entwicklungsabhängigkeit und fokussierter Test aktualisiert; Ruff und `pip check` bestanden.
+- Verification: 96 fokussierte Tests und die vollständige Suite mit 941 Tests bestanden; direkter Smoke-Test meldet `nvmlInit = True` ohne FutureWarning.
+- Active: Die drei Änderungen sind noch nicht committed.
+- Blocked: Keine technische Blockade.
+
+## Next Move
+1. Bei Bedarf die drei geänderten Dateien gezielt committen.
+2. Vor einem Push die normalen Commit-/Pre-Push-Hooks ausführen.
+
+## Relevant Files
+- `src/custom_benchmark.py`: NVML-Aufrufe über den `_nvml`-Alias und `nvidia-ml-py`-Dokumentation.
+- `requirements-dev.txt`: explizite Abhängigkeit `nvidia-ml-py>=13.0`.
+- `tests/test_custom_benchmark.py`: Regressionstest für die NVML-Bindings.
+- `CHANGELOG.md`: Eintrag `NVIDIA NVML Binding Migration` für diese Änderung.

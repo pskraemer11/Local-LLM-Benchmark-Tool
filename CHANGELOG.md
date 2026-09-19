@@ -450,3 +450,10 @@ Die Hooks erzeugen CHANGELOG-Eintraege nicht automatisch; dieser Eintrag dokumen
 | 19.09. | `src/registry_tool.py`, `src/sampling_research.py`, `doc-git/model_registry.yaml` | **CONSOLIDATION:** Registry-Sync, einmaliges Sampling-Onboarding, Feld-Ownership und read-only LM-Studio-Grenze gemeinsam versioniert. |
 | 19.09. | `src/assemble_blueprint.py`, `src/run_benchmarks.py`, `src/sandbox_worker.py`, `src/task_manifest.py` | **PIPELINE:** Blueprint-/Benchmark-/Sandbox-/Manifest-Pfade und die zugehörigen Tests gemeinsam aktualisiert. |
 | 19.09. | `.githooks/pre_commit.ps1`, `.githooks/pre_push.ps1`, `pre_review_checks.ps1` | **FIX:** Windows-Pytest verwendet frische, von Pytest erzeugte `--basetemp`-Pfade; lokale LM-Studio-Config-Drifts blockieren den CI-Review-Pfad nicht. Siehe Compaction `19.09.2026 / 21:51`. |
+
+## NVIDIA NVML Binding Migration (20.09.2026)
+| Date   | File | Change |
+|--------|------|--------|
+| 20.09. | `src/custom_benchmark.py` | **MIGRATION:** GPU-/VRAM-Monitoring verwendet die NVML-API aus `nvidia-ml-py` über den internen `_nvml`-Alias; die veraltete Wrapper-Distribution `pynvml` bleibt keine Projektabhängigkeit. |
+| 20.09. | `requirements-dev.txt` | **DEPENDENCY:** `nvidia-ml-py>=13.0` als Entwicklungsabhängigkeit ergänzt. |
+| 20.09. | `tests/test_custom_benchmark.py` | **TEST:** NVML-Initialisierung und GPU-/VRAM-Auslesung über einen gezielten Monitor-Regressionstest abgesichert. Siehe Compaction `20.09.2026 / 00:40`. |
