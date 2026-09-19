@@ -847,3 +847,28 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 - `src/benchmark_config.py`: Lokale Nutzung von Web-/manuell bestätigten Sampling-Profilen.
 - `.codex/skills/registry-sampling-review/SKILL.md`: Manuelle Codex-Eskalation.
 - `doc-git/Planung/registry_sampling.md`: Architektur- und Betriebsdokumentation. Siehe CHANGELOG-Eintrag `Registry Sampling Onboarding`.
+
+=============== Compaction 19.09.2026 / 16:45 ================
+## Objective
+- (Current) Den abgeschlossenen Commit-/Hook-/Push-Vorgang zur dauerhaften Behebung des Windows-`WinError 5` bei pytest dokumentieren.
+- (Completed) Isolierte pytest-Tempverzeichnisse in Hooks, Review-Gate und CI umgesetzt, geprüft, committed und nach `origin/main` gepusht. Siehe CHANGELOG-Eintrag `Pytest-Temp-Isolation für Hooks und CI`.
+
+## Important Details
+- **Root cause:** Das gemeinsam verwendete `.pytest-temp\\pytest-of-pskra` konnte unter Windows zwischen Läufen gesperrt oder unzugänglich werden; globale Temp-/Cache-Umleitungen verstärkten die Kollision.
+- **Decision:** Jeder pytest-Lauf verwendet ein frisches OS-Tempverzeichnis; der pytest-Cacheprovider ist im Gate deaktiviert. `pre-push` führt die Suite isoliert vor dem übrigen Review-Gate aus; Registry- und LM-Studio-Config-Artefakte bleiben unangetastet.
+- **Validation:** Commit-Hook und echter, nicht sandboxed ausgeführter Pre-Push liefen erfolgreich: 934 Tests, Registry 0 blockierende Probleme, Ruff/GGUF/fokussiertes Mypy erfolgreich. Der verbleibende Legacy-Mypy-Hinweis und zwei LM-Studio-`numParallelSessions`-Warnungen sind nicht blockierend.
+
+## Work State
+### Completed / Active / Blocked
+- Completed: Commit `1cafcb014a9a8eb356dd0cd4bdd19e820666b228` ist auf `origin/main`; die übrigen nutzereigenen Worktree-Änderungen bleiben unberührt.
+- Active: Keine offenen Arbeiten für diese Fehlerbehebung.
+- Blocked: Keine technische Blockade; Legacy-Mypy und LM-Studio-Warnungen können separat behandelt werden.
+
+## Next Move
+1. Künftige Commits und Pushes normal über die versionierten Hooks ausführen, ohne `--no-verify`.
+2. Den Legacy-Mypy-Fehler und die beiden LM-Studio-Warnungen nur bei Bedarf separat bereinigen.
+
+## Relevant Files
+- `.githooks/pre_push.ps1`, `pre_review_checks.ps1`: isolierter pytest-Aufruf und Gate-Ausführung.
+- `.githooks/pre_commit.ps1`, `pyproject.toml`, `tests/conftest.py`: per-run Temp-Umgebung ohne geteilte Cache-/Temp-Umleitung.
+- `.github/workflows/ci.yml`, `.github/workflows/review.yml`, `.gitignore`: CI-Dokumentation und Ignorieren generierter pytest-Artefakte.

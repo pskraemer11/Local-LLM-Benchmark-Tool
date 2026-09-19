@@ -430,3 +430,10 @@ Die Hooks erzeugen CHANGELOG-Eintraege nicht automatisch; dieser Eintrag dokumen
 | 19.09. | `src/type_defs.py`, `src/field_owner.py` | **SCHEMA:** Recherche-Status, Zeitstempel und Evidenz als Registry-Felder ergänzt. |
 | 19.09. | `.codex/skills/registry-sampling-review/SKILL.md` | **NEW:** Manuelle Review-Eskalation für ungelöste oder widersprüchliche Quellen über die Registry-API. Siehe Compaction 19.09.2026 / 09:34. |
 | 19.09. | `tests/test_sampling_research.py` | **TEST:** Base-Model-Auflösung, Hersteller-Unterseiten, Statuspersistenz, Einmaligkeit und manueller Schreibpfad. |
+
+## Pytest-Temp-Isolation für Hooks und CI (19.09.2026)
+| Date   | File | Change |
+|--------|------|--------|
+| 19.09. | `.githooks/pre_push.ps1`, `pre_review_checks.ps1` | **FIX:** pytest verwendet pro Lauf ein eigenes OS-Tempverzeichnis; das Review-Gate vermeidet die gemeinsam genutzte Workspace-Tempumgebung. Siehe Compaction 19.09.2026 / 16:45. |
+| 19.09. | `pyproject.toml`, `tests/conftest.py`, `.githooks/pre_commit.ps1` | **TEST:** Gemeinsamer pytest-Cache und globale Temp-Umleitung entfernt; Commit-Prüfungen laufen isoliert. Siehe Compaction 19.09.2026 / 16:45. |
+| 19.09. | `.github/workflows/ci.yml`, `.github/workflows/review.yml`, `.gitignore` | **CI:** Isolierte pytest-Ausführung und generierte Temp-Artefakte dokumentiert bzw. ignoriert. Siehe Compaction 19.09.2026 / 16:45. |
