@@ -22,6 +22,7 @@ from run_benchmarks import (
     _is_moe_model,
     _is_qwen3_5_model,
     _is_qwen3_6_model,
+    _is_qwen3_8_model,
     _is_reasoning_model,
     _model_family,
     _model_short_name,
@@ -42,6 +43,10 @@ class TestModelDetection:
         assert _is_qwen3_6_model("Qwen3.6-something") is True
         assert _is_qwen3_6_model("qwen3-32b") is False
         assert _is_qwen3_6_model("llama3") is False
+
+    def test_qwen3_8_detection(self):
+        assert _is_qwen3_8_model("qwen3.8-27b") is True
+        assert _is_qwen3_8_model("qwen3.6-27b") is False
 
     def test_qwen3_5_detection(self):
         assert _is_qwen3_5_model("qwen3.5-72b-instruct") is True
@@ -136,6 +141,14 @@ class TestModelHelpers:
 
     def test_safe_context_returns_none_for_unknown(self):
         assert _get_safe_context("definitely-not-in-the-list-xyz") is None
+
+    def test_gguf_lookup_uses_configured_model_root(self, tmp_path, monkeypatch):
+        model_path = tmp_path / "vendor" / "model" / "model-Q4_K_M.gguf"
+        model_path.parent.mkdir(parents=True)
+        model_path.write_bytes(b"GGUF")
+        monkeypatch.setenv("GGUF_MODEL_ROOT", str(tmp_path))
+
+        assert rb._resolve_model_gguf_path("vendor/model") == str(model_path)
 
 
 # ======================================================================
@@ -321,7 +334,7 @@ class TestLmevalParams:
         # MODEL_TEMP_OVERRIDES sind entfernt; stattdessen entscheidet
         # Registry-Sampling (Modell x Kategorie) ueber die Defaults.
         expected = {
-            "unsloth/phi-4": 0.0,  # Zeile phi-4
+            "unsloth/phi-4": 1.0,  # Registry-Sampling, coding
             "unsloth/gpt-oss-20b": 1.0,  # Zeile gpt-oss
             "vinpix/bonsai-8b-llama.cpp": 0.2,  # Bonsai 06.08. entfernt -> Kategorie-Default
             "unsloth/qwen3-coder-30b-a3b-instruct": 0.7,  # Registry-Sampling
@@ -331,8 +344,17 @@ class TestLmevalParams:
         for model, temp in expected.items():
             params = _get_evaluation_parameters(model, "coding")
             assert params["temperature"] == temp, model
-            assert "top_k" not in params
-            assert "min_p" not in params
+            optional = {
+                "unsloth/qwen3-coder-30b-a3b-instruct": {
+                    "top_k": 20,
+                    "repetition_penalty": 1.05,
+                },
+            }.get(model, {})
+            for key, value in optional.items():
+                assert params.get(key) == value, (model, key, params)
+            for key in ("top_k", "min_p", "repetition_penalty"):
+                if key not in optional:
+                    assert key not in params
             if "gpt-oss" not in model:
                 # gpt-oss liefert until aus der Blueprint-Definition (eigener Test).
                 assert "until" not in params

@@ -136,7 +136,11 @@ def get_provider() -> Any:
     if provider_name == "unsloth_server":
         return UnslothServerProvider(
             API_BASE,
-            model_root=os.environ.get("UNSLOTH_MODEL_ROOT") or os.environ.get("LMSTUDIO_MODELS_DIR"),
+            model_root=(
+                os.environ.get("GGUF_MODEL_ROOT")
+                or os.environ.get("UNSLOTH_MODEL_ROOT")
+                or os.environ.get("LMSTUDIO_MODELS_DIR")
+            ),
             executable=os.environ.get("UNSLOTH_SERVER_EXE"),
             registry_loader=_load_registry_data,
             runtime_loader=_unsloth_server_runtime_overrides,

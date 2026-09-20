@@ -9,6 +9,8 @@ class ModelConfig(TypedDict):
     enable_thinking: bool
     top_k: NotRequired[int]
     min_p: NotRequired[float | None]
+    presence_penalty: NotRequired[float | None]
+    repetition_penalty: NotRequired[float | None]
     stop: NotRequired[list[str]]
     reasoning_effort: NotRequired[str]
     no_system_msg: NotRequired[bool]
@@ -20,6 +22,8 @@ class SamplingCell(TypedDict):
     top_p: float
     top_k: NotRequired[int]
     min_p: NotRequired[float]
+    presence_penalty: NotRequired[float]
+    repetition_penalty: NotRequired[float]
     enabled: NotRequired[bool]
 
 
@@ -133,6 +137,7 @@ class RegistryEntry(TypedDict):
     sampling_researched_at: NotRequired[str]
     sampling_sources: NotRequired[list[str]]
     sampling_evidence: NotRequired[list[dict[str, Any]]]
+    sampling_category_status: NotRequired[dict[str, str]]
 
 
 class SystemMetrics(TypedDict):
@@ -194,6 +199,8 @@ class GenerationConfig:
     top_p: float = 1.0
     top_k: int | None = None
     min_p: float | None = None
+    presence_penalty: float | None = None
+    repetition_penalty: float | None = None
     is_thinking_enabled: bool | None = None
     reasoning_effort: str | None = None
     is_streaming: bool = True

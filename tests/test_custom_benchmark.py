@@ -687,14 +687,14 @@ class TestResolveModels:
 
 
 class TestModelSupportsReasoning:
-    def test_quantless_lms_key_resolves_mixed_registry_entry(self):
-        # REAP-Fall: LMS modelKey ohne Quant muss auf '@mixed'-Registry-Eintrag
-        # auflösen (Fix 13.08.). Nutzt die echte Registry.
-        assert cb._model_supports_reasoning("gemma4-26b-a4b-reap-25") is True
+    def test_quantless_lms_key_resolves_reap_registry_entry(self):
+        # REAP-Fall: LMS modelKey ohne Quant muss auf den vorhandenen
+        # techhermit-Registryeintrag mit Quant-Suffix auflösen.
+        assert cb._model_supports_reasoning("gemma-4-26b-a4b-it-reap126") is True
 
-    def test_full_registry_key_with_mixed(self):
+    def test_full_registry_key_with_quant(self):
         assert cb._model_supports_reasoning(
-            "crucible-labs/gemma4-26b-a4b-reap-25@mixed") is True
+            "techhermit/gemma-4-26b-a4b-it-reap126@iq4_nl") is True
 
     def test_instruct_model_returns_false(self):
         assert cb._model_supports_reasoning("qwen2-5-coder-14b-instruct") is False

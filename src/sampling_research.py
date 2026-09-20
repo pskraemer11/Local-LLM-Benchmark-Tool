@@ -20,8 +20,24 @@ from urllib.parse import quote, urldefrag, urljoin, urlparse
 from urllib.request import Request, urlopen
 
 SAMPLING_CATEGORIES = ("coding", "knowledge", "agentic", "math", "thinking")
-SUPPORTED_FIELDS = ("temperature", "top_p", "top_k", "min_p")
+SUPPORTED_FIELDS = ("temperature", "top_p", "top_k", "min_p", "presence_penalty", "repetition_penalty")
 RESEARCH_STATUSES = ("confirmed", "unresolved", "conflict", "not_found")
+
+_CATEGORY_MARKERS: dict[str, re.Pattern[str]] = {
+    "coding": re.compile(r"(?i)\b(?:coding|code|programming|webdev|software engineering)\b"),
+    "knowledge": re.compile(r"(?i)\b(?:knowledge|factual|fact[- ]?based|question answering|qa)\b"),
+    "agentic": re.compile(
+        r"(?i)\b(?:agentic|agent|tool[- ]use|function calling|instruction following|reasoning tasks)\b"
+    ),
+    "math": re.compile(r"(?i)\b(?:math|mathematics|gsm8k|aime|hmmt|math problems?)\b"),
+}
+_PROFILE_MODE_MARKER = re.compile(
+    r"(?i)\b(?:thinking mode|reasoning mode|enable_thinking\s*[:=]\s*(?:true|false)|"
+    r"instruct(?:\s+or)?\s+non[- ]thinking|non[- ]thinking|general tasks|default(?: tasks)?|normal mode)\b"
+)
+_NORMAL_PROFILE_MARKER = re.compile(
+    r"(?i)\b(?:instruct(?:\s+or)?\s+non[- ]thinking|non[- ]thinking|general tasks|default(?: tasks)?|normal mode)\b"
+)
 
 _NUMBER = r"-?(?:\d+(?:\.\d*)?|\.\d+)"
 _FIELD_PATTERNS = {
@@ -41,6 +57,12 @@ _FIELD_PATTERNS = {
         rf"(?i)(?<![a-z])(?:`|\"|')?min[_ -]?p(?:`|\"|')?"
         rf"\s*(?:=|:|\||,|\bof\b|\s+)\s*({_NUMBER})"
     ),
+    "presence_penalty": re.compile(
+        rf"(?i)(?<![a-z])(?:`|\"|')?presence[_ -]?penalty(?:`|\"|')?\s*(?:=|:|\||,|\bof\b|\s+)\s*({_NUMBER})"
+    ),
+    "repetition_penalty": re.compile(
+        rf"(?i)(?<![a-z])(?:`|\"|')?repetition[_ -]?penalty(?:`|\"|')?\s*(?:=|:|\||,|\bof\b|\s+)\s*({_NUMBER})"
+    ),
 }
 
 _VALUE_LIMITS: dict[str, tuple[float, float]] = {
@@ -48,6 +70,8 @@ _VALUE_LIMITS: dict[str, tuple[float, float]] = {
     "top_p": (0.0, 1.0),
     "top_k": (0.0, 1000.0),
     "min_p": (0.0, 1.0),
+    "presence_penalty": (-2.0, 2.0),
+    "repetition_penalty": (0.0, 3.0),
 }
 
 # These are official documentation/organization roots, not arbitrary links.
@@ -160,7 +184,7 @@ def _fetch_text(url: str, timeout_s: float) -> str | None:
             if content_type not in {"text/plain", "text/markdown", "text/html", "application/json"}:
                 return None
             return cast("str", response.read(2_000_000).decode("utf-8", errors="replace"))
-    except (HTTPError, URLError, TimeoutError, UnicodeError, OSError):
+    except (HTTPError, URLError, TimeoutError, UnicodeError, OSError, ValueError):
         return None
 
 
@@ -172,6 +196,8 @@ def _base_model_name(model: Mapping[str, Any]) -> str:
 def _normalise_url(url: str, base_url: str | None = None) -> str | None:
     resolved = urljoin(base_url or "", html.unescape(url.strip().strip("<>")))
     resolved, _ = urldefrag(resolved)
+    if any(char.isspace() or ord(char) < 32 for char in resolved) or "{" in resolved or "}" in resolved:
+        return None
     parsed = urlparse(resolved)
     if parsed.scheme != "https" or not parsed.netloc:
         return None
@@ -440,7 +466,10 @@ def _discover_hf_repositories(
 
 def _profile_context(lines: list[str], index: int) -> tuple[str, int]:
     start = max(0, index - 1)
-    end = min(len(lines), index + 2)
+    # Include the heading immediately before a parameter line, but not the
+    # following profile. Looking ahead caused adjacent profiles to bleed into
+    # one another and made category resolution non-deterministic.
+    end = min(len(lines), index + 1)
     context = " ".join(lines[start:end])
     lower = context.lower()
     cue = sum(
@@ -486,7 +515,63 @@ def _extract_candidates(
                     )
                 if profile == "thinking" and (not is_thinking or is_non_thinking):
                     continue
+                current_line = line.lower()
+                previous_line = lines[index - 1].lower() if index else ""
+                category_marker = _CATEGORY_MARKERS.get(profile)
+                if category_marker is not None:
+                    target_matches = [
+                        marker for marker in category_marker.finditer(current_line) if marker.start() < match.start()
+                    ]
+                    if target_matches:
+                        cue_positions = [(marker.start(), "target") for marker in target_matches]
+                        cue_positions.extend(
+                            (marker.start(), "mode")
+                            for marker in _PROFILE_MODE_MARKER.finditer(current_line)
+                            if marker.start() < match.start()
+                        )
+                        cue_positions.extend(
+                            (marker.start(), "other")
+                            for other_profile, other_marker in _CATEGORY_MARKERS.items()
+                            if other_profile != profile
+                            for marker in other_marker.finditer(current_line)
+                            if marker.start() < match.start()
+                        )
+                        latest_position, latest_kind = max(cue_positions, default=(-1, "other"))
+                        category_context = current_line[latest_position:] if latest_kind == "target" else ""
+                    elif any(marker.search(current_line) for marker in _CATEGORY_MARKERS.values()):
+                        category_context = ""
+                    elif re.search(
+                        r"(?i)\b(?:thinking|reasoning) mode\b|\b(?:instruct|non[- ]thinking) mode\b", current_line
+                    ):
+                        category_context = ""
+                    elif category_marker.search(previous_line):
+                        category_context = f"{previous_line} {current_line}".strip()
+                    else:
+                        category_context = ""
+                else:
+                    if profile == "normal":
+                        normal_matches = [
+                            marker
+                            for marker in _NORMAL_PROFILE_MARKER.finditer(current_line)
+                            if marker.start() < match.start()
+                        ]
+                        if normal_matches:
+                            category_context = current_line[max(marker.start() for marker in normal_matches) :]
+                        elif any(marker.search(current_line) for marker in _CATEGORY_MARKERS.values()):
+                            category_context = current_line
+                        else:
+                            category_context = current_line
+                    else:
+                        category_context = current_line
+                        if not any(marker.search(current_line) for marker in _CATEGORY_MARKERS.values()):
+                            category_context = f"{previous_line} {current_line}".strip()
                 if profile == "normal" and is_thinking and not is_non_thinking:
+                    continue
+                if profile == "normal" and any(
+                    marker.search(category_context) for marker in _CATEGORY_MARKERS.values()
+                ):
+                    continue
+                if category_marker is not None and not category_marker.search(category_context):
                     continue
                 try:
                     value = float(match.group(1))
@@ -547,17 +632,35 @@ def _source_evidence(
     profile: str,
     values: Mapping[str, float | int],
     evidence: Mapping[str, Mapping[str, str]],
+    *,
+    evidence_kind: str = "direct",
+    derived_from: str | None = None,
 ) -> list[dict[str, Any]]:
-    return [
-        {
+    items: list[dict[str, Any]] = []
+    for field, value in values.items():
+        if field not in evidence:
+            continue
+        item: dict[str, Any] = {
             "profile": profile,
             "field": field,
             "value": value,
             "url": evidence[field]["url"],
             "excerpt": evidence[field]["excerpt"],
+            "evidence_kind": evidence_kind,
         }
-        for field, value in values.items()
-        if field in evidence
+        if derived_from is not None:
+            item["derived_from"] = derived_from
+        items.append(item)
+    return items
+
+
+def _unresolved_evidence(profile: str, reason: str) -> list[dict[str, str]]:
+    return [
+        {
+            "profile": profile,
+            "evidence_kind": "unresolved",
+            "reason": reason,
+        }
     ]
 
 
@@ -617,22 +720,113 @@ def research_sampling_report(
         normal_values, normal_evidence, normal_conflicts = _resolve_profile(documents, "normal")
 
     source_urls = sorted({document.url for document in documents})
+    thinking_values, thinking_evidence, thinking_conflicts = _resolve_profile(documents, "thinking")
     if "temperature" not in normal_values or "top_p" not in normal_values:
         status = "conflict" if normal_conflicts else ("unresolved" if documents else "not_found")
+        unresolved = _unresolved_evidence(
+            "math",
+            "Kein allgemeines Profil; Coding-/Math-Fallback kann nicht belastbar bestimmt werden.",
+        )
         return {
             "sampling_research_status": status,
             "sampling_sources": source_urls,
-            "sampling_evidence": [],
+            "sampling_evidence": unresolved,
+            "sampling_category_status": {"math": "unresolved"},
         }
 
-    sampling: dict[str, Any] = {
-        category: dict(normal_values) for category in SAMPLING_CATEGORIES if category != "thinking"
-    }
+    category_status: dict[str, str] = {}
+    sampling: dict[str, Any] = {}
     evidence = _source_evidence("normal", normal_values, normal_evidence)
-    thinking_values, thinking_evidence, thinking_conflicts = _resolve_profile(documents, "thinking")
+
+    coding_values, coding_evidence, coding_conflicts = _resolve_profile(documents, "coding")
+    if coding_conflicts:
+        return {
+            "sampling_research_status": "conflict",
+            "sampling_sources": source_urls,
+            "sampling_evidence": evidence
+            + _unresolved_evidence("coding", "Widersprüchliche Coding-Profile.")
+            + _unresolved_evidence("math", "Coding-Profil widersprüchlich; Math-Ableitung nicht belastbar."),
+            "sampling_category_status": {"coding": "unresolved", "math": "unresolved"},
+        }
+    if "temperature" in coding_values and "top_p" in coding_values:
+        sampling["coding"] = dict(coding_values)
+        evidence.extend(_source_evidence("coding", coding_values, coding_evidence))
+        category_status["coding"] = "direct"
+        coding_source = "coding"
+        coding_source_evidence = coding_evidence
+    else:
+        sampling["coding"] = dict(normal_values)
+        category_status["coding"] = "derived"
+        coding_source = "normal"
+        coding_source_evidence = normal_evidence
+        evidence.extend(
+            _source_evidence("coding", normal_values, normal_evidence, evidence_kind="derived", derived_from="normal")
+        )
+
+    for category in ("knowledge", "agentic"):
+        values, profile_evidence, conflicts = _resolve_profile(documents, category)
+        if conflicts:
+            return {
+                "sampling_research_status": "conflict",
+                "sampling_sources": source_urls,
+                "sampling_evidence": evidence
+                + _unresolved_evidence(category, f"Widersprüchliche {category}-Profile.")
+                + _unresolved_evidence("math", f"Widersprüchliches {category}-Profil; Math-Status bleibt ungeklärt."),
+                "sampling_category_status": {**category_status, category: "unresolved", "math": "unresolved"},
+            }
+        if "temperature" in values and "top_p" in values:
+            sampling[category] = dict(values)
+            evidence.extend(_source_evidence(category, values, profile_evidence))
+            category_status[category] = "direct"
+        else:
+            fallback_values = (
+                thinking_values if category == "agentic" and "temperature" in thinking_values else normal_values
+            )
+            fallback_evidence = (
+                thinking_evidence if category == "agentic" and "temperature" in thinking_values else normal_evidence
+            )
+            fallback_profile = "thinking" if category == "agentic" and "temperature" in thinking_values else "normal"
+            sampling[category] = dict(fallback_values)
+            evidence.extend(
+                _source_evidence(
+                    category,
+                    fallback_values,
+                    fallback_evidence,
+                    evidence_kind="derived",
+                    derived_from=fallback_profile,
+                )
+            )
+            category_status[category] = "derived"
+
+    math_values, math_evidence, math_conflicts = _resolve_profile(documents, "math")
+    if math_conflicts:
+        return {
+            "sampling_research_status": "conflict",
+            "sampling_sources": source_urls,
+            "sampling_evidence": evidence + _unresolved_evidence("math", "Widersprüchliche Math-Profile."),
+            "sampling_category_status": {**category_status, "math": "unresolved"},
+        }
+    if "temperature" in math_values and "top_p" in math_values:
+        sampling["math"] = dict(math_values)
+        evidence.extend(_source_evidence("math", math_values, math_evidence))
+        category_status["math"] = "direct"
+    else:
+        sampling["math"] = dict(coding_values if coding_source == "coding" else normal_values)
+        evidence.extend(
+            _source_evidence(
+                "math",
+                sampling["math"],
+                coding_source_evidence,
+                evidence_kind="derived",
+                derived_from="coding",
+            )
+        )
+        category_status["math"] = "derived"
+
     if "temperature" in thinking_values and "top_p" in thinking_values and not thinking_conflicts:
         sampling["thinking"] = {"enabled": True, **thinking_values}
         evidence.extend(_source_evidence("thinking", thinking_values, thinking_evidence))
+        category_status["thinking"] = "direct"
 
     return {
         "sampling": sampling,
@@ -640,6 +834,7 @@ def research_sampling_report(
         "sampling_research_status": "confirmed",
         "sampling_sources": sorted({item["url"] for item in evidence}),
         "sampling_evidence": evidence,
+        "sampling_category_status": category_status,
     }
 
 

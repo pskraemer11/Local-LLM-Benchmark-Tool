@@ -83,3 +83,12 @@ validate_errors.log
 
 # Lokale, regenerierbare Quarantaene-Backups der Registry
 doc-git/Review-Artifacts/quarantine_registry_*.yaml
+
+# Lokale, regenerierbare Analyse- und Sicherheitsartefakte
+.compat-baseline-*/
+hardening/
+model-list.txt
+doc-git/*_llama-server_version+help.txt
+
+# Fremder, unversionierter Hilfscode im Arbeitsbaum
+utils/

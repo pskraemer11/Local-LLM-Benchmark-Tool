@@ -773,7 +773,7 @@ def classify_registry() -> None:
         if not isinstance(entry, dict):
             continue
 
-        arch = str(entry.get("arch", ""))
+        arch = str(entry.get("architecture_family") or entry.get("arch", ""))
         notes = str(entry.get("notes", ""))
 
         # Classification (priority: GGUF/override > arch map > keywords > instruct)

@@ -13,16 +13,38 @@ The project has two user-facing entry points:
 Everything else supports one of these two workflows: model discovery,
 prompt assembly, provider access, result writing, or result consolidation.
 
+## Central data flow
+
+The repository separates preparation from execution. Registry maintenance
+establishes the model and prompt policy; benchmark execution consumes that
+policy through a provider and writes reproducible result artifacts.
+
+~~~text
+LM Studio inventory ─────┐
+                         ├─ registry_tool.py ──> model_registry.yaml
+GGUF headers/files ──────┘          │
+                                    ├─> blueprint classification
+blueprint_definitions.yaml ─────────┘
+                                    │
+                                    └─> prompt preview and validation
+
+model_registry.yaml + provider ──> run_benchmarks.py
+                                      │
+                                      ├─> load / readiness / unload
+                                      ├─> Custom, EvalPlus, LM-Eval, Agentic
+                                      └─> CSV results ──> consolidation
+~~~
+
 ## What the project measures
 
 The launcher currently supports four benchmark pipelines:
 
-| Pipeline | Benchmarks | What it measures |
-| --- | --- | --- |
-| Custom | DS1000, CoderEval | Data-science and code-generation tasks |
-| EvalPlus | HumanEval+, MBPP+ | Code generation with differential tests |
-| LM-Eval | ARC, HellaSwag, TruthfulQA, IFEval, MATH-500 | Knowledge, reasoning, and instruction following |
-| Agentic | tool-eval-bench | Tool-use scenarios |
+| Pipeline                                        | Benchmarks                                      | What it measures                                |
+| ----------------------------------------------- | ----------------------------------------------- | ----------------------------------------------- |
+| Custom                                          | DS1000, CoderEval                               | Data-science and code-generation tasks          |
+| EvalPlus                                        | HumanEval+, MBPP+                               | Code generation with differential tests         |
+| LM-Eval                                         | ARC, HellaSwag, TruthfulQA, IFEval, MATH-500    | Knowledge, reasoning, and instruction following |
+| Agentic                                         | tool-eval-bench                                 | Tool-use scenarios                              |
 
 The result files contain per-task scores and runtime telemetry such as
 latency, tokens per second, CPU, GPU, RAM, VRAM, and temperature. The
@@ -129,6 +151,24 @@ The registry tool operates on:
 - LM Studio config JSONs as read-only runtime evidence
 - blueprint definitions and Jinja templates
 - bounded web research for one-time sampling onboarding
+
+### GGUF model root configuration
+
+Local GGUF discovery uses the following order by default:
+
+1. `D:\LLM-Modelle\models` as the primary model root;
+2. `C:\Users\<user>\.lmstudio\models` as a compatibility fallback.
+
+The fallback also covers installations that still expose the old location or
+use a Windows Junction.  The resolver canonicalizes paths and keeps the
+primary copy when the same model identity is visible through both locations.
+
+For an isolated or different installation, set `GGUF_MODEL_ROOT` to one
+directory.  The existing `UNSLOTH_MODEL_ROOT` and `LMSTUDIO_MODELS_DIR`
+variables remain supported as lower-priority compatibility overrides.  An
+explicit override scans only that directory; it does not silently add the
+default fallback.  The same resolution order is used by the registry tool,
+the local resolver, the benchmark runner, and the Unsloth provider.
 
 ### The important pipeline variants
 
@@ -268,20 +308,20 @@ pipelines do not independently load models.
 
 ### Common options
 
-| Option | Meaning |
-| --- | --- |
-| --model, -m | Model name, number, range, comma-separated selection, or all |
-| --benchmarks, -b | Benchmark name(s), number(s), or all |
-| --sample-size, -s | Number of tasks/scenarios per benchmark; default 20 |
-| --seed | Reproducible task selection for supported pipelines |
-| --thinking | Force thinking mode for reasoning models |
-| --agentic-mode random | Select random agentic scenarios |
-| --agentic-mode safety | Select the safety-focused agentic scenarios |
-| --exclude-benchmarks | Comma-separated exclusions |
-| --no-structured-output | Use the regex fallback in custom benchmarks |
-| --unload-between | Reload the model between benchmarks |
-| --keep-response | Store full responses instead of truncated response text |
-| --run-spec, --config | Read models, benchmarks, seed, and options from YAML |
+| Option                                                       | Meaning                                                      |
+| ------------------------------------------------------------ | ------------------------------------------------------------ |
+| --model, -m                                                  | Model name, number, range, comma-separated selection, or all |
+| --benchmarks, -b                                             | Benchmark name(s), number(s), or all                         |
+| --sample-size, -s                                            | Number of tasks/scenarios per benchmark; default 20          |
+| --seed                                                       | Reproducible task selection for supported pipelines          |
+| --thinking                                                   | Force thinking mode for reasoning models                     |
+| --agentic-mode random                                        | Select random agentic scenarios                              |
+| --agentic-mode safety                                        | Select the safety-focused agentic scenarios                  |
+| --exclude-benchmarks                                         | Comma-separated exclusions                                   |
+| --no-structured-output                                       | Use the regex fallback in custom benchmarks                  |
+| --unload-between                                             | Reload the model between benchmarks                          |
+| --keep-response                                              | Store full responses instead of truncated response text      |
+| --run-spec, --config                                         | Read models, benchmarks, seed, and options from YAML         |
 
 CLI options override values from a run-spec YAML file.
 
@@ -307,16 +347,16 @@ py -3.12 .\src\run_benchmarks.py --run-spec .\run.example.yaml
 The project deliberately separates benchmark policy from backend-local
 runtime artifacts.
 
-| Data | Location | Role |
-| --- | --- | --- |
-| Model registry | doc-git\model_registry.yaml | Benchmark policy and provider-neutral model metadata |
-| Blueprint definitions | doc-git\blueprint_definitions.yaml | System-prompt assembly rules |
-| Jinja templates | doc-git\Jinja-Chat-Templates\ | Explicit chat-template overrides |
-| GGUF files | LM Studio model directory | Immutable model/header facts |
-| LM Studio config JSONs | LM Studio internal config directory | Backend-local runtime artifacts and drift evidence |
-| Benchmark datasets | simple_evals\, lm-eval, EvalPlus, tool-eval-bench | Tasks and scenarios |
-| Run specifications | local run*.yaml files | Reproducible run selections |
-| Results | ergebnisse\ | Per-task CSVs, summaries, logs, and reports |
+| Data                                                           | Location                                                       | Role                                                           |
+| -------------------------------------------------------------- | -------------------------------------------------------------- | -------------------------------------------------------------- |
+| Model registry                                                 | doc-git\model_registry.yaml                                    | Benchmark policy and provider-neutral model metadata           |
+| Blueprint definitions                                          | doc-git\blueprint_definitions.yaml                             | System-prompt assembly rules                                   |
+| Jinja templates                                                | doc-git\Jinja-Chat-Templates\                                  | Explicit chat-template overrides                               |
+| GGUF files                                                     | `D:\LLM-Modelle\models` (legacy `~\.lmstudio\models` fallback) | Immutable model/header facts                                   |
+| LM Studio config JSONs                                         | LM Studio internal config directory                            | Backend-local runtime artifacts and drift evidence             |
+| Benchmark datasets                                             | simple_evals\, lm-eval, EvalPlus, tool-eval-bench              | Tasks and scenarios                                            |
+| Run specifications                                             | local run*.yaml files                                          | Reproducible run selections                                    |
+| Results                                                        | ergebnisse\                                                    | Per-task CSVs, summaries, logs, and reports                    |
 
 The canonical model identity is:
 
@@ -388,12 +428,12 @@ py -3.12 .\src\consolidate_results.py
 
 The default category weights are:
 
-| Category | Weight |
-| --- | ---: |
-| Coding | 35% |
-| Math | 25% |
-| Agentic | 25% |
-| Knowledge | 15% |
+| Category  | Weight    |
+| --------- | --------: |
+| Coding    | 35%       |
+| Math      | 25%       |
+| Agentic   | 25%       |
+| Knowledge | 15%       |
 
 For statistically paired comparisons, use the consolidation tool's compare
 options with a fixed seed and comparable task selection.

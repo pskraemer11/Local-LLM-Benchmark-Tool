@@ -8,10 +8,10 @@ from pathlib import Path
 import pytest
 
 import registry_tool as rt
-from sampling_research import research_sampling, research_sampling_report
+from sampling_research import _normalise_url, research_sampling, research_sampling_report
 
 
-def test_research_extracts_profile_and_applies_it_to_categories() -> None:
+def test_research_uses_explicit_profiles_and_marks_fallbacks() -> None:
     requested: list[str] = []
 
     def fetcher(url: str, _timeout: float) -> str | None:
@@ -38,9 +38,79 @@ def test_research_extracts_profile_and_applies_it_to_categories() -> None:
         "min_p": 0.05,
     }
     assert result["sampling"]["math"] == result["sampling"]["coding"]
+    assert result["sampling_category_status"]["math"] == "derived"
+    math_evidence = [item for item in result["sampling_evidence"] if item.get("profile") == "math"]
+    assert math_evidence
+    assert {item["evidence_kind"] for item in math_evidence} == {"derived"}
+    assert {item["derived_from"] for item in math_evidence} == {"coding"}
     assert result["sampling"]["thinking"]["enabled"] is True
     assert result["sampling"]["thinking"]["temperature"] == 0.6
     assert result["sampling_source"] == "web-research"
+
+
+def test_research_prefers_direct_category_profiles() -> None:
+    def fetcher(url: str, _timeout: float) -> str | None:
+        if url.endswith("/raw/main/README.md"):
+            return """
+            General tasks: temperature=0.7, top_p=0.8, top_k=20
+            Precise coding tasks: temperature=0.6, top_p=0.95, top_k=20
+            Math problems: temperature=0.4, top_p=0.9, top_k=10
+            Agentic tool use: temperature=0.8, top_p=0.92, top_k=30
+            Thinking mode: temperature=1.0, top_p=0.95, top_k=20
+            """
+        return None
+
+    result = research_sampling(
+        {"publisher": "example", "modelKey": "example/model"},
+        fetcher=fetcher,
+    )
+
+    assert result is not None
+    assert result["sampling"]["coding"]["temperature"] == 0.6
+    assert result["sampling"]["math"]["temperature"] == 0.4
+    assert result["sampling"]["knowledge"]["temperature"] == 0.7
+    assert result["sampling"]["agentic"]["temperature"] == 0.8
+    assert result["sampling_category_status"]["math"] == "direct"
+    math_evidence = [item for item in result["sampling_evidence"] if item.get("profile") == "math"]
+    assert {item["evidence_kind"] for item in math_evidence} == {"direct"}
+
+
+def test_research_separates_profiles_sharing_one_markdown_line() -> None:
+    def fetcher(url: str, _timeout: float) -> str | None:
+        if url.endswith("/raw/main/README.md"):
+            return (
+                "> - Thinking mode for precise coding tasks: temperature=0.6, top_p=0.95, top_k=20 "
+                "> - Instruct (or non-thinking) mode for general tasks: temperature=0.7, top_p=0.8, top_k=20"
+            )
+        return None
+
+    result = research_sampling(
+        {"publisher": "example", "modelKey": "example/model"},
+        fetcher=fetcher,
+    )
+
+    assert result is not None
+    assert result["sampling"]["coding"]["temperature"] == 0.6
+    assert result["sampling"]["knowledge"]["temperature"] == 0.7
+    assert result["sampling"]["math"]["temperature"] == 0.6
+    assert result["sampling_category_status"]["math"] == "derived"
+
+
+def test_research_marks_math_unresolved_without_any_sampling_profile() -> None:
+    result = research_sampling_report(
+        {"publisher": "example", "modelKey": "example/missing"},
+        fetcher=lambda _url, _timeout: None,
+    )
+
+    assert result["sampling_research_status"] == "not_found"
+    assert result["sampling_category_status"]["math"] == "unresolved"
+    assert result["sampling_evidence"] == [
+        {
+            "profile": "math",
+            "evidence_kind": "unresolved",
+            "reason": "Kein allgemeines Profil; Coding-/Math-Fallback kann nicht belastbar bestimmt werden.",
+        }
+    ]
 
 
 def test_research_rejects_implausible_or_incomplete_values() -> None:
@@ -55,6 +125,10 @@ def test_research_rejects_implausible_or_incomplete_values() -> None:
     )
 
     assert result is None
+
+
+def test_research_ignores_unresolved_template_links() -> None:
+    assert _normalise_url("/oobabooga/text-generation-webui/pull/5677/{{ revealButtonHref }}", "https://github.com") is None
 
 
 def test_research_checks_known_manufacturer_sources() -> None:
@@ -191,6 +265,66 @@ def test_manual_review_uses_validated_registry_write_seam(tmp_path: Path, monkey
     assert entry["sampling_source"] == "manual-web-review"
     assert entry["sampling_research_status"] == "confirmed"
     assert entry["sampling"]["thinking"]["enabled"] is True
+
+
+def test_sampling_report_persists_category_status(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    registry_path = tmp_path / "registry.yaml"
+    registry_path.write_text(
+        "example/model@q4_k:\n  publisher: example\n  arch: dense\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(rt, "REGISTRY_PATH", registry_path)
+
+    entry = rt.load_registry(registry_path)["example/model@q4_k"]
+    changed = rt._apply_sampling_report(
+        entry,
+        {
+            "sampling_research_status": "confirmed",
+            "sampling": {
+                "coding": {"temperature": 0.6, "top_p": 0.95},
+                "math": {"temperature": 0.6, "top_p": 0.95},
+            },
+            "sampling_category_status": {"coding": "direct", "math": "derived"},
+            "sampling_sources": ["https://example.com/model-card"],
+            "sampling_evidence": [
+                {"profile": "math", "evidence_kind": "derived", "derived_from": "coding"}
+            ],
+        },
+    )
+
+    assert changed is True
+    assert entry["sampling_category_status"] == {"coding": "direct", "math": "derived"}
+
+
+def test_forced_sampling_refresh_researches_existing_sampling(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    registry_path = tmp_path / "registry.yaml"
+    registry_path.write_text(
+        "example/model@q4_k:\n"
+        "  publisher: example\n"
+        "  arch: dense\n"
+        "  sampling:\n"
+        "    coding: {temperature: 0.7, top_p: 0.9}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(rt, "REGISTRY_PATH", registry_path)
+    calls = 0
+
+    def patched(_model: dict[str, object]) -> dict[str, object]:
+        nonlocal calls
+        calls += 1
+        return {
+            "sampling_research_status": "confirmed",
+            "sampling": {"coding": {"temperature": 0.6, "top_p": 0.95}},
+            "sampling_category_status": {"coding": "direct", "math": "derived"},
+            "sampling_sources": ["https://example.com/model-card"],
+        }
+
+    monkeypatch.setattr(rt, "research_sampling", patched)
+    assert rt._research_missing_sampling(rt.load_registry(registry_path), force=True) == []
+    assert calls == 1
+    entry = rt.load_registry(registry_path)["example/model@q4_k"]
+    assert entry["sampling"]["coding"]["temperature"] == 0.6
+    assert entry["sampling_category_status"]["math"] == "derived"
 
 
 def test_cmd_add_persists_researched_sampling_without_touching_lms_configs(

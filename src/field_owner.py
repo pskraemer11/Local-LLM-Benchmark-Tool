@@ -52,6 +52,9 @@ FIELD_OWNERSHIP: dict[str, FieldRule] = {
     "arch": FieldRule(
         "gguf", "registry", True, description="moe/mtp/dense aus GGUF expert_count",
     ),
+    "architecture_family": FieldRule(
+        "gguf", "registry", True, description="general.architecture aus GGUF-Header (LMS-Architekturfamilie)",
+    ),
     # ── lms ls --json (unveraenderlich) → Registry, Auto-Fix ────────
     "file_size_bytes": FieldRule(
         "lms", "registry", True, description="Dateigroesse aus lms ls"
@@ -109,6 +112,7 @@ FIELD_OWNERSHIP: dict[str, FieldRule] = {
     "sampling_researched_at": FieldRule("registry", "registry", False, description="Sampling research timestamp"),
     "sampling_sources": FieldRule("registry", "registry", False, description="URLs used for sampling research"),
     "sampling_evidence": FieldRule("registry", "registry", False, description="Sampling source excerpts"),
+    "sampling_category_status": FieldRule("registry", "registry", False, description="Sampling provenance per category"),
     "experts": FieldRule("registry", "registry", False),
     "custom_template": FieldRule("registry", "registry", False),
 }

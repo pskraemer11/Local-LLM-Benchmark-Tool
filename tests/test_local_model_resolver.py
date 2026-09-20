@@ -10,6 +10,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
+import model_paths
 from local_model_resolver import LocalModelResolver
 
 if TYPE_CHECKING:
@@ -126,3 +127,73 @@ def test_resolver_rejects_missing_local_model_without_remote_fallback(tmp_path: 
 
     with pytest.raises(RuntimeError, match="Remote-Downloads"):
         resolver.resolve("unsloth/missing-model@q4_k_m")
+
+
+def test_default_roots_use_primary_then_legacy_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    primary = tmp_path / "primary"
+    legacy = tmp_path / "legacy"
+    monkeypatch.delenv("GGUF_MODEL_ROOT", raising=False)
+    monkeypatch.delenv("UNSLOTH_MODEL_ROOT", raising=False)
+    monkeypatch.delenv("LMSTUDIO_MODELS_DIR", raising=False)
+    monkeypatch.setattr(model_paths, "PRIMARY_GGUF_ROOT", primary)
+    monkeypatch.setattr(model_paths, "LEGACY_GGUF_ROOT", legacy)
+
+    primary_model = primary / "vendor" / "model" / "model-Q4_K_M.gguf"
+    fallback_only = legacy / "vendor" / "fallback" / "fallback-Q8_0.gguf"
+    _touch(primary_model)
+    _touch(fallback_only)
+
+    candidates = LocalModelResolver().candidates()
+
+    assert {candidate.path for candidate in candidates} == {primary_model, fallback_only}
+    assert LocalModelResolver().model_roots == (primary, legacy)
+
+
+def test_primary_root_wins_for_duplicate_model_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    primary = tmp_path / "primary"
+    legacy = tmp_path / "legacy"
+    monkeypatch.delenv("GGUF_MODEL_ROOT", raising=False)
+    monkeypatch.delenv("UNSLOTH_MODEL_ROOT", raising=False)
+    monkeypatch.delenv("LMSTUDIO_MODELS_DIR", raising=False)
+    monkeypatch.setattr(model_paths, "PRIMARY_GGUF_ROOT", primary)
+    monkeypatch.setattr(model_paths, "LEGACY_GGUF_ROOT", legacy)
+
+    primary_model = primary / "vendor" / "model" / "model-Q4_K_M.gguf"
+    legacy_model = legacy / "vendor" / "model" / "model-Q4_K_M.gguf"
+    _touch(primary_model)
+    _touch(legacy_model)
+
+    candidates = LocalModelResolver().candidates()
+
+    assert len(candidates) == 1
+    assert candidates[0].path == primary_model
+
+
+def test_explicit_root_override_does_not_scan_implicit_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    override = tmp_path / "override"
+    fallback = tmp_path / "fallback"
+    _touch(override / "vendor" / "override" / "override-Q4_K_M.gguf")
+    _touch(fallback / "vendor" / "fallback" / "fallback-Q8_0.gguf")
+    monkeypatch.setenv("GGUF_MODEL_ROOT", str(fallback))
+
+    candidates = LocalModelResolver(override).candidates()
+
+    assert len(candidates) == 1
+    assert candidates[0].path.is_relative_to(override)
+
+
+def test_neutral_environment_root_overrides_default_roots(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    override = tmp_path / "configured"
+    monkeypatch.setenv("GGUF_MODEL_ROOT", str(override))
+    monkeypatch.setenv("UNSLOTH_MODEL_ROOT", str(tmp_path / "older-unsloth"))
+    monkeypatch.setenv("LMSTUDIO_MODELS_DIR", str(tmp_path / "older-lmstudio"))
+
+    assert LocalModelResolver().model_roots == (override,)

@@ -9,11 +9,14 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from benchmark_config import BLACKLIST, guess_quant_from_filename, is_mtp_drafter, is_support_file
 from model_identity import match_registry_key, normalize_for_config
+from model_paths import configured_gguf_roots
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 RegistryLoader = Callable[[], dict[str, Any]]
 
@@ -34,15 +37,17 @@ class LocalModelCandidate:
 
 
 class LocalModelResolver:
-    """Discover and resolve benchmarkable GGUF files below one model root."""
+    """Discover and resolve benchmarkable GGUF files below ordered roots."""
 
     def __init__(
         self,
         models_root: str | Path | None = None,
         registry_loader: RegistryLoader | None = None,
     ) -> None:
-        configured_root = models_root or Path.home() / ".lmstudio" / "models"
-        self.models_root = Path(configured_root).expanduser()
+        self.model_roots = configured_gguf_roots(models_root)
+        # Keep the established attribute for callers that display the primary
+        # root or use it in diagnostics.
+        self.models_root = self.model_roots[0]
         self._registry_loader = registry_loader
 
     def _registry(self) -> dict[str, Any]:
@@ -64,10 +69,13 @@ class LocalModelResolver:
         return any(keyword in lowered for keyword in BLACKLIST)
 
     def _model_base_id(self, path: Path) -> str:
-        try:
-            relative = path.relative_to(self.models_root)
-        except ValueError:
-            relative = path
+        relative = path
+        for root in self.model_roots:
+            try:
+                relative = path.relative_to(root)
+                break
+            except ValueError:
+                continue
         parts = relative.parts
         # Unsloth's local HF cache lives below models/hub, not below the
         # separate LM Studio config tree at .lmstudio/hub.
@@ -138,17 +146,22 @@ class LocalModelResolver:
 
     def candidates(self, registry_only: bool = False) -> list[LocalModelCandidate]:
         """Return eligible, path-deduplicated local GGUF candidates."""
-        if not self.models_root.is_dir():
+        existing_roots = [root for root in self.model_roots if root.is_dir()]
+        if not existing_roots:
             return []
 
         registry = self._registry()
         by_path: dict[str, LocalModelCandidate] = {}
-        try:
-            paths = sorted(self.models_root.rglob("*.gguf"), key=lambda item: str(item).casefold())
-        except OSError:
-            return []
+        by_identifier: dict[str, str] = {}
+        paths: list[tuple[int, Path]] = []
+        for root_index, root in enumerate(existing_roots):
+            try:
+                paths.extend((root_index, path) for path in root.rglob("*.gguf"))
+            except OSError:
+                continue
+        paths.sort(key=lambda item: (item[0], str(item[1]).casefold()))
 
-        for path in paths:
+        for _, path in paths:
             if not path.is_file():
                 continue
             try:
@@ -179,9 +192,16 @@ class LocalModelResolver:
                 display=self._display_name(model_identifier, quant, entry),
             )
             canonical_path = self._canonical_path(path)
+            identity = model_identifier.casefold()
+            existing_path = by_identifier.get(identity)
+            if existing_path is not None and existing_path != canonical_path:
+                # The first root wins.  A fallback must not make an otherwise
+                # identical model ambiguous when the primary root contains it.
+                continue
             existing = by_path.get(canonical_path)
             if existing is None or (existing.registry_key is None and registry_key is not None):
                 by_path[canonical_path] = candidate
+                by_identifier[identity] = canonical_path
 
         return sorted(by_path.values(), key=lambda item: item.display.casefold())
 

@@ -61,14 +61,14 @@ Commands:
                   prompt validation and Registry-drift validation.
                   Does not write config JSONs. Exits with code 1 when blocking
                   ownership drift remains; --ignore-drift keeps it report-only.
-                Optional: --refresh-sampling repeats terminal sampling research
-                for unresolved/new models during the sync stage.
+                Optional: --refresh-sampling re-researches sampling for every
+                benchmarkable Registry candidate during the sync stage.
   patch-reasoning-effort
                 Add gpt-oss-20b reasoningEffort/budgetTokens to LMS configs
                 (--dry-run, --wait-for-lock, --effort, --budget)
   sync          Full sync: add + web sampling research → fill-quant → fill-arch
                 → sync-from-gguf → fill-reasoning → sync-from-configs → fmt
-                --refresh-sampling: terminale Sampling-Status einmalig erneut prüfen
+                --refresh-sampling: Sampling für alle Kandidaten neu recherchieren
 
 Prinzip (seit 13.08.2026): Die **Registry (model_registry.yaml) ist Single Source of Truth**
 für useUnifiedKvCache und context_length. **num_parallel ist eine feste Benchmark-Policy**
@@ -88,7 +88,7 @@ Dokumentationspfade werden geprüft. Das Ergebnis wird als `confirmed`,
 `unresolved`, `conflict` oder `not_found` mit Quellen/Evidenz gespeichert.
 Benchmark-Läufe lesen ausschließlich lokale Registry-Werte und führen keine
 Websuche aus. Terminale Recherche-Status werden bei späterem `sync` übersprungen;
-`--refresh-sampling` erzwingt einen bewussten Neuversuch.
+`--refresh-sampling` erzwingt eine vollständige, kategorisierte Neubewertung.
 """
 
 from __future__ import annotations
@@ -162,6 +162,7 @@ from benchmark_config import (
     USE_UNIFIED_KV_CACHE_THRESHOLD_GB as _USE_UNIFIED_KV_CACHE_THRESHOLD_GB,  # noqa: F401 - re-export for tests
 )
 from model_identity import normalize_variants
+from model_paths import configured_gguf_roots
 from sampling_research import (
     RESEARCH_STATUSES,
     research_sampling,
@@ -225,6 +226,10 @@ def _apply_sampling_report(entry: dict[str, Any], report: dict[str, Any]) -> boo
     entry["sampling_researched_at"] = _sampling_researched_at()
     entry["sampling_sources"] = list(report.get("sampling_sources") or [])
     entry["sampling_evidence"] = list(report.get("sampling_evidence") or [])
+    category_status = report.get("sampling_category_status")
+    entry["sampling_category_status"] = (
+        dict(category_status) if isinstance(category_status, dict) else {}
+    )
     if status == "confirmed" and isinstance(report.get("sampling"), dict):
         entry["sampling"] = report["sampling"]
         entry["sampling_source"] = report.get("sampling_source", "web-research")
@@ -459,7 +464,7 @@ def cmd_fill_size() -> None:
 
 
 def _find_gguf_for_key(key: str) -> Path | None:
-    """Find the GGUF file for a registry key by scanning MODELS_CACHE.
+    """Find the GGUF file for a registry key by scanning configured roots.
 
     Returns the Path or None if not found.
     """
@@ -472,13 +477,21 @@ def _find_gguf_for_key(key: str) -> Path | None:
 
 
 _GGUF_FILE_CACHE: list[Path] | None = None
+_GGUF_FILE_CACHE_ROOTS: tuple[str, ...] | None = None
 
 
 def _get_all_ggufs() -> list[Path]:
-    """Return (and cache) all ``.gguf`` files under ``MODELS_CACHE``."""
-    global _GGUF_FILE_CACHE
-    if _GGUF_FILE_CACHE is None:
-        _GGUF_FILE_CACHE = sorted(MODELS_CACHE.rglob("*.gguf"))
+    """Return (and cache) all ``.gguf`` files under the configured roots."""
+    global _GGUF_FILE_CACHE, _GGUF_FILE_CACHE_ROOTS
+    roots = _gguf_roots()
+    root_key = tuple(str(root).casefold() for root in roots)
+    if _GGUF_FILE_CACHE is None or _GGUF_FILE_CACHE_ROOTS != root_key:
+        files: list[Path] = []
+        for root in roots:
+            if root.is_dir():
+                files.extend(root.rglob("*.gguf"))
+        _GGUF_FILE_CACHE = sorted(files, key=lambda item: str(item).casefold())
+        _GGUF_FILE_CACHE_ROOTS = root_key
     return _GGUF_FILE_CACHE
 
 
@@ -509,13 +522,13 @@ def _significant_words(s: str) -> set[str]:
 def _resolve_model_path_multi(key: str) -> str:
     """Resolve GGUF path — exact substring match first, then word-match fallback.
 
-    1. Exact ``MODELS_CACHE / key`` — library-level path from LM Studio.
+    1. Exact ``GGUF root / key`` — library-level path from LM Studio.
     2. Substring match (normalised key suffix in normalised GGUF path).
     3. Word-match fallback (at least 2 significant words in common).
     Returns ``""`` if nothing suitable is found.
     """
-    candidate = MODELS_CACHE / key
-    if candidate.is_file():
+    candidate = _find_gguf_relative_path(key)
+    if candidate is not None:
         return str(candidate)
 
     suffix = key.split("/", 1)[1] if "/" in key else key
@@ -525,7 +538,7 @@ def _resolve_model_path_multi(key: str) -> str:
     for g in _get_all_ggufs():
         if _is_support_file(g):
             continue
-        if sn in _norm(str(g.relative_to(MODELS_CACHE))):
+        if sn in _norm(str(g)):
             return str(g)
 
     # 3) Word-match fallback — require ≥ 2 significant words in common
@@ -536,7 +549,7 @@ def _resolve_model_path_multi(key: str) -> str:
     for g in _get_all_ggufs():
         if _is_support_file(g):
             continue
-        gw = _significant_words(str(g.relative_to(MODELS_CACHE)))
+        gw = _significant_words(str(g))
         match = len(sw & gw)
         if match >= 2 and match > best[0]:
             best = (match, str(g))
@@ -571,8 +584,8 @@ def _resolve_exact(reg_key: str, lms_path_map: dict[str, str]) -> str:
     Deliberately **no** word-match fallback: only identical files may
     end up in the same duplicate-collapse group.
     """
-    candidate = MODELS_CACHE / reg_key
-    if candidate.is_file():
+    candidate = _find_gguf_relative_path(reg_key)
+    if candidate is not None:
         return str(candidate)
     for probe in (reg_key.lower(), normalize_model_name(reg_key)):
         mp = lms_path_map.get(probe, "")
@@ -588,7 +601,7 @@ def _resolve_exact(reg_key: str, lms_path_map: dict[str, str]) -> str:
     for g in _get_all_ggufs():
         if _is_support_file(g):
             continue
-        if sn in _norm(str(g.relative_to(MODELS_CACHE))):
+        if sn in _norm(str(g)):
             return str(g)
     return ""
 
@@ -731,7 +744,7 @@ def _missing_registry_keys(lms: list[dict]) -> list[str]:
 def _gguf_for_key_exists(key: str) -> bool:
     """True wenn für den Registry-Key eine GGUF-Datei physisch existiert.
 
-    Prüft ``~/.lmstudio/models`` (MODELS_CACHE) und ``~/.lmstudio/hub/models``.
+    Prüft die konfigurierten GGUF-Roots und ``~/.lmstudio/hub/models``.
     Der Vergleich ist wort-basiert auf dem normalisierten Modellnamen (ohne
     Publisher, ``-gguf-``-Suffix und @-Quant, wie ``normalize_model_name``):
     alle signifikanten Wörter des Keys müssen im Dateinamen vorkommen.
@@ -743,7 +756,7 @@ def _gguf_for_key_exists(key: str) -> bool:
     sn = _significant_words(base)
     if not sn:
         return False
-    for base_dir in (MODELS_CACHE, Path.home() / ".lmstudio" / "hub" / "models"):
+    for base_dir in (*_gguf_roots(), Path.home() / ".lmstudio" / "hub" / "models"):
         if not base_dir.is_dir():
             continue
         for g in base_dir.rglob("*.gguf"):
@@ -1001,9 +1014,9 @@ def cmd_add(
         model_path = ""
         rp = m.get("path", "")
         if rp:
-            mp_candidate = str(MODELS_CACHE / rp)
-            if os.path.isfile(mp_candidate):
-                model_path = mp_candidate
+            mp_candidate = _find_gguf_relative_path(rp)
+            if mp_candidate is not None:
+                model_path = str(mp_candidate)
         classification = _classify_arch(mk, model_path)
         nt = f"Architektur: {classification}"
         if classification == "mtp":
@@ -1024,6 +1037,9 @@ def cmd_add(
             "offload": 1,
             "notes": nt,
         }
+        base_architecture = str(m.get("architecture") or "").strip().lower()
+        if base_architecture:
+            entry["architecture_family"] = base_architecture
         if size_bytes and size_bytes > 0:
             entry["file_size_bytes"] = int(size_bytes)
             entry["context_length"] = _default_ctx_from_size(int(size_bytes), _NP_POLICY, entry["k_cache"], entry["v_cache"])
@@ -1031,9 +1047,9 @@ def cmd_add(
         # Auto-fill arch data from GGUF file if available
         model_path = m.get("path", "")
         if model_path:
-            full_path = str(MODELS_CACHE / model_path)
-            if os.path.isfile(full_path):
-                nl, hd, is_reasoning, ctx, _ = _read_gguf_arch(full_path)
+            full_path = _find_gguf_relative_path(model_path)
+            if full_path is not None:
+                nl, hd, is_reasoning, ctx, _ = _read_gguf_arch(str(full_path))
                 if nl and hd:
                     entry["n_layers"] = int(nl)
                     entry["hidden_dim"] = int(hd)
@@ -1089,11 +1105,13 @@ def cmd_add(
 
 
 def _research_missing_sampling(reg: dict[str, Any], force: bool = False) -> list[str]:
-    """Research missing sampling once, unless an explicit refresh is requested."""
+    """Research sampling incrementally, or every candidate when forced."""
     unresolved: list[str] = []
     changed = False
     for model_key, entry in reg.items():
-        if not isinstance(entry, dict) or "sampling" in entry:
+        if not isinstance(entry, dict):
+            continue
+        if not force and "sampling" in entry:
             continue
         if not force and entry.get("sampling_research_status"):
             continue
@@ -1117,7 +1135,10 @@ def _research_missing_sampling(reg: dict[str, Any], force: bool = False) -> list
                 f"{entry['sampling_research_status']} - keine Web-Empfehlung gefunden"
             )
             continue
-        print(f"  [SAMPLING] {model_key}: fehlender Block aus Web-Quelle ergänzt")
+        if force:
+            print(f"  [SAMPLING] {model_key}: kategorisierte Sampling-Evidenz aktualisiert")
+        else:
+            print(f"  [SAMPLING] {model_key}: fehlender Block aus Web-Quelle ergänzt")
 
     if changed:
         save_registry(reg)
@@ -1227,8 +1248,8 @@ def cmd_rm(model_key: str, delete_files: bool = False, assume_yes: bool = False)
     configs = read_lms_configs(CONFIG_ROOT)
     cfg_paths = [c["json_path"] for c in find_all_configs_for_registry_key(key, configs)]
     hub_dir = Path.home() / ".lmstudio" / "hub" / "models" / Path(*key.split("/"))
-    models_dir = Path.home() / ".lmstudio" / "models" / Path(*key.split("/"))
-    model_dirs = [d for d in (hub_dir, models_dir) if d.exists()]
+    model_dirs = [root / Path(*key.split("/")) for root in _gguf_roots()]
+    model_dirs = [d for d in (hub_dir, *model_dirs) if d.exists()]
 
     print(f"  Registry-Eintrag : {key}")
     if cfg_paths:
@@ -1242,7 +1263,7 @@ def cmd_rm(model_key: str, delete_files: bool = False, assume_yes: bool = False)
                 size_gb = sum(f.stat().st_size for f in d.rglob("*") if f.is_file()) / 1e9
                 print(f"  Modell-Dateien   : {d} ({size_gb:.2f} GB)")
         else:
-            print(f"  Modell-Dateien   : (nicht gefunden unter {hub_dir} / {models_dir})")
+            print(f"  Modell-Dateien   : (nicht gefunden unter {hub_dir} / {_gguf_roots()})")
 
     if not assume_yes:
         answer = input("  Wirklich löschen? [y/N] ").strip().lower()
@@ -1782,6 +1803,20 @@ def _read_gguf_arch(
         return None, None, None, None, None
 
 
+def _read_gguf_base_arch(model_path: str) -> str | None:
+    """Read the provider-neutral ``general.architecture`` GGUF identifier."""
+    try:
+        from gguf import GGUFReader
+
+        field = GGUFReader(model_path).fields.get("general.architecture")
+        if field is None:
+            return None
+        value = field.contents()
+        return value.strip().lower() if isinstance(value, str) and value.strip() else None
+    except (ImportError, KeyError, OSError, ValueError, RuntimeError):
+        return None
+
+
 _REASONING_TOKEN_RE = re.compile(
     r"<\s*/?\s*(?:think|thinking|thought)\s*>|"
     r"<\|channel>\s*(?:thought|think)|"
@@ -1846,11 +1881,31 @@ def _read_gguf_chat_template(model_path: str | Path) -> str | None:
             return None
         value = field.contents()
         return value if isinstance(value, str) and value.strip() else None
-    except (ImportError, OSError, ValueError, RuntimeError):
+    except (ImportError, KeyError, OSError, ValueError, RuntimeError):
         return None
 
 
-MODELS_CACHE = Path.home() / ".lmstudio" / "models"
+_DEFAULT_GGUF_ROOTS = configured_gguf_roots()
+MODELS_CACHE = _DEFAULT_GGUF_ROOTS[0]
+_DEFAULT_MODELS_CACHE = MODELS_CACHE
+
+
+def _gguf_roots() -> tuple[Path, ...]:
+    """Return the configured roots, honoring the legacy test seam."""
+    if MODELS_CACHE != _DEFAULT_MODELS_CACHE:
+        # Existing callers and tests patch MODELS_CACHE to isolate a scan.
+        return (MODELS_CACHE,)
+    return _DEFAULT_GGUF_ROOTS
+
+
+def _find_gguf_relative_path(relative_path: str | Path) -> Path | None:
+    """Find an LMS-relative path in primary-first root order."""
+    candidate = Path(relative_path)
+    for root in _gguf_roots():
+        path = root / candidate
+        if path.is_file():
+            return path
+    return None
 
 # ── GGUF expert_count check (for MoE detection) ───────────────────
 # Cache: model_path -> bool (has experts / MoE)
@@ -1916,9 +1971,10 @@ def cmd_fill_arch() -> None:
         rp = m.get("path", "")
         if not rp:
             continue
-        full_path = str(MODELS_CACHE / rp)
-        if not os.path.isfile(full_path):
+        full_path = _find_gguf_relative_path(rp)
+        if full_path is None:
             continue
+        full_path = str(full_path)
         key = normalize_model_name(m.get("modelKey", "")).lower()
         base = key.split("@")[0]
         if base not in unique:
@@ -2040,9 +2096,10 @@ def cmd_fill_quant() -> None:
         rp = m.get("path", "")
         if not rp:
             continue
-        full_path = str(MODELS_CACHE / rp)
-        if not os.path.isfile(full_path):
+        full_path = _find_gguf_relative_path(rp)
+        if full_path is None:
             continue
+        full_path = str(full_path)
         base = normalize_model_name(mk).split("@")[0]
         if base not in lms_by_base:
             lms_by_base[base] = full_path
@@ -2133,9 +2190,10 @@ def cmd_sync_from_gguf() -> None:
         rp = m.get("path", "")
         if not rp:
             continue
-        full_path = str(MODELS_CACHE / rp)
-        if not os.path.isfile(full_path):
+        full_path = _find_gguf_relative_path(rp)
+        if full_path is None:
             continue
+        full_path = str(full_path)
         if _is_support_file(rp):
             continue
         key = normalize_model_name(m.get("modelKey", "")).lower()
@@ -2146,12 +2204,16 @@ def cmd_sync_from_gguf() -> None:
 
     print("[3] GGUF-Header parallel parsen ...")
     gguf_arch: dict[str, tuple[int, int, bool | None, int | None]] = {}
+    gguf_family: dict[str, str] = {}
     gguf_moe: dict[str, bool] = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
         fut_to_base = {pool.submit(_read_gguf_arch, p): b for b, p in unique.items()}
         for i, fut in enumerate(concurrent.futures.as_completed(fut_to_base), 1):
             base = fut_to_base[fut]
             nl, hd, is_reasoning, ctx, exp = fut.result()
+            architecture_family = _read_gguf_base_arch(unique[base])
+            if architecture_family:
+                gguf_family[base] = architecture_family
             if nl and hd:
                 gguf_arch[base] = (nl, hd, is_reasoning, ctx)
             if exp is not None:
@@ -2172,6 +2234,13 @@ def cmd_sync_from_gguf() -> None:
         nl, hd, is_reasoning, ctx = found
         # arch: moe/mtp/dense aus GGUF expert_count
         base = normalize_model_name(key).split("@")[0]
+        architecture_family = gguf_family.get(base)
+        if architecture_family and entry.get("architecture_family") != architecture_family:
+            old = entry.get("architecture_family")
+            entry["architecture_family"] = architecture_family
+            fixes.append(
+                f"{key}: architecture_family {old!r} -> {architecture_family!r} (GGUF general.architecture)"
+            )
         exp = gguf_moe.get(base)
         expected_arch = "moe" if exp else None
         if expected_arch is not None and entry.get("arch") != expected_arch:
@@ -2228,9 +2297,10 @@ def cmd_fill_reasoning() -> None:
         rp = m.get("path", "")
         if not rp:
             continue
-        full_path = str(MODELS_CACHE / rp)
-        if not os.path.isfile(full_path):
+        full_path = _find_gguf_relative_path(rp)
+        if full_path is None:
             continue
+        full_path = str(full_path)
         if _is_support_file(rp):
             continue
         key = normalize_model_name(m.get("modelKey", "")).lower()
@@ -2390,8 +2460,8 @@ def _find_lms_gguf_for_registry_key(model_key: str) -> Path | None:
         if candidate not in {target, target_suffix} and candidate.rsplit("/", 1)[-1] != target_suffix:
             continue
         relative_path = str(model.get("path", ""))
-        candidate_path = MODELS_CACHE / relative_path
-        if candidate_path.is_file() and not _is_support_file(relative_path):
+        candidate_path = _find_gguf_relative_path(relative_path)
+        if candidate_path is not None and not _is_support_file(relative_path):
             return candidate_path
     return None
 
@@ -2607,9 +2677,10 @@ def _gguf_drift_errors(reg: dict[str, Any]) -> list[str]:
         rp = m.get("path", "")
         if not rp:
             continue
-        full_path = str(MODELS_CACHE / rp)
-        if not os.path.isfile(full_path):
+        full_path = _find_gguf_relative_path(rp)
+        if full_path is None:
             continue
+        full_path = str(full_path)
         key = normalize_model_name(m.get("modelKey", "")).lower()
         base = key.split("@")[0]
         if base not in unique:
@@ -2793,11 +2864,19 @@ def cmd_validate(verbose: bool = False, repro: bool = False, ci: bool = False) -
         if not isinstance(entry, dict):
             continue
         reasoning = entry.get("reasoning")
-        arch_raw = entry.get("arch", "")
+        arch_raw = entry.get("architecture_family") or entry.get("arch", "")
         if not reasoning or not arch_raw:
             continue
+        # Several GGUF bases are implementation families, not reasoning
+        # contracts: e.g. ``deepseek2`` contains both GLM and Moonlight,
+        # ``llama`` contains instruct and reasoning derivatives, and Gemma-4
+        # has category-dependent thinking.  Only Qwen's name exceptions and
+        # GPT-OSS have a stable architecture-level reasoning contract here.
+        arch_normalized = str(arch_raw).lower().replace(".", "")
+        if not (arch_normalized.startswith("qwen") or arch_normalized == "gpt-oss"):
+            continue
         detected = None
-        arch_lower = arch_raw.lower().replace(".", "")  # normalize: "Qwen3.5" → "qwen35"
+        arch_lower = arch_normalized  # normalize: "Qwen3.5" → "qwen35"
         for arch_key, rtype in _ARCH_REASONING_MAP.items():
             if arch_key in arch_lower:
                 detected = rtype
@@ -2905,8 +2984,9 @@ def cmd_sync(refresh_sampling: bool = False) -> None:
     bei fehlenden/konfligierenden Werten bleiben Kategorie-Defaults aktiv. Es
     wird NIE in JSON-Configs geschrieben (die GUI ist die Quelle) und die
     Blueprint-YAML wird nicht regeneriert (sie ist die Quelle für assemble).
-    Terminale Recherche-Status werden nicht erneut versucht; dafür gibt es
-    --refresh-sampling.
+    Terminale Recherche-Status werden nicht erneut versucht; ein explizites
+    --refresh-sampling recherchiert dagegen alle benchmarkbaren Kandidaten
+    erneut und aktualisiert dabei auch die Kategorie-Evidenz.
     """
     lms = _benchmark_lms_models(_run_lms_ls())
     reg = load_registry()
@@ -2928,7 +3008,7 @@ def cmd_sync(refresh_sampling: bool = False) -> None:
 
     print("[sampling] Fehlende Registry-Sampling-Blöcke per Web-Recherche prüfen ...")
     if refresh_sampling:
-        print("  [sampling] Expliziter Refresh auch für terminale Recherche-Status ...")
+        print("  [sampling] Expliziter Voll-Refresh für alle Registry-Kandidaten ...")
     _research_missing_sampling(load_registry(), force=refresh_sampling)
 
     print("[fill-quant] fehlende @quant-Suffixe aus GGUF-Headern ergänzen ...")

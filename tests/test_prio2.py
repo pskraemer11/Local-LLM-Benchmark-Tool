@@ -310,6 +310,7 @@ class TestSupportsChatTemplateKwargs:
 
     def test_qwen3_5(self):
         assert _supports_chat_template_kwargs("lmstudio-community/qwen3.5-8b") is True
+        assert _supports_chat_template_kwargs("byteshape/qwen3.8-27b") is True
 
     def test_deepseek_r1_distill_qwen(self):
         assert _supports_chat_template_kwargs("lmstudio-community/deepseek-r1-distill-qwen-14b") is True

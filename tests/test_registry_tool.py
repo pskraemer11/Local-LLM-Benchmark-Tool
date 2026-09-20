@@ -602,7 +602,9 @@ def _make_mini_gguf(
     buf = bytearray(b"GGUF")
     buf += struct.pack("<IQ", 3, 0)  # version, tensor_count
     kvs = []
+    architecture = b"qwen2"
     for key, vtype, payload in [
+        ("general.architecture", 8, struct.pack("<Q", len(architecture)) + architecture),
         ("qwen2.block_count", 4, struct.pack("<I", block_count)),
         ("qwen2.embedding_length", 4, struct.pack("<I", embedding_length)),
         ("qwen2.context_length", 4, struct.pack("<I", context_length)),
@@ -618,6 +620,23 @@ def _make_mini_gguf(
         buf += struct.pack("<I", vtype)
         buf += payload
     return bytes(buf)
+
+
+def test_read_gguf_base_arch_returns_general_architecture(tmp_path):
+    p = tmp_path / "model.gguf"
+    p.write_bytes(_make_mini_gguf(48, 5120, None))
+    assert rt._read_gguf_base_arch(str(p)) == "qwen2"
+
+
+def test_read_gguf_base_arch_handles_duplicate_metadata(monkeypatch, tmp_path):
+    class BrokenReader:
+        def __init__(self, _path):
+            raise KeyError("Duplicate GGUF.version")
+
+    import gguf
+
+    monkeypatch.setattr(gguf, "GGUFReader", BrokenReader)
+    assert rt._read_gguf_base_arch(str(tmp_path / "broken.gguf")) is None
 
 
 class TestReadGgufArchReasoning:

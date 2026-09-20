@@ -105,7 +105,7 @@ Agentic-Benchmarks bleiben vorerst bei den vorhandenen Inspect-AI-Tools und dem 
 ### Modell- und Registry-Arbeiten
 
 - [ ] Qwen3.8-Unsloth-Empfehlungen und neue Modelle in Blueprint/Assembly integrieren. Qwen3.6-Kompatibilitaet und die kanonische Identitaet `publisher/model@quant` erhalten.
-- [ ] Konfigurierbaren GGUF-Modellroot mit primaerer neuer Quelle und kompatiblem altem Fallback umsetzen; Junction-Unterstuetzung bleibt erhalten.
+- [x] Konfigurierbaren GGUF-Modellroot mit primaerer neuer Quelle und kompatiblem altem Fallback umsetzen; Junction-Unterstuetzung bleibt erhalten.
 - [~] Qwen-Nachlauf und Top-Candidates-Neuauflage mit aktuellem Setup, vollstaendiger Modellabdeckung und korrekter Konsolidierung abschliessen.
 
 ### Provider-Architektur
@@ -120,6 +120,30 @@ Agentic-Benchmarks bleiben vorerst bei den vorhandenen Inspect-AI-Tools und dem 
 - [ ] Gepaarte Kompatibilitaetslaeufe vor/nach der Import-Blockaden-Entfernung mit identischem Manifest ausfuehren.
 - [ ] Manifest- und Worker-Funktionen mit Ruff, Python-3.12-Syntaxcheck und fokussierten Pytest-Tests verifizieren.
 - [ ] Nach Abschluss die Ergebnisse und die Entscheidung zur Score-Neutralitaet in `ergebnisse/` dokumentieren.
+
+### Abgeschlossener Plan: konfigurierbarer GGUF-Modellroot
+
+Ziel war eine reproduzierbare Modell-Dateiaufloesung, die den neuen
+dedizierten Modellroot bevorzugt, bestehende Installationen mit dem alten
+LM-Studio-Pfad weiterfindet und Windows-Junctions nicht doppelt bewertet.
+
+Umsetzung:
+
+1. `src/model_paths.py` definiert die zentrale Root-Reihenfolge. Standardmaessig
+   gilt `D:\LLM-Modelle\models` vor `~\.lmstudio\models`.
+2. `GGUF_MODEL_ROOT` ist der provider-neutrale Einzelroot-Override;
+   `UNSLOTH_MODEL_ROOT` und `LMSTUDIO_MODELS_DIR` bleiben kompatibel.
+3. `LocalModelResolver`, `registry_tool.py`, `run_benchmarks.py` und der
+   Unsloth-Provider verwenden dieselbe Aufloesung. Bei identischer Modell-ID
+   gewinnt der erste Root; kanonische Pfade deduplizieren Junction-Treffer.
+4. Der bestehende `MODELS_CACHE`-Anker bleibt fuer isolierte Registry-Tests
+   erhalten, waehrend die Standardpfade automatisch mehrroot-faehig sind.
+5. README und Architektur-Dokumentation beschreiben Prioritaet, Override,
+   Fallback und Junction-Verhalten.
+
+Verifikation: fokussierte Resolver-Tests, Python-3.12-Syntaxpruefung, Ruff
+und anschliessend die Registry-/Gesamttests werden nach der Dokumentations-
+und Integrationsaenderung erneut ausgefuehrt.
 
 ## Verifikation vor Commit
 

@@ -75,6 +75,7 @@ from typing import TYPE_CHECKING, Any
 import psutil
 
 import csv_writer as csv_writer
+from model_paths import configured_gguf_roots
 
 if TYPE_CHECKING:
     from type_defs import AvailableModelInfo, BenchmarkDef, PipelineResult
@@ -128,6 +129,10 @@ REASONING_KEYWORDS = ["reasoning", "think", "r1", "rnj", "magistral"]
 
 def _is_qwen3_6_model(model_identifier: str) -> bool:
     return "qwen3.6" in model_identifier.lower()
+
+
+def _is_qwen3_8_model(model_identifier: str) -> bool:
+    return "qwen3.8" in model_identifier.lower()
 MOE_PATTERN = re.compile(r"\d+b-a\d+b", re.IGNORECASE)  # e.g., "8b-a1b", "24b-a2b"
 
 def _is_reasoning_model(model_identifier: str) -> bool:
@@ -207,18 +212,18 @@ def _resolve_model_gguf_path(model_identifier: str) -> str | None:
     Substring match on the normalised identifier suffix (like
     registry_tool._resolve_model_path_multi, but self-contained).
     """
-    models_root = os.path.expanduser(os.path.join("~", ".lmstudio", "models"))
-    if not os.path.isdir(models_root):
-        return None
     suffix = model_identifier.split("/", 1)[1] if "/" in model_identifier else model_identifier
     suffix_norm = suffix.replace("_", "").replace("-", "").replace("@", "").lower()
-    for g in sorted(glob.glob(os.path.join(models_root, "**", "*.gguf"), recursive=True)):
-        g_base = os.path.basename(g).lower()
-        if "mmproj" in g_base or g_base.startswith("mtp-"):
+    for models_root in configured_gguf_roots():
+        if not os.path.isdir(models_root):
             continue
-        g_norm = os.path.basename(g).replace("_", "").replace("-", "").lower()
-        if suffix_norm and suffix_norm in g_norm:
-            return g
+        for g in sorted(glob.glob(os.path.join(str(models_root), "**", "*.gguf"), recursive=True)):
+            g_base = os.path.basename(g).lower()
+            if "mmproj" in g_base or g_base.startswith("mtp-"):
+                continue
+            g_norm = os.path.basename(g).replace("_", "").replace("-", "").lower()
+            if suffix_norm and suffix_norm in g_norm:
+                return g
     return None
 
 
@@ -826,6 +831,9 @@ def _get_evaluation_parameters(model_identifier: str, bench_name: str = "") -> d
         generation_parameters["top_k"] = config["top_k"]
     if config.get("min_p") is not None:
         generation_parameters["min_p"] = config["min_p"]
+    for key in ("presence_penalty", "repetition_penalty"):
+        if config.get(key) is not None:
+            generation_parameters[key] = config[key]
     if config.get("stop"):
         generation_parameters["until"] = config["stop"]
 
@@ -882,7 +890,7 @@ def _build_lmeval_cmd(model_identifier: str, api_model: str, subset_task: str, p
         if eos_str:
             model_settings["eos_string"] = eos_str
     # Generation params go to --generation_parameters (overrides YAML generation_parameters via merge)
-    generation_parameters_keys = {"max_tokens", "temperature", "top_p", "top_k", "min_p",
+    generation_parameters_keys = {"max_tokens", "temperature", "top_p", "top_k", "min_p", "presence_penalty", "repetition_penalty",
                        "until", "chat_template_kwargs", "reasoning", "reasoning_effort"}
     generation_parameters = {k: v for k, v in evaluation_parameters.items()
                   if k in generation_parameters_keys and v is not None}
@@ -1366,7 +1374,7 @@ def run_lmeval(model_info: AvailableModelInfo, bench: BenchmarkDef, limit: int =
             model_settings["eos_string"] = eos_str
             print(f"  [CFG] eos_string={eos_str!r} (Task {task_name} hat keine until-Stops)")
     # Gen_kwargs keys that should override YAML generation_kwargs per request.
-    generation_parameters_keys = {"max_tokens", "temperature", "top_p", "top_k", "min_p",
+    generation_parameters_keys = {"max_tokens", "temperature", "top_p", "top_k", "min_p", "presence_penalty", "repetition_penalty",
                        "until", "chat_template_kwargs", "reasoning", "reasoning_effort"}
     generation_parameters = {k: v for k, v in evaluation_parameters.items()
                   if k in generation_parameters_keys and v is not None}
@@ -2013,7 +2021,7 @@ def _check_registry_for_model(model_identifier: str, model_display: str) -> bool
         except Exception as exc:
             warn(f"{model_display}: prompt-artifact check skipped ({exc})")
 
-        return (reasoning_val == "thinking") or _is_qwen3_6_model(model_identifier)
+        return (reasoning_val == "thinking") or _is_qwen3_6_model(model_identifier) or _is_qwen3_8_model(model_identifier)
     except (ImportError, KeyError, OSError, ValueError):
         print("\n  [WARN] Registry nicht lesbar - ohne Reasoning-Info fortfahren.")
         return False

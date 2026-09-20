@@ -161,6 +161,7 @@ REASONING_PATTERNS = {
     "glm-4.6v",
     "qwen3.5",
     "qwen3.6",
+    "qwen3.8",
     "qwen3-14b",
     "qwen3-coder-reap",
 }
@@ -610,7 +611,7 @@ def get_model_config(model_identifier: str, category: str = "coding", is_thinkin
         # Steuerung via Blueprint-Feld schlaegt die JSON-Config (Fix 15.08. -
         # Gemma-Configs mit budgetTokens=2048 haetten sonst Thinking in allen
         # Kategorien erzwungen, auch Coding).
-        for k in ("top_k", "min_p", "enable_thinking", "reasoning_effort"):
+        for k in ("top_k", "min_p", "presence_penalty", "repetition_penalty", "enable_thinking", "reasoning_effort"):
             if k in lms:
                 config[k] = lms[k]
     # A web-researched Registry cell is more authoritative than one GUI
@@ -702,7 +703,7 @@ def _registry_sampling_params(
     cell = block.get("thinking") if use_thinking_profile and isinstance(block.get("thinking"), dict) else block.get(cat)
     if not isinstance(cell, dict):
         return {}
-    return {key: cell[key] for key in ("top_k", "min_p") if key in cell}
+    return {key: cell[key] for key in ("top_k", "min_p", "presence_penalty", "repetition_penalty") if key in cell}
 
 
 # ── Backward-Compat: THINKING_CONFIG bleibt als Alias ──

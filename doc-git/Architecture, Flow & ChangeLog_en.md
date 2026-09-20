@@ -51,16 +51,33 @@ model_registry.yaml + provider ──> run_benchmarks.py
 
 ### 2.1 Authoritative and derived data
 
-| Data | Authority | Used by | Write policy |
-| --- | --- | --- | --- |
-| doc-git/model_registry.yaml | Benchmark policy and provider-neutral metadata | Registry tool, launcher, model resolution | Updated by registry maintenance |
-| GGUF header and filename | Model architecture and native limits | Registry tool, resolver | Read-only source |
-| doc-git/blueprint_definitions.yaml | Prompt blueprint definitions | Assembly and validation | Maintained as project policy |
-| doc-git/Jinja-Chat-Templates/ | Explicit template files | Prompt assembly | Maintained as project assets |
-| LM Studio config JSONs | LM Studio runtime state | Drift checks and explicit runtime repair | Never written by ordinary sync/full |
-| simple_evals/ | Local custom benchmark tasks | Custom pipeline | Benchmark input; do not rewrite during runs |
-| EvalPlus/lm-eval/tool-eval-bench data | External benchmark tasks | Their respective pipelines | Managed by the dependency/tool |
-| ergebnisse/ | Run outputs | Human review and consolidation | Runtime output, normally ignored |
+| Data                                           | Authority                                      | Used by                                        | Write policy                                   |
+| ---------------------------------------------- | ---------------------------------------------- | ---------------------------------------------- | ---------------------------------------------- |
+| doc-git/model_registry.yaml                    | Benchmark policy and provider-neutral metadata | Registry tool, launcher, model resolution      | Updated by registry maintenance                |
+| GGUF header and filename                       | Model architecture and native limits           | Registry tool, resolver                        | Read-only source                               |
+| doc-git/blueprint_definitions.yaml             | Prompt blueprint definitions                   | Assembly and validation                        | Maintained as project policy                   |
+| doc-git/Jinja-Chat-Templates/                  | Explicit template files                        | Prompt assembly                                | Maintained as project assets                   |
+| LM Studio config JSONs                         | LM Studio runtime state                        | Drift checks and explicit runtime repair       | Never written by ordinary sync/full            |
+| simple_evals/                                  | Local custom benchmark tasks                   | Custom pipeline                                | Benchmark input; do not rewrite during runs    |
+| EvalPlus/lm-eval/tool-eval-bench data          | External benchmark tasks                       | Their respective pipelines                     | Managed by the dependency/tool                 |
+| ergebnisse/                                    | Run outputs                                    | Human review and consolidation                 | Runtime output, normally ignored               |
+
+### 2.1.1 GGUF model root resolution
+
+Local GGUF discovery uses one shared ordered-root contract. By default,
+`D:\LLM-Modelle\models` is the primary root and
+`C:\Users\<user>\.lmstudio\models` is the compatible fallback. This keeps
+older LM Studio installations usable while making the dedicated model volume
+the authoritative first lookup location.
+
+`GGUF_MODEL_ROOT` can select one explicit root for an isolated or alternative
+installation. The existing `UNSLOTH_MODEL_ROOT` and
+`LMSTUDIO_MODELS_DIR` variables remain supported as compatibility overrides.
+An explicit override scans only its selected directory. Resolved paths are
+canonicalized so a Windows Junction does not produce duplicate candidates;
+when both roots expose the same model identity, the primary-root candidate
+wins. The registry tool, local resolver, benchmark runner, and Unsloth
+provider all use this same order.
 
 The important separation is between Registry policy and LM Studio runtime
 artifacts. A GUI setting such as a system prompt, chat template, KV-cache
@@ -231,17 +248,17 @@ behavior only; it is not an automatic repair.
 The pipeline modes are the preferred user interface, but lower-level
 commands remain useful for focused repairs:
 
-| Command | Purpose | Writes config JSONs? |
-| --- | --- | --- |
-| compare | Report Registry/LMS/config differences | No |
-| validate --ci | Headless consistency validation | No |
-| fill-quant | Fill missing quantization from GGUF names | No |
-| fill-arch | Read architecture values from GGUF headers | No |
-| fill-reasoning | Detect reasoning from GGUF templates | No |
-| sync-from-configs | Report config-derived drift; --write is explicit | No by default |
-| sync-templates | Explicitly copy missing prompt templates into configs | Yes |
-| sync-template-from-gguf | Explicitly copy an embedded GGUF template into one config | Yes |
-| patch-reasoning-effort | Explicit GLM runtime-config patch | Yes |
+| Command                                                   | Purpose                                                   | Writes config JSONs?                                      |
+| --------------------------------------------------------- | --------------------------------------------------------- | --------------------------------------------------------- |
+| compare                                                   | Report Registry/LMS/config differences                    | No                                                        |
+| validate --ci                                             | Headless consistency validation                           | No                                                        |
+| fill-quant                                                | Fill missing quantization from GGUF names                 | No                                                        |
+| fill-arch                                                 | Read architecture values from GGUF headers                | No                                                        |
+| fill-reasoning                                            | Detect reasoning from GGUF templates                      | No                                                        |
+| sync-from-configs                                         | Report config-derived drift; --write is explicit          | No by default                                             |
+| sync-templates                                            | Explicitly copy missing prompt templates into configs     | Yes                                                       |
+| sync-template-from-gguf                                   | Explicitly copy an embedded GGUF template into one config | Yes                                                       |
+| patch-reasoning-effort                                    | Explicit GLM runtime-config patch                         | Yes                                                       |
 
 The explicit write commands are intentionally separate from normal sync and
 full validation.
@@ -371,12 +388,12 @@ benchmarking a different model.
 
 For every selected benchmark:
 
-| Selection | Implementation |
-| --- | --- |
-| DS1000 / CoderEval | custom_benchmark.py in a bounded subprocess |
-| HumanEval+ / MBPP+ | EvalPlus generation and differential evaluation |
-| ARC / HellaSwag / TruthfulQA / IFEval / MATH-500 | lm-evaluation-harness |
-| Agentic | tool-eval-bench scenarios |
+| Selection                                        | Implementation                                   |
+| ------------------------------------------------ | ------------------------------------------------ |
+| DS1000 / CoderEval                               | custom_benchmark.py in a bounded subprocess      |
+| HumanEval+ / MBPP+                               | EvalPlus generation and differential evaluation  |
+| ARC / HellaSwag / TruthfulQA / IFEval / MATH-500 | lm-evaluation-harness                            |
+| Agentic                                          | tool-eval-bench scenarios                        |
 
 sample-size controls the number of tasks or scenarios where the pipeline
 supports sampling. seed is passed to the deterministic selection paths.
@@ -426,12 +443,12 @@ identity fields include:
 Runtime metrics are telemetry. They do not change the benchmark score.
 Consolidation applies the documented category weights:
 
-| Category | Weight |
-| --- | ---: |
-| Coding | 35% |
-| Math | 25% |
-| Agentic | 25% |
-| Knowledge | 15% |
+| Category  | Weight    |
+| --------- | --------: |
+| Coding    | 35%       |
+| Math      | 25%       |
+| Agentic   | 25%       |
+| Knowledge | 15%       |
 
 For comparisons, use the same model identity, quantization, task selection,
 seed, sampling policy, provider, and hardware.

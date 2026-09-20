@@ -46,9 +46,21 @@ class TestCategoryDefaults:
 
 
 class TestRegistryBackedSampling:
+    def test_qwen38_profiles_and_penalties(self):
+        normal = get_model_config("byteshape/qwen3.8-27b@iq4_xs", category="coding")
+        thinking = get_model_config("byteshape/qwen3.8-27b@iq4_xs", category="coding", is_thinking_enabled=True)
+        assert (normal["temperature"], normal["top_p"]) == (0.7, 0.8)
+        # Qwen dokumentiert fuer presence_penalty nur einen Bereich, keinen
+        # belastbaren Einzelwert; deshalb bleibt das optionale Feld offen.
+        assert "presence_penalty" not in normal
+        assert "repetition_penalty" not in normal
+        assert (thinking["temperature"], thinking["top_p"]) == (0.6, 0.95)
+        assert "presence_penalty" not in thinking
+        assert "repetition_penalty" not in thinking
+
     def test_granite_registry_block(self):
         cfg = get_model_config("ibm-granite/granite-4.1-8b", category="coding")
-        assert (cfg["temperature"], cfg["top_p"]) == (0.0, 1.0)
+        assert (cfg["temperature"], cfg["top_p"]) == (1.0, 0.95)
         assert cfg["_source"] == "registry-sampling"
 
     def test_gpt_oss_registry_block(self):
@@ -68,12 +80,13 @@ class TestRegistryBackedSampling:
             assert (cfg["temperature"], cfg["top_p"]) == (temp, top_p)
 
     def test_partial_row_falls_back_to_category_default(self):
-        # Ernie: nur knowledge/agentic/math-Zellen belegt
+        # Ernie: mangels differenzierter Herstellerprofile aus der
+        # allgemeinen Empfehlung in jede Kategorie abgeleitet.
         cfg = get_model_config("noctrex/ernie-4.5-21b-a3b-pt_moe", category="coding")
-        assert (cfg["temperature"], cfg["top_p"]) == (0.2, 1.0)
-        assert cfg["_source"] == "category-default"
+        assert (cfg["temperature"], cfg["top_p"]) == (0.8, 0.95)
+        assert cfg["_source"] == "registry-sampling"
         cfg = get_model_config("noctrex/ernie-4.5-21b-a3b-pt_moe", category="knowledge")
-        assert (cfg["temperature"], cfg["top_p"]) == (0.8, 1.0)
+        assert (cfg["temperature"], cfg["top_p"]) == (0.8, 0.95)
         assert cfg["_source"] == "registry-sampling"
 
     def test_quant_suffix_still_matches_row(self):
@@ -107,13 +120,13 @@ class TestRegistrySampling:
         assert cfg["_source"] == "registry-sampling"
 
     def test_registry_block_per_category_ernie(self):
-        # ernie: nur knowledge/agentic/math recherchiert; coding -> Fallback
+        # Ernie: allgemeines Profil wurde in die Kategorien abgeleitet.
         cfg = get_model_config("noctrex/ernie-4.5-21b-a3b-pt_moe", category="knowledge")
-        assert (cfg["temperature"], cfg["top_p"]) == (0.8, 1.0)
+        assert (cfg["temperature"], cfg["top_p"]) == (0.8, 0.95)
         assert cfg["_source"] == "registry-sampling"
         cfg = get_model_config("noctrex/ernie-4.5-21b-a3b-pt_moe", category="coding")
-        assert (cfg["temperature"], cfg["top_p"]) == (0.2, 1.0)  # category-default
-        assert cfg["_source"] == "category-default"
+        assert (cfg["temperature"], cfg["top_p"]) == (0.8, 0.95)  # Registry-Ableitung
+        assert cfg["_source"] == "registry-sampling"
 
     def test_registry_block_partial_row_falls_back(self):
         # kimi-linear: kein agentic im Block -> Kategorie-Fallback
@@ -210,7 +223,7 @@ class TestLmsJsonMerge:
         }
         mocker.patch.object(bc, "_lms_generation_config", return_value=lms)
         cfg = get_model_config("ibm-granite/granite-4.1-8b", category="coding")
-        assert (cfg["temperature"], cfg["top_p"]) == (0.0, 1.0)  # Registry-Zelle
+        assert (cfg["temperature"], cfg["top_p"]) == (1.0, 0.95)  # Registry-Zelle
         assert cfg["top_k"] == 40
         assert cfg["min_p"] == 0.1
         assert cfg["enable_thinking"] is True
@@ -305,4 +318,4 @@ class TestGemmaThinkingByCategory:
         mocker.patch.object(bc, "_lms_generation_config", return_value=lms)
         cfg = get_model_config("unsloth/gemma-4-12b-it-qat@q4_k_xl", category="coding")
         assert cfg["enable_thinking"] is False
-        assert cfg["top_k"] == 20
+        assert cfg["top_k"] == 64

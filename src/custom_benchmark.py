@@ -905,6 +905,10 @@ def generate_answer(cfg: GenerationConfig) -> tuple[str | None, float, int, int,
         body["top_k"] = cfg.top_k
     if cfg.min_p is not None:
         body["min_p"] = cfg.min_p
+    for key in ("presence_penalty", "repetition_penalty"):
+        value = getattr(cfg, key, None)
+        if value is not None:
+            body[key] = value
     # ── Thinking-Modus ueber OpenAI-kompatibles API steuern ──
     #
     # Quelle:
@@ -1656,6 +1660,8 @@ def run_task(task: dict[str, Any], task_type: str, model_identifier: str | None 
         "top_p": model_config.get("top_p", 1.0),
         "top_k": model_config.get("top_k"),
         "min_p": model_config.get("min_p"),
+        "presence_penalty": model_config.get("presence_penalty"),
+        "repetition_penalty": model_config.get("repetition_penalty"),
         "is_thinking_enabled": model_config.get("enable_thinking"),
         "reasoning_effort": model_config.get("reasoning_effort"),
         "stop": model_config.get("stop", STOP_TOKENS_CODING),

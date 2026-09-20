@@ -22,6 +22,7 @@ from field_owner import FIELD_OWNERSHIP, Drift, auto_fix_fields, resolve
 from model_identity import (
     MODEL_FAMILIES,
     classify_reasoning_by_family,
+    family_for_arch,
     match_registry_key,
     normalize_for_config,
     normalize_lms_model_name,
@@ -164,6 +165,37 @@ class TestMatchRegistryKey:
 
 
 class TestFamilies:
+    @pytest.mark.parametrize(
+        "arch",
+        [
+            "deepseek2",
+            "ernie4_5-moe",
+            "gemma2",
+            "gemma3",
+            "gemma4",
+            "glm4",
+            "gpt-oss",
+            "granite",
+            "granitehybrid",
+            "internlm2",
+            "kimi-linear",
+            "lfm2",
+            "lfm2moe",
+            "llama",
+            "mellum",
+            "mistral3",
+            "muse-glimmer",
+            "qwen2",
+            "qwen3",
+            "qwen35",
+            "qwen3moe",
+            "qwen35moe",
+            "starcoder2",
+        ],
+    )
+    def test_lms_architecture_families_are_centralized(self, arch: str) -> None:
+        assert family_for_arch(arch) is not None
+
     def test_map_order_qwen35_before_qwen3(self) -> None:
         # qwen35 MUSS vor qwen3 geprueft werden (Substring-Overlap)
         keys = [ak for fam in MODEL_FAMILIES for ak in fam.arch_keys]
@@ -171,6 +203,9 @@ class TestFamilies:
 
     def test_qwen35_default_thinking(self) -> None:
         assert classify_reasoning_by_family("qwen3.5-9b", "qwen35") == "thinking"
+
+    def test_qwen38_default_thinking(self) -> None:
+        assert classify_reasoning_by_family("qwen3.8-27b", "qwen38") == "thinking"
 
     def test_qwen3_default_instruct(self) -> None:
         assert classify_reasoning_by_family("qwen3-14b", "qwen3") == "instruct"
@@ -214,7 +249,14 @@ class TestFieldOwnership:
                 assert rule.source in ("gguf", "lms"), f"{field}: auto_fix mit Quelle {rule.source}"
 
     def test_auto_fix_fields(self) -> None:
-        assert set(auto_fix_fields()) == {"n_layers", "hidden_dim", "max_context_length", "arch", "file_size_bytes"}
+        assert set(auto_fix_fields()) == {
+            "n_layers",
+            "hidden_dim",
+            "max_context_length",
+            "arch",
+            "architecture_family",
+            "file_size_bytes",
+        }
 
     def test_config_fields_report_only(self) -> None:
         # Since 2026-08-11: Registry is SSOT, these fields have source="registry"
