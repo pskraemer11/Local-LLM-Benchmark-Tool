@@ -956,3 +956,32 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 - `requirements-dev.txt`: explizite Abhängigkeit `nvidia-ml-py>=13.0`.
 - `tests/test_custom_benchmark.py`: Regressionstest für die NVML-Bindings.
 - `CHANGELOG.md`: Eintrag `NVIDIA NVML Binding Migration` für diese Änderung.
+
+=============== Compaction 20.09.2026 / 16:00 ================
+## Objective
+- (Completed) Den bereinigten Gesamtstand des Benchmarks-Repositories committen und nach `origin/main` pushen.
+- (Completed) Sicherstellen, dass künftig nur bewusst ausgeschlossene lokale Artefakte außerhalb des Repository-Scopes verbleiben.
+
+## Important Details
+- **Reconciliation:** Die zuvor getrennt zurückgehaltenen Änderungen wurden nach ausdrücklicher Nutzerfreigabe in einem gemeinsamen Commit zusammengeführt. Darin enthalten sind Registry-/Sampling-Logik, Benchmark-Code, GGUF-Root-Auflösung, Dokumentation, Tests und `src/model_paths.py`.
+- **Generated artifacts:** `.compat-baseline-*`, `hardening/`, `model-list.txt`, lokale llama-server-Hilfe und `utils/` wurden nicht gelöscht, sondern in `.gitignore` aufgenommen.
+- **Registry SSOT:** Nachgestellte Leerzeichen in der Registry-Evidenz wurden entfernt; die Registry-Validierung blieb semantisch fehlerfrei. Veraltete Tests wurden an aktuelle Sampling-/Reasoning-Werte und die entfernte crucible-labs-Variante angepasst.
+- **Hook environment:** Die Windows-Pytest-Aufräumfehler (`WinError 5`) lagen am systemweiten Temp-Pfad. Commit und Push liefen mit einem kontrollierten repository-eigenen Temp-Bereich und ohne `--no-verify`.
+
+## Work State
+### Completed / Active / Blocked
+- Completed: Commit `499fe85e4fd1902a5f173f713455bc04c0376302` ist auf `origin/main`; Arbeitsbaum sauber.
+- Verification: Commit-Hook bestanden; fokussierter Umfang `284 passed`; vollständige Suite `980 passed`; Registry `0` blockierende Probleme; Ruff `0` Probleme; GGUF-Abgleich `54` Einträge ohne Abweichung; fokussierter mypy-Check bestanden.
+- Advisory: Zwei bestehende LM-Studio-Hinweise zu `numParallelSessions != 4` bleiben separat zu bewerten.
+- Blocked: Keine technische Blockade.
+
+## Next Move
+1. Künftige Änderungen normal über die versionierten Commit-/Push-Hooks prüfen und vollständig committen.
+2. Die beiden nicht-blockierenden LM-Studio-Config-Hinweise nur bei Bedarf separat untersuchen; keine automatische Änderung an lokalen Runtime-Konfigurationen vornehmen.
+
+## Relevant Files
+- `.gitignore`: Lokale, regenerierbare Analyse- und Hilfsartefakte aus dem Versionsumfang ausgeschlossen.
+- `src/model_paths.py`, `src/local_model_resolver.py`, `src/registry_tool.py`: Konfigurierbare GGUF-Suche und Registry-/Pipeline-Anpassungen.
+- `src/sampling_research.py`, `doc-git/model_registry.yaml`: Kategoriebezogene Sampling-Evidenz und Registry-SSOT.
+- `README.md`, `doc-git/Architecture, Flow & ChangeLog_en.md`, `PLANUNG.md`: Datenfluss-, Architektur- und Planungsdokumentation.
+- `CHANGELOG.md`: Eintrag `Worktree Reconciliation and GitHub Push` für diesen Vorgang.
