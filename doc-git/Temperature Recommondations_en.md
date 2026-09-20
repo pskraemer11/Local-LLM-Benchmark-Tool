@@ -1,27 +1,110 @@
 # Temperature Recommendations per Model and Task
 
-**Status:** 2026-08-06 · **Method:** Official Hugging Face model cards, vendor docs/blogs (Mistral, Qwen, DeepSeek, Microsoft, IBM, OpenAI, Google, Zhipu, Moonshot, NVIDIA, Liquid AI, Baidu, JetBrains, Cohere).
+**Status:** 2026-09-20 · **Method:** Official Hugging Face model cards, vendor docs/blogs and the reproducible Registry sampling pipeline. The current per-model values and evidence are stored in `doc-git/model_registry.yaml`; this document explains the policy and summarizes the current snapshot.
+
+> **Current-state notice:** The Registry is the source of truth for per-model and per-category sampling. The detailed tables farther below preserve the historical research baseline from 2026-08-06 and are retained as an audit trail; they must not be used to reconstruct current values when they differ from the Registry.
+
+## Current Registry Snapshot (2026-09-20)
+
+The current Registry contains 74 model entries. Sampling research currently reports:
+
+The reproducible refresh path is:
+
+```powershell
+py -3.12 .\src\registry_tool.py pipeline full --refresh-sampling
+```
+
+The command updates Registry data and evidence; this document is a human-readable
+policy and snapshot, not a second source of truth.
+
+| Research status | Entries | Meaning                                                             |
+| --------------- | ------: | ------------------------------------------------------------------- |
+| `confirmed`     | 47      | Accepted direct or derived category profiles with evidence          |
+| `conflict`      | 8       | Sources or profiles disagree; values require explicit review        |
+| `unresolved`    | 14      | A model is in scope, but at least one required profile remains open |
+| `not_found`     | 1       | No usable source was found                                          |
+| no status yet   | 4       | No completed sampling research record                               |
+
+### Fallback policy
+
+These are fallback values only. A confirmed Registry cell always takes precedence.
+
+| Category              | Temperature | `top_p` | Thinking |
+| --------------------- | ----------: | ------: | -------- |
+| `coding`              | 0.2         | 1.0     | disabled |
+| `knowledge`           | 0.6         | 1.0     | disabled |
+| `agentic`             | 0.6         | 0.95    | disabled |
+| `math`                | 0.7         | 0.95    | disabled |
+| `--thinking` fallback | 0.6         | 0.95    | enabled  |
+
+`math` is a real research category. If an official source documents a Math
+profile, the Registry stores it as `sampling.math` with category status
+`direct`. If no Math profile exists, the research logic derives Math from the
+precise Coding profile and records category status `derived`. Contradictory or
+missing evidence remains `unresolved`; it is not silently replaced by a
+family-wide guess.
+
+### Precedence and provenance
+
+1. Confirmed `sampling.<category>` values in `model_registry.yaml`.
+2. The category fallback table above when no confirmed cell exists.
+3. Thinking fallback `0.6/0.95` for a thinking run when no confirmed thinking
+   profile exists.
+4. LM Studio JSON values for non-temperature runtime fields only (`top_k`,
+   `min_p`, context, thinking controls and related runtime settings).
+
+The evidence fields distinguish `direct`, `derived`, and `unresolved` per
+category. A single overall status of `confirmed` does not mean that every
+category was directly documented; consumers must inspect
+`sampling_category_status` and `sampling_evidence`.
+
+### Current architecture/blueprint coverage
+
+The current architecture classes are already represented by existing Registry
+blueprint assignments. Blueprint definitions are keyed by prompt behavior and
+template requirements, not by every GGUF architecture-family spelling.
+
+| Architecture family        | Current handling                                                                       | Blueprint consequence                           |
+| -------------------------- | -------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| `qwen35`, `qwen35moe`      | Qwen3.6/Qwen3.8 dual-mode reasoning classification; category-specific sampling         | Existing `reasoning_coding` blueprint           |
+| `qwen3`, `qwen3moe`        | Qwen3 instruct/thinking classification based on model identity                         | Existing `coding_agent` or `reasoning_coding`   |
+| `gemma4`                   | Gemma-specific template and category thinking control                                  | Existing `gemma_assistant` or `gemma_reasoning` |
+| `granite`, `granitehybrid` | Granite-specific coding/template handling                                              | Existing `granite_coding_agent`                 |
+| `gpt-oss`                  | Harmony template and reasoning controls                                                | Existing `gptoss_reasoning`                     |
+| Other families             | Generic reasoning/coding/default classification unless a template-specific rule exists | Existing generic or family-specific blueprint   |
+
+Validation on 2026-09-20 found no missing Registry blueprint, no missing
+template file and no invalid blueprint definition. Therefore
+`doc-git/blueprint_definitions.yaml` does not require a new architecture-class
+entry for the current sampling research. It should only change when a family
+introduces a distinct prompt template, stop protocol, reasoning parser or
+category-specific thinking control.
 
 ## Starting Point
 
-The benchmarks run so far use the `BENCHMARK_CATEGORY_DEFAULTS` (`src/benchmark_config.py:241`) for models without an LMS JSON config:
+The benchmark fallback uses `BENCHMARK_CATEGORY_DEFAULTS` in
+`src/benchmark_config.py` for models without a confirmed Registry cell:
 
-| Task      | temp | top_p | max_tokens | thinking |
-|-----------|------|-------|------------|----------|
-| coding    | 0.0  | 1.0   |   4096     | False    |
-| math      | 0.7  | 0.95  |   4096     | False    |
-| knowledge | 0.0  | 1.0   |   4096     | False    |
-| agentic   | 0.3  | 0.95  |   4096     | False    |
+| Task      | temp | `top_p` | max_tokens | thinking |
+| --------- | ---: | ------: | ---------: | -------- |
+| coding    | 0.2  | 1.0     | 4096       | False    |
+| math      | 0.7  | 0.95    | 4096       | False    |
+| knowledge | 0.6  | 1.0     | 4096       | False    |
+| agentic   | 0.6  | 0.95    | 4096       | False    |
 
-**Finding:** temp=0.0 for coding/knowledge is only appropriate for a subset of models. 
+**Historical finding:** temp=0.0 for coding/knowledge was only appropriate for a subset of models; the current fallback is differentiated as documented above.
 
 The official recommendations range from **0.0** (Granite 4, Phi-4, DeepSeek-Coder, Ministral, LFM2) to **1.0** (GPT-OSS, Gemma-4, Qwen3.6, North-Mini-Code, MiroThinker, Nemotron-3). 
 Many coding-specialized models officially recommend 0.15–0.7.
 
-## New Recommendation:
-** 1. Reasoning/thinking models: flat t=0.6 (top_p 0.95) for everything — do not take over the category values.** 
+## Current recommendation
 
-Rationale:
+Do not apply one temperature to every model or every task. The current policy
+keeps the four benchmark categories distinct and lets confirmed model-card
+recommendations override the fallback. Thinking defaults are separate from
+ordinary instruct defaults; they do not overwrite confirmed category cells.
+
+Historical rationale for the thinking fallback:
 Official thinking values are 0.6/0.95 everywhere, not 0.2:**
 - DeepSeek-R1-Distill: **0.6/0.95** ("0.6 is recommended", range 0.5–0.7)
 - Qwen3-14B Thinking: **0.6/0.95** (card explicitly warns: *"DO NOT use greedy"*)
@@ -35,24 +118,24 @@ Low temperature/greedy is even counterproductive for thinking models (repetition
 0.7 (Math) falls within the R1 range, but 0.6 covers all 4 categories. 
 top_p 0.95 = official standard across all thinking cards.
 
-**Proposal for the new defaults (fallback without JSON config):**
+The current fallback without a confirmed Registry cell is:
 
 | Task      | instruct | thinking |
-|-----------|----------|----------|
-| coding    |   0.2    | **0.6**  |
-| knowledge |   0.6    | **0.6**  |
-| agentic   |   0.6    | **0.6**  |
-| math      |   0.7    | **0.6**  |
-| top_p     |   1.0    | **0.95** |
+| --------- | -------- | -------- |
+| coding    | 0.2      | **0.6**  |
+| knowledge | 0.6      | **0.6**  |
+| agentic   | 0.6      | **0.6**  |
+| math      | 0.7      | **0.6**  |
+| top_p     | 1.0      | **0.95** |
 
-**Limitations:**
+**Limitations of the fallback:**
 - Exceptions: GPT-OSS (1.0/1.0), Gemma-4 (1.0/0.95), MiroThinker (1.0/0.95), Qwen3.6-general (1.0/0.95), Nemotron-3-Reasoning (1.0/1.0) — officially higher. 
         0.6 remains a compromise, but clearly closer to the recommendations than 0.0.
 - **Watch out for compatibility:** previous benchmark runs still use temp=0.0 (category default) — after changing the defaults, old scores would not be directly comparable with a new run. 
 
-## Implementation & Design Decision (2026-08-06)
+## Historical Implementation & Design Decision (2026-08-06)
 
-**Architecture:** Since 2026-08-05, the LMS JSON config supplies the generation parameters
+**Historical architecture decision:** Since 2026-08-05, the LMS JSON config supplied the generation parameters
 (single source of truth; `MODEL_TEMP_OVERRIDES` were removed). **Since 2026-08-06, the
 sampling design below applies** (exception table > defaults; JSON temp/top_p only for the GUI).
 
@@ -63,9 +146,9 @@ A per-category differentiation can therefore **not be expressed** via the JSON c
 
 **Solution (decision, option "table > defaults, JSON temp ignored"):**
 1. **Registry `sampling:` field** (`doc-git/model_registry.yaml`, SSOT since 13.08.):
-   per-category `temperature`/`top_p` block (Variante A, model × category). Migrated
-   for 17 models with the researched values (previously: `MODEL_CATEGORY_SAMPLING` in
-   `src/benchmark_config.py`). Missing categories fall back to the table.
+   per-category `temperature`/`top_p` block (model × category). The former
+   2026-08-06 migration covered 17 models; the current Registry snapshot above
+   supersedes that count. Missing categories fall back to the table.
 2. **Precedence:** registry `sampling:` cell > `MODEL_CATEGORY_SAMPLING` cell >
    `BENCHMARK_THINKING_DEFAULTS` (0.6/0.95) or `BENCHMARK_CATEGORY_DEFAULTS`
    (0.2/0.6/0.6/0.7). Applies to instruct **and** thinking runs — this way the
@@ -106,38 +189,38 @@ Many registry entries are not vendor models but **quantizations/repacks** (unslo
 or **subsequent fine-tunes/REAPs**. These repacks usually have no model card of their own with sampling recommendations. 
 The research was therefore **always done on the base model on the actual vendor page**; the values in the table apply to all quants of a base model.
 
-| Registry entry (processor)                                            | Processor                 | Base model (vendor)                        | Note                               |
-|-----------------------------------------------------------------------|---------------------------|--------------------------------------------|------------------------------------|
-| `unsloth/qwen3-coder-30b-a3b-instruct`                                | Unsloth (GGUF)            | Qwen3-Coder-30B-A3B-Instruct               | official best practices 0.7/0.8    |
-| `mradermacher/qwen3-coder-reap-25b-a3b(-i1)`                          | MRadermacher (GGUF)       | cerebras/Qwen3-Coder-REAP-25B-A3B          | inherits Qwen3-Coder values        |
-| `qwen/qwen2.5-coder-14b-instruct@*`                                   | Qwen (official quants)    | Qwen2.5-Coder-14B-Instruct                 | family default 0.7/0.8             |
-| `unsloth/qwen3-30b-a3b-instruct-2507`, `intel/qwen3-30b-…-autoround`  | Unsloth / Intel AutoRound | Qwen3-30B-A3B-Instruct-2507                | 0.7/0.8                            |
-| `Qwen/Qwen3.5-9B-GGUF`, `qwen/qwen3.5-9b`                             | Qwen                      | Qwen3.5-9B                                 | Thinking 1.0/0.95, Coding 0.6/0.95 |
-| `unsloth/qwen3.6-27b`, `-mtp`; `mradermacher/qwen3.6-27b-i1`,         | Unsloth / MRadermacher    | Qwen3.6-27B (REAP variants: cerebras)      | Thinking 1.0/0.95, Coding 0.6/0.95 |
-|        `qwen3.6-28b-reap-i1@*`                                        |
-| `intel/mirothinker-v1.5-30b-…`                                        | Intel AutoRound           | miromind-ai/MiroThinker-v1.5-30B           | 1.0/0.95                           |
-| `unsloth/phi-4`                                                       | Unsloth (GGUF)            | microsoft/phi-4                            | 0.0                                |
-| `unsloth/gemma-4-26b-a4b-it`, `bartowski/google_gemma-4-26b-a4b-it@*`,| Unsloth/Bartowski/...     |google/gemma-4-12B-it or -19B/-26B-A4B-it   | 1.0/0.95, top_k 64                 |
-|    `mradermacher/gemma-4-26b-a4b-it-i1@*`, `gemma-4-19b-a4b-it-reap-i1@*`,| ...MRadermacher/Google|
-|    `google/gemma-4-*-qat`                                             |
-| `unsloth/ernie-4.5-21b-a3b-pt`, `noctrex/ernie-4.5-21b-a3b-pt_moe@*`  | Unsloth / Noctrex         | baidu/ERNIE-4.5-21B-A3B-PT                 | Qianfan 0.8/1.0                    |
-| `unsloth/devstral-small-2-24b-instruct-2512`                          | Unsloth (GGUF)            | mistralai/Devstral-Small-2-24B-Instruct-2512 | 0.15                             |
-| `bartowski/mistralai_magistral-small-2509`                            | Bartowski (GGUF)          | mistralai/Magistral-Small-2509             | 0.7/0.95                           |
-| `lmstudio-community/ministral-3-14b-instruct-2512`                    | LM Studio                 | mistralai/Ministral-3-14B-Instruct-2512    | <0.1                               |
-| `gabriellarson/mamba-codestral-7b-v0.1`                               | Gabriellarson (GGUF)      | mistralai/Mamba-Codestral-7B-v0.1          | no value, Mistral range            |
-| `unsloth/januscoder-14b`                                              | Unsloth (GGUF)            | internlm/JanusCoder-14B (base Qwen3-14B)   | no value → Qwen3                   |
-| `unsloth/north-mini-code-1.0`                                         | Unsloth (GGUF)            | CohereLabs/North-Mini-Code-1.0             | 1.0/0.95                           |
-| `nerdsking/nerdsking-python-coder-7b-i`                               | Nerdsking (Fine-Tune)     | Nerdsking-Python-Coder-7B-i                | 0.1 (Eval)                         |
-| `mradermacher/deepseek-coder-33b-instruct`                            | MRadermacher (GGUF)       | deepseek-ai/deepseek-coder-33b-instruct    | greedy                             |
-| `lmstudio-community/deepseek-coder-v2-lite-instruct`                  | LM Studio                 | deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct | 0.3 (vLLM)                        |
-| `lmstudio-community/deepseek-r1-distill-qwen-14b`                     | LM Studio                 | deepseek-ai/DeepSeek-R1-Distill-Qwen-14B   | 0.6/0.95                           |
-| `lmstudio-community/internlm2-math-plus-20b`                          | LM Studio                 | internlm/internlm2-math-plus-20b           | greedy + CoT                       |
-| `mradermacher/kimi-linear-reap-35b-a3b-instruct.i1`                   | MRadermacher (GGUF)       | moonshotai/Kimi-Linear (REAP: cerebras)    | Kimi-K2: 0.6                       |
-| `mradermacher/nemotron-cascade-14b-thinking`                          | MRadermacher (GGUF)       | nvidia/Nemotron-Cascade-14B-Thinking       | 0.6/0.95                           |
-| `quietimpostor/nemotron-3-nano-reap-21b-a3b`                          | QuietImpostor (REAP)      | nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16 | Reasoning 1.0/1.0, Tool 0.6/0.95   |
-| `noctrex/lfm2-24b-a2b_moe`                                            | Noctrex (MXFP4)           | LiquidAI/LFM2-24B-A2B                      | 0.1                                |
-| `unsloth/glm-4.7-flash`, `-reap-23b-a3b`                              | Unsloth                   | zai-org/glm-4.7-flash (REAP: cerebras)     | 1.0/0.95, SWE+Tool Calling 0.7/1.0 |
-| `essentialai/essentialai/rnj-1`                                       | (registry name)           | EssentialAI/rnj-1                          | [0, 0.6]                           |
+| Registry entry (processor)                                              | Processor                 | Base model (vendor)                          | Note                               |
+| ----------------------------------------------------------------------- | ------------------------- | -------------------------------------------- | ---------------------------------- |
+| `unsloth/qwen3-coder-30b-a3b-instruct`                                  | Unsloth (GGUF)            | Qwen3-Coder-30B-A3B-Instruct                 | official best practices 0.7/0.8    |
+| `mradermacher/qwen3-coder-reap-25b-a3b(-i1)`                            | MRadermacher (GGUF)       | cerebras/Qwen3-Coder-REAP-25B-A3B            | inherits Qwen3-Coder values        |
+| `qwen/qwen2.5-coder-14b-instruct@*`                                     | Qwen (official quants)    | Qwen2.5-Coder-14B-Instruct                   | family default 0.7/0.8             |
+| `unsloth/qwen3-30b-a3b-instruct-2507`, `intel/qwen3-30b-…-autoround`    | Unsloth / Intel AutoRound | Qwen3-30B-A3B-Instruct-2507                  | 0.7/0.8                            |
+| `Qwen/Qwen3.5-9B-GGUF`, `qwen/qwen3.5-9b`                               | Qwen                      | Qwen3.5-9B                                   | Thinking 1.0/0.95, Coding 0.6/0.95 |
+| `unsloth/qwen3.6-27b`, `-mtp`; `mradermacher/qwen3.6-27b-i1`,           | Unsloth / MRadermacher    | Qwen3.6-27B (REAP variants: cerebras)        | Thinking 1.0/0.95, Coding 0.6/0.95 |
+| `qwen3.6-28b-reap-i1@*`                                                 |                           |                                              |                                    |
+| `intel/mirothinker-v1.5-30b-…`                                          | Intel AutoRound           | miromind-ai/MiroThinker-v1.5-30B             | 1.0/0.95                           |
+| `unsloth/phi-4`                                                         | Unsloth (GGUF)            | microsoft/phi-4                              | 0.0                                |
+| `unsloth/gemma-4-26b-a4b-it`, `bartowski/google_gemma-4-26b-a4b-it@*`,  | Unsloth/Bartowski/...     | google/gemma-4-12B-it or -19B/-26B-A4B-it    | 1.0/0.95, top_k 64                 |
+| `mradermacher/gemma-4-26b-a4b-it-i1@*`, `gemma-4-19b-a4b-it-reap-i1@*`, | ...MRadermacher/Google    |                                              |                                    |
+| `google/gemma-4-*-qat`                                                  |                           |                                              |                                    |
+| `unsloth/ernie-4.5-21b-a3b-pt`, `noctrex/ernie-4.5-21b-a3b-pt_moe@*`    | Unsloth / Noctrex         | baidu/ERNIE-4.5-21B-A3B-PT                   | Qianfan 0.8/1.0                    |
+| `unsloth/devstral-small-2-24b-instruct-2512`                            | Unsloth (GGUF)            | mistralai/Devstral-Small-2-24B-Instruct-2512 | 0.15                               |
+| `bartowski/mistralai_magistral-small-2509`                              | Bartowski (GGUF)          | mistralai/Magistral-Small-2509               | 0.7/0.95                           |
+| `lmstudio-community/ministral-3-14b-instruct-2512`                      | LM Studio                 | mistralai/Ministral-3-14B-Instruct-2512      | <0.1                               |
+| `gabriellarson/mamba-codestral-7b-v0.1`                                 | Gabriellarson (GGUF)      | mistralai/Mamba-Codestral-7B-v0.1            | no value, Mistral range            |
+| `unsloth/januscoder-14b`                                                | Unsloth (GGUF)            | internlm/JanusCoder-14B (base Qwen3-14B)     | no value → Qwen3                   |
+| `unsloth/north-mini-code-1.0`                                           | Unsloth (GGUF)            | CohereLabs/North-Mini-Code-1.0               | 1.0/0.95                           |
+| `nerdsking/nerdsking-python-coder-7b-i`                                 | Nerdsking (Fine-Tune)     | Nerdsking-Python-Coder-7B-i                  | 0.1 (Eval)                         |
+| `mradermacher/deepseek-coder-33b-instruct`                              | MRadermacher (GGUF)       | deepseek-ai/deepseek-coder-33b-instruct      | greedy                             |
+| `lmstudio-community/deepseek-coder-v2-lite-instruct`                    | LM Studio                 | deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct  | 0.3 (vLLM)                         |
+| `lmstudio-community/deepseek-r1-distill-qwen-14b`                       | LM Studio                 | deepseek-ai/DeepSeek-R1-Distill-Qwen-14B     | 0.6/0.95                           |
+| `lmstudio-community/internlm2-math-plus-20b`                            | LM Studio                 | internlm/internlm2-math-plus-20b             | greedy + CoT                       |
+| `mradermacher/kimi-linear-reap-35b-a3b-instruct.i1`                     | MRadermacher (GGUF)       | moonshotai/Kimi-Linear (REAP: cerebras)      | Kimi-K2: 0.6                       |
+| `mradermacher/nemotron-cascade-14b-thinking`                            | MRadermacher (GGUF)       | nvidia/Nemotron-Cascade-14B-Thinking         | 0.6/0.95                           |
+| `quietimpostor/nemotron-3-nano-reap-21b-a3b`                            | QuietImpostor (REAP)      | nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16   | Reasoning 1.0/1.0, Tool 0.6/0.95   |
+| `noctrex/lfm2-24b-a2b_moe`                                              | Noctrex (MXFP4)           | LiquidAI/LFM2-24B-A2B                        | 0.1                                |
+| `unsloth/glm-4.7-flash`, `-reap-23b-a3b`                                | Unsloth                   | zai-org/glm-4.7-flash (REAP: cerebras)       | 1.0/0.95, SWE+Tool Calling 0.7/1.0 |
+| `essentialai/essentialai/rnj-1`                                         | (registry name)           | EssentialAI/rnj-1                            | [0, 0.6]                           |
 
 **Corrected registry links** (repo names deviate): `essentialai/essentialai/rnj-1` → `EssentialAI/rnj-1`; `google/gemma-4-12b-it-qat` (BF16) does not exist → only QAT-q4_0 repos; 
         `mradermacher/qwen3.6-27b-i1` does not exist as a repo (only i1 repacks of fine-tunes, base Qwen3.6-27B).
@@ -150,49 +233,49 @@ The research was therefore **always done on the base model on the actual vendor 
 
 ## Overview Table (Base Models, Quants Consolidated)
 
-| Model (registry key)                                                               | Official recommendation (temp/top_p)                                       | Coding               | Knowledge      | Agentic           | Math                |
-|-------------------------------------------------------------------------------------|--------------------------------------------------------------------------|----------------------|----------------|-------------------|---------------------|
-| Qwen3-Coder-30B-A3B (`unsloth/qwen3-coder-30b-a3b-instruct`)                        | *0.7 / 0.8*, top_k 20, rep_pen 1.05                                      | *0.7/0.8*            | *0.7/0.8*      | *0.7/0.8*         | *0.7/0.8*           |
-| Qwen3-Coder-REAP-25B (`mradermacher/qwen3-coder-reap-25b-a3b…`)                     | no own specification → inherits Qwen3-Coder                              |  0.7/0.8 (BP)        |  0.7/0.8 (BP)  | 0.7/0.8 (BP)      | 0.7/0.8 (BP)        |
-| Qwen2.5-Coder-14B (`qwen/qwen2.5-coder-14b-instruct@*`)                             | family default *0.7 / 0.8* (Qwen2.5)                                     |  0.2–0.3 (BP)        | *0.7/0.8*      | 0.5–0.7 (BP)      | *0.7/0.8*           |         
-| Qwen3-30B-A3B-Instruct-2507 (`unsloth/qwen3-30b-a3b-instruct-2507`, Intel-q2ks)     | *0.7 / 0.8*, top_k 20, min_p 0                                           |  0.7/0.8 (BP)        |  0.7/0.8 (BP)  | 0.7/0.8 (BP)      | 0.7/0.8 (BP)        |
-| Qwen3-14B (`qwen/qwen3-14b`)                                                        | Thinking *0.6 / 0.95*; Non-Thinking *0.7 / 0.8*                          | *0.6/0.95*           | *0.6/0.95*     | 0.6/0.95 (BP)     | *0.6/0.95*          |
-| Qwen3.5-9B (`qwen/qwen3.5-9b`, `Qwen/Qwen3.5-9B-GGUF`)                              | Thinking *1.0 / 0.95* (pres_pen 1.5); Coding/WebDev *0.6 / 0.95*;        | *0.6/0.95*           | *1.0/0.95*     | 1.0/0.95 (BP)     | *1.0/1.0*           |
-                                                                                      |             / Instruct *0.7 / 0.8*; Instruct-Reasoning *1.0 / 1.0*       |                      |                |                   |                     |
-| Qwen3.6-27B (`unsloth/qwen3.6-27b`, -mtp, `mradermacher/qwen3.6-27b-i1`, -28b-reap) | Thinking *1.0 / 0.95*; Coding/WebDev *0.6 / 0.95*; Instruct *0.7 / 0.8*  | *0.6/0.95*           | *1.0/0.95*     | *1.0/0.95*        | 0.6–1.0/0.95 (BP)   |
-| MiroThinker-v1.5-30B (`intel/mirothinker-v1.5-30b-q2ks-mixed-autoround`)            | *1.0 / 0.95*, rep_pen 1.05, ctx 262144                                   |  1.0/0.95 (BP)       | *1.0/0.95*     | *1.0/0.95*        | 1.0/0.95 (BP)       |
-| DeepSeek-R1-Distill-Qwen-14B (`lmstudio-community/deepseek-r1-distill-qwen-14b`)    | *0.5–0.7 (0.6 recommended) / 0.95*                                       | *0.6/0.95*           | *0.6/0.95*     | *0.6/0.95*        | *0.6/0.95*          |
-| DeepSeek-Coder-33B-Instruct (`mradermacher/deepseek-coder-33b-instruct`)            | example *greedy* (do_sample=False, top_k 50, top_p 0.95)                 | *greedy* (0.0–0.3 BP)|  0.7 (BP)      | 0.2 (BP)          | 0.5 (BP)            |
-| DeepSeek-Coder-V2-Lite (`lmstudio-community/deepseek-coder-v2-lite-instruct`)       | vLLM example *0.3*; transformers greedy                                  | *0.3*                |  0.7 (BP)      | 0.2–0.3 (BP)      | 0.3–0.5 (BP)        |
-| GPT-OSS-20B (`openai/gpt-oss-20b`)                                                  | *1.0 / 1.0* ("recommended sampling parameters", GitHub-README)           | *1.0/1.0*            | *1.0/1.0*      | *1.0/1.0*         | *1.0/1.0*           |
-| Phi-4 (`unsloth/phi-4`)                                                             | *0.0* (card metadata)                                                    | *0.0*                | *0.0*          | 0.0–0.3 (BP)      | *0.0*               |
-| Gemma-4 12B/26B-A4B (+QAT, REAP) (`google/gemma-4-*`, `unsloth/gemma-4-*`,          | *1.0 / 0.95*, top_k 64 (standardized for all tasks)                      | *1.0/0.95*           | *1.0/0.95*     | *1.0/0.95*        | *1.0/0.95*          |
-|      `mradermacher/gemma-4-*`, `bartowski/google_gemma-4-*`)                        |                                                                          |                      |                |                   |                     |
-| rnj-1 (`essentialai/rnj-1`)                                                         | *range [0, 0.6]*; examples 0.2 / 0.95; tool-use model                    | *0.2/0.95*           |  0.2/0.95 (BP) |  *0.2/0.95*       | 0.2/0.95 (BP)       |
-| Granite-4.0-H-Tiny (`ibm-granite/granite-4.0-h-tiny`)                               | *0.0 / 1.0*, top_k 0 (IBM docs: "work best with temperature 0")          | *0.0/1.0*            | *0.0/1.0*      | *0.0/1.0*         | *0.0/1.0*           |
-| Granite-4.1 8B/30B (`ibm-granite/granite-4.1-8b`, `-30b`)                           | family rule *0.0 / 1.0*, top_k 0                                         | *0.0/1.0*            | *0.0/1.0*      | *0.0/1.0*         | *0.0/1.0*           |
-| Codestral-22B (`mistralai/codestral-22b-v0.1`)                                      | examples *temp=0.0*; FIM docs: range 0.0–0.7                             | *0.0–0.3*            |  0.7 (BP)      | 0.2 (BP)          | 0.3 (BP)            |
-| Mamba-Codestral-7B (`gabriellarson/mamba-codestral-7b-v0.1`)                        | no specification → Mistral range                                         |  0.0–0.3 (BP)        |  0.7 (BP)      | 0.2 (BP)          | 0.3 (BP)            |
-| Devstral-Small-2-24B (`unsloth/devstral-small-2-24b-instruct-2512`)                 | examples *0.15*                                                          | *0.15*               |  0.4 (BP)      | *0.15* (SWE-Agent)| 0.3 (BP)            |
-| Magistral-Small-2509 (`bartowski/mistralai_magistral-small-2509`)                   | *0.7 / 0.95* (explicitly)                                                | *0.7/0.95*           | *0.7/0.95*     | *0.7/0.95*        | *0.7/0.95*          |
-| Ministral-3-14B (`lmstudio-community/ministral-3-14b-instruct-2512`)                | *temp < 0.1* ("daily driver"); examples 0.15                             | *<0.1–0.15*          | *<0.1–0.15*    | *<0.1–0.15*       | *<0.1–0.15*         |
-| JanusCoder-14B (`unsloth/januscoder-14b`)                                           | no specification → Qwen3 family (0.7/0.8)                                |  0.2–0.3 (BP)        |  0.7/0.8 (BP)  | 0.2 (BP)          | 0.5 (BP)            |
-| North-Mini-Code-1.0 (`unsloth/north-mini-code-1.0`)                                 | *1.0 / 0.95* (explicitly, also for benchmarks)                           | *1.0/0.95*           | *1.0/0.95*     | *1.0/0.95*        | *1.0/0.95*          |
-| Nerdsking-Python-Coder-7B (`nerdsking/nerdsking-python-coder-7b-i`)                 | HumanEval config *0.1*, do_sample=False                                  | *0.1*                |  0.7 (BP)      | 0.2 (BP)          | 0.2–0.3 (BP)        |
-| GLM-4.7-Flash (`unsloth/glm-4.7-flash`, -reap-23b)                                  | eval default *1.0 / 0.95*; SWE-bench *0.7 / 1.0*; τ²-Bench *0*           | *0.7/1.0* (SWE)      | *1.0/0.95*     | *0* (τ²)          | *1.0/0.95*          |
-| GLM-4.6V-Flash (`zai-org/glm-4.6v-flash`)                                           | *0.8 / 0.6*, top_k 2, rep_pen 1.1                                        |  0.8/0.6 (visual)    | 0.8/0.6        | 0.8/0.6           | 0.8/0.6             |
-| ERNIE-4.5-21B-A3B-PT (`unsloth/ernie-4.5-21b-a3b-pt*`,                              | card: n/a; hosted (Qianfan) *0.8 / 1.0*; Baidu tuning: 0.3 for focus     |  0.2–0.3 (BP)        | *0.8/1.0*      | 0.2–0.8, tool     | 0.2–0.3 (BP)        |
-|               ... `noctrex/ernie-4.5-21b-a3b-pt_moe*`)                              |                                                                          |                      |                |   use low (BP)    |                     |
-| Falcon3-10B-Instruct (`tiiuae/falcon3-10b-instruct`)                                | no specification (quickstart greedy)                                     |  0.2/0.95 (BP)       |0.6–0.7/0.9 (BP)| 0.2–0.3 (BP)      | 0.2/0.95 (BP)       |
-| Falcon3-Mamba-7B (`tiiuae/falcon3-mamba-7b-instruct`)                               | no specification                                                         |  0.2/0.95 (BP)       |0.6–0.7/0.9 (BP)| 0.2–0.3 (BP)      | 0.2/0.95 (BP)       |
-| Mellum2-12B (`jetbrains/mellum2-12b-a2.5b-instruct`, -thinking_moe)                 | quickstart *0.6 / 0.95*, top_k 20                                        | *0.6/0.95*           | *0.6/0.95*     | *0.6/0.95*        | *0.6/0.95*          |
-| Kimi-Linear-REAP-35B (`mradermacher/kimi-linear-reap-35b-a3b-instruct.i1`)          | card: no specification; Kimi-K2: *0.6*                                   |  0.6 (BP, from K2)   |  0.6 (BP)      | 0.6 (BP)          | 0.6 (BP)            |
-| Nemotron-Cascade-14B-Thinking (`mradermacher/nemotron-cascade-14b-thinking`)        | *0.6 / 0.95* (thinking-only)                                             | *0.6/0.95*           | *0.6/0.95*     | *0.6/0.95*        | *0.6/0.95*          |
-| Nemotron-3-Nano-REAP-21B (`quietimpostor/nemotron-3-nano-reap-21b-a3b`)             | base 30B: Reasoning *1.0 / 1.0*; Tool-Calling *0.6 / 0.95*;              | *1.0/1.0*            | *1.0/1.0*      | *0.6/0.95*        | *1.0/1.0*           |
-|                                                                                     |         ... thinking off: greedy                                         |                      |                |                   |                     |
-| LFM2-24B-A2B (`noctrex/lfm2-24b-a2b_moe`)                                           | quickstart *0.1*, top_k 50, rep_pen 1.05; "not recommended for coding"   | –                    | *0.1*          | *0.1*             | 0.1 (BP)            |
-| InternLM2.5-20B-Chat (`internlm/internlm2_5-20b-chat`)                              | no specification                                                         |  0.6/0.8 (BP)        |  0.6/0.8 (BP)  |  0.6/0.8 (BP)     | 0.6/0.8 (BP)        |
-| InternLM2-Math-Plus-20B (`lmstudio-community/internlm2-math-plus-20b`)              | no specification; official eval: *greedy + CoT*                          | –                    |  0.7 (BP)      | –                 |*greedy* (0.2–0.6 BP)|
+| Model (registry key)                                                                | Official recommendation (temp/top_p)                                    | Coding                | Knowledge        | Agentic            | Math                  |
+| ----------------------------------------------------------------------------------- | ----------------------------------------------------------------------- | --------------------- | ---------------- | ------------------ | --------------------- |
+| Qwen3-Coder-30B-A3B (`unsloth/qwen3-coder-30b-a3b-instruct`)                        | *0.7 / 0.8*, top_k 20, rep_pen 1.05                                     | *0.7/0.8*             | *0.7/0.8*        | *0.7/0.8*          | *0.7/0.8*             |
+| Qwen3-Coder-REAP-25B (`mradermacher/qwen3-coder-reap-25b-a3b…`)                     | no own specification → inherits Qwen3-Coder                             | 0.7/0.8 (BP)          | 0.7/0.8 (BP)     | 0.7/0.8 (BP)       | 0.7/0.8 (BP)          |
+| Qwen2.5-Coder-14B (`qwen/qwen2.5-coder-14b-instruct@*`)                             | family default *0.7 / 0.8* (Qwen2.5)                                    | 0.2–0.3 (BP)          | *0.7/0.8*        | 0.5–0.7 (BP)       | *0.7/0.8*             |
+| Qwen3-30B-A3B-Instruct-2507 (`unsloth/qwen3-30b-a3b-instruct-2507`, Intel-q2ks)     | *0.7 / 0.8*, top_k 20, min_p 0                                          | 0.7/0.8 (BP)          | 0.7/0.8 (BP)     | 0.7/0.8 (BP)       | 0.7/0.8 (BP)          |
+| Qwen3-14B (`qwen/qwen3-14b`)                                                        | Thinking *0.6 / 0.95*; Non-Thinking *0.7 / 0.8*                         | *0.6/0.95*            | *0.6/0.95*       | 0.6/0.95 (BP)      | *0.6/0.95*            |
+| Qwen3.5-9B (`qwen/qwen3.5-9b`, `Qwen/Qwen3.5-9B-GGUF`)                              | Thinking *1.0 / 0.95* (pres_pen 1.5); Coding/WebDev *0.6 / 0.95*;       | *0.6/0.95*            | *1.0/0.95*       | 1.0/0.95 (BP)      | *1.0/1.0*             |
+| / Instruct *0.7 / 0.8*; Instruct-Reasoning *1.0 / 1.0*                              |                                                                         |                       |                  |                    |                       |
+| Qwen3.6-27B (`unsloth/qwen3.6-27b`, -mtp, `mradermacher/qwen3.6-27b-i1`, -28b-reap) | Thinking *1.0 / 0.95*; Coding/WebDev *0.6 / 0.95*; Instruct *0.7 / 0.8* | *0.6/0.95*            | *1.0/0.95*       | *1.0/0.95*         | 0.6–1.0/0.95 (BP)     |
+| MiroThinker-v1.5-30B (`intel/mirothinker-v1.5-30b-q2ks-mixed-autoround`)            | *1.0 / 0.95*, rep_pen 1.05, ctx 262144                                  | 1.0/0.95 (BP)         | *1.0/0.95*       | *1.0/0.95*         | 1.0/0.95 (BP)         |
+| DeepSeek-R1-Distill-Qwen-14B (`lmstudio-community/deepseek-r1-distill-qwen-14b`)    | *0.5–0.7 (0.6 recommended) / 0.95*                                      | *0.6/0.95*            | *0.6/0.95*       | *0.6/0.95*         | *0.6/0.95*            |
+| DeepSeek-Coder-33B-Instruct (`mradermacher/deepseek-coder-33b-instruct`)            | example *greedy* (do_sample=False, top_k 50, top_p 0.95)                | *greedy* (0.0–0.3 BP) | 0.7 (BP)         | 0.2 (BP)           | 0.5 (BP)              |
+| DeepSeek-Coder-V2-Lite (`lmstudio-community/deepseek-coder-v2-lite-instruct`)       | vLLM example *0.3*; transformers greedy                                 | *0.3*                 | 0.7 (BP)         | 0.2–0.3 (BP)       | 0.3–0.5 (BP)          |
+| GPT-OSS-20B (`openai/gpt-oss-20b`)                                                  | *1.0 / 1.0* ("recommended sampling parameters", GitHub-README)          | *1.0/1.0*             | *1.0/1.0*        | *1.0/1.0*          | *1.0/1.0*             |
+| Phi-4 (`unsloth/phi-4`)                                                             | *0.0* (card metadata)                                                   | *0.0*                 | *0.0*            | 0.0–0.3 (BP)       | *0.0*                 |
+| Gemma-4 12B/26B-A4B (+QAT, REAP) (`google/gemma-4-*`, `unsloth/gemma-4-*`,          | *1.0 / 0.95*, top_k 64 (standardized for all tasks)                     | *1.0/0.95*            | *1.0/0.95*       | *1.0/0.95*         | *1.0/0.95*            |
+| `mradermacher/gemma-4-*`, `bartowski/google_gemma-4-*`)                             |                                                                         |                       |                  |                    |                       |
+| rnj-1 (`essentialai/rnj-1`)                                                         | *range [0, 0.6]*; examples 0.2 / 0.95; tool-use model                   | *0.2/0.95*            | 0.2/0.95 (BP)    | *0.2/0.95*         | 0.2/0.95 (BP)         |
+| Granite-4.0-H-Tiny (`ibm-granite/granite-4.0-h-tiny`)                               | *0.0 / 1.0*, top_k 0 (IBM docs: "work best with temperature 0")         | *0.0/1.0*             | *0.0/1.0*        | *0.0/1.0*          | *0.0/1.0*             |
+| Granite-4.1 8B/30B (`ibm-granite/granite-4.1-8b`, `-30b`)                           | family rule *0.0 / 1.0*, top_k 0                                        | *0.0/1.0*             | *0.0/1.0*        | *0.0/1.0*          | *0.0/1.0*             |
+| Codestral-22B (`mistralai/codestral-22b-v0.1`)                                      | examples *temp=0.0*; FIM docs: range 0.0–0.7                            | *0.0–0.3*             | 0.7 (BP)         | 0.2 (BP)           | 0.3 (BP)              |
+| Mamba-Codestral-7B (`gabriellarson/mamba-codestral-7b-v0.1`)                        | no specification → Mistral range                                        | 0.0–0.3 (BP)          | 0.7 (BP)         | 0.2 (BP)           | 0.3 (BP)              |
+| Devstral-Small-2-24B (`unsloth/devstral-small-2-24b-instruct-2512`)                 | examples *0.15*                                                         | *0.15*                | 0.4 (BP)         | *0.15* (SWE-Agent) | 0.3 (BP)              |
+| Magistral-Small-2509 (`bartowski/mistralai_magistral-small-2509`)                   | *0.7 / 0.95* (explicitly)                                               | *0.7/0.95*            | *0.7/0.95*       | *0.7/0.95*         | *0.7/0.95*            |
+| Ministral-3-14B (`lmstudio-community/ministral-3-14b-instruct-2512`)                | *temp < 0.1* ("daily driver"); examples 0.15                            | *<0.1–0.15*           | *<0.1–0.15*      | *<0.1–0.15*        | *<0.1–0.15*           |
+| JanusCoder-14B (`unsloth/januscoder-14b`)                                           | no specification → Qwen3 family (0.7/0.8)                               | 0.2–0.3 (BP)          | 0.7/0.8 (BP)     | 0.2 (BP)           | 0.5 (BP)              |
+| North-Mini-Code-1.0 (`unsloth/north-mini-code-1.0`)                                 | *1.0 / 0.95* (explicitly, also for benchmarks)                          | *1.0/0.95*            | *1.0/0.95*       | *1.0/0.95*         | *1.0/0.95*            |
+| Nerdsking-Python-Coder-7B (`nerdsking/nerdsking-python-coder-7b-i`)                 | HumanEval config *0.1*, do_sample=False                                 | *0.1*                 | 0.7 (BP)         | 0.2 (BP)           | 0.2–0.3 (BP)          |
+| GLM-4.7-Flash (`unsloth/glm-4.7-flash`, -reap-23b)                                  | eval default *1.0 / 0.95*; SWE-bench *0.7 / 1.0*; τ²-Bench *0*          | *0.7/1.0* (SWE)       | *1.0/0.95*       | *0* (τ²)           | *1.0/0.95*            |
+| GLM-4.6V-Flash (`zai-org/glm-4.6v-flash`)                                           | *0.8 / 0.6*, top_k 2, rep_pen 1.1                                       | 0.8/0.6 (visual)      | 0.8/0.6          | 0.8/0.6            | 0.8/0.6               |
+| ERNIE-4.5-21B-A3B-PT (`unsloth/ernie-4.5-21b-a3b-pt*`,                              | card: n/a; hosted (Qianfan) *0.8 / 1.0*; Baidu tuning: 0.3 for focus    | 0.2–0.3 (BP)          | *0.8/1.0*        | 0.2–0.8, tool      | 0.2–0.3 (BP)          |
+| ... `noctrex/ernie-4.5-21b-a3b-pt_moe*`)                                            |                                                                         |                       |                  | use low (BP)       |                       |
+| Falcon3-10B-Instruct (`tiiuae/falcon3-10b-instruct`)                                | no specification (quickstart greedy)                                    | 0.2/0.95 (BP)         | 0.6–0.7/0.9 (BP) | 0.2–0.3 (BP)       | 0.2/0.95 (BP)         |
+| Falcon3-Mamba-7B (`tiiuae/falcon3-mamba-7b-instruct`)                               | no specification                                                        | 0.2/0.95 (BP)         | 0.6–0.7/0.9 (BP) | 0.2–0.3 (BP)       | 0.2/0.95 (BP)         |
+| Mellum2-12B (`jetbrains/mellum2-12b-a2.5b-instruct`, -thinking_moe)                 | quickstart *0.6 / 0.95*, top_k 20                                       | *0.6/0.95*            | *0.6/0.95*       | *0.6/0.95*         | *0.6/0.95*            |
+| Kimi-Linear-REAP-35B (`mradermacher/kimi-linear-reap-35b-a3b-instruct.i1`)          | card: no specification; Kimi-K2: *0.6*                                  | 0.6 (BP, from K2)     | 0.6 (BP)         | 0.6 (BP)           | 0.6 (BP)              |
+| Nemotron-Cascade-14B-Thinking (`mradermacher/nemotron-cascade-14b-thinking`)        | *0.6 / 0.95* (thinking-only)                                            | *0.6/0.95*            | *0.6/0.95*       | *0.6/0.95*         | *0.6/0.95*            |
+| Nemotron-3-Nano-REAP-21B (`quietimpostor/nemotron-3-nano-reap-21b-a3b`)             | base 30B: Reasoning *1.0 / 1.0*; Tool-Calling *0.6 / 0.95*;             | *1.0/1.0*             | *1.0/1.0*        | *0.6/0.95*         | *1.0/1.0*             |
+|                                                                                     | ... thinking off: greedy                                                |                       |                  |                    |                       |
+| LFM2-24B-A2B (`noctrex/lfm2-24b-a2b_moe`)                                           | quickstart *0.1*, top_k 50, rep_pen 1.05; "not recommended for coding"  | –                     | *0.1*            | *0.1*              | 0.1 (BP)              |
+| InternLM2.5-20B-Chat (`internlm/internlm2_5-20b-chat`)                              | no specification                                                        | 0.6/0.8 (BP)          | 0.6/0.8 (BP)     | 0.6/0.8 (BP)       | 0.6/0.8 (BP)          |
+| InternLM2-Math-Plus-20B (`lmstudio-community/internlm2-math-plus-20b`)              | no specification; official eval: *greedy + CoT*                         | –                     | 0.7 (BP)         | –                  | *greedy* (0.2–0.6 BP) |
 
 (Essential says about RNJ-1's knowledge segment: "not optimized for factual recovery")
 

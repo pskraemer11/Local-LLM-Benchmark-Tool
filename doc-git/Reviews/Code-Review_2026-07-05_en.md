@@ -5,11 +5,11 @@
 **Run 2026-07-04 (with `--thinking`):** 3/3 models successfully completed.
 Results in the consolidated table (`konsolidiert_20260704_022948.md`):
 
-| Model                                      | Quant  | Overall | Coding |Knowledge| Math | Agentic| tok/s |
-|---------------------------------------------|--------|---------|--------|---------|------|--------|-------|
-| Gemma 4 26B A4B Instruct UD (unsloth)       | IQ3_S  |   55%   |   66%  |   76%   |  55% |   25%  |   14  |
-| Gemma 4 26B A4B Instruct Q3_K_S (bartowski) | Q3_K_S |   37%   |   37%  |    4%   |   0% |   95%  |    1  |
-| Gemma 4 19B A4B Instruct REAP I1            | IQ4_NL |   56%   |   70%  |   43%   |   0% |   98%  |   17  |
+| Model                                       | Quant  | Overall | Coding | Knowledge | Math | Agentic | tok/s |
+| ------------------------------------------- | ------ | ------- | ------ | --------- | ---- | ------- | ----- |
+| Gemma 4 26B A4B Instruct UD (unsloth)       | IQ3_S  | 55%     | 66%    | 76%       | 55%  | 25%     | 14    |
+| Gemma 4 26B A4B Instruct Q3_K_S (bartowski) | Q3_K_S | 37%     | 37%    | 4%        | 0%   | 95%     | 1     |
+| Gemma 4 19B A4B Instruct REAP I1            | IQ4_NL | 56%     | 70%    | 43%       | 0%   | 98%     | 17    |
 
 Notable observations:
 - **Gemma 4 26B UD (IQ3_S)** best Gemma overall (55%), excellent efficiency (24.4 %p/h, rank 2)
@@ -30,11 +30,11 @@ Notable observations:
 
 **Qwen3 Coder REAP 25B A3B I1** (from `quant_comparison.md`):
 
-| Quant       | DS1000 |CoderEval| HEval+ | MBPP+ | ARC  |HellaSwag|TruthfulQA| MathQA | MMLU-Pro| Agentic | Overall  |
-|-------------|--------|---------|--------|-------|------|---------|----------|--------|---------|---------|----------|
-| IQ4_XS (UD) |   10%  |    75%  |   95%  |  71%  |  75% |   40%   |    50%   |   45%  |    46%  |   88%   |  *63.2%* |
-| Q3_K_M      |   15%  |    75%  |   95%  |  79%  |  80% |   55%   |    50%   |   40%  |    58%  |   65%   |  *58.4%* |
-| Q4_K_S      |   25%  |    75%  |   95%  |  71%  |  80% |   50%   |    50%   |   50%  |    36%  |   85%   |  *65.2%* |
+| Quant       | DS1000 | CoderEval | HEval+ | MBPP+ | ARC | HellaSwag | TruthfulQA | MathQA | MMLU-Pro | Agentic | Overall |
+| ----------- | ------ | --------- | ------ | ----- | --- | --------- | ---------- | ------ | -------- | ------- | ------- |
+| IQ4_XS (UD) | 10%    | 75%       | 95%    | 71%   | 75% | 40%       | 50%        | 45%    | 46%      | 88%     | *63.2%* |
+| Q3_K_M      | 15%    | 75%       | 95%    | 79%   | 80% | 55%       | 50%        | 40%    | 58%      | 65%     | *58.4%* |
+| Q4_K_S      | 25%    | 75%       | 95%    | 71%   | 80% | 50%       | 50%        | 50%    | 36%      | 85%     | *65.2%* |
 
 Bootstrap 95% CI (SampleSize=20):
 - DS1000: ±20-25% → differences <15% not significant
@@ -43,20 +43,20 @@ Bootstrap 95% CI (SampleSize=20):
 
 **Devstral Small 2 24B Instruct 2512:**
 
-| Quant        | DS1000 |CoderEval| HEval+ | MBPP+ | Overall   | Delta |
-|--------------|--------|---------|--------|-------|-----------|-------|
-| IQ3_XXS (UD) |   15%  |   67%   |   95%  |  64%  | **58.4%** |   –   |
-| Q3_K_S (new) |   30%  |   75%   |  100%  |  79%  | **67.0%** | +8.6% |
+| Quant        | DS1000 | CoderEval | HEval+ | MBPP+ | Overall   | Delta |
+| ------------ | ------ | --------- | ------ | ----- | --------- | ----- |
+| IQ3_XXS (UD) | 15%    | 67%       | 95%    | 64%   | **58.4%** | –     |
+| Q3_K_S (new) | 30%    | 75%       | 100%   | 79%   | **67.0%** | +8.6% |
 
 Q3_K_S clearly better – +8.6% overall with manageable VRAM increase.
 
 ### 4. Gemma-4-26B-QAT Comparison
 
-| Quant        | DS1000 |CoderEval| HEval+ | MBPP+ | ARC  |HellaSwag|TruthfulQA| MathQA | MMLU-Pro| Overall  |
-|--------------|--------|---------|--------|-------|------|---------|----------|--------|---------|----------|
-| IQ3_S (UD)   |   10%  |   83%   |  100%  |  71%  |  95% |   60%   |    65%   |   55%  |    86%  |   53.4%  |
-| QAT Q4_0     |   10%  |   17%   |   60%  |  64%  |  90% |    5%   |    60%   |   15%  |    75%  |   30.6%  |
-| **Delta**    |    0%  |  -67%   |  -40%  |  -7%  |  -5% |  -55%   |    -5%   |  -40%  |   -11%  | *-22.8%* |
+| Quant      | DS1000 | CoderEval | HEval+ | MBPP+ | ARC | HellaSwag | TruthfulQA | MathQA | MMLU-Pro | Overall  |
+| ---------- | ------ | --------- | ------ | ----- | --- | --------- | ---------- | ------ | -------- | -------- |
+| IQ3_S (UD) | 10%    | 83%       | 100%   | 71%   | 95% | 60%       | 65%        | 55%    | 86%      | 53.4%    |
+| QAT Q4_0   | 10%    | 17%       | 60%    | 64%   | 90% | 5%        | 60%        | 15%    | 75%      | 30.6%    |
+| **Delta**  | 0%     | -67%      | -40%   | -7%   | -5% | -55%      | -5%        | -40%   | -11%     | *-22.8%* |
 
 QAT Q4_0 is massively worse than IQ3_S (–22.8% overall) with similar VRAM. No reason to continue using QAT.
 

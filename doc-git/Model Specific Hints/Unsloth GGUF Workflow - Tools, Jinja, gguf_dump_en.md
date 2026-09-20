@@ -87,17 +87,17 @@ Tokenizer, Template) — nützlich z.B. zum Vergleich GGUF-Template vs. Hub-Temp
 
 ## 3. llama.cpp-Tools (Auswahl)
 
-| Tool/Script | Zweck |
-|---|---|
-| `llama-server` | OpenAI-kompatible Server; `--jinja`, `--chat-template-file`, `--parallel N`, `--ctx-size`, `--flash-attn` |
-| `llama-cli` | CLI-Inferenz (Chat/Completion, `--jinja`, `--single-turn`) |
-| `llama-gguf-hash` | GGUF-Hashes (identische Dateien erkennen) |
-| `llama-gguf` / `llama-gguf-split` | GGUF-Info/Quants splitten |
-| `llama-quantize` | Quantisierung |
-| `test-chat-template` | JSON-Input durch `.jinja` rendern → inspizieren (Template-Validierung) |
-| `test-jinja` | minja-Engine gegen Standard-Jinja2 testen |
-| `gguf-py/scripts/*` | `gguf_dump.py`, `gguf_editor_gui.py`, `gguf_set_metadata.py`, `gguf_new_metadata.py`, `gguf_hash.py`, `gguf_convert_endian.py` |
-| `scripts/get_chat_template.py` | Offizielles Chat-Template von HF holen (für `--chat-template-file`) |
+| Tool/Script                       | Zweck                                                                                                                          |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `llama-server`                    | OpenAI-kompatible Server; `--jinja`, `--chat-template-file`, `--parallel N`, `--ctx-size`, `--flash-attn`                      |
+| `llama-cli`                       | CLI-Inferenz (Chat/Completion, `--jinja`, `--single-turn`)                                                                     |
+| `llama-gguf-hash`                 | GGUF-Hashes (identische Dateien erkennen)                                                                                      |
+| `llama-gguf` / `llama-gguf-split` | GGUF-Info/Quants splitten                                                                                                      |
+| `llama-quantize`                  | Quantisierung                                                                                                                  |
+| `test-chat-template`              | JSON-Input durch `.jinja` rendern → inspizieren (Template-Validierung)                                                         |
+| `test-jinja`                      | minja-Engine gegen Standard-Jinja2 testen                                                                                      |
+| `gguf-py/scripts/*`               | `gguf_dump.py`, `gguf_editor_gui.py`, `gguf_set_metadata.py`, `gguf_new_metadata.py`, `gguf_hash.py`, `gguf_convert_endian.py` |
+| `scripts/get_chat_template.py`    | Offizielles Chat-Template von HF holen (für `--chat-template-file`)                                                            |
 
 **Function-Calling:** native Tool-Formate (Llama 3.1/3.3, Qwen 2.5/2.5-Coder,
 Mistral-Nemo, DeepSeek-R1 …) oder generisches Format (Fallback) — `Chat format: Generic`

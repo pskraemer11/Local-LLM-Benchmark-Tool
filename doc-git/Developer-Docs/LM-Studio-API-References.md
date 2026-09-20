@@ -13,15 +13,15 @@ Collected: 2026-08-11.
 
 ### Request Body Parameters
 
-| Parameter                 | Type               | Description                                      |
-|---------------------------|--------------------|--------------------------------------------------|
-| `model`                   | string             | Unique identifier for the model to load          |
-| `context_length`          | number (optional)  | Maximum number of tokens the model will consider |
-| `eval_batch_size`         | number (optional)  | Number of input tokens per evaluation batch      |
+| Parameter                 | Type               | Description                                             |
+| ------------------------- | ------------------ | ------------------------------------------------------- |
+| `model`                   | string             | Unique identifier for the model to load                 |
+| `context_length`          | number (optional)  | Maximum number of tokens the model will consider        |
+| `eval_batch_size`         | number (optional)  | Number of input tokens per evaluation batch             |
 | `flash_attention`         | boolean (optional) | Optimize attention computation (reduces memory, faster) |
-| `num_experts`             | number (optional)  | Number of experts for MoE models                 |
-| `offload_kv_cache_to_gpu` | boolean (optional) | Whether KV cache is offloaded to GPU             |
-| `echo_load_config`        | boolean (optional) | If true, returns applied config in `load_config` |
+| `num_experts`             | number (optional)  | Number of experts for MoE models                        |
+| `offload_kv_cache_to_gpu` | boolean (optional) | Whether KV cache is offloaded to GPU                    |
+| `echo_load_config`        | boolean (optional) | If true, returns applied config in `load_config`        |
 
 ### Response Fields
 
@@ -46,7 +46,7 @@ Collected: 2026-08-11.
 ### Supported Payload Parameters
 
 | Parameter           | Description                |
-|---------------------|----------------------------|
+| ------------------- | -------------------------- |
 | `model`             | Model identifier           |
 | `messages`          | Chat history               |
 | `temperature`       | Sampling temperature       |
@@ -69,21 +69,21 @@ Collected: 2026-08-11.
 
 ### Parameters
 
-| Parameter                     | Type                           | Description                         |
-|-------------------------------|--------------------------------|-------------------------------------|
-| `gpu`                         | GPUSetting                     | GPU distribution                    |
-| `contextLength`               | number                         | Context length in tokens            |
-| `ropeFrequencyBase`           | number                         | Custom RoPE base frequency          |
-| `ropeFrequencyScale`          | number                         | RoPE frequency scaling              |
-| `evalBatchSize`               | number                         | Evaluation batch size               |
-| `flashAttention`              | boolean                        | Enable Flash Attention              |
-| `keepModelInMemory`           | boolean                        | Prevent swapping from system memory |
-| `seed`                        | number                         | Random seed for reproducibility     |
-| `useFp16ForKVCache`           | boolean                        | Store KV cache in FP16              |
-| `tryMmap`                     | boolean                        | Use memory-mapped file access       |
-| `numExperts`                  | number                         | Number of MoE experts               |
-| `llamaKCacheQuantizationType` | LLMLlamaCacheQuantizationType \| false | Key cache quantization      |
-| `llamaVCacheQuantizationType` | LLMLlamaCacheQuantizationType \| false | Value cache quantization    |
+| Parameter                     | Type                                   | Description                         |
+| ----------------------------- | -------------------------------------- | ----------------------------------- |
+| `gpu`                         | GPUSetting                             | GPU distribution                    |
+| `contextLength`               | number                                 | Context length in tokens            |
+| `ropeFrequencyBase`           | number                                 | Custom RoPE base frequency          |
+| `ropeFrequencyScale`          | number                                 | RoPE frequency scaling              |
+| `evalBatchSize`               | number                                 | Evaluation batch size               |
+| `flashAttention`              | boolean                                | Enable Flash Attention              |
+| `keepModelInMemory`           | boolean                                | Prevent swapping from system memory |
+| `seed`                        | number                                 | Random seed for reproducibility     |
+| `useFp16ForKVCache`           | boolean                                | Store KV cache in FP16              |
+| `tryMmap`                     | boolean                                | Use memory-mapped file access       |
+| `numExperts`                  | number                                 | Number of MoE experts               |
+| `llamaKCacheQuantizationType` | LLMLlamaCacheQuantizationType \| false | Key cache quantization              |
+| `llamaVCacheQuantizationType` | LLMLlamaCacheQuantizationType \| false | Value cache quantization            |
 
 ### Key Finding
 
@@ -98,22 +98,22 @@ They are exclusively set via JSON config files in `~/.lmstudio/.internal/user-co
 
 ### Fields
 
-| Field                   | Type                     | Description                          |
-|-------------------------|--------------------------|--------------------------------------|
-| `maxTokens`             | number \| false          | Maximum tokens to predict            |
-| `temperature`           | number                   | Sampling temperature                 |
-| `stopStrings`           | string[]                 | Stop generation at these strings     |
-| `toolCallStopStrings`   | string[]                 | Stop for tool calls                  |
-| `contextOverflowPolicy` | LLMContextOverflowPolicy | Behavior when context exceeds window |
-| `structured`            | ZodType \| LLMStructuredPredictionSetting | Structured JSON output |
-| `topKSampling`          | number                   | Top-K sampling limit                 |
-| `repeatPenalty`         | number \| false          | Repetition penalty                   |
-| `minPSampling`          | number \| false          | Minimum probability threshold        |
-| `topPSampling`          | number \| false          | Nucleus sampling threshold           |
-| `xtcProbability`        | number \| false          | XTC sampling probability             |
-| `xtcThreshold`          | number \| false          | XTC probability threshold            |
-| `cpuThreads`            | number                   | CPU threads for inference            |
-| `draftModel`            | string                   | Draft model for speculative decoding |
+| Field                   | Type                                      | Description                          |
+| ----------------------- | ----------------------------------------- | ------------------------------------ |
+| `maxTokens`             | number \| false                           | Maximum tokens to predict            |
+| `temperature`           | number                                    | Sampling temperature                 |
+| `stopStrings`           | string[]                                  | Stop generation at these strings     |
+| `toolCallStopStrings`   | string[]                                  | Stop for tool calls                  |
+| `contextOverflowPolicy` | LLMContextOverflowPolicy                  | Behavior when context exceeds window |
+| `structured`            | ZodType \| LLMStructuredPredictionSetting | Structured JSON output               |
+| `topKSampling`          | number                                    | Top-K sampling limit                 |
+| `repeatPenalty`         | number \| false                           | Repetition penalty                   |
+| `minPSampling`          | number \| false                           | Minimum probability threshold        |
+| `topPSampling`          | number \| false                           | Nucleus sampling threshold           |
+| `xtcProbability`        | number \| false                           | XTC sampling probability             |
+| `xtcThreshold`          | number \| false                           | XTC probability threshold            |
+| `cpuThreads`            | number                                    | CPU threads for inference            |
+| `draftModel`            | string                                    | Draft model for speculative decoding |
 
 ---
 

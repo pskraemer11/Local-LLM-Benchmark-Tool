@@ -15,45 +15,45 @@
 
 ### 1.1 Quellcode-Inventar (10 Skripte, src/)
 
-| Datei                      |   LOC  | Funcs | Docstrings | Typ-Hints (Param) | Return-Anno | except-Blöcke | Größte Funktion          |
-|----------------------------|-------:|------:|-----------:|------------------:|------------:|--------------:|--------------------------|
-| `run_benchmarks.py`        |  2.019 |   58  |    52%     |       100%        |    100%     |      34       | `run_lmeval` (201 Z.)    |
-| `custom_benchmark.py`      |  2.176 |   62  |   *29%*    |       *85%*       |    100%     |      30       | `main` (234 Z.)          |
-| `consolidate_results.py`   |  1.775 |   45  |    47%     |        98%        |     98%     |      22       | `main` (278 Z.)          |
-| `registry_tool.py`         |  1.847 |   48  |    65%     |        96%        |     98%     |       9       | `cmd_validate` (147 Z.)  |
-| `assemble_blueprint.py`    |  1.114 |   21  |   100%     |       100%        |    100%     |       6       | `assemble_prompts` (172) |
-| `benchmark_config.py`      |    529 |    5  |   100%     |       100%        |    100%     |       1       | `get_quant` (71 Z.)      |
-| `model_manager.py`         |    591 |   13  |    85%     |       100%        |    100%     |      20       | `get_available_models`   |
-| `csv_writer.py`            |    482 |   12  |    58%     |        98%        |    100%     |       0       | `write_per_task_csv`     |
-| `_corr_final.py`           |    263 |    3  |   *0%*     |       100%        |    100%     |       1       | `read_lms_configs` (39)  |
-| `type_defs.py`             |    170 |    0  |     -      |         -         |      -      |       0       | -                        |
-|----------------------------|-------:|------:|-----------:|------------------:|------------:|--------------:|--------------------------|
-| *GESAMT*                   |*10.966*| *267* |  ~58%      |       ~97%        |    ~100%    |     123       |                          |
+| Datei                                                                                                                                          | LOC      | Funcs | Docstrings | Typ-Hints (Param) | Return-Anno | except-Blöcke | Größte Funktion          |
+| ---------------------------------------------------------------------------------------------------------------------------------------------- | -------: | ----: | ---------: | ----------------: | ----------: | ------------: | ------------------------ |
+| `run_benchmarks.py`                                                                                                                            | 2.019    | 58    | 52%        | 100%              | 100%        | 34            | `run_lmeval` (201 Z.)    |
+| `custom_benchmark.py`                                                                                                                          | 2.176    | 62    | *29%*      | *85%*             | 100%        | 30            | `main` (234 Z.)          |
+| `consolidate_results.py`                                                                                                                       | 1.775    | 45    | 47%        | 98%               | 98%         | 22            | `main` (278 Z.)          |
+| `registry_tool.py`                                                                                                                             | 1.847    | 48    | 65%        | 96%               | 98%         | 9             | `cmd_validate` (147 Z.)  |
+| `assemble_blueprint.py`                                                                                                                        | 1.114    | 21    | 100%       | 100%              | 100%        | 6             | `assemble_prompts` (172) |
+| `benchmark_config.py`                                                                                                                          | 529      | 5     | 100%       | 100%              | 100%        | 1             | `get_quant` (71 Z.)      |
+| `model_manager.py`                                                                                                                             | 591      | 13    | 85%        | 100%              | 100%        | 20            | `get_available_models`   |
+| `csv_writer.py`                                                                                                                                | 482      | 12    | 58%        | 98%               | 100%        | 0             | `write_per_task_csv`     |
+| `_corr_final.py`                                                                                                                               | 263      | 3     | *0%*       | 100%              | 100%        | 1             | `read_lms_configs` (39)  |
+| `type_defs.py`                                                                                                                                 | 170      | 0     | -          | -                 | -           | 0             | -                        |
+| ----------------------------\|-------:\|------:\|-----------:\|------------------:\|------------:\|--------------:\|-------------------------- |          |       |            |                   |             |               |                          |
+| *GESAMT*                                                                                                                                       | *10.966* | *267* | ~58%       | ~97%              | ~100%       | 123           |                          |
 
 **Delta zu 28.07.2026:** +3.041 LOC, +33 Funktionen (Struktur-Gate, Run-Spec, MTP-Schutz, Agentic-Safety).
 
 ### 1.2 Test-Inventar
 
-| Metrik                    | Wert                              |
-|---------------------------|----------------------------------:|
-| Test-Suite                | **704 passed** in 5.2s (0 Failed) |
-| Delta zu 02.08.2026       | +11 (MTP-Schutz, phi-4-Override)  |
-| Test-to-Source Ratio      | ca. 1:2.2                         |
+| Metrik               | Wert                              |
+| -------------------- | --------------------------------: |
+| Test-Suite           | **704 passed** in 5.2s (0 Failed) |
+| Delta zu 02.08.2026  | +11 (MTP-Schutz, phi-4-Override)  |
+| Test-to-Source Ratio | ca. 1:2.2                         |
 
 ### 1.3 Registry-Stand (model_registry.yaml)
 
-| Aspekt                                    | Wert          |
-|-------------------------------------------|--------------:|
-| Registry-Eintraege (dict)                 |    70         |
-| Mit `reasoning`/`blueprint`/              |    70 (100%)  |
-|      `context_length`/`capabilities`      |               |
-| Mit `file_size_bytes`                     |    69 (99%)   |
-| Mit `truncation`                          |    69 (99%)   |
-| Mit `n_layers`                            |    68 (97%)   |
-| Mit `quants`                              |    50 (71%)   |
-| Mit `max_context_length`                  |    53 (76%)   |
-| Mit `pub_url`                             |    45 (64%)   |
-| Mit `template`                            |     5 (7%) - davon **2 mit Config-Fehler** |
+| Aspekt                                    | Wert                                         |
+| ----------------------------------------- | -------------------------------------------: |
+| Registry-Eintraege (dict)                 | 70                                           |
+| Mit `reasoning`/`blueprint`/              | 70 (100%)                                    |
+| `context_length`/`capabilities`           |                                              |
+| Mit `file_size_bytes`                     | 69 (99%)                                     |
+| Mit `truncation`                          | 69 (99%)                                     |
+| Mit `n_layers`                            | 68 (97%)                                     |
+| Mit `quants`                              | 50 (71%)                                     |
+| Mit `max_context_length`                  | 53 (76%)                                     |
+| Mit `pub_url`                             | 45 (64%)                                     |
+| Mit `template`                            | 5 (7%) - davon **2 mit Config-Fehler**       |
 | Validierung (`registry_tool.py validate`) | **2 Probleme** (nur template_missing_config) |
 
 ### 1.4 Live-Abgleich lms ls vs. Registry (03.08.2026, 14:26)
@@ -69,7 +69,7 @@
 ### 1.5 Behebungen seit 02.08.2026 (in diesem Review verifiziert)
 
 | Commit     | Inhalt                                                                           | Verifiziert                           |
-|------------|----------------------------------------------------------------------------------|---------------------------------------|
+| ---------- | -------------------------------------------------------------------------------- | ------------------------------------- |
 | `9cfe8aa5` | Qwen3/Qwen3.6-Klassifikation: Map-Default statt hardcodiert, Arch-Normalisierung | `validate`: reasoning_arch_mismatch 0 |
 | `b74ca283` | Registry: UD-Variante + MTP-Hinweis, Drafter entfernt, pub_url-Fixes             | Registry-Check ok                     |
 | `fb44d851` | MTP-Drafter-Schutz `_is_support_file` (add/resolve) + 11 Tests                   | Siehe F1 (Luecke)                     |
@@ -152,27 +152,27 @@ Typ-Hint-Abdeckung ist dagegen mit ~97% (Param) exzellent.
 
 ## 3. Bewertung nach ISO/IEC 9126
 
-| Merkmal          | Bewertung | Begruendung                                                                                                       |
-|------------------|:---------:|-------------------------------------------------------------------------------------------------------------------|
-| *Functionality*  |  9.0/10   | 4 Pipelines, 10 Benchmarks, Struktur-Gate, Run-Spec, Safety-Modus; Registry-Abdeckung 57/58 installierter Modelle |
-| *Reliability*    |  8.5/10   | 704 Tests gruen; F1 (Dauerwarnung MTP-Drafter), F2 (2 Granite-Template-Fehler)                                    |
-| *Usability*      |  8.5/10   | CLI-Menue, YAML-Run-Spec, klare Ergebnisdoku; kleine Rest-Ecken (F1-Rauschen)                                     |
-| *Efficiency*     |  8.5/10   | Suite 5.2s; Quant-Cache; Lauf-Output zeigt gesunde Telemetrie; Log-Spam `Accumulated N tokens` (extern)           |
-| *Maintainability*|  8.0/10   | Typ-Hints ~97%, type_defs.py; aber 29-52% Docstrings in den groessten Modulen, grosse main()-Funktionen           |
-| *Portability*    |  8.0/10   | src/-Migration, CI (pytest+ruff+mypy); F4 CWD-abhaengiger Modulaufruf                                             |
-| *GESAMT*         | *8.4/10*  | Steigerung ggueber 27.07. (8.5) - Niveau gehalten trotz +3k LOC; 2 neue kleinere Funde                            |
+| Merkmal           | Bewertung | Begruendung                                                                                                       |
+| ----------------- | :-------: | ----------------------------------------------------------------------------------------------------------------- |
+| *Functionality*   | 9.0/10    | 4 Pipelines, 10 Benchmarks, Struktur-Gate, Run-Spec, Safety-Modus; Registry-Abdeckung 57/58 installierter Modelle |
+| *Reliability*     | 8.5/10    | 704 Tests gruen; F1 (Dauerwarnung MTP-Drafter), F2 (2 Granite-Template-Fehler)                                    |
+| *Usability*       | 8.5/10    | CLI-Menue, YAML-Run-Spec, klare Ergebnisdoku; kleine Rest-Ecken (F1-Rauschen)                                     |
+| *Efficiency*      | 8.5/10    | Suite 5.2s; Quant-Cache; Lauf-Output zeigt gesunde Telemetrie; Log-Spam `Accumulated N tokens` (extern)           |
+| *Maintainability* | 8.0/10    | Typ-Hints ~97%, type_defs.py; aber 29-52% Docstrings in den groessten Modulen, grosse main()-Funktionen           |
+| *Portability*     | 8.0/10    | src/-Migration, CI (pytest+ruff+mypy); F4 CWD-abhaengiger Modulaufruf                                             |
+| *GESAMT*          | *8.4/10*  | Steigerung ggueber 27.07. (8.5) - Niveau gehalten trotz +3k LOC; 2 neue kleinere Funde                            |
 
 ---
 
 ## 4. Priorisierte Empfehlungen
 
-| Prio | Massnahme                                                                   |Aufwand | Nutzen                                  |
-|:----:|-----------------------------------------------------------------------------|:------:|-----------------------------------------|
-|  P1  | `_is_support_file` auch in `get_available_models()` anwenden (F1)           |    S   | Beseitigt Dauerwarnung + Modellrauschen |
-|  P2  | Granite-Templates: entfernen oder Configs befuellen (F2)                    |    S   | `validate` wieder 0 Probleme            |
-|  P2  | Docstrings in `custom_benchmark.py`/`consolidate_results.py` ergaenzen (F3) |    M   | Wartbarkeit der groessten Module        |
-|  P3  | CWD-unabhaengiger Modulaufruf (F4)                                          |    S   | Konsistente CLI-Nutzung                 |
-|  P3  | Codestral-22B-Notiz wg. Grammar-Fehlern (F5)                                |    S   | Dokumentation bekannter Limitierung     |
+| Prio | Massnahme                                                                   | Aufwand | Nutzen                                  |
+| :---: | --------------------------------------------------------------------------- | :-----: | --------------------------------------- |
+| P1   | `_is_support_file` auch in `get_available_models()` anwenden (F1)           | S       | Beseitigt Dauerwarnung + Modellrauschen |
+| P2   | Granite-Templates: entfernen oder Configs befuellen (F2)                    | S       | `validate` wieder 0 Probleme            |
+| P2   | Docstrings in `custom_benchmark.py`/`consolidate_results.py` ergaenzen (F3) | M       | Wartbarkeit der groessten Module        |
+| P3   | CWD-unabhaengiger Modulaufruf (F4)                                          | S       | Konsistente CLI-Nutzung                 |
+| P3   | Codestral-22B-Notiz wg. Grammar-Fehlern (F5)                                | S       | Dokumentation bekannter Limitierung     |
 
 ---
 

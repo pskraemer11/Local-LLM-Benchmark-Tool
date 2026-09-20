@@ -17,7 +17,7 @@ Template `doc-git/Jinja-Chat-Templates/gpt-oss-20b_harmony.jinja` (17221 charact
 was injected into all configs:
 
 | Config                                   | Vorher                     | Nachher                                |
-|------------------------------------------|----------------------------|----------------------------------------|
+| ---------------------------------------- | -------------------------- | -------------------------------------- |
 | `openai/gpt-oss-20b.json` (Default-Load) | **fehlt** (3179 Bytes)     | Template + Prompt (20447 Bytes)        |
 | `lmstudio-community/.../MXFP4.gguf.json` | vorhanden, falscher Prompt | Template korrekt + Prompt aktualisiert |
 | `unsloth/.../Q6_K.gguf.json`             | vorhanden, falscher Prompt | Template korrekt + Prompt aktualisiert |
@@ -62,11 +62,11 @@ is now only set for non-gpt-oss models.
 **Most critical bug.** Without `max_thinking_tokens`, gpt-oss thinks up to `max_tokens`
 (4096 for MATH-500) and produces `content=""`. The parameter had to be added in 3 files:
 
-| File                                  | Change                                                  |
-|---------------------------------------|---------------------------------------------------------|
-| `benchmark_config.py` line 283        | `"max_thinking_tokens": 200` in gpt-oss override        |
-| `run_benchmarks.py` lines 625, 996    | `"max_thinking_tokens"` in `generation_parameters_keys` |
-| `custom_benchmark.py` lines 763, 779  | `body["max_thinking_tokens"] = 200` for gpt-oss         |
+| File                                 | Change                                                  |
+| ------------------------------------ | ------------------------------------------------------- |
+| `benchmark_config.py` line 283       | `"max_thinking_tokens": 200` in gpt-oss override        |
+| `run_benchmarks.py` lines 625, 996   | `"max_thinking_tokens"` in `generation_parameters_keys` |
+| `custom_benchmark.py` lines 763, 779 | `body["max_thinking_tokens"] = 200` for gpt-oss         |
 
 ### Bug 5: `reasoning` instead of `reasoning_effort` in the API body
 `squashed in earlier session (24.07.2026)`
@@ -74,7 +74,7 @@ is now only set for non-gpt-oss models.
 ## Effect of the fixes (test run 3, 28.07.2026)
 
 | Benchmark | Before fixes (ChatML, no budget) | After fixes (Harmony + max_thinking_tokens=200) |
-|-----------|----------------------------------|-------------------------------------------------|
+| --------- | -------------------------------- | ----------------------------------------------- |
 | DS1000    | 0% (leerer Output)               | ~33% (sample-size 3, echter Code)               |
 | MATH-500  | 0% (leerer Output)               | 20% (sample-size 5)                             |
 | IFEVAL    | 40% / 62.5%                      | 40% / 62.5% (stabil)                            |

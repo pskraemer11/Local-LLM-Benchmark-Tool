@@ -38,11 +38,11 @@ This is the **main cause** of systematic failure. The model cannot guess the col
 
 The tests are **implementation-specific** rather than **behavior-oriented**. Example:
 
-| Task              | Prompt says                                | Test checks                                                                 |
-|-------------------|--------------------------------------------|-----------------------------------------------------------------------------|
-| 1 (explode_and_agg) | "explodes a DF column… computes mean…"    | `isinstance(result, pd.DataFrame)` + columns `'categories'`, `'score'`    |
-| 5 (assign_derived)  | "add multiple derived columns"            | columns `'total'`, `'discounted'`, `'category'`                              |
-| 7 (eval_expression) | "compute a new column from an expression" | column `'ratio'`                                                            |
+| Task                | Prompt says                               | Test checks                                                            |
+| ------------------- | ----------------------------------------- | ---------------------------------------------------------------------- |
+| 1 (explode_and_agg) | "explodes a DF column… computes mean…"    | `isinstance(result, pd.DataFrame)` + columns `'categories'`, `'score'` |
+| 5 (assign_derived)  | "add multiple derived columns"            | columns `'total'`, `'discounted'`, `'category'`                        |
+| 7 (eval_expression) | "compute a new column from an expression" | column `'ratio'`                                                       |
 
 The canonical solution for task 1 uses `.reset_index()`, which returns a DataFrame. Models that return only a Series without `.reset_index()` **or** that use `.reset_index()` but with different column naming fail, even if the logic is correct.
 
@@ -60,14 +60,14 @@ DeepSeek Coder v2 Lite generates for task 7: `df['new_column'] = eval(expr)` →
 
 ## 2. Code Review: `benchmark_lmstudio_v20.py` – Critical Findings
 
-| Location   | Problem                                                                                             | Severity  |
-|------------|-----------------------------------------------------------------------------------------------------|-----------|
-| `L.848-856`| `setup_code` missing from prompt                                                                    | **High**  |
-| `L.551-552`| `eval`, `compile` removed, but pandas may internally require them                                   | Medium (only for explicit `eval()` call) |
-| `L.364-368`| `extract_code()` fallback: only captures lines matching `_is_bare_statement` – misses code without function definition | Low       |
-| `L.371-427`| `_repair_indentation()` fixes indentation errors but cannot fix syntax errors                       | Medium    |
-| `L.475-510`| Sandbox blocks `os`, `subprocess` etc. – sensible, but debugging is harder when errors occur        | Low       |
-|   `L.51`   | `SAMPLE_SIZE=8` with only 10 tasks – statistically weak signal                                       | Medium    |
+| Location    | Problem                                                                                                                | Severity                                 |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| `L.848-856` | `setup_code` missing from prompt                                                                                       | **High**                                 |
+| `L.551-552` | `eval`, `compile` removed, but pandas may internally require them                                                      | Medium (only for explicit `eval()` call) |
+| `L.364-368` | `extract_code()` fallback: only captures lines matching `_is_bare_statement` – misses code without function definition | Low                                      |
+| `L.371-427` | `_repair_indentation()` fixes indentation errors but cannot fix syntax errors                                          | Medium                                   |
+| `L.475-510` | Sandbox blocks `os`, `subprocess` etc. – sensible, but debugging is harder when errors occur                           | Low                                      |
+| `L.51`      | `SAMPLE_SIZE=8` with only 10 tasks – statistically weak signal                                                         | Medium                                   |
 
 
 
@@ -88,14 +88,14 @@ DeepSeek Coder v2 Lite generates for task 7: `df['new_column'] = eval(expr)` →
 
 ### CoderEval vs. PandasEval
 
-| Criterion       | PandasEval (current)                   | CoderEval                                                           |
-|-----------------|----------------------------------------|---------------------------------------------------------------------|
-| Tasks           | 10 (self-created)                      | 230 (from real projects)                                            |
-| Tests           | Assertions with hardcoded column names | Real unit tests from OSS projects                                   |
-| Coverage        | Pandas only                            | Databases, web frameworks, data processing, etc.                    |
-| Prompt Quality  | Vague (without context)                | Docstrings + File context                                           |
-| Signal Strength | Weak (0-12% across all)                | Stronger (more differentiated scores)                               |
-| Docker Required | No                                     | Yes (for full evaluation)                                           |
+| Criterion       | PandasEval (current)                   | CoderEval                                        |
+| --------------- | -------------------------------------- | ------------------------------------------------ |
+| Tasks           | 10 (self-created)                      | 230 (from real projects)                         |
+| Tests           | Assertions with hardcoded column names | Real unit tests from OSS projects                |
+| Coverage        | Pandas only                            | Databases, web frameworks, data processing, etc. |
+| Prompt Quality  | Vague (without context)                | Docstrings + File context                        |
+| Signal Strength | Weak (0-12% across all)                | Stronger (more differentiated scores)            |
+| Docker Required | No                                     | Yes (for full evaluation)                        |
 
 ### Recommendation
 

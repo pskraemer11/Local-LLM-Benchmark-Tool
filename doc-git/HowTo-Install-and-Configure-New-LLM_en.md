@@ -8,11 +8,11 @@ This guide reflects the current provider-split architecture in the benchmark sta
 
 ## 1. Resolution model
 
-| Layer                 | Owns                                          | Examples                                                                   |
-| --------------------- | --------------------------------------------- | -------------------------------------------------------------------------- |
-| GGUF header           | Immutable technical facts                     | `n_layers`, `hidden_dim`, max context, embedded chat template              |
+| Layer                 | Owns                                          | Examples                                                                             |
+| --------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------ |
+| GGUF header           | Immutable technical facts                     | `n_layers`, `hidden_dim`, max context, embedded chat template                        |
 | `model_registry.yaml` | Benchmark policy and neutral runtime settings | reasoning, capabilities, blueprint, truncation, KV policy, sampling, template policy |
-| Provider adapter      | Provider-specific runtime behavior            | LM Studio JSON, TabbyAPI, Unsloth `llama-server.exe` args                  |
+| Provider adapter      | Provider-specific runtime behavior            | LM Studio JSON, TabbyAPI, Unsloth `llama-server.exe` args                            |
 
 Important:
 
@@ -60,22 +60,22 @@ If the model is already known and only needs a partial refresh, the lower-level 
 
 ## 3. What is derived from where
 
-| Field or decision        | Source                    | Notes                                                    |
-| ------------------------ | ------------------------- | -------------------------------------------------------- |
-| `n_layers`               | GGUF header               | Read automatically from the model file                   |
-| `hidden_dim`             | GGUF header               | Read automatically from the model file                   |
-| `context_length`         | GGUF + registry policy    | Derived from architecture and runtime policy             |
-| `reasoning` / `thinking` | GGUF chat template        | No more keyword fallback for the default path            |
-| `sampling`              | HF card/API + official docs | Accepted only after plausibility, profile and conflict checks |
-| `sampling_research_status` | Onboarding/review       | `confirmed`, `unresolved`, `conflict`, or `not_found`      |
-| `sampling_sources/evidence` | Onboarding/review    | Provenance for accepted or investigated values             |
-| `capabilities`           | Registry classification   | For example coding, text, vision, audio exclusions       |
-| `blueprint`              | Registry classification   | Derived from reasoning plus capability hints             |
-| `truncation`             | Registry / context policy | Based on effective context length                        |
-| `num_parallel`           | Fixed policy              | No longer a registry field;                              |
-|                                                         current policy is 4 for sample sizes >= 10, otherwise 1 |
-| `k_cache` / `v_cache`    | Registry policy           | Used to derive the runtime settings                      |
-| `useUnifiedKvCache`      | VRAM formula              | Derived from model size, KV settings, and available VRAM |
+| Field or decision                                       | Source                      | Notes                                                         |
+| ------------------------------------------------------- | --------------------------- | ------------------------------------------------------------- |
+| `n_layers`                                              | GGUF header                 | Read automatically from the model file                        |
+| `hidden_dim`                                            | GGUF header                 | Read automatically from the model file                        |
+| `context_length`                                        | GGUF + registry policy      | Derived from architecture and runtime policy                  |
+| `reasoning` / `thinking`                                | GGUF chat template          | No more keyword fallback for the default path                 |
+| `sampling`                                              | HF card/API + official docs | Accepted only after plausibility, profile and conflict checks |
+| `sampling_research_status`                              | Onboarding/review           | `confirmed`, `unresolved`, `conflict`, or `not_found`         |
+| `sampling_sources/evidence`                             | Onboarding/review           | Provenance for accepted or investigated values                |
+| `capabilities`                                          | Registry classification     | For example coding, text, vision, audio exclusions            |
+| `blueprint`                                             | Registry classification     | Derived from reasoning plus capability hints                  |
+| `truncation`                                            | Registry / context policy   | Based on effective context length                             |
+| `num_parallel`                                          | Fixed policy                | No longer a registry field;                                   |
+| current policy is 4 for sample sizes >= 10, otherwise 1 |                             |                                                               |
+| `k_cache` / `v_cache`                                   | Registry policy             | Used to derive the runtime settings                           |
+| `useUnifiedKvCache`                                     | VRAM formula                | Derived from model size, KV settings, and available VRAM      |
 
 ## 4. Provider-specific behavior
 

@@ -39,12 +39,12 @@ model_registry.yaml + provider ──> run_benchmarks.py
 
 The launcher currently supports four benchmark pipelines:
 
-| Pipeline                                        | Benchmarks                                      | What it measures                                |
-| ----------------------------------------------- | ----------------------------------------------- | ----------------------------------------------- |
-| Custom                                          | DS1000, CoderEval                               | Data-science and code-generation tasks          |
-| EvalPlus                                        | HumanEval+, MBPP+                               | Code generation with differential tests         |
-| LM-Eval                                         | ARC, HellaSwag, TruthfulQA, IFEval, MATH-500    | Knowledge, reasoning, and instruction following |
-| Agentic                                         | tool-eval-bench                                 | Tool-use scenarios                              |
+| Pipeline | Benchmarks                                   | What it measures                                |
+| -------- | -------------------------------------------- | ----------------------------------------------- |
+| Custom   | DS1000, CoderEval                            | Data-science and code-generation tasks          |
+| EvalPlus | HumanEval+, MBPP+                            | Code generation with differential tests         |
+| LM-Eval  | ARC, HellaSwag, TruthfulQA, IFEval, MATH-500 | Knowledge, reasoning, and instruction following |
+| Agentic  | tool-eval-bench                              | Tool-use scenarios                              |
 
 The result files contain per-task scores and runtime telemetry such as
 latency, tokens per second, CPU, GPU, RAM, VRAM, and temperature. The
@@ -308,20 +308,20 @@ pipelines do not independently load models.
 
 ### Common options
 
-| Option                                                       | Meaning                                                      |
-| ------------------------------------------------------------ | ------------------------------------------------------------ |
-| --model, -m                                                  | Model name, number, range, comma-separated selection, or all |
-| --benchmarks, -b                                             | Benchmark name(s), number(s), or all                         |
-| --sample-size, -s                                            | Number of tasks/scenarios per benchmark; default 20          |
-| --seed                                                       | Reproducible task selection for supported pipelines          |
-| --thinking                                                   | Force thinking mode for reasoning models                     |
-| --agentic-mode random                                        | Select random agentic scenarios                              |
-| --agentic-mode safety                                        | Select the safety-focused agentic scenarios                  |
-| --exclude-benchmarks                                         | Comma-separated exclusions                                   |
-| --no-structured-output                                       | Use the regex fallback in custom benchmarks                  |
-| --unload-between                                             | Reload the model between benchmarks                          |
-| --keep-response                                              | Store full responses instead of truncated response text      |
-| --run-spec, --config                                         | Read models, benchmarks, seed, and options from YAML         |
+| Option                 | Meaning                                                      |
+| ---------------------- | ------------------------------------------------------------ |
+| --model, -m            | Model name, number, range, comma-separated selection, or all |
+| --benchmarks, -b       | Benchmark name(s), number(s), or all                         |
+| --sample-size, -s      | Number of tasks/scenarios per benchmark; default 20          |
+| --seed                 | Reproducible task selection for supported pipelines          |
+| --thinking             | Force thinking mode for reasoning models                     |
+| --agentic-mode random  | Select random agentic scenarios                              |
+| --agentic-mode safety  | Select the safety-focused agentic scenarios                  |
+| --exclude-benchmarks   | Comma-separated exclusions                                   |
+| --no-structured-output | Use the regex fallback in custom benchmarks                  |
+| --unload-between       | Reload the model between benchmarks                          |
+| --keep-response        | Store full responses instead of truncated response text      |
+| --run-spec, --config   | Read models, benchmarks, seed, and options from YAML         |
 
 CLI options override values from a run-spec YAML file.
 
@@ -347,16 +347,16 @@ py -3.12 .\src\run_benchmarks.py --run-spec .\run.example.yaml
 The project deliberately separates benchmark policy from backend-local
 runtime artifacts.
 
-| Data                                                           | Location                                                       | Role                                                           |
-| -------------------------------------------------------------- | -------------------------------------------------------------- | -------------------------------------------------------------- |
-| Model registry                                                 | doc-git\model_registry.yaml                                    | Benchmark policy and provider-neutral model metadata           |
-| Blueprint definitions                                          | doc-git\blueprint_definitions.yaml                             | System-prompt assembly rules                                   |
-| Jinja templates                                                | doc-git\Jinja-Chat-Templates\                                  | Explicit chat-template overrides                               |
-| GGUF files                                                     | `D:\LLM-Modelle\models` (legacy `~\.lmstudio\models` fallback) | Immutable model/header facts                                   |
-| LM Studio config JSONs                                         | LM Studio internal config directory                            | Backend-local runtime artifacts and drift evidence             |
-| Benchmark datasets                                             | simple_evals\, lm-eval, EvalPlus, tool-eval-bench              | Tasks and scenarios                                            |
-| Run specifications                                             | local run*.yaml files                                          | Reproducible run selections                                    |
-| Results                                                        | ergebnisse\                                                    | Per-task CSVs, summaries, logs, and reports                    |
+| Data                   | Location                                                       | Role                                                 |
+| ---------------------- | -------------------------------------------------------------- | ---------------------------------------------------- |
+| Model registry         | doc-git\model_registry.yaml                                    | Benchmark policy and provider-neutral model metadata |
+| Blueprint definitions  | doc-git\blueprint_definitions.yaml                             | System-prompt assembly rules                         |
+| Jinja templates        | doc-git\Jinja-Chat-Templates\                                  | Explicit chat-template overrides                     |
+| GGUF files             | `D:\LLM-Modelle\models` (legacy `~\.lmstudio\models` fallback) | Immutable model/header facts                         |
+| LM Studio config JSONs | LM Studio internal config directory                            | Backend-local runtime artifacts and drift evidence   |
+| Benchmark datasets     | simple_evals\, lm-eval, EvalPlus, tool-eval-bench              | Tasks and scenarios                                  |
+| Run specifications     | local run*.yaml files                                          | Reproducible run selections                          |
+| Results                | ergebnisse\                                                    | Per-task CSVs, summaries, logs, and reports          |
 
 The canonical model identity is:
 
@@ -428,12 +428,12 @@ py -3.12 .\src\consolidate_results.py
 
 The default category weights are:
 
-| Category  | Weight    |
-| --------- | --------: |
-| Coding    | 35%       |
-| Math      | 25%       |
-| Agentic   | 25%       |
-| Knowledge | 15%       |
+| Category  | Weight |
+| --------- | -----: |
+| Coding    | 35%    |
+| Math      | 25%    |
+| Agentic   | 25%    |
+| Knowledge | 15%    |
 
 For statistically paired comparisons, use the consolidation tool's compare
 options with a fixed seed and comparable task selection.
@@ -486,6 +486,7 @@ manually afterwards.
 
 ## Further documentation
 
+- Review-Gate für Review, Commit und Push: REVIEW-GATE.md
 - Architecture, Flow & ChangeLog: doc-git\Architecture, Flow & ChangeLog_en.md
 - How to install and configure a new LLM:
   doc-git\HowTo-Install-and-Configure-New-LLM_en.md

@@ -9,13 +9,13 @@
 
 ## 0. Zusammenfassung
 
-| Punkt | Inhalt | Status |
-|---|---|---|
-| P1 | Struktur-Gate / Output-Fidelity (CSV-Spalten `output_status`, `entry_point_found`, `extracted_code`) | done |
-| P4 | Adversarial-Safety-Selektion (`--agentic-mode safety`, 13 Category-K-Szenarien) | done |
-| P3 | YAML-Run-Spec (`--run-spec/--config run.yaml`, Precedence CLI>YAML>Defaults, Seed-Durchgängigkeit) | done |
-| P2 | LLM-as-judge (OpenAI/promptfoo llm-rubric) | **nicht** – erfordert Cloud-Provider |
-| Doku | Auswertung DS1000-Re-Run + Feature-Übersicht | ReRun teils (Ternary 0.10 / gpt-oss 0.20 gemessen; Q1_0+8B laufen) |
+| Punkt | Inhalt                                                                                               | Status                                                             |
+| ----- | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| P1    | Struktur-Gate / Output-Fidelity (CSV-Spalten `output_status`, `entry_point_found`, `extracted_code`) | done                                                               |
+| P4    | Adversarial-Safety-Selektion (`--agentic-mode safety`, 13 Category-K-Szenarien)                      | done                                                               |
+| P3    | YAML-Run-Spec (`--run-spec/--config run.yaml`, Precedence CLI>YAML>Defaults, Seed-Durchgängigkeit)   | done                                                               |
+| P2    | LLM-as-judge (OpenAI/promptfoo llm-rubric)                                                           | **nicht** – erfordert Cloud-Provider                               |
+| Doku  | Auswertung DS1000-Re-Run + Feature-Übersicht                                                         | ReRun teils (Ternary 0.10 / gpt-oss 0.20 gemessen; Q1_0+8B laufen) |
 
 Test-Suite: **693 passed** (Delta +14: 12 TestRunSpec + 2 parallel_ab-Seed-Tests).
 
@@ -80,11 +80,11 @@ eine lokale YAML-Run-Spec (Modelle/Benchmarks/sample_size/seed/agentic_mode + Fl
 
 ## 4. Tests (neu)
 
-| Test-Klasse/-Fall | Datei | Zweck |
-|---|---|---|
-| `TestRunSpec` (12) | `tests/test_run_benchmarks.py` | Laden, Listen→CSV, Unbekannt-Warn, Bool/Int-Typen, Fatal-Fehler (Datei fehlt/YAML kaputt), `_apply_run_spec` Precedence (YAML füllt Defaults; CLI-Werte bleiben), End-to-End `_parse_args` mit `--run-spec` |
-| `test_parse_args_cli_flags_win_over_run_spec` | dito | CLI `-s`/`--seed` über YAML |
-| Seed-Tests (2) | `tests/test_parallel_ab.py` | impliziter Seed 42 reproduzierbar; expliziter Seed identisch |
+| Test-Klasse/-Fall                             | Datei                          | Zweck                                                                                                                                                                                                       |
+| --------------------------------------------- | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TestRunSpec` (12)                            | `tests/test_run_benchmarks.py` | Laden, Listen→CSV, Unbekannt-Warn, Bool/Int-Typen, Fatal-Fehler (Datei fehlt/YAML kaputt), `_apply_run_spec` Precedence (YAML füllt Defaults; CLI-Werte bleiben), End-to-End `_parse_args` mit `--run-spec` |
+| `test_parse_args_cli_flags_win_over_run_spec` | dito                           | CLI `-s`/`--seed` über YAML                                                                                                                                                                                 |
+| Seed-Tests (2)                                | `tests/test_parallel_ab.py`    | impliziter Seed 42 reproduzierbar; expliziter Seed identisch                                                                                                                                                |
 
 ---
 

@@ -11,24 +11,24 @@
 
 ### 1.1 LMS Live Inventory (`lms ls --json`, 20.07.2026)
 
-| Category      | Count | Examples                                                     |
-|----------------|-------:|---------------------------------------------------------------|
-| **LLM**        | 45     | Gemma-4, Qwen3.6, Granite-4.1, Phi-4 …                        |
-| **Embedding**  |  9     | bge-m3, jina-v3, nomic-embed …                                |
-| **Total**      | 54     | (exclusively GGUF format)                                     |
+| Category      | Count | Examples                               |
+| ------------- | ----: | -------------------------------------- |
+| **LLM**       | 45    | Gemma-4, Qwen3.6, Granite-4.1, Phi-4 … |
+| **Embedding** | 9     | bge-m3, jina-v3, nomic-embed …         |
+| **Total**     | 54    | (exclusively GGUF format)              |
 
 **Benchmark-relevant LLMs after exclude keywords filter** (`run_benchmarks.py:617`): **40 remaining models**.
 
 ### 1.2 Registry Status (before this review)
 
-| Aspect                                                | Value         |
-|-------------------------------------------------------|---------------|
-| Registered models (before the review)                 | **108**       |
-| Of which with GGUF header data (`n_layers`/`hidden_dim`) |   79 (73%)    |
-| LMS LLMs matching registry                            |   34 / 40     |
-| LMS LLMs missing from registry                        |    3 (see §2) |
-| Existing registry entries without arch data           |    2          |
-| Source code lines (9 scripts)                         |  8,274        |
+| Aspect                                                   | Value      |
+| -------------------------------------------------------- | ---------- |
+| Registered models (before the review)                    | **108**    |
+| Of which with GGUF header data (`n_layers`/`hidden_dim`) | 79 (73%)   |
+| LMS LLMs matching registry                               | 34 / 40    |
+| LMS LLMs missing from registry                           | 3 (see §2) |
+| Existing registry entries without arch data              | 2          |
+| Source code lines (9 scripts)                            | 8,274      |
 
 ### 1.3 Fixes in This Review
 
@@ -36,18 +36,18 @@
 
 Three LLMs installed in LMS were not in `model_registry.yaml`. Data read with `_read_gguf_arch()` from GGUF headers:
 
-| Key                                | Arch          | n_layers | hidden_dim | Params | Quant  | Size [GB] |
-|------------------------------------|---------------|---------:|-----------:|--------|--------|----------:|
-| `mradermacher/f2llm-v2-4b`         | Qwen3 Dense   |   36     |   2560     |  4B    | Q6_K   |  3.31     |
-| `mradermacher/f2llm-v2-1.7b`       | Qwen3 Dense   |   28     |   2048     |  1.7B  | Q8_0   |  1.83     |
-| `mradermacher/datagemma-rig-27b-it`| Gemma-2 Dense |   46     |   4608     | 27B    | Q3_K_S | 12.17     |
+| Key                                 | Arch          | n_layers | hidden_dim | Params | Quant  | Size [GB] |
+| ----------------------------------- | ------------- | -------: | ---------: | ------ | ------ | --------: |
+| `mradermacher/f2llm-v2-4b`          | Qwen3 Dense   | 36       | 2560       | 4B     | Q6_K   | 3.31      |
+| `mradermacher/f2llm-v2-1.7b`        | Qwen3 Dense   | 28       | 2048       | 1.7B   | Q8_0   | 1.83      |
+| `mradermacher/datagemma-rig-27b-it` | Gemma-2 Dense | 46       | 4608       | 27B    | Q3_K_S | 12.17     |
 
 #### 1.3.2 Arch Data for Existing Entries Added
 
-| Key                                | Arch          | n_layers | hidden_dim |
-|------------------------------------|---------------|---------:|-----------:|
-| `essentialai/rnj-1`                | Gemma-3 Dense | 32       | 4096       |
-| `mistralai/codestral-22b-v0.1`     | Llama Dense   | 56       | 6144       |
+| Key                            | Arch          | n_layers | hidden_dim |
+| ------------------------------ | ------------- | -------: | ---------: |
+| `essentialai/rnj-1`            | Gemma-3 Dense | 32       | 4096       |
+| `mistralai/codestral-22b-v0.1` | Llama Dense   | 56       | 6144       |
 
 > **Verification:** `pytest` — 547 / 547 green (no regression).
 
@@ -59,13 +59,13 @@ Three LLMs installed in LMS were not in `model_registry.yaml`. Data read with `_
 
 Suitability of the software for the specified use.
 
-| Sub-characteristic         | Rating | Finding                                                                                                    |
-|---------------------|:---------:|-----------------------------------------------------------------------------------------------------------|
-| Suitability         | 9/10      | Four independent pipelines, nine benchmarks, path drift controlled                                         |
-| Accuracy            | 8/10      | Bootstrap CIs, median/P90 instead of mean/max, weighted consolidation; VRAM formula for `useUnifiedKvCache` |
-| Interoperability    | 7/10      | OpenAI-compatible + Native API (`/api/v1/chat`); JSON configs bidirectional LMS ↔ Registry                |
-| Security            | 8/10      | `_validate_model_identifier()` prevents subprocess injection; `_VALID_MODEL_KEY_RE` whitelist regex        |
-| Compliance          | 7/10      | Few specified requirements; `pyproject.toml` declares Python ≥3.11                                        |
+| Sub-characteristic | Rating | Finding                                                                                                     |
+| ------------------ | :----: | ----------------------------------------------------------------------------------------------------------- |
+| Suitability        | 9/10   | Four independent pipelines, nine benchmarks, path drift controlled                                          |
+| Accuracy           | 8/10   | Bootstrap CIs, median/P90 instead of mean/max, weighted consolidation; VRAM formula for `useUnifiedKvCache` |
+| Interoperability   | 7/10   | OpenAI-compatible + Native API (`/api/v1/chat`); JSON configs bidirectional LMS ↔ Registry                  |
+| Security           | 8/10   | `_validate_model_identifier()` prevents subprocess injection; `_VALID_MODEL_KEY_RE` whitelist regex         |
+| Compliance         | 7/10   | Few specified requirements; `pyproject.toml` declares Python ≥3.11                                          |
 
 **Strengths:**
 
@@ -91,12 +91,12 @@ Suitability of the software for the specified use.
 
 Reliability under defined conditions.
 
-| Sub-characteristic     | Rating | Finding                                                                                              |
-|-----------------|:---------:|-----------------------------------------------------------------------------------------------------|
-| Maturity        | 9/10      | 547+ tests, p1–p11 documented, no unhandled exceptions in production so far                          |
-| Availability    | 8/10      | Task retry with exponential backoff (2s/4s/8s); model reload on unexpected unload                     |
-| Fault-tolerance | 7/10      | Some unguarded `except Exception:` swallow errors (e.g. `model_manager.py:103`, `:193`, `:495`)       |
-| Recoverability  | 8/10      | Channel error auto-fallback to `--no-structured-output`; SIGALRM fix in custom minerva_math500        |
+| Sub-characteristic | Rating | Finding                                                                                         |
+| ------------------ | :----: | ----------------------------------------------------------------------------------------------- |
+| Maturity           | 9/10   | 547+ tests, p1–p11 documented, no unhandled exceptions in production so far                     |
+| Availability       | 8/10   | Task retry with exponential backoff (2s/4s/8s); model reload on unexpected unload               |
+| Fault-tolerance    | 7/10   | Some unguarded `except Exception:` swallow errors (e.g. `model_manager.py:103`, `:193`, `:495`) |
+| Recoverability     | 8/10   | Channel error auto-fallback to `--no-structured-output`; SIGALRM fix in custom minerva_math500  |
 
 **Strengths:**
 
@@ -138,13 +138,13 @@ Recommendation: either only specific or only `Exception` — not both.
 
 Effort for use and operation.
 
-| Sub-characteristic       | Rating | Finding                                                                                          |
-|-------------------|:---------:|--------------------------------------------------------------------------------------------------|
-| Understandability | 8/10      | Extensive `doc-git/` documentation (README, Architecture, HowTo, Datasets, thinking-config)        |
-| Learnability       | 7/10      | Quick start in README, CLI table; but: no tutorial notebook                                       |
-| Operability        | 7/10      | Interactive + non-interactive mode, `--seed` for reproducibility; but: no GUI                     |
-| Attractiveness     | 6/10      | Terminal output functional, but ASCII-only; no color coding for scores/errors                     |
-| Error-handling UX  | 7/10      | `[INFO]`/`[WARN]`/`[ERROR]`/`[OK]`/`[CHANNEL-ERROR]` prefixes; but: little context for end-user   |
+| Sub-characteristic | Rating | Finding                                                                                         |
+| ------------------ | :----: | ----------------------------------------------------------------------------------------------- |
+| Understandability  | 8/10   | Extensive `doc-git/` documentation (README, Architecture, HowTo, Datasets, thinking-config)     |
+| Learnability       | 7/10   | Quick start in README, CLI table; but: no tutorial notebook                                     |
+| Operability        | 7/10   | Interactive + non-interactive mode, `--seed` for reproducibility; but: no GUI                   |
+| Attractiveness     | 6/10   | Terminal output functional, but ASCII-only; no color coding for scores/errors                   |
+| Error-handling UX  | 7/10   | `[INFO]`/`[WARN]`/`[ERROR]`/`[OK]`/`[CHANNEL-ERROR]` prefixes; but: little context for end-user |
 
 **Strengths:**
 
@@ -169,11 +169,11 @@ Effort for use and operation.
 
 Performance and resource consumption.
 
-| Sub-characteristic     | Rating | Finding                                                                                          |
-|-----------------|:---------:|--------------------------------------------------------------------------------------------------|
-| Time behaviour  | 9/10      | GGUF reader 99.97% faster, realtime MATH-500 progress, median instead of mean                      |
-| Resource usage  | 7/10      | VRAM formula for `useUnifiedKvCache`; 5Hz monitor instead of 1Hz spikes; CPU thread remains busy   |
-| Capacity        | 8/10      | 16 GB VRAM sufficient for 27-30B Q3_K_S MoE; pipeline parallelization theoretically possible       |
+| Sub-characteristic | Rating | Finding                                                                                          |
+| ------------------ | :----: | ------------------------------------------------------------------------------------------------ |
+| Time behaviour     | 9/10   | GGUF reader 99.97% faster, realtime MATH-500 progress, median instead of mean                    |
+| Resource usage     | 7/10   | VRAM formula for `useUnifiedKvCache`; 5Hz monitor instead of 1Hz spikes; CPU thread remains busy |
+| Capacity           | 8/10   | 16 GB VRAM sufficient for 27-30B Q3_K_S MoE; pipeline parallelization theoretically possible     |
 
 **Strengths:**
 
@@ -198,12 +198,12 @@ Performance and resource consumption.
 
 Effort for modification/improvement. **Phase 1–4 (Type Hints, Boolean Prefixes, TypedDict, Ubiquitous Language) fully implemented in p11.**
 
-| Sub-characteristic        | Rating | Finding                                                                                          |
-|--------------------|:---------:|--------------------------------------------------------------------------------------------------|
-| Analyzability       | 9/10      | Hybrid coding convention p11: type hints + `is_`/`has_` prefixes + TypedDict (PEP 589) + DDD      |
-| Changeability       | 8/10      | Single source of truth in `benchmark_config.py` and `model_registry.yaml`                          |
-| Stability           | 9/10      | 547 tests green, 9 obsolete/skipped (with `obsolete` marker documented)                           |
-| Testability         | 8/10      | 16 test files, `pytest >= 8.0`, mypy/ruff defined in pyproject.toml                                |
+| Sub-characteristic | Rating | Finding                                                                                      |
+| ------------------ | :----: | -------------------------------------------------------------------------------------------- |
+| Analyzability      | 9/10   | Hybrid coding convention p11: type hints + `is_`/`has_` prefixes + TypedDict (PEP 589) + DDD |
+| Changeability      | 8/10   | Single source of truth in `benchmark_config.py` and `model_registry.yaml`                    |
+| Stability          | 9/10   | 547 tests green, 9 obsolete/skipped (with `obsolete` marker documented)                      |
+| Testability        | 8/10   | 16 test files, `pytest >= 8.0`, mypy/ruff defined in pyproject.toml                          |
 
 **Strengths (after p11):**
 
@@ -238,12 +238,12 @@ Effort for modification/improvement. **Phase 1–4 (Type Hints, Boolean Prefixes
 
 Suitability for transfer to other environments.
 
-| Sub-characteristic      | Rating | Finding                                                                                          |
-|------------------|:---------:|--------------------------------------------------------------------------------------------------|
-| Adaptability     | 6/10      | Hardcoded `127.0.0.1:1234` and `C:\Users\pskra\.lmstudio` paths in hidden locations                 |
-| Installability   | 9/10      | `pyproject.toml` + `requirements-dev.txt`, LM Studio installation guide                             |
-| Conformance      | 7/10      | Python ≥3.11 enforced; OpenAI-compatible + LM Studio-specific                                     |
-| Replaceability   | 7/10      | LM Studio only; no alternative runtime (vLLM, Ollama, TGI); but clear adapter layer               |
+| Sub-characteristic | Rating | Finding                                                                             |
+| ------------------ | :----: | ----------------------------------------------------------------------------------- |
+| Adaptability       | 6/10   | Hardcoded `127.0.0.1:1234` and `C:\Users\pskra\.lmstudio` paths in hidden locations |
+| Installability     | 9/10   | `pyproject.toml` + `requirements-dev.txt`, LM Studio installation guide             |
+| Conformance        | 7/10   | Python ≥3.11 enforced; OpenAI-compatible + LM Studio-specific                       |
+| Replaceability     | 7/10   | LM Studio only; no alternative runtime (vLLM, Ollama, TGI); but clear adapter layer |
 
 **Strengths:**
 
@@ -266,23 +266,23 @@ Suitability for transfer to other environments.
 
 ## 3. Consolidated Findings — Priority List
 
-| Prio | Finding                                                                                 | Category                     | Effort   | File                           |
-|:----:|----------------------------------------------------------------------------------------|-------------------------------|-----------|---------------------------------|
-| *P1* | Registry drift between LMS and `model_registry.yaml` (3 missing, now fixed §1.3)         | Functionality/Maintainability | Medium    | `doc-git/model_registry.yaml`   |
-| *P1* | Hardcoded `http://127.0.0.1:1234/v1` in `--base-url`                                   | Portability                   | Trivial   | `run_benchmarks.py:1002`        |
-| *P1* | 16 `except Exception:` swallow programming errors                                       | Reliability                   | Medium    | multiple scripts                |
-| *P2* | `_types.py` renamed to `type_defs.py` (was conflict with CPython built-in `_types` module!) | Maintainability          | Done (p11) | `type_defs.py`                |
-| *P2* | `time.sleep(10)` instead of adaptive polling after model load                          | Efficiency                    | Medium    | `run_benchmarks.py:1186`        |
-| *P2* | Bare `registry_key_map` bug: 3 of 8 tests with `test_build_lmeval_cmd` have manual `cutoff` expectations | Maintainability | Trivial   | `tests/test_run_benchmarks.py`  |
-| *P3* | EXCLUDE_KEYWORDS duplicated in 3 files without single source of truth                  | Functionality                 | Small     | `benchmark_config.py`/`run_benchmarks.py`/`consolidate_results.py` |
-| *P3* | `_infer_num_parallel()` underestimates for MoE models (16 experts)                     | Functionality                 | Small     | `registry_tool.py`              |
-| *P3* | Localization: `locale.setlocale()` not used                                            | Usability                     | Trivial   | `csv_writer.py`                 |
-| *P4* | No visual progress bar for long subprocesses                                           | Usability                     | Medium    | `run_benchmarks.py`             |
-| *P4* | 9 obsolete tests not cleaned up                                                        | Maintainability               | Trivial   | `tests/test_run_benchmarks.py`  |
-| *P4* | CI/CD pipeline missing in `.github/`                                                   | Maintainability               | Medium    | `.github/workflows/`            |      
-| *P4* | `_KV_BYTES` not thread-safe                                                            | Efficiency/Portability        | Small     | `registry_tool.py`              |
-| *P5* | `download_real_benchmarks.py` error swallowing                                         | Reliability                   | Small     | `download_real_benchmarks.py`   |
-| *P5* | DS-1000 Windows patches not documented for Linux                                       | Portability                   | Small     | README                          |
+| Prio | Finding                                                                                                  | Category                      | Effort     | File                                                               |
+| :---: | -------------------------------------------------------------------------------------------------------- | ----------------------------- | ---------- | ------------------------------------------------------------------ |
+| *P1* | Registry drift between LMS and `model_registry.yaml` (3 missing, now fixed §1.3)                         | Functionality/Maintainability | Medium     | `doc-git/model_registry.yaml`                                      |
+| *P1* | Hardcoded `http://127.0.0.1:1234/v1` in `--base-url`                                                     | Portability                   | Trivial    | `run_benchmarks.py:1002`                                           |
+| *P1* | 16 `except Exception:` swallow programming errors                                                        | Reliability                   | Medium     | multiple scripts                                                   |
+| *P2* | `_types.py` renamed to `type_defs.py` (was conflict with CPython built-in `_types` module!)              | Maintainability               | Done (p11) | `type_defs.py`                                                     |
+| *P2* | `time.sleep(10)` instead of adaptive polling after model load                                            | Efficiency                    | Medium     | `run_benchmarks.py:1186`                                           |
+| *P2* | Bare `registry_key_map` bug: 3 of 8 tests with `test_build_lmeval_cmd` have manual `cutoff` expectations | Maintainability               | Trivial    | `tests/test_run_benchmarks.py`                                     |
+| *P3* | EXCLUDE_KEYWORDS duplicated in 3 files without single source of truth                                    | Functionality                 | Small      | `benchmark_config.py`/`run_benchmarks.py`/`consolidate_results.py` |
+| *P3* | `_infer_num_parallel()` underestimates for MoE models (16 experts)                                       | Functionality                 | Small      | `registry_tool.py`                                                 |
+| *P3* | Localization: `locale.setlocale()` not used                                                              | Usability                     | Trivial    | `csv_writer.py`                                                    |
+| *P4* | No visual progress bar for long subprocesses                                                             | Usability                     | Medium     | `run_benchmarks.py`                                                |
+| *P4* | 9 obsolete tests not cleaned up                                                                          | Maintainability               | Trivial    | `tests/test_run_benchmarks.py`                                     |
+| *P4* | CI/CD pipeline missing in `.github/`                                                                     | Maintainability               | Medium     | `.github/workflows/`                                               |
+| *P4* | `_KV_BYTES` not thread-safe                                                                              | Efficiency/Portability        | Small      | `registry_tool.py`                                                 |
+| *P5* | `download_real_benchmarks.py` error swallowing                                                           | Reliability                   | Small      | `download_real_benchmarks.py`                                      |
+| *P5* | DS-1000 Windows patches not documented for Linux                                                         | Portability                   | Small      | README                                                             |
 
 ---
 
@@ -367,15 +367,15 @@ Detailed analysis on request.
 
 **Overall rating according to ISO/IEC 9126 (subjective, 0-10):**
 
-| Characteristic          | Rating |
-|------------------|:---------:|
-| Functionality    |    8      |
-| Reliability      |    8      |
-| Usability        |    7      |
-| Efficiency       |    8      |
-| Maintainability  |    8.5    |
-| Portability      |    7      |
-| **Overall**       | **7.75** |
+| Characteristic  | Rating   |
+| --------------- | :------: |
+| Functionality   | 8        |
+| Reliability     | 8        |
+| Usability       | 7        |
+| Efficiency      | 8        |
+| Maintainability | 8.5      |
+| Portability     | 7        |
+| **Overall**     | **7.75** |
 
 **Comment:** The code is in good condition. Phase 1-4 of p11 have significantly increased maintainability. Main improvement potential lies in **(Reliability)** through reduction of bare-`except` patterns, **(Portability)** through a CI/CD pipeline without LMS dependency, and **(Functionality)** through consistent single-source-of-truth lists (`EXCLUDE_KEYWORDS`, `_infer_num_parallel`) as well as consistent use of `registry_tool.py sync` as a pre-run hook.
 

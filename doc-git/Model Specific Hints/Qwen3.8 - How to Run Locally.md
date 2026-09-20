@@ -235,7 +235,7 @@ Due to naming issues, we used TQ2\_0, TQ1\_0 and Q1\_0 otherwise it won't pop up
 
 We are still running benchmarks for the new data-types, but for other large models, we get **good results without any QAT / QAD**:
 
-| Dtype        |     GiB |      PPL |      KLD |  top-p |
+| Dtype        | GiB     | PPL      | KLD      | top-p  |
 | ------------ | ------: | -------: | -------: | -----: |
 | IQ1\_S       | 553.204 | 2.578876 | 0.564553 | 78.882 |
 | UD-IQ1\_XS   | 513.583 | 2.931261 | 0.690161 | 75.726 |
@@ -387,13 +387,13 @@ All benchmarks use 1x B200 128 concurrency. Higher concurrency can boost 35B to 
 
 For accuracy benchmarks we ran KLD and Top-1% agreement over Code, Chat and many domains. NVFP4 is consistency 92% to 97% accuracy recovery vs BF16
 
-| corpus            |      KLD mean | top-1 agreement |
+| corpus            | KLD mean      | top-1 agreement |
 | ----------------- | ------------: | --------------: |
-| zh                |       0.01628 |          93.55% |
-| code              |       0.02600 |          96.68% |
-| refgen            |       0.03993 |          94.46% |
-| chat              |       0.05818 |          92.15% |
-| ja / ko / ru / es | 0.0124-0.0155 |          94-95% |
+| zh                | 0.01628       | 93.55%          |
+| code              | 0.02600       | 96.68%          |
+| refgen            | 0.03993       | 94.46%          |
+| chat              | 0.05818       | 92.15%          |
+| ja / ko / ru / es | 0.0124-0.0155 | 94-95%          |
 
 For accuracy benchmarks For Qwen 3.6, we conducted MMLU-Pro, AIME 2025, GPQA for FP8, BF16, NVIDIA's NVFP4 and our NVFP4s - we show our faster quants do similarly on all:
 

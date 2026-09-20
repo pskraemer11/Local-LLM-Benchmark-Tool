@@ -20,17 +20,17 @@
 
 ## 1. Model Variants in the Registry
 
-| Variant                             | Publisher    | Quant(s)    | Architecture            | Special Feature                 |
-|-------------------------------------|--------------|-------------|-------------------------|---------------------------------|
-| `gemma-4-e4b`                       | google       |   –         | Gemma-4 MoE (PLE)       | Embedding model?                |
-| `gemma-4-12b-qat@q4_0`              | google       | Q4_0        | Gemma-4 (12B) Unified   | QAT, Audio+Video native         |
-| `gemma-4-19b-a4b-it-reap-i1@q4_k_s` | mradermacher | Q4_K_S      | Gemma-4 MoE             | REAP-compressed, 18 experts     |
-| `gemma-4-26b-a4b-it-quat@q4_0`      | google       | Q4_0        | Gemma-4 MoE             | QAT-weighted                    |
-| `google_gemma-4-26b-a4b-it@q3_k_s`  | bartowski    |Q3_K_S,IQ4_XS| Gemma-4 MoE             | lm_eval=0% problem              |
-| `gemma-4-26b-a4b-it@iq4_xs`         | google       | IQ4_XS      | Gemma-4 MoE             | Original Google                 |
-| `gemma-4-26b-a4b-it-ud@iq3_s`       | unsloth      | IQ3_S       | Gemma-4 MoE             | UD version                      |
-| `gemma-4-26b-a4b-it-i1`             | mradermacher | IQ4_XS      | Gemma-4 MoE             | i1 quantization                 |
-| `gemma-4-31b.i1`                    | mradermacher | IQ3_M       | Gemma-4 Dense           | 31B dense                       |
+| Variant                             | Publisher    | Quant(s)      | Architecture          | Special Feature             |
+| ----------------------------------- | ------------ | ------------- | --------------------- | --------------------------- |
+| `gemma-4-e4b`                       | google       | –             | Gemma-4 MoE (PLE)     | Embedding model?            |
+| `gemma-4-12b-qat@q4_0`              | google       | Q4_0          | Gemma-4 (12B) Unified | QAT, Audio+Video native     |
+| `gemma-4-19b-a4b-it-reap-i1@q4_k_s` | mradermacher | Q4_K_S        | Gemma-4 MoE           | REAP-compressed, 18 experts |
+| `gemma-4-26b-a4b-it-quat@q4_0`      | google       | Q4_0          | Gemma-4 MoE           | QAT-weighted                |
+| `google_gemma-4-26b-a4b-it@q3_k_s`  | bartowski    | Q3_K_S,IQ4_XS | Gemma-4 MoE           | lm_eval=0% problem          |
+| `gemma-4-26b-a4b-it@iq4_xs`         | google       | IQ4_XS        | Gemma-4 MoE           | Original Google             |
+| `gemma-4-26b-a4b-it-ud@iq3_s`       | unsloth      | IQ3_S         | Gemma-4 MoE           | UD version                  |
+| `gemma-4-26b-a4b-it-i1`             | mradermacher | IQ4_XS        | Gemma-4 MoE           | i1 quantization             |
+| `gemma-4-31b.i1`                    | mradermacher | IQ3_M         | Gemma-4 Dense         | 31B dense                   |
 
 All Gemma-4 IT models have `reasoning: thinking` and use `blueprint: gemma_reasoning`.
 
@@ -80,10 +80,10 @@ They **must not** be built into the Jinja chat template – the template exclusi
 
 ### 3.3 System Prompt Parameters (recommended)
 
-| Parameter                                                | Value                              | Reason                            |
-|----------------------------------------------------------|------------------------------------|-----------------------------------|
-| `enable_thinking`                                        | `false` (Code), `true` (Reasoning) | Control via Blueprint/Benchmark   |
-| No thinking tags in prompt when `enable_thinking=False`  |           –                        | Otherwise Gemma ignores the flag  |
+| Parameter                                               | Value                              | Reason                           |
+| ------------------------------------------------------- | ---------------------------------- | -------------------------------- |
+| `enable_thinking`                                       | `false` (Code), `true` (Reasoning) | Control via Blueprint/Benchmark  |
+| No thinking tags in prompt when `enable_thinking=False` | –                                  | Otherwise Gemma ignores the flag |
 
 ---
 
@@ -91,25 +91,25 @@ They **must not** be built into the Jinja chat template – the template exclusi
 
 ### 4.1 Templates Used
 
-| Model              | Template File                       |
-|--------------------|-------------------------------------|
-| 12B (QAT)          | `google_gemma-4-12B-it-qat-q4_0-chat_template.jinja` |
-| 19B (REAP)         | `google_gemma-4-26B-A4B-it_chat_template.jinja` |
-| 26B (all quantizations) | `google_gemma-4-26B-A4B-it_chat_template.jinja` |
-| 31B                | `google_gemma-4-26B-A4B-it_chat_template.jinja` |
+| Model                   | Template File                                        |
+| ----------------------- | ---------------------------------------------------- |
+| 12B (QAT)               | `google_gemma-4-12B-it-qat-q4_0-chat_template.jinja` |
+| 19B (REAP)              | `google_gemma-4-26B-A4B-it_chat_template.jinja`      |
+| 26B (all quantizations) | `google_gemma-4-26B-A4B-it_chat_template.jinja`      |
+| 31B                     | `google_gemma-4-26B-A4B-it_chat_template.jinja`      |
 
 ### 4.2 Token Reference (per Technical Report Appendix Table 11)
 
-| Function          | Token                                                   |
-|-----------------------------------|-------------------------------------------------------|
-| Turn-Start (System/User/Model)    | `<|turn>role\n`                                       |
-| Turn-End                          | `<turn|>`                                             |
-| Thinking Signal (Prompt side)     | `<|think|>`                                           |
-| Thinking Trace (Response side)    | `<|channel>thought\n...<channel|>`                    |
-| Tool Declaration                  | `<|tool>declaration:name{...}<tool|>`                 |
-| Tool Call                         | `<|tool_call>call:name{...}<tool_call|>`              |
-| Tool Response                     | `<|tool_response>response:name{...}<tool_response|>`  |
-| BOS                               | `bos_token` (per tokenizer)                           |
+| Function                       | Token                                                  |
+| ------------------------------ | ------------------------------------------------------ |
+| Turn-Start (System/User/Model) | `<\|turn>role\n`                                       |
+| Turn-End                       | `<turn\|>`                                             |
+| Thinking Signal (Prompt side)  | `<\|think\|>`                                          |
+| Thinking Trace (Response side) | `<\|channel>thought\n...<channel\|>`                   |
+| Tool Declaration               | `<\|tool>declaration:name{...}<tool\|>`                |
+| Tool Call                      | `<\|tool_call>call:name{...}<tool_call\|>`             |
+| Tool Response                  | `<\|tool_response>response:name{...}<tool_response\|>` |
+| BOS                            | `bos_token` (per tokenizer)                            |
 
 Compare "Technical Report Gemma-4" pdf by Google DeepMind, Appendix, page 17.
 
@@ -143,21 +143,21 @@ The template controls thinking via:
 
 ### 5.1 Control Mechanisms
 
-| Method | Effect | Usage |
-|---|---|---|
-| `enable_thinking: bool` in JSON config (via `extra_body`) | `<|think|>` in prompt | Code benchmarks: `false`; Reasoning: `true` |
-| LM Studio GUI: "Enable Thinking" | Same effect | Manual configuration |
-| CLI `--no-think` (tool-eval-bench v2.0.7) | Sets `enable_thinking=false` | Agentic pipeline |
-| System prompt override (if config ignored) | Textual prohibition | Emergency workaround |
+| Method                                                    | Effect                       | Usage                                       |
+| --------------------------------------------------------- | ---------------------------- | ------------------------------------------- |
+| `enable_thinking: bool` in JSON config (via `extra_body`) | `<\|think\|>` in prompt      | Code benchmarks: `false`; Reasoning: `true` |
+| LM Studio GUI: "Enable Thinking"                          | Same effect                  | Manual configuration                        |
+| CLI `--no-think` (tool-eval-bench v2.0.7)                 | Sets `enable_thinking=false` | Agentic pipeline                            |
+| System prompt override (if config ignored)                | Textual prohibition          | Emergency workaround                        |
 
 ### 5.2 Recommendation by Benchmark Type
 
-| Benchmark Type    | `enable_thinking` | Reason |
-|---|---|---|
-| DS1000, CoderEval, Coding tasks | `false` | Thinking costs tokens + time, provides no benefit |
-| MathQA, MMLU-Pro, GPQA | `true` | Reasoning improves accuracy |
-| Agentic (BFCL) | `false` | Clear tool calls, no thinking needed |
-| Generic chat tasks | `false` | Direct answers preferred |
+| Benchmark Type                  | `enable_thinking` | Reason                                            |
+| ------------------------------- | ----------------- | ------------------------------------------------- |
+| DS1000, CoderEval, Coding tasks | `false`           | Thinking costs tokens + time, provides no benefit |
+| MathQA, MMLU-Pro, GPQA          | `true`            | Reasoning improves accuracy                       |
+| Agentic (BFCL)                  | `false`           | Clear tool calls, no thinking needed              |
+| Generic chat tasks              | `false`           | Direct answers preferred                          |
 
 ### 5.3 Thinking Trace Extraction
 
@@ -194,20 +194,20 @@ After extraction, only the answer text (without thinking) is passed into benchma
 
 ### 7.1 Recommended Defaults (Code Benchmarks)
 
-| Parameter    | Value | Reason |
-|---|---|---|
-| `temperature` | 0.0 | Deterministic output for reproducible benchmarks |
-| `top_p`       | 1.0 | No nucleus sampling |
-| `max_tokens`  | 4096 | Sufficient for code responses |
-| `until`       | `[]` | No stop token (template controls end) |
+| Parameter     | Value | Reason                                           |
+| ------------- | ----- | ------------------------------------------------ |
+| `temperature` | 0.0   | Deterministic output for reproducible benchmarks |
+| `top_p`       | 1.0   | No nucleus sampling                              |
+| `max_tokens`  | 4096  | Sufficient for code responses                    |
+| `until`       | `[]`  | No stop token (template controls end)            |
 
 ### 6.2 Reasoning Tasks
 
-| Parameter    | Value | Reason |
-|---|---|---|
-| `temperature` | 0.0 – 0.3 | Minimal sampling for stable reasoning chains |
-| `top_p`       | 0.95 | Light diversity across multiple solution paths |
-| `max_tokens`  | 8192 | Longer reasoning chains possible |
+| Parameter     | Value     | Reason                                         |
+| ------------- | --------- | ---------------------------------------------- |
+| `temperature` | 0.0 – 0.3 | Minimal sampling for stable reasoning chains   |
+| `top_p`       | 0.95      | Light diversity across multiple solution paths |
+| `max_tokens`  | 8192      | Longer reasoning chains possible               |
 
 ### 6.3 lm_eval Parameters
 
@@ -254,27 +254,27 @@ The setting is located in `model_manager.py`/`run_benchmarks.py` in the `reasoni
 
 ### 7.4 Architecture Details (MoE)
 
-| Model    | Total | Active | Ratio | Experts | Active | Shared | Attention |
-|---|---|---|---|---|---|---|---|
-| 19B REAP | 19B | ~4B | 4.75:1 | 90 (pruned) | 8 | 1 | Hybrid Sliding/Full (30 layers) |
-| 26B A4B  | 26B | ~4B | 4.75:1 | 128 | 8 | 1 | Hybrid Sliding/Full (30 layers) |
+| Model    | Total | Active | Ratio  | Experts     | Active | Shared | Attention                       |
+| -------- | ----- | ------ | ------ | ----------- | ------ | ------ | ------------------------------- |
+| 19B REAP | 19B   | ~4B    | 4.75:1 | 90 (pruned) | 8      | 1      | Hybrid Sliding/Full (30 layers) |
+| 26B A4B  | 26B   | ~4B    | 4.75:1 | 128         | 8      | 1      | Hybrid Sliding/Full (30 layers) |
 
 ### 7.5 Memory Requirements (VRAM)
 
-| Model    | BF16   | Q4_0   | f16 KV-Cache (per token) |
-|---|---|---|---|
-| 12B      | 26.7 GB | 6.7 GB | ~3.5 MB/token (12B) |
-| 26B A4B  | 57.7 GB | 14.4 GB | ~2.3 MB/token (26B MoE) |
-| 31B      | 69.9 GB | 17.5 GB | ~4.2 MB/token (31B) |
+| Model   | BF16    | Q4_0    | f16 KV-Cache (per token) |
+| ------- | ------- | ------- | ------------------------ |
+| 12B     | 26.7 GB | 6.7 GB  | ~3.5 MB/token (12B)      |
+| 26B A4B | 57.7 GB | 14.4 GB | ~2.3 MB/token (26B MoE)  |
+| 31B     | 69.9 GB | 17.5 GB | ~4.2 MB/token (31B)      |
 
 KV-Cache in `f16` is the dominant VRAM factor at long contexts.
 
 ### 7.4 Context Length
 
-| Model Group  | Max. Context |
-|---|---|
-| E2B, E4B     | 128K tokens |
-| 12B, 26B A4B, 31B | 256K tokens |
+| Model Group       | Max. Context |
+| ----------------- | ------------ |
+| E2B, E4B          | 128K tokens  |
+| 12B, 26B A4B, 31B | 256K tokens  |
 
 In LM Studio, `model_max_length` must be checked (not automatically read from GGUF). The effective context length in the registry is calculated via the VRAM formula (`context_length` in `model_registry.yaml`).
 
@@ -297,11 +297,11 @@ In LM Studio, `model_max_length` must be checked (not automatically read from GG
 
 Weighting: Coding 35% | Math 25% | Agentic 25% | Knowledge 15%
 
-| Rank | Model | VRAM | Overall | Coding | Knowledge | Math | Agentic |
-|---|---|---|---|---|---|---|---|
-| 1 | Gemma 4 26B UD@IQ3_S | 13.6 GB | **66%** | 70% | 73% | **55%** | 28% |
-| 2 | Gemma 4 19B REAP@Q4_K_S | 11.3 GB | **55%** | 68% | 75% | 24% | 22% |
-| 7 | Gemma 4 19B REAP (earlier quantization) | 12.5 GB | 50% | 60% | 62% | 28% | 77% |
+| Rank | Model                                   | VRAM    | Overall | Coding | Knowledge | Math    | Agentic |
+| ---- | --------------------------------------- | ------- | ------- | ------ | --------- | ------- | ------- |
+| 1    | Gemma 4 26B UD@IQ3_S                    | 13.6 GB | **66%** | 70%    | 73%       | **55%** | 28%     |
+| 2    | Gemma 4 19B REAP@Q4_K_S                 | 11.3 GB | **55%** | 68%    | 75%       | 24%     | 22%     |
+| 7    | Gemma 4 19B REAP (earlier quantization) | 12.5 GB | 50%     | 60%    | 62%       | 28%     | 77%     |
 
 Note: Agentic score of the 26B UD (28%) is low – other models (Devstral, Ministral) are better suited for agentic tasks.
 

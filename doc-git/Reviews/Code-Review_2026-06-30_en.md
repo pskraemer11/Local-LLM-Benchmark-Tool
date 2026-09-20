@@ -16,20 +16,20 @@ The project consists of **6 main scripts** (pipeline), **3 wrapper scripts**, **
 
 ## 2. File Overview
 
-| File | Lines | Role | Status |
-|------|-------|------|--------|
-| `benchmark_config.py` | 142 | Central configuration | OK |
-| `model_manager.py` | 246 | Model management (lms CLI) | OK |
-| `csv_writer.py` | 339 | Unified CSV output | OK |
-| `run_benchmarks_v10.py` | 1028 | Launcher (4 pipelines) | OK |
-| `custom_benchmark_v10.py` | 1710 | Custom pipeline (DS1000/CoderEval) | OK |
-| `consolidate_results_v10.py` | 942 | Consolidation + rankings | OK |
-| `generate_quant_map.py` | 280 | QUANT_MAP generator | **Bug fixed** |
-| `run_all_dense.py` | 119 | Wrapper (dense models) | **Outdated** |
-| `rerun_ds1000_mmlu.py` | 73 | Rerun wrapper | OK |
-| `rerun_lmeval.py` | 90 | Rerun wrapper | OK |
-| `tests/test_scores.py` | 60 | Score tests (10) | OK |
-| `tests/test_csv.py` | 39 | CSV tests (5) | OK |
+| File                         | Lines | Role                               | Status        |
+| ---------------------------- | ----- | ---------------------------------- | ------------- |
+| `benchmark_config.py`        | 142   | Central configuration              | OK            |
+| `model_manager.py`           | 246   | Model management (lms CLI)         | OK            |
+| `csv_writer.py`              | 339   | Unified CSV output                 | OK            |
+| `run_benchmarks_v10.py`      | 1028  | Launcher (4 pipelines)             | OK            |
+| `custom_benchmark_v10.py`    | 1710  | Custom pipeline (DS1000/CoderEval) | OK            |
+| `consolidate_results_v10.py` | 942   | Consolidation + rankings           | OK            |
+| `generate_quant_map.py`      | 280   | QUANT_MAP generator                | **Bug fixed** |
+| `run_all_dense.py`           | 119   | Wrapper (dense models)             | **Outdated**  |
+| `rerun_ds1000_mmlu.py`       | 73    | Rerun wrapper                      | OK            |
+| `rerun_lmeval.py`            | 90    | Rerun wrapper                      | OK            |
+| `tests/test_scores.py`       | 60    | Score tests (10)                   | OK            |
+| `tests/test_csv.py`          | 39    | CSV tests (5)                      | OK            |
 
 ---
 
@@ -47,17 +47,17 @@ The project consists of **6 main scripts** (pipeline), **3 wrapper scripts**, **
 
 ## 4. Comments Added
 
-| File | Location | Content |
-|------|----------|---------|
-| `benchmark_config.py` | Module header | Docstring with imports, QUANT_MAP priority |
-| `csv_writer.py:62` | Field definitions | Warning about consistency with consolidate_results_v10.py |
-| `run_benchmarks_v10.py:449` | run_custom_benchmark() | Interface description: --api-model = exact load ID |
-| `run_benchmarks_v10.py:389` | _get_lmeval_params() | Docstring: consistency with MODEL_CONFIG, Qwen3.6 note |
-| `custom_benchmark_v10.py:72` | model_manager import | Explanation: NO load/unload from here |
-| `custom_benchmark_v10.py:135` | MODEL_CONFIG qwen3.6 | Warning: thinking tokens consume max_tokens |
-| `consolidate_results_v10.py:228` | find_latest_csvs() | Explanation: lookup key = model_key from CSV content |
-| `consolidate_results_v10.py:412` | compute_category_scores() | Docstring: normalization with partial data |
-| `run_all_dense.py:1` | Module header | Warning: WHITELIST manually maintained, may be outdated |
+| File                             | Location                  | Content                                                   |
+| -------------------------------- | ------------------------- | --------------------------------------------------------- |
+| `benchmark_config.py`            | Module header             | Docstring with imports, QUANT_MAP priority                |
+| `csv_writer.py:62`               | Field definitions         | Warning about consistency with consolidate_results_v10.py |
+| `run_benchmarks_v10.py:449`      | run_custom_benchmark()    | Interface description: --api-model = exact load ID        |
+| `run_benchmarks_v10.py:389`      | _get_lmeval_params()      | Docstring: consistency with MODEL_CONFIG, Qwen3.6 note    |
+| `custom_benchmark_v10.py:72`     | model_manager import      | Explanation: NO load/unload from here                     |
+| `custom_benchmark_v10.py:135`    | MODEL_CONFIG qwen3.6      | Warning: thinking tokens consume max_tokens               |
+| `consolidate_results_v10.py:228` | find_latest_csvs()        | Explanation: lookup key = model_key from CSV content      |
+| `consolidate_results_v10.py:412` | compute_category_scores() | Docstring: normalization with partial data                |
+| `run_all_dense.py:1`             | Module header             | Warning: WHITELIST manually maintained, may be outdated   |
 
 ---
 
@@ -193,12 +193,12 @@ tests/test_scores.py::TestPercentile::test_two_values PASSED
 
 ## 9. Changed Files
 
-| File | Change |
-|------|--------|
-| `benchmark_config.py` | Module docstring added |
-| `csv_writer.py` | Comment about field consistency added |
-| `run_benchmarks_v10.py` | Comments about pipeline interfaces added |
-| `custom_benchmark_v10.py` | Comments about import interface and qwen3.6 MODEL_CONFIG |
+| File                         | Change                                                      |
+| ---------------------------- | ----------------------------------------------------------- |
+| `benchmark_config.py`        | Module docstring added                                      |
+| `csv_writer.py`              | Comment about field consistency added                       |
+| `run_benchmarks_v10.py`      | Comments about pipeline interfaces added                    |
+| `custom_benchmark_v10.py`    | Comments about import interface and qwen3.6 MODEL_CONFIG    |
 | `consolidate_results_v10.py` | Docstrings for find_latest_csvs and compute_category_scores |
-| `generate_quant_map.py` | **Bugfix:** Marker detection for --write corrected |
-| `run_all_dense.py` | Warning about outdated WHITELIST added |
+| `generate_quant_map.py`      | **Bugfix:** Marker detection for --write corrected          |
+| `run_all_dense.py`           | Warning about outdated WHITELIST added                      |

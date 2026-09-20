@@ -144,14 +144,14 @@ These aliases forward to v10 functions, but are no longer called in the current 
 
 **Bugs/Problems:**
 
-| # | Line | Problem | Severity |
-|---|------|---------|----------|
-| B1 | 270-287 | `resolve_benchmarks` only matches exact lowercase names, but `ALL_BENCH_NAMES` are also lowercase → if a benchmark is displayed as "MATH-500" in the UI and the user capitalizes it, an `Unknown benchmark` error occurs. Should match case-insensitively. | Low |
-| B2 | 666-676 | **Critical documentation conflict:** Documentation says "ALWAYS use api_model" but `model_manager.load_model_via_lms` returns `model_key` (not `identifier`) when `get_current_loaded_model` fails for 10s. Subprocesses then receive `model_key` (e.g., `qwen/qwen3-coder-30b`) instead of identifier (e.g., `qwen/qwen3-coder-30b@q3_k_s`) → HTTP 400 hang | **High** |
-| B3 | 1015-1024 | `exclude_benchmarks` sets `b["name"].lower()` but does not match case-insensitively against `b["name"]` (line 1019) | Low |
-| B4 | 1062-1065 | If `load_model_via_lms` fails, jumps to next model with `continue` — **without** checking if other benchmarks should possibly be skipped. Correct, but logging could be better. | Low |
-| B5 | 1115-1117 | `all_summary.append(result)` is in the custom pipeline, `model_results.append(result)` is in all pipelines — asymmetry is clean, but **the condition `if result:`** at lines 1116-1121 is redundant: an empty `result` (None) is already covered by `result = run_*()`. | Low |
-| B6 | 1132-1137 | **Reload logic only for Custom** — with `if is_custom`, checks if model is still loaded. EvalPlus/LM-Eval/Agentic do not have this check. If their subprocesses accidentally unload, the next task crashes. | Medium |
+| #   | Line      | Problem                                                                                                                                                                                                                                                                                                                                                      | Severity |
+| --- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------- |
+| B1  | 270-287   | `resolve_benchmarks` only matches exact lowercase names, but `ALL_BENCH_NAMES` are also lowercase → if a benchmark is displayed as "MATH-500" in the UI and the user capitalizes it, an `Unknown benchmark` error occurs. Should match case-insensitively.                                                                                                   | Low      |
+| B2  | 666-676   | **Critical documentation conflict:** Documentation says "ALWAYS use api_model" but `model_manager.load_model_via_lms` returns `model_key` (not `identifier`) when `get_current_loaded_model` fails for 10s. Subprocesses then receive `model_key` (e.g., `qwen/qwen3-coder-30b`) instead of identifier (e.g., `qwen/qwen3-coder-30b@q3_k_s`) → HTTP 400 hang | **High** |
+| B3  | 1015-1024 | `exclude_benchmarks` sets `b["name"].lower()` but does not match case-insensitively against `b["name"]` (line 1019)                                                                                                                                                                                                                                          | Low      |
+| B4  | 1062-1065 | If `load_model_via_lms` fails, jumps to next model with `continue` — **without** checking if other benchmarks should possibly be skipped. Correct, but logging could be better.                                                                                                                                                                              | Low      |
+| B5  | 1115-1117 | `all_summary.append(result)` is in the custom pipeline, `model_results.append(result)` is in all pipelines — asymmetry is clean, but **the condition `if result:`** at lines 1116-1121 is redundant: an empty `result` (None) is already covered by `result = run_*()`.                                                                                      | Low      |
+| B6  | 1132-1137 | **Reload logic only for Custom** — with `if is_custom`, checks if model is still loaded. EvalPlus/LM-Eval/Agentic do not have this check. If their subprocesses accidentally unload, the next task crashes.                                                                                                                                                  | Medium   |
 
 **Stylistic issues:**
 - `import csv_writer as csv_writer` (line 53) — `as csv_writer` is redundant
@@ -168,14 +168,14 @@ These aliases forward to v10 functions, but are no longer called in the current 
 
 **Bugs/Problems:**
 
-| # | Line | Problem | Severity |
-|---|------|---------|----------|
-| C1 | 640-651 | `strip_thinking_tokens`: Estimates tokens via `total_chars // 4` — for Gemma-4 with `<|channel>thought\n...<channel|>` markup this is **drastically too high**, because `4` is calibrated for English text. Can lead to `thinking_ratio` > 100% | **High** |
-| C2 | 1268-1271 | Prompt construction: `f"Create the function \`{entry_point}\`."` is hardcoded text; CoderEval tasks already contain `entry_point` in the docstring — can lead to duplicates in the prompt | Low |
-| C3 | 1310-1319 | `# SOLUTION START` marker handling: If the marker is missing (e.g., newer DS1000 versions), `setup_code` becomes empty → sandbox cannot execute → score 0% without error message | Medium |
-| C4 | 1706-1708 | `MAX_TASKS_PER_BENCHMARK = 100` — hardcoded limit; with 1000-task benchmarks, 90% are ignored without warning | Medium |
-| C5 | 504-627 | `_stream_chat_completion` has 8-tuple return (`content, elapsed, t_in, t_out, tps, thinking_tokens, error_type, error_detail`) — should be a `@dataclass` (see `consolidate_results.py:688-757` for positive examples) | Medium |
-| C6 | 1700-1732 | In non-interactive mode, iterates over `for bench in benchmarks`, but `non_interactive` does **not** automatically execute `--thinking` — is this intentional? Not documented in README. | Low |
+| #   | Line      | Problem                                                                                                                                                                                                                                           | Severity |
+| --- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| C1  | 640-651   | `strip_thinking_tokens`: Estimates tokens via `total_chars // 4` — for Gemma-4 with `<\|channel>thought\n...<channel\|>` markup this is **drastically too high**, because `4` is calibrated for English text. Can lead to `thinking_ratio` > 100% | **High** |
+| C2  | 1268-1271 | Prompt construction: `f"Create the function \`{entry_point}\`."` is hardcoded text; CoderEval tasks already contain `entry_point` in the docstring — can lead to duplicates in the prompt                                                         | Low      |
+| C3  | 1310-1319 | `# SOLUTION START` marker handling: If the marker is missing (e.g., newer DS1000 versions), `setup_code` becomes empty → sandbox cannot execute → score 0% without error message                                                                  | Medium   |
+| C4  | 1706-1708 | `MAX_TASKS_PER_BENCHMARK = 100` — hardcoded limit; with 1000-task benchmarks, 90% are ignored without warning                                                                                                                                     | Medium   |
+| C5  | 504-627   | `_stream_chat_completion` has 8-tuple return (`content, elapsed, t_in, t_out, tps, thinking_tokens, error_type, error_detail`) — should be a `@dataclass` (see `consolidate_results.py:688-757` for positive examples)                            | Medium   |
+| C6  | 1700-1732 | In non-interactive mode, iterates over `for bench in benchmarks`, but `non_interactive` does **not** automatically execute `--thinking` — is this intentional? Not documented in README.                                                          | Low      |
 
 **Performance:**
 - `Monitor` (lines 282-373) allocates 4 lists per instance with `MONITOR_HISTORY_MAX = 500` elements — on long benchmarks (>500 tasks), oldest samples are removed with `del lst[:-MONITOR_HISTORY_MAX]`. O(1) per append, but `get_snapshot` calls `update` — can block the actual sampling thread. Should be implemented as a lock-free ring buffer.
@@ -194,14 +194,14 @@ These aliases forward to v10 functions, but are no longer called in the current 
 
 **Bugs/Problems:**
 
-| # | Line | Problem | Severity |
-|---|------|---------|----------|
-| D1 | 152-192 | `_lookup_vram` fuzzy match with `dk_short = re.sub("(ibm\|google\|microsoft\|mistralai\|essentialai)/", "", dk_norm)` and `len(dk_short) > 5`: with `gemma-4-12b` (10 chars), **everything** containing `gemma4...` is matched → wrong VRAM assignment | **High** |
-| D2 | 220-264 | `bootstrap_ci` and `paired_bootstrap_ci` in pure Python — 10000 resamples × N tasks. With N=100, that's 1M `random.choice` calls per benchmark. **NumPy not used** — wasted CPU time | Medium |
-| D3 | 504-560 | `_read_results_json` and `read_lmeval_per_model` parse JSON files unsorted, **the newest file is found through filename sorting** (line 609), but if old and new files exist (e.g., after reload), the newest is not guaranteed to be selected | Medium |
-| D4 | 621-655 | `read_agentic` does `os.walk` and sorts by timestamp substring in filenames — fragile: if the file is named `agentic_qwen3-30b_20260712_120000.json`, `_extract_ts` looks for 14-digit numbers, but if the name is `_v2_20260712_120000`, `v2` can collide with `v2_20260712...` | Low |
-| D5 | 762-790 | `read_data` with `model_keys=None` does auto-discovery via filenames, **not** via the `model_key` from CSV content. When re-running a model with a different quant variant (e.g., `qwen3-coder-30b@q4_k_s` vs `@q3_k_s`), only the **newest** CSV is found — **old results are overwritten** instead of merged | Medium |
-| D6 | 1079-1118 | `_write_tbl` manually builds a markdown table with complex width calculation. Code reuse of 50 LOC for a single table — should use `tabulate` library (already present as transitive dependency via evalplus) | Low |
+| #   | Line      | Problem                                                                                                                                                                                                                                                                                                        | Severity |
+| --- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| D1  | 152-192   | `_lookup_vram` fuzzy match with `dk_short = re.sub("(ibm\|google\|microsoft\|mistralai\|essentialai)/", "", dk_norm)` and `len(dk_short) > 5`: with `gemma-4-12b` (10 chars), **everything** containing `gemma4...` is matched → wrong VRAM assignment                                                         | **High** |
+| D2  | 220-264   | `bootstrap_ci` and `paired_bootstrap_ci` in pure Python — 10000 resamples × N tasks. With N=100, that's 1M `random.choice` calls per benchmark. **NumPy not used** — wasted CPU time                                                                                                                           | Medium   |
+| D3  | 504-560   | `_read_results_json` and `read_lmeval_per_model` parse JSON files unsorted, **the newest file is found through filename sorting** (line 609), but if old and new files exist (e.g., after reload), the newest is not guaranteed to be selected                                                                 | Medium   |
+| D4  | 621-655   | `read_agentic` does `os.walk` and sorts by timestamp substring in filenames — fragile: if the file is named `agentic_qwen3-30b_20260712_120000.json`, `_extract_ts` looks for 14-digit numbers, but if the name is `_v2_20260712_120000`, `v2` can collide with `v2_20260712...`                               | Low      |
+| D5  | 762-790   | `read_data` with `model_keys=None` does auto-discovery via filenames, **not** via the `model_key` from CSV content. When re-running a model with a different quant variant (e.g., `qwen3-coder-30b@q4_k_s` vs `@q3_k_s`), only the **newest** CSV is found — **old results are overwritten** instead of merged | Medium   |
+| D6  | 1079-1118 | `_write_tbl` manually builds a markdown table with complex width calculation. Code reuse of 50 LOC for a single table — should use `tabulate` library (already present as transitive dependency via evalplus)                                                                                                  | Low      |
 
 **Documentation problems:**
 - Docstring lines 7-21 says: "1. Overall ranking", "2. Category scores" etc. — but the `main()` function (line 950-...) uses `--compare` mode (paired bootstrap) that runs **before** normal consolidation. The main function branches very early — unusual for Python `main()`.
@@ -215,14 +215,14 @@ These aliases forward to v10 functions, but are no longer called in the current 
 
 **Bugs/Problems:**
 
-| # | Line | Problem | Severity |
-|---|------|---------|----------|
-| M1 | 274-280 | **Critical fallback bug:** If `get_current_loaded_model()` returns `None` for 10×1s = 10s, `model_key` is returned as identifier. LM Studio API accepts `model_key` but **only** if `lms load` was called without `--yes`. With `--yes` load (line 254), a variant with `@quant` suffix is loaded — `model_key` without suffix mismatch → HTTP 400 hang | **High** |
-| M2 | 120-132 | `unload_all_models` makes 15× POST calls to `/v1/chat/completions` with `model="check"` — **30s wait time** on every benchmark switch, **even if the model was already unloaded**. Should check with `lms ps --json` whether anything is loaded at all | Medium |
-| M3 | 80-97 | `get_current_loaded_model` parses `lms ps --json` and returns only the **first** element (`entries[0]`). With multiple loaded models, returns the "wrong" one | Medium |
-| M4 | 252-295 | `load_model_via_lms` has `context_length` and `gpu_offload` as parameters, but in the launcher (`run_benchmarks.py:1057, 1062, 1090`) **only** `context_length` is passed — `gpu_offload` is dead | Low |
-| M5 | 218-249 | `_ensure_lmstudio_running` starts `llmster.exe` from `~/.lmstudio/llmster/0.0.12-1/llmster.exe` — **absolute version number in path**. Breaks on LM Studio update | Low |
-| M6 | 70-77 | `check_api_available` and `TIMEOUT_HEALTH_CHECK` are imported but **never** called outside `model_manager.py` — dead code (lines 19-20 in `custom_benchmark.py:78-83` import them but do not use them) | Low |
+| #   | Line    | Problem                                                                                                                                                                                                                                                                                                                                                 | Severity |
+| --- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| M1  | 274-280 | **Critical fallback bug:** If `get_current_loaded_model()` returns `None` for 10×1s = 10s, `model_key` is returned as identifier. LM Studio API accepts `model_key` but **only** if `lms load` was called without `--yes`. With `--yes` load (line 254), a variant with `@quant` suffix is loaded — `model_key` without suffix mismatch → HTTP 400 hang | **High** |
+| M2  | 120-132 | `unload_all_models` makes 15× POST calls to `/v1/chat/completions` with `model="check"` — **30s wait time** on every benchmark switch, **even if the model was already unloaded**. Should check with `lms ps --json` whether anything is loaded at all                                                                                                  | Medium   |
+| M3  | 80-97   | `get_current_loaded_model` parses `lms ps --json` and returns only the **first** element (`entries[0]`). With multiple loaded models, returns the "wrong" one                                                                                                                                                                                           | Medium   |
+| M4  | 252-295 | `load_model_via_lms` has `context_length` and `gpu_offload` as parameters, but in the launcher (`run_benchmarks.py:1057, 1062, 1090`) **only** `context_length` is passed — `gpu_offload` is dead                                                                                                                                                       | Low      |
+| M5  | 218-249 | `_ensure_lmstudio_running` starts `llmster.exe` from `~/.lmstudio/llmster/0.0.12-1/llmster.exe` — **absolute version number in path**. Breaks on LM Studio update                                                                                                                                                                                       | Low      |
+| M6  | 70-77   | `check_api_available` and `TIMEOUT_HEALTH_CHECK` are imported but **never** called outside `model_manager.py` — dead code (lines 19-20 in `custom_benchmark.py:78-83` import them but do not use them)                                                                                                                                                  | Low      |
 
 ### 3.5 `benchmark_config.py` (124 LOC)
 
@@ -233,12 +233,12 @@ These aliases forward to v10 functions, but are no longer called in the current 
 
 **Bugs/Problems:**
 
-| # | Line | Problem | Severity |
-|---|------|---------|----------|
-| K1 | 23-67 | `QUANT_MAP` contains **three entries** for `gpt-oss-20b`: `gpt-oss-20b` (Q6_K), `lmstudio-community/gpt-oss-20b` (MXFP4), `unsloth/gpt-oss-20b` (Q6_K). `_lookup_vram` uses the first match — if a different quant is desired, the wrong one is returned | **High** |
-| K2 | 85-104 | `CAT_WEIGHTS` uses `HumanEval+_plus` and `MBPP+_plus` as keys (lines 88-89), but `custom_benchmark.py` writes `"HumanEval+"` to CSV. Inconsistency leads to score=0 for these benchmarks in `compute_category_scores` | **High** |
-| K3 | 70-76 | `MMLU_PRO_SUBSETS` is dead code (see D4 in Architecture) | Low |
-| K4 | 108-115 | `PIPELINE_TIMEOUTS["custom_subprocess"] = 14400` (4h!) — very long, blocks error detection. With hanging tasks, you run 4h without feedback | Low |
+| #   | Line    | Problem                                                                                                                                                                                                                                                  | Severity |
+| --- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| K1  | 23-67   | `QUANT_MAP` contains **three entries** for `gpt-oss-20b`: `gpt-oss-20b` (Q6_K), `lmstudio-community/gpt-oss-20b` (MXFP4), `unsloth/gpt-oss-20b` (Q6_K). `_lookup_vram` uses the first match — if a different quant is desired, the wrong one is returned | **High** |
+| K2  | 85-104  | `CAT_WEIGHTS` uses `HumanEval+_plus` and `MBPP+_plus` as keys (lines 88-89), but `custom_benchmark.py` writes `"HumanEval+"` to CSV. Inconsistency leads to score=0 for these benchmarks in `compute_category_scores`                                    | **High** |
+| K3  | 70-76   | `MMLU_PRO_SUBSETS` is dead code (see D4 in Architecture)                                                                                                                                                                                                 | Low      |
+| K4  | 108-115 | `PIPELINE_TIMEOUTS["custom_subprocess"] = 14400` (4h!) — very long, blocks error detection. With hanging tasks, you run 4h without feedback                                                                                                              | Low      |
 
 **Bug K2 is particularly critical** — the keys in `CAT_WEIGHTS` (`HumanEval+_plus`, `MBPP+_plus`) do not match the keys in `bench_scores` (comes from `try_read_evalplus` lines 518-542 with key `humaneval_plus` and `mbpp_plus` — so also not!). Chain of bugs:
 - `try_read_evalplus` returns `{"humaneval_plus": 0.x, "mbpp_plus": 0.x}` (lowercase, without `+`)
@@ -255,11 +255,11 @@ These aliases forward to v10 functions, but are no longer called in the current 
 
 **Bugs/Problems:**
 
-| # | Line | Problem | Severity |
-|---|------|---------|----------|
-| W1 | 68-100 | `TASK_FIELDS` contains `response` (line 99) — for DS1000/CoderEval, `response` can be several KB of JSON code. With 100 tasks × 50KB = 5MB CSV. **Bloat** | Medium |
-| W2 | 152-166 | `CONSOLIDATED_FIELDS` contains no columns for runtime/efficiency/VRAM — the important engineering metrics are missing in the consolidated overview | Medium |
-| W3 | 271 | `f"{e.get('avg_score', 0) * 100:.1f}"` — multiplication by 100 hardcoded. If `avg_score` is already in 0-100 (which it is, see `run_task` lines 1283-1295), it becomes 100 times too large! | **High** |
+| #   | Line    | Problem                                                                                                                                                                                     | Severity |
+| --- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| W1  | 68-100  | `TASK_FIELDS` contains `response` (line 99) — for DS1000/CoderEval, `response` can be several KB of JSON code. With 100 tasks × 50KB = 5MB CSV. **Bloat**                                   | Medium   |
+| W2  | 152-166 | `CONSOLIDATED_FIELDS` contains no columns for runtime/efficiency/VRAM — the important engineering metrics are missing in the consolidated overview                                          | Medium   |
+| W3  | 271     | `f"{e.get('avg_score', 0) * 100:.1f}"` — multiplication by 100 hardcoded. If `avg_score` is already in 0-100 (which it is, see `run_task` lines 1283-1295), it becomes 100 times too large! | **High** |
 
 **W3 is a real bug:** in `benchmark_model` line 1473, `avg_score = sum(scores) / len(scores)` is calculated, and `scores` contains values from `result["score"]` (line 1283: 0.0 or 1.0 for pass/fail). So 0-1. In `write_per_model_csv` line 271, `* 100` is done → correct. But the `avg_score` in `model_results` (lines 1738-1752) is **passed as float (0-1)**, and `e.get("avg_score")` is that float. `* 100` is therefore correct. **False alarm.**
 
@@ -432,21 +432,21 @@ With 100+ models or SS=100, the system becomes noticeably slower:
 
 ### 7.1 Data Volume
 
-| Log | Size | Lines | Models (top) |
-|-----|------|-------|--------------|
+| Log                | Size    | Lines   | Models (top)                                            |
+| ------------------ | ------- | ------- | ------------------------------------------------------- |
 | `2026-07-12.5.log` | 10.0 MB | 110,902 | qwen3.6-28b-reap-i1@q3_k_s (30k), qwen3.6-27b-mtp (15k) |
-| `2026-07-12.6.log` | 10.0 MB | 110,370 | qwen3.6-27b-mtp (73k), qwen3.6-28b-reap-i1@iq3_s (32k) |
-| `2026-07-12.7.log` | 1.3 MB | 12,997 | qwen3.6-28b-reap-i1@iq3_s (12.5k) |
+| `2026-07-12.6.log` | 10.0 MB | 110,370 | qwen3.6-27b-mtp (73k), qwen3.6-28b-reap-i1@iq3_s (32k)  |
+| `2026-07-12.7.log` | 1.3 MB  | 12,997  | qwen3.6-28b-reap-i1@iq3_s (12.5k)                       |
 
 ### 7.2 Error Categorization
 
-| Error Type | Log 5 | Log 6 | Log 7 | Total |
-|------------|-------|-------|-------|-------|
-| "No models loaded" | 13 | 1 | 0 | **14** |
-| "Unexpected endpoint /v1/version" | 5 | 1 | 0 | **6** |
-| **"Channel Error: Cannot combine structured output constraints with lazy grammar"** | **2** | 0 | 0 | **2** |
-| TIMEOUT pattern | 0 | 0 | 0 | 0 |
-| OOM (not enough space) | 0 | 0 | 0 | 0 |
+| Error Type                                                                          | Log 5 | Log 6 | Log 7 | Total  |
+| ----------------------------------------------------------------------------------- | ----- | ----- | ----- | ------ |
+| "No models loaded"                                                                  | 13    | 1     | 0     | **14** |
+| "Unexpected endpoint /v1/version"                                                   | 5     | 1     | 0     | **6**  |
+| **"Channel Error: Cannot combine structured output constraints with lazy grammar"** | **2** | 0     | 0     | **2**  |
+| TIMEOUT pattern                                                                     | 0     | 0     | 0     | 0      |
+| OOM (not enough space)                                                              | 0     | 0     | 0     | 0      |
 
 ### 7.3 Channel Error – Critical Finding
 
@@ -567,15 +567,15 @@ DS1000 tasks fail with the following error messages:
 
 **Severity: 🟠 High** | **Affected: 13/14 models**
 
-| Model | ARC-Challenge Score |
-|---|---|
-| Granite 4.1 30B I1 | 0 |
-| Granite 4.1 30B | 0 |
-| Granite 4.0 H Tiny | 0 |
-| Granite 4.1 8B | 0 |
+| Model                       | ARC-Challenge Score     |
+| --------------------------- | ----------------------- |
+| Granite 4.1 30B I1          | 0                       |
+| Granite 4.1 30B             | 0                       |
+| Granite 4.0 H Tiny          | 0                       |
+| Granite 4.1 8B              | 0                       |
 | Qwen3 30B A3B Instruct 2507 | **0.9** (only non-zero) |
-| Qwen3.6 27B | 0 |
-| Qwen3.6 28B REAP I1 | 0 |
+| Qwen3.6 27B                 | 0                       |
+| Qwen3.6 28B REAP I1         | 0                       |
 
 **Likely cause:** ARC-Challenge has 1170 multiple-choice questions — with limit=10, 8 out of 10 are likely "easy" while 2-3 are the "hard" ones. With SampleSize=10, the sample is too small for statistical significance. **BUT:** Even Qwen3 30B A3B achieves 0.9, so score=0 for all other models is suspicious.
 
@@ -603,12 +603,12 @@ DS1000 tasks fail with the following error messages:
 
 **Severity: 🟡 Medium** | **Affected: 3/3 Granite models**
 
-| Model | HellaSwag |
-|---|---|
-| Granite 4.1 30B I1 | 0 |
-| Granite 4.0 H Tiny | 0.23 |
-| Granite 4.1 8B | 0 |
-| Qwen3 30B A3B | 0.72 |
+| Model              | HellaSwag |
+| ------------------ | --------- |
+| Granite 4.1 30B I1 | 0         |
+| Granite 4.0 H Tiny | 0.23      |
+| Granite 4.1 8B     | 0         |
+| Qwen3 30B A3B      | 0.72      |
 
 **Likely cause:** Similar to ARC — Granite models return **only the letter A/B/C/D**, not the full sentence completion → `custom-extract` regex does not match.
 
@@ -700,17 +700,17 @@ The terminal output ends with "aborted with Ctrl-C in PowerShell" (line 2753). T
 
 ### Fix Status of all Prio-0/2/3 findings (2026-07-12)
 
-| # | Finding | Severity | Status | Changed Files |
-|---|---------|----------|--------|---------------|
-| 19 | `langdetect` missing → IFEval 14/14 fail | 🔴 | ✅ FIXED | `install_benchmark-data_windows.ps1`, `install_benchmark-data_debian.sh`, `README.md`, `tests/test_dependencies.py` |
-| 20 | `math_verify`/`sympy`/`antlr4==4.11` missing → MATH-500 14/14 fail | 🔴 | ✅ FIXED | (same files) |
-| 20+ | `immutabledict` missing → IFEval transitive dep | 🔴 | ✅ FIXED | (same files) |
-| 21 | Update install scripts | 🟠 | ✅ FIXED | `install_benchmark-data_windows.ps1` + Debian + README |
-| 22 | `truthfulqa_gen` → `truthfulqa_mc1` | 🟠 | ✅ FIXED | `run_benchmarks.py:176`, `consolidate_results.py:661`, `run_np_calibration.ps1:93` |
-| 23 | DS1000 `_unwrap_solution_for_insert` | 🟠 | ✅ FIXED | `custom_benchmark.py:1090-1175` — multiple `[insert]` markers, comment-skip, synthetic function wrapper |
-| 24 | DS1000 matplotlib `set_xticklabels` patch | 🟠 | ✅ FIXED | `custom_benchmark.py:_patch_matplotlib_compat()` (new) |
-| 25 | CoderEval `extract_code` Granite | 🟠 | ✅ FIXED | `custom_benchmark.py:775-832` — alternative code-block patterns, bare-statement fallback |
-| 26 | PowerShell UTF-8 encoding | 🟢 | ✅ FIXED | `run_missing_benchmarks.ps1`, `run_np_calibration.ps1`, `run_v18_models.ps1` |
+| #   | Finding                                                            | Severity | Status  | Changed Files                                                                                                       |
+| --- | ------------------------------------------------------------------ | -------- | ------- | ------------------------------------------------------------------------------------------------------------------- |
+| 19  | `langdetect` missing → IFEval 14/14 fail                           | 🔴        | ✅ FIXED | `install_benchmark-data_windows.ps1`, `install_benchmark-data_debian.sh`, `README.md`, `tests/test_dependencies.py` |
+| 20  | `math_verify`/`sympy`/`antlr4==4.11` missing → MATH-500 14/14 fail | 🔴        | ✅ FIXED | (same files)                                                                                                        |
+| 20+ | `immutabledict` missing → IFEval transitive dep                    | 🔴        | ✅ FIXED | (same files)                                                                                                        |
+| 21  | Update install scripts                                             | 🟠        | ✅ FIXED | `install_benchmark-data_windows.ps1` + Debian + README                                                              |
+| 22  | `truthfulqa_gen` → `truthfulqa_mc1`                                | 🟠        | ✅ FIXED | `run_benchmarks.py:176`, `consolidate_results.py:661`, `run_np_calibration.ps1:93`                                  |
+| 23  | DS1000 `_unwrap_solution_for_insert`                               | 🟠        | ✅ FIXED | `custom_benchmark.py:1090-1175` — multiple `[insert]` markers, comment-skip, synthetic function wrapper             |
+| 24  | DS1000 matplotlib `set_xticklabels` patch                          | 🟠        | ✅ FIXED | `custom_benchmark.py:_patch_matplotlib_compat()` (new)                                                              |
+| 25  | CoderEval `extract_code` Granite                                   | 🟠        | ✅ FIXED | `custom_benchmark.py:775-832` — alternative code-block patterns, bare-statement fallback                            |
+| 26  | PowerShell UTF-8 encoding                                          | 🟢        | ✅ FIXED | `run_missing_benchmarks.ps1`, `run_np_calibration.ps1`, `run_v18_models.ps1`                                        |
 
 **Test suite:** `pytest tests/` → **43/43 passed** (previously 36/36; +7 for `tests/test_dependencies.py`).
 

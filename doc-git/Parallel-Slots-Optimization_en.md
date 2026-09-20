@@ -15,13 +15,13 @@
 
 ### A/B tests on real pipeline (DS1000 / CoderEval, `--num-parallel`)
 
-| Date    | Model                  | Arch   | SS | np=1      | np=2      | np=4      | Speedup |
-|---------|------------------------|--------|----|-----------|-----------|-----------|---------|
-| 01.08.  | GPT-OSS-20b            | Dense  | 20 | 692.8s    | 666.3s    | 517.6s    | **1.34×** |
-| 04.08.  | GLM-4.7-Flash          | MoE    |  5 | 164.7s    | –         | 89.2s     | **1.85×** |
-| 04.08.  | Granite-4.0-h-tiny@Q8_0| MoE*   | 20 | 90s       | –         | 27s       | **3.33×** |
-| 04.08.  | LFM2-24B-a2b_moe       | MoE    | 20 | 80s       | –         | 27s       | **2.96×** |
-| 04.08.  | Mellum2-12B (Thinking) | MoE    | 20 | 1530s     | –         | 1301s     | **1.18×** |
+| Date   | Model                   | Arch  | SS  | np=1   | np=2   | np=4   | Speedup   |
+| ------ | ----------------------- | ----- | --- | ------ | ------ | ------ | --------- |
+| 01.08. | GPT-OSS-20b             | Dense | 20  | 692.8s | 666.3s | 517.6s | **1.34×** |
+| 04.08. | GLM-4.7-Flash           | MoE   | 5   | 164.7s | –      | 89.2s  | **1.85×** |
+| 04.08. | Granite-4.0-h-tiny@Q8_0 | MoE*  | 20  | 90s    | –      | 27s    | **3.33×** |
+| 04.08. | LFM2-24B-a2b_moe        | MoE   | 20  | 80s    | –      | 27s    | **2.96×** |
+| 04.08. | Mellum2-12B (Thinking)  | MoE   | 20  | 1530s  | –      | 1301s  | **1.18×** |
 
 *Granite-4.0-h-tiny: small MoE-like arch, behaves like Dense for VRAM purposes.
 
@@ -32,11 +32,11 @@
 
 ### 05.08. test run (real pipeline, HumanEval+ SS=20, np=4)
 
-| Model                  | Wall time | Note                                        |
-|------------------------|-----------|---------------------------------------------|
-| Rnj 1@Q8_0             | 146s      | fast – baseline                            |
-| ERNIE-4.5-21B-A3B-PT MXFP4 MoE | 605s | MXFP4 slow path on this GPU (see case study) |
-| ERNIE-4.5-21B-A3B-PT@IQ4_NL | 934s | **misconfigured** (ctx=131k, UKV=False) – fixed case study below |
+| Model                          | Wall time | Note                                                             |
+| ------------------------------ | --------- | ---------------------------------------------------------------- |
+| Rnj 1@Q8_0                     | 146s      | fast – baseline                                                  |
+| ERNIE-4.5-21B-A3B-PT MXFP4 MoE | 605s      | MXFP4 slow path on this GPU (see case study)                     |
+| ERNIE-4.5-21B-A3B-PT@IQ4_NL    | 934s      | **misconfigured** (ctx=131k, UKV=False) – fixed case study below |
 
 The ERNIE result is the most important single data point: **configuration, not model size, caused a 6× slowdown.**
 
@@ -46,10 +46,10 @@ The ERNIE result is the most important single data point: **configuration, not m
 
 Old hypothesis (pre-05.08.): "ERNIE is slow at np=4 because of shared experts / heterogeneous CUDA kernels" — **REFUTED.** The real cause was a VRAM overflow:
 
-| Setting                    | VRAM (GPU) | Shared system RAM | Speed       |
-|----------------------------|-----------:|------------------:|-------------|
-| ctx=131k, UKV=False (old)  | 15.5 GB    | 7.3 GB            | very slow (934s / 20 tasks) |
-| ctx=32k, UKV=True (new)    | 13.3 GB    | 0 GB              | **5–10× faster** |
+| Setting                   | VRAM (GPU) | Shared system RAM | Speed                       |
+| ------------------------- | ---------: | ----------------: | --------------------------- |
+| ctx=131k, UKV=False (old) | 15.5 GB    | 7.3 GB            | very slow (934s / 20 tasks) |
+| ctx=32k, UKV=True (new)   | 13.3 GB    | 0 GB              | **5–10× faster**            |
 
 **Mechanism:** with UKV=False, each of the 4 slots gets its own KV cache (4 × ctx). ctx=131k × 4 slots exceeded the 16 GB GPU → KV spilled into shared system RAM → PCIe paging → massive slowdown. UKV=True shares one unified KV pool (scales with ctx, not np), ctx=32k keeps the total small → everything fits in VRAM → 5–10× faster.
 
@@ -82,12 +82,12 @@ For benchmarks, prompts are diverse → LCP≈0 → cache reuse is irrelevant. T
 
 ### np=1 vs np=4 summary
 
-| Aspect           | np=1                          | np=4                              |
-|------------------|-------------------------------|-----------------------------------|
-| GPU utilization  | Low (1 token stream)          | High (2–4 parallel)              |
+| Aspect                            | np=1                   | np=4                             |
+| --------------------------------- | ---------------------- | -------------------------------- |
+| GPU utilization                   | Low (1 token stream)   | High (2–4 parallel)              |
 | LCP reuse (Dense, chat-like load) | Always (stable f_keep) | Random / reduced                 |
-| KV-cache VRAM    | 1× base                       | up to 4× base (unless UKV=True)  |
-| Benchmark speed  | baseline                      | **1.18–3.33× faster** (measured) |
+| KV-cache VRAM                     | 1× base                | up to 4× base (unless UKV=True)  |
+| Benchmark speed                   | baseline               | **1.18–3.33× faster** (measured) |
 
 ## VRAM budget & context
 
@@ -101,13 +101,13 @@ Practical sizing for a 16 GB GPU:
 
 ## Retired Hypotheses (kept for reference, NOT valid)
 
-| Old claim | Status | Correct fact |
-|-----------|--------|--------------|
-| Dense → np=1 is optimal | **Retired 04.08.** | np=4 wins on benchmarks even for Dense (GPT-OSS 1.34×, Granite 3.33×) |
-| "np=4 → 3 slots unused" | **Retired 04.08.** | server logs: 2–4 slots active |
-| LCP=0 → np=4 useless | **Retired 04.08.** | batching effect dominates |
-| ERNIE slow due to shared experts / CUDA kernels | **Retired 05.08.** | VRAM overflow (ctx=131k, UKV=False) – fixed via UKV=True + ctx=32k |
-| "safe context = np=1 ctx / np" rule | **Retired 05.08.** | obsolete with UKV=True (KV no longer scales with np) |
+| Old claim                                       | Status             | Correct fact                                                          |
+| ----------------------------------------------- | ------------------ | --------------------------------------------------------------------- |
+| Dense → np=1 is optimal                         | **Retired 04.08.** | np=4 wins on benchmarks even for Dense (GPT-OSS 1.34×, Granite 3.33×) |
+| "np=4 → 3 slots unused"                         | **Retired 04.08.** | server logs: 2–4 slots active                                         |
+| LCP=0 → np=4 useless                            | **Retired 04.08.** | batching effect dominates                                             |
+| ERNIE slow due to shared experts / CUDA kernels | **Retired 05.08.** | VRAM overflow (ctx=131k, UKV=False) – fixed via UKV=True + ctx=32k    |
+| "safe context = np=1 ctx / np" rule             | **Retired 05.08.** | obsolete with UKV=True (KV no longer scales with np)                  |
 
 ## Pipeline fixes (05.08.2026) – np=4 only works if requests are sent in parallel
 
@@ -125,11 +125,11 @@ server log 19:38-19:41: slot 0=12, slot 1=12, slot 2=8, slot 3=6 print_timing ev
 `_compute_ukv()` in `registry_tool.py` (priority-based, VRAM budget 15.3 GB):
 `num_parallel` ist seit 13.08. **kein Registry-Feld mehr** — feste Policy (SS>=10 → 4, sonst 1).
 
-| Prio | useUnifiedKvCache | Reason |
-|------|-------------------|--------|
-| 1    | False             | max parallelism, separate KV caches |
+| Prio | useUnifiedKvCache | Reason                                 |
+| ---- | ----------------- | -------------------------------------- |
+| 1    | False             | max parallelism, separate KV caches    |
 | 2    | True              | save VRAM (KV scales with ctx, not np) |
-| 3    | True (Fallback)   | ctx=min_ctx, last resort |
+| 3    | True (Fallback)   | ctx=min_ctx, last resort               |
 
 Context length is **not** overwritten by the algorithm — manual GUI settings are authoritative. GGUF header is the source of truth for `max_context_length`.
 
@@ -137,10 +137,10 @@ Context length is **not** overwritten by the algorithm — manual GUI settings a
 
 Seit 13.08. hardcoded (kein CLI-Override, kein Registry-Lookup):
 
-| SampleSize | num_parallel |
-|------------|--------------|
+| SampleSize | num_parallel       |
+| ---------- | ------------------ |
 | ≥ 10       | **4** (all models) |
-| < 10       | 1 |
+| < 10       | 1                  |
 
 ## Reproducible Prompt Selection (parallel_ab)
 

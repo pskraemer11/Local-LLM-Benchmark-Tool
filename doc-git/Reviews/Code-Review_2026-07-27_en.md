@@ -11,30 +11,30 @@
 
 ### 1.1 LMS Live Inventory (47 installed LLMs after exclude filter)
 
-| Category              | Count | Examples                                                                                          |
-|------------------------|-------:|------------------------------------------------------------------------------------------------------|
-| **LLM (after filter)** |    47  | GPT-OSS, Gemma-4, Qwen3.6, Magistral, Phi-4 Reasoning, Ministral, Nemotron, Apriel, Intel AutoRound  |
-| **Embedding**          |   ~10  | bge-m3, jina-v3, nomic-embed                                                                        |
-| **Registry entries**   |   115  | incl. GPT-OSS (5 variants), Intel AutoRound                                                        |
-| **Reasoning models**   |     8  | GPT-OSS (thinking), Gemma-4 (thinking), Magistral, Phi-4, Ministral, Nemotron, Apriel, Qwen3.6      |
+| Category               | Count | Examples                                                                                            |
+| ---------------------- | ----: | --------------------------------------------------------------------------------------------------- |
+| **LLM (after filter)** | 47    | GPT-OSS, Gemma-4, Qwen3.6, Magistral, Phi-4 Reasoning, Ministral, Nemotron, Apriel, Intel AutoRound |
+| **Embedding**          | ~10   | bge-m3, jina-v3, nomic-embed                                                                        |
+| **Registry entries**   | 115   | incl. GPT-OSS (5 variants), Intel AutoRound                                                         |
+| **Reasoning models**   | 8     | GPT-OSS (thinking), Gemma-4 (thinking), Magistral, Phi-4, Ministral, Nemotron, Apriel, Qwen3.6      |
 
 ### 1.2 Registry Status (after this review)
 
-| Aspect                            | Value        |
-|-----------------------------------|--------------|
-| Registered models                 | **115**      |
-| Of which with `quants`            |    79 (69%)  |
-| Of which with `n_layers`/`hidden_dim` | 75 (65%)  |
-| Of which with `experts` (MoE)     |    33 (29%)  |
-| Of which with `reasoning`         |   115 (100%) |
-| Of which with `capabilities`      |   115 (100%) |
-| Of which with `blueprint`         |   115 (100%) |
-| Of which with `truncation`        |   115 (100%) |
-| Of which with `context_length`    |   115 (100%) |
-| Of which with `template`          |    18 (16%)  |
-| Source code lines (9 scripts)     | 9,790        |
-| Test files (14)                   | 5,566        |
-| Tests                             | **564 (all green)** |
+| Aspect                                | Value               |
+| ------------------------------------- | ------------------- |
+| Registered models                     | **115**             |
+| Of which with `quants`                | 79 (69%)            |
+| Of which with `n_layers`/`hidden_dim` | 75 (65%)            |
+| Of which with `experts` (MoE)         | 33 (29%)            |
+| Of which with `reasoning`             | 115 (100%)          |
+| Of which with `capabilities`          | 115 (100%)          |
+| Of which with `blueprint`             | 115 (100%)          |
+| Of which with `truncation`            | 115 (100%)          |
+| Of which with `context_length`        | 115 (100%)          |
+| Of which with `template`              | 18 (16%)            |
+| Source code lines (9 scripts)         | 9,790               |
+| Test files (14)                       | 5,566               |
+| Tests                                 | **564 (all green)** |
 
 ### 1.3 Fixes in This Review
 
@@ -44,18 +44,18 @@
 
 **After:** 6 remaining `except Exception:` — of which 3 string literals in code generator, 2 top-level error handlers with `traceback.print_exc()`, 1 intentional catch-all with logging (`is_api_available`).
 
-| File                         | Before | After | Action                                                        |
-|-------------------------------|-------:|--------:|----------------------------------------------------------------|
-| `model_manager.py`            |    3   |    1    | 2→specific exceptions; 1 intentional (contract: `-> bool`)     |
-| `run_benchmarks.py`           |    6   |    2    | 4→specific exceptions; 2→`_start/_stop_lmeval_proxy`           |
-| `consolidate_results.py`      |    9   |    0    | All→specific exceptions                                        |
-| `assemble_blueprint.py`       |    3   |    0    | All→specific exceptions                                        |
-| `registry_tool.py`            |    3   |    0    | All→specific exceptions                                        |
-| `custom_benchmark.py`         |    9   |    5    | 4→specific; 3 string literals + 2 top-level handlers           |
-| `_corr_final.py`              |    1   |    0    | →specific exceptions                                           |
-| `tools/correlation_export.py` |    1   |    0    | →specific exceptions                                           |
-|-------------------------------|-------:|--------:|----------------------------------------------------------------|
-| *TOTAL*                       | *35*   |   *8*   | *27 blocks cleaned up (77%)*                                   |
+| File                                                                                                                   | Before | After | Action                                                     |
+| ---------------------------------------------------------------------------------------------------------------------- | -----: | ----: | ---------------------------------------------------------- |
+| `model_manager.py`                                                                                                     | 3      | 1     | 2→specific exceptions; 1 intentional (contract: `-> bool`) |
+| `run_benchmarks.py`                                                                                                    | 6      | 2     | 4→specific exceptions; 2→`_start/_stop_lmeval_proxy`       |
+| `consolidate_results.py`                                                                                               | 9      | 0     | All→specific exceptions                                    |
+| `assemble_blueprint.py`                                                                                                | 3      | 0     | All→specific exceptions                                    |
+| `registry_tool.py`                                                                                                     | 3      | 0     | All→specific exceptions                                    |
+| `custom_benchmark.py`                                                                                                  | 9      | 5     | 4→specific; 3 string literals + 2 top-level handlers       |
+| `_corr_final.py`                                                                                                       | 1      | 0     | →specific exceptions                                       |
+| `tools/correlation_export.py`                                                                                          | 1      | 0     | →specific exceptions                                       |
+| -------------------------------\|-------:\|--------:\|---------------------------------------------------------------- |        |       |                                                            |
+| *TOTAL*                                                                                                                | *35*   | *8*   | *27 blocks cleaned up (77%)*                               |
 
 Remaining 8 `except Exception:`:
 - 3 string literals in `custom_benchmark.py` (code generator, written into generated files)
@@ -66,13 +66,13 @@ Remaining 8 `except Exception:`:
 
 Five GPT-OSS variants registered in `model_registry.yaml`:
 
-| Key                                   | Arch        | Experts| Context | Reasoning | Blueprint        |
-|---------------------------------------|-------------|-------:|--------:|-----------|------------------|
-| `openai/gpt-oss-20b`                  | GPT-OSS MoE |   32   |  128000 | thinking  | gptoss_reasoning |
-| `lmstudio-community/gpt-oss-20b-gguf` | GPT-OSS MoE |   32   |  128000 | thinking  | gptoss_reasoning |
-| `unsloth/gpt-oss-20b-bnb-4bit`        | GPT-OSS MoE |   32   |  128000 | thinking  | gptoss_reasoning |
-| `bartowski/gpt-oss-20b-GGUF`          | GPT-OSS MoE |   32   |  128000 | thinking  | gptoss_reasoning |
-| `intel/GPT-OSS-20B-AutoRound-Q4_K_S`  | GPT-OSS MoE |   32   |  128000 | thinking  | gptoss_reasoning |
+| Key                                   | Arch        | Experts | Context | Reasoning | Blueprint        |
+| ------------------------------------- | ----------- | ------: | ------: | --------- | ---------------- |
+| `openai/gpt-oss-20b`                  | GPT-OSS MoE | 32      | 128000  | thinking  | gptoss_reasoning |
+| `lmstudio-community/gpt-oss-20b-gguf` | GPT-OSS MoE | 32      | 128000  | thinking  | gptoss_reasoning |
+| `unsloth/gpt-oss-20b-bnb-4bit`        | GPT-OSS MoE | 32      | 128000  | thinking  | gptoss_reasoning |
+| `bartowski/gpt-oss-20b-GGUF`          | GPT-OSS MoE | 32      | 128000  | thinking  | gptoss_reasoning |
+| `intel/GPT-OSS-20B-AutoRound-Q4_K_S`  | GPT-OSS MoE | 32      | 128000  | thinking  | gptoss_reasoning |
 
 **HF verification:** `config.json` of `openai/gpt-oss-20b` confirms `num_local_experts=32`, `num_experts_per_tok=4`.
 
@@ -128,13 +128,13 @@ YAML cache (`_QUANT_REGISTRY_CACHE` + `_load_quant_registry()`) prevents re-pars
 
 Suitability of the software for the specified use.
 
-| Sub-characteristic | Rating | Finding                                                                                   |
-|-------------------|-------:|-------------------------------------------------------------------------------------------|
-| Suitability       |    9/10   | Four independent pipelines, nine benchmarks, path drift controlled                         |
-| Accuracy          |    9/10   | Bootstrap CIs, median/P90, weighted consolidation; VRAM formula for `useUnifiedKvCache`    |
-| Interoperability  |    8/10   | OpenAI-compatible + Native API; JSON configs bidirectional LMS ↔ Registry                 |
-| Security          |    8/10   | `_validate_model_identifier()` prevents subprocess injection; `_VALID_MODEL_KEY_RE`       |
-| Compliance        |    7/10   | `pyproject.toml` declares Python ≥3.11                                                    |
+| Sub-characteristic | Rating | Finding                                                                                 |
+| ------------------ | -----: | --------------------------------------------------------------------------------------- |
+| Suitability        | 9/10   | Four independent pipelines, nine benchmarks, path drift controlled                      |
+| Accuracy           | 9/10   | Bootstrap CIs, median/P90, weighted consolidation; VRAM formula for `useUnifiedKvCache` |
+| Interoperability   | 8/10   | OpenAI-compatible + Native API; JSON configs bidirectional LMS ↔ Registry               |
+| Security           | 8/10   | `_validate_model_identifier()` prevents subprocess injection; `_VALID_MODEL_KEY_RE`     |
+| Compliance         | 7/10   | `pyproject.toml` declares Python ≥3.11                                                  |
 
 **Strengths:**
 - **`get_quant()` rewrite with YAML cache**: priority (1) exact, (2) stripped, (3) `@variant` self-evident, (4) base-only, (5) registry fallback. No more re-parsing.
@@ -154,12 +154,12 @@ Suitability of the software for the specified use.
 
 Reliability under defined conditions.
 
-| Sub-characteristic | Rating | Finding                                                                    |
-|-------------------|-------:|----------------------------------------------------------------------------|
-| Maturity        |    9/10   | 564 tests green, p1-p7 documented                                          |
-| Availability    |    9/10   | Task retry with exponential backoff; model reload on unexpected unload      |
-| Fault-tolerance |    9/10   | Bare-except reduction by 77% (35→8); specific exceptions + logging          |
-| Recoverability  |    9/10   | Channel error auto-fallback; SIGALRM fix; double-quant fix                  |
+| Sub-characteristic | Rating | Finding                                                                |
+| ------------------ | -----: | ---------------------------------------------------------------------- |
+| Maturity           | 9/10   | 564 tests green, p1-p7 documented                                      |
+| Availability       | 9/10   | Task retry with exponential backoff; model reload on unexpected unload |
+| Fault-tolerance    | 9/10   | Bare-except reduction by 77% (35→8); specific exceptions + logging     |
+| Recoverability     | 9/10   | Channel error auto-fallback; SIGALRM fix; double-quant fix             |
 
 **Strengths:**
 - **Bare-except reduction** (this review): 27 of 35 blocks replaced with specific exceptions. No silent `pass` for programming errors anymore.
@@ -176,13 +176,13 @@ Reliability under defined conditions.
 
 ### 2.3 Usability · Rating: 7/10 · Good
 
-| Sub-characteristic | Rating | Finding                                                        |
-|-------------------|-------:|---------------------------------------------------------------|
-| Understandability |    8/10   | Extensive `doc-git/` documentation                             |
-| Learnability      |    7/10   | Quick start in README, CLI table; no tutorial notebook         |
-| Operability       |    7/10   | Interactive + non-interactive mode; no GUI                     |
-| Attractiveness    |   [6/10]  | Terminal output ASCII-only                                     |
-| Error-handling UX |    8/10   | `[INFO]`/`[WARN]`/`[ERROR]`/`[OK]`/`[CHANNEL-ERROR]` prefixes |
+| Sub-characteristic | Rating | Finding                                                       |
+| ------------------ | -----: | ------------------------------------------------------------- |
+| Understandability  | 8/10   | Extensive `doc-git/` documentation                            |
+| Learnability       | 7/10   | Quick start in README, CLI table; no tutorial notebook        |
+| Operability        | 7/10   | Interactive + non-interactive mode; no GUI                    |
+| Attractiveness     | [6/10] | Terminal output ASCII-only                                    |
+| Error-handling UX  | 8/10   | `[INFO]`/`[WARN]`/`[ERROR]`/`[OK]`/`[CHANNEL-ERROR]` prefixes |
 
 **Strengths:**
 - **Registry tool with `cmd_*` functions**: interactive CLI for registry maintenance.
@@ -197,11 +197,11 @@ Reliability under defined conditions.
 
 ### 2.4 Efficiency · Rating: 8/10 · Very Good
 
-| Sub-characteristic | Rating | Finding                                                    |
-|-------------------|-------:|------------------------------------------------------------|
-| Time behaviour |    9/10   | YAML cache prevents re-parsing; GGUF header reader ~1ms     |
-| Resource usage |    8/10   | VRAM formula; 5Hz monitor                                  |
-| Capacity       |    8/10   | 16 GB VRAM sufficient for 27-30B Q3_K_S MoE                |
+| Sub-characteristic | Rating | Finding                                                 |
+| ------------------ | -----: | ------------------------------------------------------- |
+| Time behaviour     | 9/10   | YAML cache prevents re-parsing; GGUF header reader ~1ms |
+| Resource usage     | 8/10   | VRAM formula; 5Hz monitor                               |
+| Capacity           | 8/10   | 16 GB VRAM sufficient for 27-30B Q3_K_S MoE             |
 
 **Strengths:**
 - **`_QUANT_REGISTRY_CACHE`** (new): `model_registry.yaml` parsed once, cache lives as long as the process.
@@ -219,11 +219,11 @@ Reliability under defined conditions.
 Effort for modification/improvement. **Phase 1-4 of p11 (Type Hints, Boolean Prefixes, TypedDict, Ubiquitous Language) complete. Phase p7 (Bare-Except Reduction) completed.**
 
 | Sub-characteristic | Rating | Finding                                                                   |
-|-------------------|-------:|---------------------------------------------------------------------------|
-| Analyzability |   9/10    | Type hints + `is_`/`has_` prefixes + TypedDict + DDD                      |
-| Changeability |   9/10    | Single source of truth in `benchmark_config.py` and `model_registry.yaml` |
-| Stability     |  10/10    | 564 tests green                                                           |
-| Testability   |   9/10    | 14 test files, `pytest >= 8.0`, mypy/ruff in pyproject.toml               |
+| ------------------ | -----: | ------------------------------------------------------------------------- |
+| Analyzability      | 9/10   | Type hints + `is_`/`has_` prefixes + TypedDict + DDD                      |
+| Changeability      | 9/10   | Single source of truth in `benchmark_config.py` and `model_registry.yaml` |
+| Stability          | 10/10  | 564 tests green                                                           |
+| Testability        | 9/10   | 14 test files, `pytest >= 8.0`, mypy/ruff in pyproject.toml               |
 
 **Strengths:**
 - **Bare-except reduction** (77%): 27 of 35 blocks replaced with specific exceptions. Programming errors are no longer silently swallowed.
@@ -241,12 +241,12 @@ Effort for modification/improvement. **Phase 1-4 of p11 (Type Hints, Boolean Pre
 
 ### 2.6 Portability · Rating: 7/10 · Acceptable with Limitations
 
-| Sub-characteristic | Rating | Finding                                                          |
-|-------------------|-------:|-----------------------------------------------------------------|
-| Adaptability   |   [6/10]   | Hardcoded `127.0.0.1:1234` and `C:\Users\pskra\.lmstudio` paths  |
-| Installability |    9/10   | `pyproject.toml` + `requirements-dev.txt`                        |
-| Conformance    |    7/10   | Python ≥3.11; OpenAI-compatible + LM Studio-specific             |
-| Replaceability |    7/10   | LM Studio only; adapter layer in `model_manager.py`              |
+| Sub-characteristic | Rating | Finding                                                         |
+| ------------------ | -----: | --------------------------------------------------------------- |
+| Adaptability       | [6/10] | Hardcoded `127.0.0.1:1234` and `C:\Users\pskra\.lmstudio` paths |
+| Installability     | 9/10   | `pyproject.toml` + `requirements-dev.txt`                       |
+| Conformance        | 7/10   | Python ≥3.11; OpenAI-compatible + LM Studio-specific            |
+| Replaceability     | 7/10   | LM Studio only; adapter layer in `model_manager.py`             |
 
 **Strengths:**
 - **`os.path.join`, `Path` usage consistent**.
@@ -261,22 +261,22 @@ Effort for modification/improvement. **Phase 1-4 of p11 (Type Hints, Boolean Pre
 
 ## 3. Consolidated Findings — Priority List
 
-| Prio | Finding | Category | Effort | Status |
-|:----:|------------------------------------------------------|-----------------|--------|------------------------------------|
-| *P1* | *16 `except Exception:` swallow programming errors* | Reliability     | Medium | **DONE (p7): 27/35 cleaned up**    |
-| *P1* | *Registry drift: missing LMS models*                 | Functionality   | Medium | **DONE (p7): 115 entries**         |
-| *P1* | *VERSION suffix `p3` instead of `p7`*                | Maintainability | Trivial | **DONE (p7)**                     |
-| *P1* | *Double-quant bug in model_manager.py:249*           | Reliability     | Trivial | **DONE (p7)**                     |
-| *P1* | *`normalize_model_name` forgets `-gguf` stripping*   | Functionality   | Trivial | **DONE (p7)**                     |
-|  P2  | EXCLUDE_KEYWORDS duplicated in 3 files               | Functionality   | Small   | Open                               |
-|  P2  | `time.sleep(10)` instead of adaptive polling         | Efficiency      | Medium  | Open                               |
-|  P2  | `_infer_num_parallel()` underestimates for MoE       | Functionality   | Small   | Open                               |
-|  P2  | 36 registry entries without `quants`                 | Functionality   | Small   | Open (sync pending)                |
-|  P3  | `locale.setlocale()` not used                        | Usability       | Trivial | Open                               |
-|  P3  | No visual progress bar                               | Usability       | Medium  | Open                               |
-|  P3  | CI/CD pipeline missing                               | Maintainability | Medium  | Open                               |
-|  P4  | `download_real_benchmarks.py` error swallowing       | Reliability     | Small   | Open                               |
-|  P4  | DS-1000 Windows patches not for Linux                | Portability     | Small   | Open                               |
+| Prio | Finding                                             | Category        | Effort  | Status                          |
+| :---: | --------------------------------------------------- | --------------- | ------- | ------------------------------- |
+| *P1* | *16 `except Exception:` swallow programming errors* | Reliability     | Medium  | **DONE (p7): 27/35 cleaned up** |
+| *P1* | *Registry drift: missing LMS models*                | Functionality   | Medium  | **DONE (p7): 115 entries**      |
+| *P1* | *VERSION suffix `p3` instead of `p7`*               | Maintainability | Trivial | **DONE (p7)**                   |
+| *P1* | *Double-quant bug in model_manager.py:249*          | Reliability     | Trivial | **DONE (p7)**                   |
+| *P1* | *`normalize_model_name` forgets `-gguf` stripping*  | Functionality   | Trivial | **DONE (p7)**                   |
+| P2   | EXCLUDE_KEYWORDS duplicated in 3 files              | Functionality   | Small   | Open                            |
+| P2   | `time.sleep(10)` instead of adaptive polling        | Efficiency      | Medium  | Open                            |
+| P2   | `_infer_num_parallel()` underestimates for MoE      | Functionality   | Small   | Open                            |
+| P2   | 36 registry entries without `quants`                | Functionality   | Small   | Open (sync pending)             |
+| P3   | `locale.setlocale()` not used                       | Usability       | Trivial | Open                            |
+| P3   | No visual progress bar                              | Usability       | Medium  | Open                            |
+| P3   | CI/CD pipeline missing                              | Maintainability | Medium  | Open                            |
+| P4   | `download_real_benchmarks.py` error swallowing      | Reliability     | Small   | Open                            |
+| P4   | DS-1000 Windows patches not for Linux               | Portability     | Small   | Open                            |
 
 ---
 
@@ -309,21 +309,21 @@ Effort for modification/improvement. **Phase 1-4 of p11 (Type Hints, Boolean Pre
 ## 5. Statistical Comparison
 
 | Metric                         | Review   | Review   | Delta   |
-|                                |2026-07-20|2026-07-27|         |
-|--------------------------------|----------|----------|---------|
-|*Overall rating (ISO/IEC 9126)* | 7.75/10  | *8.5/10* | *+0.75* |
-| Functionality                  |  8/10    |  8.5/10  |  +0.5   |
-| Reliability                    |  8/10    |  9/10    |  +1.0   |
-| Usability                      |  7/10    |  7/10    |    —    |
-| Efficiency                     |  8/10    |  8/10    |    —    |
-| Maintainability                |  8.5/10  |  9/10    | +0.5    |
-| Portability                    |  7/10    |  7/10    |    —    |
-| Tests (green)                  | 547      |  *564*   | +17     |
-| Registry entries               | 108      |  *115*   |  +7     |
-| Core LOC (9 scripts)           | 8,274    |*9,790*   | +1,516  |
-| Test LOC (14 files)            |    —     |*5,566*   |    —    |
-| Bare `except Exception:`       |  16+     |   *6*    |  -10 (↓63%) |
-| Code files with reduction      |    —     | 8 files  |   —     |  
+|                                 | 2026-07-20 | 2026-07-27 |            |
+| ------------------------------- | ---------- | ---------- | ---------- |
+| *Overall rating (ISO/IEC 9126)* | 7.75/10    | *8.5/10*   | *+0.75*    |
+| Functionality                   | 8/10       | 8.5/10     | +0.5       |
+| Reliability                     | 8/10       | 9/10       | +1.0       |
+| Usability                       | 7/10       | 7/10       | —          |
+| Efficiency                      | 8/10       | 8/10       | —          |
+| Maintainability                 | 8.5/10     | 9/10       | +0.5       |
+| Portability                     | 7/10       | 7/10       | —          |
+| Tests (green)                   | 547        | *564*      | +17        |
+| Registry entries                | 108        | *115*      | +7         |
+| Core LOC (9 scripts)            | 8,274      | *9,790*    | +1,516     |
+| Test LOC (14 files)             | —          | *5,566*    | —          |
+| Bare `except Exception:`        | 16+        | *6*        | -10 (↓63%) |
+| Code files with reduction       | —          | 8 files    | —          |
 
 ---
 
@@ -331,15 +331,15 @@ Effort for modification/improvement. **Phase 1-4 of p11 (Type Hints, Boolean Pre
 
 **Overall rating according to ISO/IEC 9126 (subjective, 0-10):**
 
-| Characteristic | Rating |
-|----------------|-------:|
-| Functionality   |    8.5    |
-| Reliability     |    9      |
-| Usability       |    7      |
-| Efficiency      |    8      |
-| Maintainability |    9      |
-| Portability     |    7      |
-| *Overall*       |   *8.5*   |
+| Characteristic  | Rating |
+| --------------- | -----: |
+| Functionality   | 8.5    |
+| Reliability     | 9      |
+| Usability       | 7      |
+| Efficiency      | 8      |
+| Maintainability | 9      |
+| Portability     | 7      |
+| *Overall*       | *8.5*  |
 
 **Comment:** The code has improved significantly since the last review (7.75/10).
 The three main fixes in this review — bare-except reduction (77%), registry enhancements (115 entries), and GPT-OSS/Intel-AutoRound integration —

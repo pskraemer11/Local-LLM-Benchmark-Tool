@@ -31,13 +31,13 @@ only for the preceding download of test data.
 
 ## 1. HumanEval+ (Coding)
 
-| Field       | Value                                                            |
-|-------------|------------------------------------------------------------------|
-| JSONL file  | `simple_evals/coding.jsonl`                                      |
-| Tasks       | 164 Python functions                                             |
-| Selection   | **Min(SampleSize, 80)** randomly from `get_human_eval_plus()`    |
-| Type        | Code generation + test execution                                 |
-| Evaluation  | `exec()` + `check()` assertions + differential test (plus_input) |
+| Field      | Value                                                            |
+| ---------- | ---------------------------------------------------------------- |
+| JSONL file | `simple_evals/coding.jsonl`                                      |
+| Tasks      | 164 Python functions                                             |
+| Selection  | **Min(SampleSize, 80)** randomly from `get_human_eval_plus()`    |
+| Type       | Code generation + test execution                                 |
+| Evaluation | `exec()` + `check()` assertions + differential test (plus_input) |
 
 **Sources:**
 
@@ -58,27 +58,27 @@ only for the preceding download of test data.
 
 ## 2. MathQA (Mathematics, Multiple Choice)
 
-| Field       | Value                                                  |
-|-------------|--------------------------------------------------------|
-| JSONL file  | `simple_evals/math.jsonl`                              |
-| Tasks       | 2985 (test split from 37K total)                       |
-| Selection   | **ceil(SampleSize/6) per category** from 6 categories  |
-| Type        | Multiple Choice (A–E)                                  |
-| Evaluation  | `evaluate_answer()` (single-letter regex)              |
+| Field      | Value                                                 |
+| ---------- | ----------------------------------------------------- |
+| JSONL file | `simple_evals/math.jsonl`                             |
+| Tasks      | 2985 (test split from 37K total)                      |
+| Selection  | **ceil(SampleSize/6) per category** from 6 categories |
+| Type       | Multiple Choice (A–E)                                 |
+| Evaluation | `evaluate_answer()` (single-letter regex)             |
 
 **Source:** GitHub `math-qa.github.io`
 `https://math-qa.github.io/math-QA/data/MathQA.zip`
 Contains a ZIP with a JSON file (`MathQA.json`) comprising 37,245 tasks in 6 categories.
 
 **6 Categories:**
-| Category     | Share   | Examples                               |
-|--------------|---------|----------------------------------------|
-| `gain`       |  ~4.2%  | Profit/loss calculation                |
-| `general`    | ~30.2%  | General word problems                  |
-| `geometry`   |  ~7.5%  | Geometry (area, volume, angles)        |
-| `other`      | ~26.7%  | Miscellaneous                          |
-| `physics`    |  ~6.7%  | Physical calculations (force, energy)  |
-| `probability`| ~24.7%  | Probability theory                     |
+| Category      | Share  | Examples                              |
+| ------------- | ------ | ------------------------------------- |
+| `gain`        | ~4.2%  | Profit/loss calculation               |
+| `general`     | ~30.2% | General word problems                 |
+| `geometry`    | ~7.5%  | Geometry (area, volume, angles)       |
+| `other`       | ~26.7% | Miscellaneous                         |
+| `physics`     | ~6.7%  | Physical calculations (force, energy) |
+| `probability` | ~24.7% | Probability theory                    |
 
 **Reference:** Amini et al., "MathQA: Towards Interpretable Math Word Problem Solving with Operation-Based Formalisms", NAACL 2019
 
@@ -86,13 +86,13 @@ Contains a ZIP with a JSON file (`MathQA.json`) comprising 37,245 tasks in 6 cat
 
 ## 3. MBPP+ (Algorithms)
 
-| Field       | Value                                                           |
-|-------------|-----------------------------------------------------------------|
-| JSONL file  | `simple_evals/algorithmic.jsonl`                                |
-| Tasks       | 378                                                             |
-| Selection   | **Min(SampleSize, 378)** randomly from GitHub Release JSONL     |
-| Type        | Code generation + differential test                             |
-| Evaluation  | `exec()` + `assertion` strings + `plus_input` differential test |
+| Field      | Value                                                           |
+| ---------- | --------------------------------------------------------------- |
+| JSONL file | `simple_evals/algorithmic.jsonl`                                |
+| Tasks      | 378                                                             |
+| Selection  | **Min(SampleSize, 378)** randomly from GitHub Release JSONL     |
+| Type       | Code generation + differential test                             |
+| Evaluation | `exec()` + `assertion` strings + `plus_input` differential test |
 
 **Source:** evalplus GitHub Release v0.2.0
 `https://github.com/evalplus/mbppplus_release/releases/download/v0.2.0/MbppPlus.jsonl.gz`
@@ -104,11 +104,11 @@ Liu et al., "HumanEval+ and MBPP+: Extended Benchmarks", NeurIPS 2023
 
 ## 4. DS1000 (Data Science)
 
-| Field       | Value                                                      |
-|-------------|------------------------------------------------------------|
-| JSONL file  | `simple_evals/data_science.jsonl`                          |
-| Tasks       | ~500                                                       |
-| Selection   | **ceil(SampleSize/5) per library** randomly from 5 libraries:
+| Field      | Value                                                         |
+| ---------- | ------------------------------------------------------------- |
+| JSONL file | `simple_evals/data_science.jsonl`                             |
+| Tasks      | ~500                                                          |
+| Selection  | **ceil(SampleSize/5) per library** randomly from 5 libraries: |
                   Matplotlib, Numpy, Pandas, Scipy, Sklearn. Pytorch and Tensorflow are skipped (not installed) |
 | Type        | Code generation with setup code                            |
 | Evaluation  | Namespace comparison: `reference_code` vs. generated code  |
@@ -125,13 +125,13 @@ Liu et al., "HumanEval+ and MBPP+: Extended Benchmarks", NeurIPS 2023
 
 ## 5. CoderEval (Coding, self-contained + slib_runnable) – NEW in v10
 
-| Field       | Value                                                   |
-|-------------|---------------------------------------------------------|
-| JSONL file  | `simple_evals/coder_eval.jsonl`                         |
-| Tasks       | ~138 (self_contained + slib_runnable)                   |
-| Selection   | **Min(SampleSize, 138)** randomly                       |
-| Type        | Code generation + assertion tests                       |
-| Evaluation  | `exec_sandboxed()` with `exec()` + `check()` assertions |
+| Field      | Value                                                   |
+| ---------- | ------------------------------------------------------- |
+| JSONL file | `simple_evals/coder_eval.jsonl`                         |
+| Tasks      | ~138 (self_contained + slib_runnable)                   |
+| Selection  | **Min(SampleSize, 138)** randomly                       |
+| Type       | Code generation + assertion tests                       |
+| Evaluation | `exec_sandboxed()` with `exec()` + `check()` assertions |
 
 **Source:** Manually curated for this project. Tasks are divided into two categories:
 - **self_contained:** Code runs entirely with embedded test data
@@ -146,7 +146,7 @@ Liu et al., "HumanEval+ and MBPP+: Extended Benchmarks", NeurIPS 2023
 The following benchmarks are executed via the `lm_eval` CLI (no longer via custom script):
 
 | Task                 | Benchmark           | Description                        |
-|----------------------|---------------------|------------------------------------|
+| -------------------- | ------------------- | ---------------------------------- |
 | `mathqa_gen`         | MathQA              | Multiple Choice A-E, 604 tasks     |
 | `arc_challenge_chat` | ARC-Challenge       | Multiple Choice, 259 tasks         |
 | `hellaswag_gen`      | HellaSwag           | Multiple Choice, 10042 tasks       |
@@ -161,13 +161,13 @@ The following benchmarks are executed via the `lm_eval` CLI (no longer via custo
 
 ## 7. Agentic (Tool Evaluation) – NEW in v10
 
-| Field       | Value                                                                        |
-|-------------|------------------------------------------------------------------------------|
-| CLI         | `tool_eval_bench`                                                            |
-| Tasks       | 69 scenarios (TC-01 to TC-69)                                                |
-| Selection   | Random selection via `TOOL_EVAL_SCENARIO_IDS` from `src/benchmark_config.py` |
-| Type        | Multi-turn tool calling                                                      |
-| Evaluation  | `final_score` (0-100) from JSON envelope, normalized to 0-1                  |
+| Field      | Value                                                                        |
+| ---------- | ---------------------------------------------------------------------------- |
+| CLI        | `tool_eval_bench`                                                            |
+| Tasks      | 69 scenarios (TC-01 to TC-69)                                                |
+| Selection  | Random selection via `TOOL_EVAL_SCENARIO_IDS` from `src/benchmark_config.py` |
+| Type       | Multi-turn tool calling                                                      |
+| Evaluation | `final_score` (0-100) from JSON envelope, normalized to 0-1                  |
 
 **Source:** HuggingFace `aisafety-ai/tool_eval_bench`
 
@@ -177,14 +177,14 @@ The following benchmarks are executed via the `lm_eval` CLI (no longer via custo
 
 ## 8a. IFEval (Instruction Following) – NEW in v10
 
-| Field        | Value                                                                                              |
-|-------------|-----------------------------------------------------------------------------------------------------|
-| CLI         | `lm_eval`                                                                                           |
-| Task        | `ifeval`                                                                                            |
-| Selection   | via `--limit` with `SampleSize` (subsampling by lm-evaluation-harness)                              |
-| Type        | Instruction-following / output adherence                                                            |
-| Evaluation  | Result metrics from `lm_eval` `results_*.json` (pipeline uses v13 typically `inst_level_loose_acc`) |
-| Dependency  | `langdetect` (error-prone when package missing; imported at module level by `lm_eval/tasks/ifeval`) |
+| Field      | Value                                                                                               |
+| ---------- | --------------------------------------------------------------------------------------------------- |
+| CLI        | `lm_eval`                                                                                           |
+| Task       | `ifeval`                                                                                            |
+| Selection  | via `--limit` with `SampleSize` (subsampling by lm-evaluation-harness)                              |
+| Type       | Instruction-following / output adherence                                                            |
+| Evaluation | Result metrics from `lm_eval` `results_*.json` (pipeline uses v13 typically `inst_level_loose_acc`) |
+| Dependency | `langdetect` (error-prone when package missing; imported at module level by `lm_eval/tasks/ifeval`) |
 
 **Integration:** Runs via `src/run_benchmarks.py` (pipeline "LM-Eval").
 
@@ -192,14 +192,14 @@ The following benchmarks are executed via the `lm_eval` CLI (no longer via custo
 
 ## 8b. MATH-500 – NEW in v10
 
-| Field        | Value                                                              |
-|-------------|---------------------------------------------------------------------|
-| CLI         | `lm_eval`                                                           |
-| Task        | `minerva_math500`                                                   |
-| Selection   | via `--limit` with `SampleSize`                                     |
-| Type        | Math problem solving (open response)                                |
-| Evaluation  | `exact_match` via `lm_eval` results (parsed from `results_*.json`)  |
-| Timeout     | Increased via `timeout_mult = 3`                                    |
+| Field      | Value                                                              |
+| ---------- | ------------------------------------------------------------------ |
+| CLI        | `lm_eval`                                                          |
+| Task       | `minerva_math500`                                                  |
+| Selection  | via `--limit` with `SampleSize`                                    |
+| Type       | Math problem solving (open response)                               |
+| Evaluation | `exact_match` via `lm_eval` results (parsed from `results_*.json`) |
+| Timeout    | Increased via `timeout_mult = 3`                                   |
 
 **Integration:** Runs via `src/run_benchmarks.py` (pipeline "LM-Eval").
 
@@ -207,28 +207,28 @@ The following benchmarks are executed via the `lm_eval` CLI (no longer via custo
 
 ## 8. PandasEval (Pandas Coding) – DEPRECATED since v10
 
-| Field       | Value                                                               |
-|-------------|---------------------------------------------------------------------|
-| JSONL file  | `simple_evals/pandas_eval.jsonl`                                    |
-| Tasks       | 10 curated Pandas operations                                        |
-| Selection   | All 10 (fixed curation, no random selection)                        |
-| Type        | Code generation (function completion) + assertion tests             |
-| Evaluation  | `evaluate_code()` with `setup_code` (test DataFrames via `exec()`)  |
+| Field      | Value                                                              |
+| ---------- | ------------------------------------------------------------------ |
+| JSONL file | `simple_evals/pandas_eval.jsonl`                                   |
+| Tasks      | 10 curated Pandas operations                                       |
+| Selection  | All 10 (fixed curation, no random selection)                       |
+| Type       | Code generation (function completion) + assertion tests            |
+| Evaluation | `evaluate_code()` with `setup_code` (test DataFrames via `exec()`) |
 
 **Source:** Manually curated for this project. Each task trains a specific Pandas operation:
 
-| No | Function         | Operation           | Description                                     |
-|----|------------------|---------------------|-------------------------------------------------|
-|  1 | `crosstab`       | `pd.crosstab()`     | Cross-tabulation from two categorical columns   |
-|  2 | `explode_df`     | `df.explode()`      | Split lists into rows                           |
-|  3 | `pipe_df`        | `df.pipe()`         | Chaining multiple transformations               |
-|  4 | `compare_df`     | `df.compare()`      | Differences between two DataFrames              |
-|  5 | `factorize_col`  | `pd.factorize()`    | Encode categorical values as integer codes      |
-|  6 | `qcut_col`       | `pd.qcut()`         | Quantile-based binning                          |
-|  7 | `assign_df`      | `df.assign()`       | New columns based on conditions                 |
-|  8 | `cut_col`        | `pd.cut()`          | Bin value range into intervals                  |
-|  9 | `eval_df`        | `df.eval()`         | Column-wise formula evaluation                  |
-| 10 | `between_filter` | `df[col].between()` | Filter by value range                           |
+| No  | Function         | Operation           | Description                                   |
+| --- | ---------------- | ------------------- | --------------------------------------------- |
+| 1   | `crosstab`       | `pd.crosstab()`     | Cross-tabulation from two categorical columns |
+| 2   | `explode_df`     | `df.explode()`      | Split lists into rows                         |
+| 3   | `pipe_df`        | `df.pipe()`         | Chaining multiple transformations             |
+| 4   | `compare_df`     | `df.compare()`      | Differences between two DataFrames            |
+| 5   | `factorize_col`  | `pd.factorize()`    | Encode categorical values as integer codes    |
+| 6   | `qcut_col`       | `pd.qcut()`         | Quantile-based binning                        |
+| 7   | `assign_df`      | `df.assign()`       | New columns based on conditions               |
+| 8   | `cut_col`        | `pd.cut()`          | Bin value range into intervals                |
+| 9   | `eval_df`        | `df.eval()`         | Column-wise formula evaluation                |
+| 10  | `between_filter` | `df[col].between()` | Filter by value range                         |
 
 **Overlap with DS1000:** Checked – 0-3 occurrences per operation in the 291 DS1000 Pandas tasks (negligible).
 
@@ -238,13 +238,13 @@ The following benchmarks are executed via the `lm_eval` CLI (no longer via custo
 
 ## 9. BBH (Reasoning) – DEPRECATED since v21
 
-| Field       | Value                                                            |
-|-------------|------------------------------------------------------------------|
-| JSONL file  | `simple_evals/reasoning.jsonl`                                   |
-| Tasks       | 18 subsets                                                       |
-| Selection   | **ceil(SampleSize/18) per subset** randomly, from all 18 subsets |
-| Type        | Multiple Choice / text answer                                    |
-| Evaluation  | `evaluate_answer()`                                              |
+| Field      | Value                                                            |
+| ---------- | ---------------------------------------------------------------- |
+| JSONL file | `simple_evals/reasoning.jsonl`                                   |
+| Tasks      | 18 subsets                                                       |
+| Selection  | **ceil(SampleSize/18) per subset** randomly, from all 18 subsets |
+| Type       | Multiple Choice / text answer                                    |
+| Evaluation | `evaluate_answer()`                                              |
 
 **Source:** GitHub Raw (suzgunmirac/BIG-Bench-Hard)
 `https://raw.githubusercontent.com/suzgunmirac/BIG-Bench-Hard/main/bbh/{subset}.json`
@@ -259,11 +259,11 @@ Fallback: `datasets.load_dataset("Joschka/big_bench_hard", …)`
 
 ## 10. MMLU (Language Understanding) – DEPRECATED since v21
 
-| Field       | Value                                            |
-|-------------|--------------------------------------------------|
-| JSONL file  | `simple_evals/understanding.jsonl`               |
-| Tasks       | 57 subject areas ~14000 questions                |
-| Selection   | **ceil(SampleSize/57) per subject** randomly     |
+| Field      | Value                                        |
+| ---------- | -------------------------------------------- |
+| JSONL file | `simple_evals/understanding.jsonl`           |
+| Tasks      | 57 subject areas ~14000 questions            |
+| Selection  | **ceil(SampleSize/57) per subject** randomly |
                   (Seed=42). No group weighting – see Appendix A |
 | Type        | Multiple Choice (A–D)                            |
 | Evaluation  | `evaluate_answer()` (single-letter regex)        |
@@ -277,15 +277,15 @@ Fallback: `datasets.load_dataset("Joschka/big_bench_hard", …)`
 
 ## 11. MMLU-Pro (Complex Tasks) – DEPRECATED since v21
 
-| Field       | Value                                                    |
-|-------------|----------------------------------------------------------|
-| JSONL file  | `simple_evals/complex_tasks.jsonl`                       |
-| Tasks       | ~12000                                                   |
-| Selection   | **Min(SampleSize, 12000)** randomly from test split;     |
-|             |   if categories exist,                                   |
-|             | **ceil(SampleSize/NumCategories)** is drawn per category |
-| Type        | Multiple Choice (A–D)                                    |
-| Evaluation  | `evaluate_answer()` (single-letter regex)                |
+| Field      | Value                                                    |
+| ---------- | -------------------------------------------------------- |
+| JSONL file | `simple_evals/complex_tasks.jsonl`                       |
+| Tasks      | ~12000                                                   |
+| Selection  | **Min(SampleSize, 12000)** randomly from test split;     |
+|            | if categories exist,                                     |
+|            | **ceil(SampleSize/NumCategories)** is drawn per category |
+| Type       | Multiple Choice (A–D)                                    |
+| Evaluation | `evaluate_answer()` (single-letter regex)                |
 
 **Source:** HuggingFace `TIGER-Lab/MMLU-Pro`
 `datasets.load_dataset("TIGER-Lab/MMLU-Pro", split="test")`
@@ -298,13 +298,13 @@ Fallback: `datasets.load_dataset("Joschka/big_bench_hard", …)`
 
 ## 12. ARC-Challenge (Science Reasoning) – DEPRECATED since v21
 
-| Field       | Value                                     |
-|-------------|-------------------------------------------|
-| JSONL file  | `simple_evals/science.jsonl`              |
-| Tasks       | 1172 (Challenge split)                    |
-| Selection   | **Min(SampleSize, 1172)** randomly from Challenge test split |
-| Type        | Multiple Choice (A–D)                     |
-| Evaluation  | `evaluate_answer()` (single-letter regex) |
+| Field      | Value                                                        |
+| ---------- | ------------------------------------------------------------ |
+| JSONL file | `simple_evals/science.jsonl`                                 |
+| Tasks      | 1172 (Challenge split)                                       |
+| Selection  | **Min(SampleSize, 1172)** randomly from Challenge test split |
+| Type       | Multiple Choice (A–D)                                        |
+| Evaluation | `evaluate_answer()` (single-letter regex)                    |
 
 **Source (primary):** HuggingFace `allenai/ai2_arc`
 `datasets.load_dataset("allenai/ai2_arc", "ARC-Challenge", split="test")`
@@ -320,13 +320,13 @@ Fallback: `datasets.load_dataset("Joschka/big_bench_hard", …)`
 
 ## 13. TruthfulQA (Factual Truth) – DEPRECATED since v21
 
-| Field       | Value                                     |
-|-------------|-------------------------------------------|
-| JSONL file  | `simple_evals/truthfulness.jsonl`         |
-| Tasks       | 817 (MC1)                                 |
-| Selection   | **Min(SampleSize, 817)** randomly from validation split with valid `mc1_targets` label |
-| Type        | Multiple Choice (A–D)                     |
-| Evaluation  | `evaluate_answer()` (single-letter regex) |
+| Field      | Value                                                                                  |
+| ---------- | -------------------------------------------------------------------------------------- |
+| JSONL file | `simple_evals/truthfulness.jsonl`                                                      |
+| Tasks      | 817 (MC1)                                                                              |
+| Selection  | **Min(SampleSize, 817)** randomly from validation split with valid `mc1_targets` label |
+| Type       | Multiple Choice (A–D)                                                                  |
+| Evaluation | `evaluate_answer()` (single-letter regex)                                              |
 
 **Source:** HuggingFace `truthfulqa/truthful_qa`
 `datasets.load_dataset("truthfulqa/truthful_qa", "multiple_choice", split="validation")`
@@ -340,13 +340,13 @@ Uses `mc1_targets` (exactly one correct answer).
 
 ## 14. HellaSwag (Commonsense Reasoning) – DEPRECATED since v21
 
-| Field       | Value                                     |
-|-------------|-------------------------------------------|
-| JSONL file  | `simple_evals/commonsense.jsonl`          |
-| Tasks       | 10042 (validation)                        |
-| Selection   | **Min(SampleSize, 10042)** randomly from validation split with valid `label` (0–3) |
-| Type        | Multiple Choice (A–D)                     |
-| Evaluation  | `evaluate_answer()` (single-letter regex) |
+| Field      | Value                                                                              |
+| ---------- | ---------------------------------------------------------------------------------- |
+| JSONL file | `simple_evals/commonsense.jsonl`                                                   |
+| Tasks      | 10042 (validation)                                                                 |
+| Selection  | **Min(SampleSize, 10042)** randomly from validation split with valid `label` (0–3) |
+| Type       | Multiple Choice (A–D)                                                              |
+| Evaluation | `evaluate_answer()` (single-letter regex)                                          |
 
 **Source:** HuggingFace `Rowan/hellaswag`
 `datasets.load_dataset("Rowan/hellaswag", split="validation")`
@@ -362,20 +362,20 @@ Ending with `label` 0–3 is mapped to A–D.
 
 The following table shows which packages are **mandatory** and which are **optional**.
 
-| Package       | Required for test             | Source download via HTTP | Required |
-|---------------|-------------------------------|--------------------------|----------|
-| `requests`    | HuggingFace API, GitHub Raw   | Yes                      | **Yes**  |
-| `datasets`    | HuggingFace fallback          | No (optional fallback)   | Optional |
-| `numpy`       | DS1000 evaluation             | –                        | Optional |
-| `pandas`      | DS1000 + CoderEval evaluation | –                        | Optional |
-| `matplotlib`  | DS1000 evaluation             | –                        | Optional |
-| `seaborn`     | DS1000 evaluation             | –                        | Optional |
-| `scipy`       | DS1000 evaluation             | –                        | Optional |
-| `scikit-learn`| DS1000 evaluation             | –                        | Optional |
-| `xgboost`     | DS1000 evaluation             | –                        | Optional |
-| `statsmodels` | DS1000 evaluation             | –                        | Optional |
-| `psutil`      | CPU/RAM monitoring            | –                        | Optional |
-| `pynvml`      | GPU/VRAM monitoring           | –                        | Optional |
+| Package        | Required for test             | Source download via HTTP | Required |
+| -------------- | ----------------------------- | ------------------------ | -------- |
+| `requests`     | HuggingFace API, GitHub Raw   | Yes                      | **Yes**  |
+| `datasets`     | HuggingFace fallback          | No (optional fallback)   | Optional |
+| `numpy`        | DS1000 evaluation             | –                        | Optional |
+| `pandas`       | DS1000 + CoderEval evaluation | –                        | Optional |
+| `matplotlib`   | DS1000 evaluation             | –                        | Optional |
+| `seaborn`      | DS1000 evaluation             | –                        | Optional |
+| `scipy`        | DS1000 evaluation             | –                        | Optional |
+| `scikit-learn` | DS1000 evaluation             | –                        | Optional |
+| `xgboost`      | DS1000 evaluation             | –                        | Optional |
+| `statsmodels`  | DS1000 evaluation             | –                        | Optional |
+| `psutil`       | CPU/RAM monitoring            | –                        | Optional |
+| `pynvml`       | GPU/VRAM monitoring           | –                        | Optional |
 
 **Note:** `evalplus` and `human_eval` are **not** required – all coding data
 is loaded via HTTP from GitHub. LM-Eval tasks are executed via the `lm_eval` CLI.
@@ -425,21 +425,21 @@ subject** are randomly selected (Seed 42). With default SampleSize=50 this yield
 1 per subject → 57 tasks. The group breakdown below is for display purposes
 **only**, **not** for selection – each subject is equally weighted.
 
-| No | Group                                            | Subjects |
-|----|--------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------|
-|  1 | **Mathematics & Logic**                          | `abstract_algebra`, `college_mathematics`, `elementary_mathematics`, `high_school_mathematics`, `high_school_statistics`,      |
-|                                                      |    `formal_logic`, `logical_fallacies`                                                                                         |
-|  2 | **Physics & Astronomy**                          | `astronomy`, `college_physics`, `conceptual_physics`, `electrical_engineering`, `high_school_physics`                          |
-|  3 | **Chemistry & Biology**                          | `college_chemistry`, `high_school_chemistry`, `anatomy`, `college_biology`, `high_school_biology`, `nutrition`, `virology`     |
-|  4 | **Medicine & Health**                            | `clinical_knowledge`, `college_medicine`, `human_aging`, `human_sexuality`, `medical_genetics`, `professional_medicine`        |
-|  5 | **Computer Science**                             | `college_computer_science`, `computer_security`, `high_school_computer_science`, `machine_learning`                            |
-|  6 | **Psychology & Sociology**                       | `high_school_psychology`, `professional_psychology`, `sociology`, `public_relations`                                           |
-|  7 | **History & Politics**                           | `high_school_european_history`, `high_school_us_history`, `high_school_world_history`, `prehistory`,                           |
-|                                                      |    `high_school_government_and_politics`, `us_foreign_policy`, `security_studies`                                              |
-|  8 | **Economics & Management**                       | `econometrics`, `high_school_macroeconomics`, `high_school_microeconomics`, `management`, `marketing`,                         |
-|                                                      |    `professional_accounting`, `business_ethics`                                                                                |
-|  9 | **Philosophy, Ethics & Law**                     | `moral_disputes`, `moral_scenarios`, `philosophy`, `world_religions`, `international_law`, `jurisprudence`, `professional_law` |
-| 10 | **Geography, General Knowledge & Miscellaneous** | `high_school_geography`, `global_facts`, `miscellaneous` |
+| No  | Group                                                                          | Subjects                                                                                                                       |
+| --- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | **Mathematics & Logic**                                                        | `abstract_algebra`, `college_mathematics`, `elementary_mathematics`, `high_school_mathematics`, `high_school_statistics`,      |
+|     | `formal_logic`, `logical_fallacies`                                            |                                                                                                                                |
+| 2   | **Physics & Astronomy**                                                        | `astronomy`, `college_physics`, `conceptual_physics`, `electrical_engineering`, `high_school_physics`                          |
+| 3   | **Chemistry & Biology**                                                        | `college_chemistry`, `high_school_chemistry`, `anatomy`, `college_biology`, `high_school_biology`, `nutrition`, `virology`     |
+| 4   | **Medicine & Health**                                                          | `clinical_knowledge`, `college_medicine`, `human_aging`, `human_sexuality`, `medical_genetics`, `professional_medicine`        |
+| 5   | **Computer Science**                                                           | `college_computer_science`, `computer_security`, `high_school_computer_science`, `machine_learning`                            |
+| 6   | **Psychology & Sociology**                                                     | `high_school_psychology`, `professional_psychology`, `sociology`, `public_relations`                                           |
+| 7   | **History & Politics**                                                         | `high_school_european_history`, `high_school_us_history`, `high_school_world_history`, `prehistory`,                           |
+|     | `high_school_government_and_politics`, `us_foreign_policy`, `security_studies` |                                                                                                                                |
+| 8   | **Economics & Management**                                                     | `econometrics`, `high_school_macroeconomics`, `high_school_microeconomics`, `management`, `marketing`,                         |
+|     | `professional_accounting`, `business_ethics`                                   |                                                                                                                                |
+| 9   | **Philosophy, Ethics & Law**                                                   | `moral_disputes`, `moral_scenarios`, `philosophy`, `world_religions`, `international_law`, `jurisprudence`, `professional_law` |
+| 10  | **Geography, General Knowledge & Miscellaneous**                               | `high_school_geography`, `global_facts`, `miscellaneous`                                                                       |
 
 ---
 
@@ -448,26 +448,26 @@ subject** are randomly selected (Seed 42). With default SampleSize=50 this yield
 BBH (BIG-Bench Hard) consists of 18 subsets that are considered particularly challenging for LLMs.
 From each subset, **ceil(SampleSize/18)** tasks are randomly drawn (Seed=42).
 
-| No | Subset                            | Description |
-|----|-----------------------------------|-------------|
-|  1 | `boolean_expressions`             | Evaluation of boolean expressions (e.g. `(not True and False) or True`) |
-|  2 | `causal_judgment`                 | Causal reasoning from short stories |
-|  3 | `date_understanding`              | Date logic (e.g. "What day is 3 days after the 2nd Tuesday of March?") |
-|  4 | `disambiguation_qa`               | Resolving ambiguous questions through context |
-|  5 | `formal_fallacies`                | Recognizing formal fallacies (e.g. "If A then B, not B → not A") |
-|  6 | `geometric_shapes`                | Properties of geometric shapes |
-|  7 | `hyperbaton`                      | Grammatically correct sentence structure (adjective order) |
-|  8 | `logical_deduction_three_objects` | Logical deduction with 3 objects and properties |
-|  9 | `navigate`                        | Navigation in a 2D grid based on step-by-step instructions |
-| 10 | `object_counting`                | Determining the number of similar objects in a scene |
-| 11 | `penguins_in_a_table`            | Logical inferences from a table of penguin properties |
-| 12 | `reasoning_about_colored_objects`| Reasoning about the position and color of objects |
-| 13 | `ruin_names`                     | Guessing the original name of a "ruined" LLM name |
-| 14 | `snarks`                         | Sarcasm detection |
-| 15 | `temporal_sequences`             | Understanding temporal sequences and orderings |
-| 16 | `tracking_shuffled_objects_three_objects` | Tracking the position of 3 objects after repeated shuffling |
-| 17 | `web_of_lies`                    | Tracking truth values in a network of statements |
-| 18 | `word_sorting`                   | Sorting words by various criteria |
+| No  | Subset                                    | Description                                                             |
+| --- | ----------------------------------------- | ----------------------------------------------------------------------- |
+| 1   | `boolean_expressions`                     | Evaluation of boolean expressions (e.g. `(not True and False) or True`) |
+| 2   | `causal_judgment`                         | Causal reasoning from short stories                                     |
+| 3   | `date_understanding`                      | Date logic (e.g. "What day is 3 days after the 2nd Tuesday of March?")  |
+| 4   | `disambiguation_qa`                       | Resolving ambiguous questions through context                           |
+| 5   | `formal_fallacies`                        | Recognizing formal fallacies (e.g. "If A then B, not B → not A")        |
+| 6   | `geometric_shapes`                        | Properties of geometric shapes                                          |
+| 7   | `hyperbaton`                              | Grammatically correct sentence structure (adjective order)              |
+| 8   | `logical_deduction_three_objects`         | Logical deduction with 3 objects and properties                         |
+| 9   | `navigate`                                | Navigation in a 2D grid based on step-by-step instructions              |
+| 10  | `object_counting`                         | Determining the number of similar objects in a scene                    |
+| 11  | `penguins_in_a_table`                     | Logical inferences from a table of penguin properties                   |
+| 12  | `reasoning_about_colored_objects`         | Reasoning about the position and color of objects                       |
+| 13  | `ruin_names`                              | Guessing the original name of a "ruined" LLM name                       |
+| 14  | `snarks`                                  | Sarcasm detection                                                       |
+| 15  | `temporal_sequences`                      | Understanding temporal sequences and orderings                          |
+| 16  | `tracking_shuffled_objects_three_objects` | Tracking the position of 3 objects after repeated shuffling             |
+| 17  | `web_of_lies`                             | Tracking truth values in a network of statements                        |
+| 18  | `word_sorting`                            | Sorting words by various criteria                                       |
 
 ---
 
@@ -476,9 +476,9 @@ From each subset, **ceil(SampleSize/18)** tasks are randomly drawn (Seed=42).
 The ARC dataset (AI2 Reasoning Challenge) has two difficulty levels:
 
 | Split             | Questions | Difficulty | Typical tasks                                                                                |
-|-------------------|-----------|------------|----------------------------------------------------------------------------------------------|
-| **ARC-Easy**      |    5197   | Easy       | Question-answer with pure recall knowledge (e.g. "How many bones does the human body have?") |
-| **ARC-Challenge** |    2590   | Hard       | Solvable only by combining multiple knowledge facts                                          |
+| ----------------- | --------- | ---------- | -------------------------------------------------------------------------------------------- |
+| **ARC-Easy**      | 5197      | Easy       | Question-answer with pure recall knowledge (e.g. "How many bones does the human body have?") |
+| **ARC-Challenge** | 2590      | Hard       | Solvable only by combining multiple knowledge facts                                          |
 
 We use exclusively **ARC-Challenge** (test split), since Easy is too trivial for modern LLMs.
 
@@ -489,8 +489,8 @@ We use exclusively **ARC-Challenge** (test split), since Easy is too trivial for
 TruthfulQA tests the tendency of LLMs to repeat false statements ("hallucinations").
 There are two evaluation formats:
 
-| Format                      |   Meaning                                                                                                                        | Selection                      |
-|-----------------------------|----------------------------------------------------------------------------------------------------------------------------------|--------------------------------|
+| Format                      | Meaning                                                                                                                          | Selection                      |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
 | **MC1** (Multiple Choice 1) | **Exactly one** answer is correct. The label field contains a list with exactly one `1` (correct) and otherwise `0` (incorrect). | Used – unambiguously evaluable |
 | **MC2** (Multiple Choice 2) | **Multiple** answers can be correct. Evaluation is done via probabilities (Multiple True).                                       | Not used – complex evaluation  |
 
@@ -504,11 +504,11 @@ Each HellaSwag task consists of a context (situation) and 4 possible endings.
 The `label` field indicates which ending is correct:
 
 | Label | Answer | Meaning                      |
-|-------|--------|------------------------------|
-| `"0"` |   A    | The first ending is correct  |
-| `"1"` |   B    | The second ending is correct |
-| `"2"` |   C    | The third ending is correct  |
-| `"3"` |   D    | The fourth ending is correct |
+| ----- | ------ | ---------------------------- |
+| `"0"` | A      | The first ending is correct  |
+| `"1"` | B      | The second ending is correct |
+| `"2"` | C      | The third ending is correct  |
+| `"3"` | D      | The fourth ending is correct |
 
 Tasks with `label` outside 0–3 or an empty label are skipped.
 The 4 endings come from a crowdsourcing study: three endings are human-written

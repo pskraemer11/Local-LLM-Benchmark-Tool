@@ -7,16 +7,16 @@
 
 ## Overall Picture
 
-| File | Lines | Purpose | Maturity |
-|------|------:|------|------|
-| `run_benchmarks.py` | 1,287 | Launcher, 4 pipelines | stable, mature |
-| `custom_benchmark.py` | 1,920 | DS1000/CoderEval, Monitor | stable, mature |
-| `consolidate_results.py` | 1,488 | Ranking aggregation | stable, mature |
-| `registry_tool.py` | 1,018 | Registry sync, VRAM formula | actively developed |
-| `benchmark_config.py` | 329 | Central config | mature |
-| `model_manager.py` | 497 | LMS load/unload | stable |
-| `csv_writer.py` | 453 | CSV schema | mature |
-| `assemble_blueprint.py` | 825 | Prompt blueprints | stable |
+| File                     | Lines | Purpose                     | Maturity           |
+| ------------------------ | ----: | --------------------------- | ------------------ |
+| `run_benchmarks.py`      | 1,287 | Launcher, 4 pipelines       | stable, mature     |
+| `custom_benchmark.py`    | 1,920 | DS1000/CoderEval, Monitor   | stable, mature     |
+| `consolidate_results.py` | 1,488 | Ranking aggregation         | stable, mature     |
+| `registry_tool.py`       | 1,018 | Registry sync, VRAM formula | actively developed |
+| `benchmark_config.py`    | 329   | Central config              | mature             |
+| `model_manager.py`       | 497   | LMS load/unload             | stable             |
+| `csv_writer.py`          | 453   | CSV schema                  | mature             |
+| `assemble_blueprint.py`  | 825   | Prompt blueprints           | stable             |
 
 **Strengths:**
 - Clear 4-pipeline architecture with `model_manager.py` as single point of load/unload
@@ -256,10 +256,10 @@ llmster = os.path.join(os.path.dirname(os.path.dirname(__file__)),
 
 ## Test Statistics
 
-| Phase | Tests passing | Tests skipped | Tests failing |
-|-------|------:|------:|------:|
-| **Before review** | 412 | 0 | 1 (pre-existing) |
-| **After review** | **548** | **9** (obsolete) | **0** |
+| Phase             | Tests passing | Tests skipped    | Tests failing    |
+| ----------------- | ------------: | ---------------: | ---------------: |
+| **Before review** | 412           | 0                | 1 (pre-existing) |
+| **After review**  | **548**       | **9** (obsolete) | **0**            |
 
 **+136 new tests** in `test_registry_tool.py` (35), `test_assemble_blueprint.py` (43), `test_model_manager.py` (+13), `test_run_benchmarks.py` (+1 after updates), `test_prio2_terminal.py` (1 bug-fix test), `test_model_manager.py` (10 bug-1-fix tests).
 
@@ -267,37 +267,37 @@ llmster = os.path.join(os.path.dirname(os.path.dirname(__file__)),
 
 ## Changed Files (12)
 
-| File | Change |
-|-------|----------|
-| `assemble_blueprint.py` | `read_lms_configs` caching (5s TTL) |
-| `benchmark_config.py` | Central VRAM constants, `get_quant()` registry fallback, `MMLU_PRO_ENABLED` removed |
-| `consolidate_results.py` | `MMLU_PRO_ENABLED` import removed |
-| `custom_benchmark.py` | Monitor sampling 0.5s, `_safe_float()` helper, `_validate_model_key` test, `_unwrap_solution_for_insert` bug fix |
-| `model_manager.py` | Magic string constant, `_validate_model_key()`, `safe_json_loads()`, `_ensure_lmstudio_running()` 3-level, documented silent except |
-| `registry_tool.py` | Dynamic import → direct, `_normalize_ctx` → `normalize_model_name`, `llm.load.contextLength` write, USE_UNIFIED/LEGACY_THRESHOLD imports |
-| `run_benchmarks.py` | Redundant EXCLUDE filtering removed, `EVALPLUS_SENTINEL_MODEL` constant, `THINKING_ENABLED` documented |
-| `tests/test_model_manager.py` | +13 tests for `_validate_model_key`, +10 tests for bug-1 fixes (`unload_all_models`) |
-| `tests/test_run_benchmarks.py` | `SAFE_CONTEXT_FALLBACK` imported, 9 obsolete tests skipped |
-| `tests/test_registry_tool.py` | **NEW** – 35 tests |
-| `tests/test_assemble_blueprint.py` | **NEW** – 43 tests |
-| `doc-git/Architecture-and-Flow.md`, `HowTo-Install-and-Configure-New-LLM.md` | Minor corrections (doc sync) |
+| File                                                                         | Change                                                                                                                                   |
+| ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `assemble_blueprint.py`                                                      | `read_lms_configs` caching (5s TTL)                                                                                                      |
+| `benchmark_config.py`                                                        | Central VRAM constants, `get_quant()` registry fallback, `MMLU_PRO_ENABLED` removed                                                      |
+| `consolidate_results.py`                                                     | `MMLU_PRO_ENABLED` import removed                                                                                                        |
+| `custom_benchmark.py`                                                        | Monitor sampling 0.5s, `_safe_float()` helper, `_validate_model_key` test, `_unwrap_solution_for_insert` bug fix                         |
+| `model_manager.py`                                                           | Magic string constant, `_validate_model_key()`, `safe_json_loads()`, `_ensure_lmstudio_running()` 3-level, documented silent except      |
+| `registry_tool.py`                                                           | Dynamic import → direct, `_normalize_ctx` → `normalize_model_name`, `llm.load.contextLength` write, USE_UNIFIED/LEGACY_THRESHOLD imports |
+| `run_benchmarks.py`                                                          | Redundant EXCLUDE filtering removed, `EVALPLUS_SENTINEL_MODEL` constant, `THINKING_ENABLED` documented                                   |
+| `tests/test_model_manager.py`                                                | +13 tests for `_validate_model_key`, +10 tests for bug-1 fixes (`unload_all_models`)                                                     |
+| `tests/test_run_benchmarks.py`                                               | `SAFE_CONTEXT_FALLBACK` imported, 9 obsolete tests skipped                                                                               |
+| `tests/test_registry_tool.py`                                                | **NEW** – 35 tests                                                                                                                       |
+| `tests/test_assemble_blueprint.py`                                           | **NEW** – 43 tests                                                                                                                       |
+| `doc-git/Architecture-and-Flow.md`, `HowTo-Install-and-Configure-New-LLM.md` | Minor corrections (doc sync)                                                                                                             |
 
 ---
 
 ## Recommendations (prioritized)
 
-| Prio | Measure | Effort | Impact |
-|:----:|----------|--------:|-------:|
-| 1 | Fix race condition `unload_all_models` | 30 min | ✅ Fixed |
-| 2 | Fix hardcoded `llmster.exe` path | 15 min | ✅ Fixed |
-| 3 | Write tests for `registry_tool.py` | 4 h | ✅ Fixed (35 tests) |
-| 4 | Consolidate `_normalize_ctx` | 1 h | ✅ Fixed |
-| 5 | Generate `QUANT_MAP` from registry | 3 h | ✅ Fixed (fallback in `get_quant()`) |
-| 6 | Centralize magic numbers in `benchmark_config.py` | 2 h | ✅ Fixed |
-| 7 | Make `EXCLUDE_KEYWORDS` uniform | 30 min | ✅ Fixed |
-| 8 | Subprocess injection hardening | 1 h | ✅ Fixed |
-| 9 | Logging module instead of print storm (optional) | 8 h | ⚪ not started |
-| 10 | Test `PowerShell sync_model_configs.ps1 -FullSync` | 3 h | ⚪ not started |
+| Prio | Measure                                            | Effort | Impact                              |
+| :---: | -------------------------------------------------- | -----: | ----------------------------------: |
+| 1    | Fix race condition `unload_all_models`             | 30 min | ✅ Fixed                             |
+| 2    | Fix hardcoded `llmster.exe` path                   | 15 min | ✅ Fixed                             |
+| 3    | Write tests for `registry_tool.py`                 | 4 h    | ✅ Fixed (35 tests)                  |
+| 4    | Consolidate `_normalize_ctx`                       | 1 h    | ✅ Fixed                             |
+| 5    | Generate `QUANT_MAP` from registry                 | 3 h    | ✅ Fixed (fallback in `get_quant()`) |
+| 6    | Centralize magic numbers in `benchmark_config.py`  | 2 h    | ✅ Fixed                             |
+| 7    | Make `EXCLUDE_KEYWORDS` uniform                    | 30 min | ✅ Fixed                             |
+| 8    | Subprocess injection hardening                     | 1 h    | ✅ Fixed                             |
+| 9    | Logging module instead of print storm (optional)   | 8 h    | ⚪ not started                       |
+| 10   | Test `PowerShell sync_model_configs.ps1 -FullSync` | 3 h    | ⚪ not started                       |
 
 ---
 

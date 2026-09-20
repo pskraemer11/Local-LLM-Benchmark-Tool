@@ -74,7 +74,8 @@
 - Vor Commit: Ruff-Cleanliness für geänderte `src/`-Dateien sicherstellen.
 - `utils/` ist fremder Code und bleibt untracked.
 - Review: verwende `engineering:code-review` und das zentrale Review-Gate
-  `C:\Users\pskra\.agents\references\gates\review.md`.
+  `C:\Users\pskra\.agents\references\gates\review.md`. Die verbindliche
+  projektspezifische Anwendung ist in `REVIEW-GATE.md` beschrieben.
 
 ## Git-Hooks und Sicherheitsgate
 - Der versionierte Hook-Pfad ist `.githooks/`; im lokalen Clone muss `git config core.hooksPath .githooks` gesetzt sein.
