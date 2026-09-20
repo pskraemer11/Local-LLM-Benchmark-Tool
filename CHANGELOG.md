@@ -481,3 +481,11 @@ Die Hooks erzeugen CHANGELOG-Eintraege nicht automatisch; dieser Eintrag dokumen
 | 20.09. | `README.md`, `doc-git/Architecture, Flow & ChangeLog_en.md`, `PLANUNG.md`         | **DOC:** Datenfluss, Architektur und Bereinigungs-/Planungsstand synchronisiert.                                                   |
 | 20.09. | `tests/`, `src/field_owner.py`                                                    | **TEST/SCHEMA:** Aktuelle Registry-SSOT, Sampling-Parameter, Reasoning-Zuordnung und `sampling_category_status` abgesichert.       |
 | 20.09. | `499fe85e4fd1902a5f173f713455bc04c0376302`                                        | **RELEASE:** Reconciliation-Commit nach `origin/main` gepusht. Siehe Compaction `20.09.2026 / 16:00`.                              |
+
+## Generation-Safe Sampling Evidence (20.09.2026)
+| Date   | File                                       | Change                                                                                                                               |
+| ------ | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
+| 20.09. | `src/sampling_research.py`                 | **FIX:** Granite-Quellen generationsspezifisch begrenzen; direkte, abgeleitete und ungeklärte Sampling-Evidence kompakt persistieren. |
+| 20.09. | `tests/test_sampling_research.py`          | **TEST:** Evidence-Gruppierung, Granite-Generationsgrenze und Begrenzung terminaler Quellenlisten absichern.                          |
+| 20.09. | `doc-git/model_registry.yaml`              | **DATA:** Sampling-Evidence nach erneutem `pipeline full --refresh-sampling` aktualisieren und alte Granite-4.2-Verweise entfernen.   |
+| 20.09. | `doc-git/Temperature Recommondations_en.md` | **DOC:** Kompaktes Evidence-Schema und Herkunftslogik dokumentieren.                                                               |

@@ -56,7 +56,11 @@ family-wide guess.
 The evidence fields distinguish `direct`, `derived`, and `unresolved` per
 category. A single overall status of `confirmed` does not mean that every
 category was directly documented; consumers must inspect
-`sampling_category_status` and `sampling_evidence`.
+`sampling_category_status` and `sampling_evidence`. Each accepted profile is
+stored with one `values` mapping instead of one evidence record per field.
+Direct records carry the source URL and excerpt; derived records point to
+`derived_from` and deliberately inherit the source without repeating the URL
+and excerpt. The unique URLs are listed once in `sampling_sources`.
 
 ### Current architecture/blueprint coverage
 

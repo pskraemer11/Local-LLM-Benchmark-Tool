@@ -116,6 +116,7 @@ _MAX_OFFICIAL_PAGES = 12
 _MAX_OFFICIAL_DEPTH = 2
 _MAX_LINKS_PER_PAGE = 12
 _MAX_HF_SEARCH_RESULTS = 20
+_MAX_TERMINAL_SOURCE_URLS = 8
 
 
 @dataclass(frozen=True)
@@ -242,10 +243,39 @@ def _manufacturer_urls(model: Mapping[str, Any]) -> list[str]:
     publisher = str(model.get("publisher") or "").strip().lower()
     model_name = _base_model_name(model).lower()
     urls: list[str] = []
+    # IBM's generic Granite landing page links to the newest generation. That
+    # is not safe evidence for an older model: sampling recommendations are
+    # generation-specific and must not flow backwards from Granite 4.2.
+    if publisher == "ibm-granite" or "granite-4." in model_name:
+        generation_match = re.search(r"granite[- ]4[.]([012])", model_name)
+        if generation_match:
+            urls.append(f"https://www.ibm.com/granite/docs/models/granite4-{generation_match.group(1)}")
+        else:
+            urls.append("https://www.ibm.com/granite/")
     for name, candidates in _MANUFACTURER_SOURCES.items():
+        if name == "ibm":
+            continue
         if publisher == name or publisher.startswith(f"{name}-") or name in model_name:
             urls.extend(candidates)
     return _unique_urls(urls)
+
+
+def _granite_generation(model: Mapping[str, Any]) -> str | None:
+    """Return the generation token used by IBM's Granite documentation URLs."""
+    match = re.search(r"granite[- ]4[.]([012])", _base_model_name(model).lower())
+    return f"granite4-{match.group(1)}" if match else None
+
+
+def _compatible_official_source(url: str, generation: str | None) -> bool:
+    """Reject cross-generation IBM Granite documentation links."""
+    if generation is None:
+        return True
+    parsed = urlparse(url)
+    if parsed.netloc.lower() != "www.ibm.com":
+        return True
+    if "/granite/docs/models/granite4-" not in parsed.path.lower():
+        return True
+    return generation in parsed.path.lower()
 
 
 def _unique_urls(urls: list[str]) -> list[str]:
@@ -327,19 +357,26 @@ def _crawl_official_sources(
     timeout_s: float,
     documents: list[SourceDocument],
     visited: set[str],
+    generation: str | None = None,
 ) -> None:
     """Follow a small, same-domain documentation frontier."""
     queue: deque[tuple[str, int, int]] = deque((url, priority, 0) for url, priority in seeds)
     pages = 0
     while queue and pages < _MAX_OFFICIAL_PAGES:
         url, priority, depth = queue.popleft()
+        if not _compatible_official_source(url, generation):
+            continue
         text = _collect_document(url, priority, fetch, timeout_s, documents, visited)
         if not text:
             continue
         pages += 1
         if depth >= _MAX_OFFICIAL_DEPTH:
             continue
-        links = sorted(_linked_official_sources(text, publisher, url), key=_link_score, reverse=True)
+        links = sorted(
+            (link for link in _linked_official_sources(text, publisher, url) if _compatible_official_source(link, generation)),
+            key=_link_score,
+            reverse=True,
+        )
         for linked in links[:_MAX_LINKS_PER_PAGE]:
             host = urlparse(linked).netloc.lower()
             if host in _HF_HOSTS:
@@ -636,18 +673,27 @@ def _source_evidence(
     evidence_kind: str = "direct",
     derived_from: str | None = None,
 ) -> list[dict[str, Any]]:
-    items: list[dict[str, Any]] = []
+    grouped: dict[tuple[str, str], dict[str, float | int]] = {}
     for field, value in values.items():
         if field not in evidence:
             continue
+        source = evidence[field]
+        key = (source["url"], source["excerpt"])
+        grouped.setdefault(key, {})[field] = value
+
+    items: list[dict[str, Any]] = []
+    for (url, excerpt), grouped_values in grouped.items():
         item: dict[str, Any] = {
             "profile": profile,
-            "field": field,
-            "value": value,
-            "url": evidence[field]["url"],
-            "excerpt": evidence[field]["excerpt"],
+            "values": grouped_values,
             "evidence_kind": evidence_kind,
         }
+        # A derived profile is traceable through its source category. Repeating
+        # the inherited URL and excerpt for every derived field made the YAML
+        # noisy and obscured the actual provenance chain.
+        if evidence_kind == "direct":
+            item["url"] = url
+            item["excerpt"] = excerpt
         if derived_from is not None:
             item["derived_from"] = derived_from
         items.append(item)
@@ -664,6 +710,33 @@ def _unresolved_evidence(profile: str, reason: str) -> list[dict[str, str]]:
     ]
 
 
+def _research_source_urls(
+    documents: list[SourceDocument],
+    *evidence_maps: Mapping[str, Mapping[str, str]],
+) -> list[str]:
+    """Return a compact provenance list for terminal research outcomes.
+
+    The crawler may inspect linked navigation pages while resolving a model.
+    Those pages are useful search inputs, but they are not all evidence. Keep
+    URLs from matched field evidence when available; otherwise retain only the
+    highest-priority fetched documents as a bounded record of what was tried.
+    """
+    evidence_urls = {
+        str(source["url"])
+        for evidence in evidence_maps
+        for source in evidence.values()
+        if source.get("url")
+    }
+    if evidence_urls:
+        return sorted(evidence_urls)
+    highest_priority = max((document.priority for document in documents), default=None)
+    if highest_priority is None:
+        return []
+    return sorted({document.url for document in documents if document.priority == highest_priority})[
+        :_MAX_TERMINAL_SOURCE_URLS
+    ]
+
+
 def research_sampling_report(
     model: Mapping[str, Any],
     timeout_s: float = 8.0,
@@ -672,6 +745,7 @@ def research_sampling_report(
     """Return a confirmed or explicitly unresolved onboarding research report."""
     fetch = fetcher or _fetch_text
     publisher = str(model.get("publisher") or "").strip().lower()
+    generation = _granite_generation(model)
     hf_urls = _hf_repo_urls(model)
     documents: list[SourceDocument] = []
     visited: set[str] = set()
@@ -683,7 +757,11 @@ def research_sampling_report(
         for raw_url in _raw_hf_urls(repo_id):
             text = _collect_document(raw_url, 4, fetch, timeout_s, documents, visited)
             if text:
-                linked = _linked_official_sources(text, publisher, url)
+                linked = [
+                    link
+                    for link in _linked_official_sources(text, publisher, url)
+                    if _compatible_official_source(link, generation)
+                ]
                 _crawl_official_sources(
                     [(linked_url, 3) for linked_url in linked[:6]],
                     publisher,
@@ -691,6 +769,7 @@ def research_sampling_report(
                     timeout_s,
                     documents,
                     visited,
+                    generation,
                 )
 
     _crawl_official_sources(
@@ -700,6 +779,7 @@ def research_sampling_report(
         timeout_s,
         documents,
         visited,
+        generation,
     )
 
     normal_values, normal_evidence, normal_conflicts = _resolve_profile(documents, "normal")
@@ -708,7 +788,11 @@ def research_sampling_report(
             for raw_url in _raw_hf_urls(repo_id):
                 text = _collect_document(raw_url, priority, fetch, timeout_s, documents, visited)
                 if text:
-                    linked = _linked_official_sources(text, publisher, f"https://huggingface.co/{repo_id}")
+                    linked = [
+                        link
+                        for link in _linked_official_sources(text, publisher, f"https://huggingface.co/{repo_id}")
+                        if _compatible_official_source(link, generation)
+                    ]
                     _crawl_official_sources(
                         [(linked_url, min(priority, 3)) for linked_url in linked[:6]],
                         publisher,
@@ -716,11 +800,12 @@ def research_sampling_report(
                         timeout_s,
                         documents,
                         visited,
+                        generation,
                     )
         normal_values, normal_evidence, normal_conflicts = _resolve_profile(documents, "normal")
 
-    source_urls = sorted({document.url for document in documents})
     thinking_values, thinking_evidence, thinking_conflicts = _resolve_profile(documents, "thinking")
+    source_urls = _research_source_urls(documents, normal_evidence, thinking_evidence)
     if "temperature" not in normal_values or "top_p" not in normal_values:
         status = "conflict" if normal_conflicts else ("unresolved" if documents else "not_found")
         unresolved = _unresolved_evidence(
@@ -739,6 +824,7 @@ def research_sampling_report(
     evidence = _source_evidence("normal", normal_values, normal_evidence)
 
     coding_values, coding_evidence, coding_conflicts = _resolve_profile(documents, "coding")
+    source_urls = _research_source_urls(documents, normal_evidence, thinking_evidence, coding_evidence)
     if coding_conflicts:
         return {
             "sampling_research_status": "conflict",
@@ -765,6 +851,13 @@ def research_sampling_report(
 
     for category in ("knowledge", "agentic"):
         values, profile_evidence, conflicts = _resolve_profile(documents, category)
+        source_urls = _research_source_urls(
+            documents,
+            normal_evidence,
+            thinking_evidence,
+            coding_evidence,
+            profile_evidence,
+        )
         if conflicts:
             return {
                 "sampling_research_status": "conflict",
@@ -799,6 +892,13 @@ def research_sampling_report(
             category_status[category] = "derived"
 
     math_values, math_evidence, math_conflicts = _resolve_profile(documents, "math")
+    source_urls = _research_source_urls(
+        documents,
+        normal_evidence,
+        thinking_evidence,
+        coding_evidence,
+        math_evidence,
+    )
     if math_conflicts:
         return {
             "sampling_research_status": "conflict",
@@ -832,7 +932,7 @@ def research_sampling_report(
         "sampling": sampling,
         "sampling_source": "web-research",
         "sampling_research_status": "confirmed",
-        "sampling_sources": sorted({item["url"] for item in evidence}),
+        "sampling_sources": sorted({item["url"] for item in evidence if "url" in item}),
         "sampling_evidence": evidence,
         "sampling_category_status": category_status,
     }

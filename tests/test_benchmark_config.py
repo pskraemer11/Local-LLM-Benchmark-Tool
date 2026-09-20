@@ -60,7 +60,7 @@ class TestRegistryBackedSampling:
 
     def test_granite_registry_block(self):
         cfg = get_model_config("ibm-granite/granite-4.1-8b", category="coding")
-        assert (cfg["temperature"], cfg["top_p"]) == (1.0, 0.95)
+        assert (cfg["temperature"], cfg["top_p"]) == (0.001, 1.0)
         assert cfg["_source"] == "registry-sampling"
 
     def test_gpt_oss_registry_block(self):
@@ -223,7 +223,7 @@ class TestLmsJsonMerge:
         }
         mocker.patch.object(bc, "_lms_generation_config", return_value=lms)
         cfg = get_model_config("ibm-granite/granite-4.1-8b", category="coding")
-        assert (cfg["temperature"], cfg["top_p"]) == (1.0, 0.95)  # Registry-Zelle
+        assert (cfg["temperature"], cfg["top_p"]) == (0.001, 1.0)  # Registry-Zelle
         assert cfg["top_k"] == 40
         assert cfg["min_p"] == 0.1
         assert cfg["enable_thinking"] is True

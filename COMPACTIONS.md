@@ -985,3 +985,31 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 - `src/sampling_research.py`, `doc-git/model_registry.yaml`: Kategoriebezogene Sampling-Evidenz und Registry-SSOT.
 - `README.md`, `doc-git/Architecture, Flow & ChangeLog_en.md`, `PLANUNG.md`: Datenfluss-, Architektur- und Planungsdokumentation.
 - `CHANGELOG.md`: Eintrag `Worktree Reconciliation and GitHub Push` für diesen Vorgang.
+
+=============== Compaction 20.09.2026 / 21:09 ================
+## Objective
+- (Completed) Granite-Sampling-Evidence generationssicher recherchieren und redundante Registry-Evidence nachhaltig durch Producer-Logik straffen.
+- (Completed) Den Refresh mit `pipeline full --refresh-sampling` ausführen und Registry, Tests und Validierung prüfen.
+
+## Important Details
+- **Generation boundary:** IBM-Granite-4.0- und 4.1-Modelle verwenden keine Granite-4.2-Quellen mehr. Granite 4.0 und 4.1-30B bleiben bei fehlendem vollständigem Herstellerprofil `unresolved`; Granite 4.2 bleibt mit seiner eigenen Empfehlung bestätigt.
+- **Evidence structure:** Direkte Profile speichern ein gemeinsames `values`-Mapping mit URL/Excerpt; abgeleitete Profile speichern nur `derived_from`. Terminale Recherchequellen sind auf acht priorisierte URLs begrenzt.
+- **Inventory drift:** Während der Pipeline änderte sich der LM-Studio-Bestand. Zwei K2-Horizon-Modelle wurden deshalb automatisch als aktuelle Registry-Einträge aufgenommen. Die Quarantäne blieb Dry-Run.
+
+## Work State
+### Completed / Active / Blocked
+- Completed: 76 Registry-Einträge, 369 Evidence-Einträge, keine alten `field`/`value`-Evidence-Einträge, maximal acht Sampling-Quellen pro Modell.
+- Verification: 114 fokussierte Tests bestanden; Ruff bestanden; `validate --ci` mit 0 Problemen; Prompt-Assembly 91/91 bestanden; `git diff --check` bestanden.
+- Active: Änderungen sind noch nicht committed oder gepusht.
+- Blocked: `pipeline full` meldet weiterhin 43 lokale Config-Context-Drifts, fünf fehlende Config-Zuordnungen und eine fehlende Techhermit-Template-Config; diese sind nicht Teil der Sampling-Korrektur.
+
+## Next Move
+1. Vor einem Commit den Gesamt-Diff prüfen und die bereits vorhandenen Dokumentationsänderungen bewusst vom Sampling-Scope abgrenzen oder gemeinsam freigeben.
+2. Danach die versionierten Commit-/Push-Hooks ausführen.
+
+## Relevant Files
+- `src/sampling_research.py`: generationstreue Granite-Quellen, kompakte Evidence und begrenzte terminale Quellenlisten.
+- `tests/test_sampling_research.py`: Tests für kompakte Evidence, Granite-Generationstrennung und Quellenbegrenzung.
+- `doc-git/model_registry.yaml`: durch den Refresh erzeugte Sampling- und aktuelle Inventardaten.
+- `doc-git/Temperature Recommondations_en.md`: Dokumentation des neuen Evidence-Schemas.
+- `CHANGELOG.md`: Eintrag `Generation-Safe Sampling Evidence` für diese Änderung.

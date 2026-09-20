@@ -1,6 +1,39 @@
 # Qwen3.8 - How to Run Locally
 Quelle: https://unsloth.ai/docs/models/qwen3.8
 
+## Project integration update (2026-09-20)
+
+This document contains the upstream local-run guide below. The following project-specific findings record how Qwen3.8 is currently represented in the Benchmarks Registry, blueprint and runtime path.
+
+| Registry model group       | Architecture family | Reasoning  | Blueprint          | Maximum context |
+| -------------------------- | ------------------- | ---------- | ------------------ | --------------: |
+| Qwen3.8 dense 27B variants | `qwen35`            | `thinking` | `reasoning_coding` | 262144          |
+| Qwen3.8 distilled 9B       | `qwen35`            | `thinking` | `reasoning_coding` | 262144          |
+
+The current Registry entries cover `byteshape/qwen3.8-27b@iq4_xs`, `jrell/qwen3.8-27b-i1-smaller@iq4_xs` and `empero-ai/qwen3.8-9b-distill@q8_0`. Quantization, distillation and imatrix/I1 packaging affect resource use and quality, but do not create a new architecture family or blueprint. The model-specific setup is therefore shared through `architecture_family: qwen35` and `blueprint: reasoning_coding`.
+
+### Differentiated benchmark sampling
+
+Qwen3.8 is a hybrid thinking model. The upstream Qwen/Unsloth guidance distinguishes thinking mode from instruct (non-thinking) mode; the project pipeline preserves that distinction in the category-specific Registry values.
+
+| Category  | Temperature | Top-p | Top-k | Min-p | Status                                                                                     |
+| --------- | ----------: | ----: | ----: | ----: | ------------------------------------------------------------------------------------------ |
+| coding    | 0.7         | 0.80  | 20    | 0.0   | derived from non-thinking/instruct guidance                                                |
+| knowledge | 0.7         | 0.80  | 20    | 0.0   | derived from non-thinking/instruct guidance                                                |
+| agentic   | 0.6         | 0.95  | 20    | 0.0   | derived from thinking/agentic guidance                                                     |
+| math      | 0.7         | 0.80  | 20    | 0.0   | derived from the precise coding/instruct path; no separate Qwen3.8 math profile documented |
+| thinking  | 0.6         | 0.95  | 20    | 0.0   | direct/derived thinking profile, depending on the entry                                    |
+
+The upstream guide's raw model defaults remain useful for direct llama.cpp/Unsloth operation: thinking mode uses `temperature=1.0`, `top_p=0.95`, `top_k=20`, while instruct mode uses `temperature=0.7`, `top_p=0.80`, `top_k=20`. The Registry categories are benchmark policies selected for the repository's task classes and should not be replaced by copying the same mode into every category.
+
+### Blueprint, template and reasoning behavior
+
+Qwen3.8 uses the shared `reasoning_coding` blueprint. This blueprint supplies coding-oriented role and output guidance without adding a generic chain-of-thought scaffold; the native Qwen template controls thinking behavior. There is no separate Qwen3.8 Jinja template in `doc-git/Jinja-Chat-Templates`, so the GGUF-embedded/LM Studio template remains authoritative.
+
+For local API execution, distinguish thinking from direct instruct execution explicitly. Use the thinking template/request mode for reasoning, math and agentic tasks when the benchmark policy selects it; use the non-thinking mode for direct coding or knowledge answers when selected. A small output budget can be consumed by reasoning before a final answer is emitted, so benchmark runs must account for reasoning tokens.
+
+The integration is implemented through `src/registry_tool.py` and `src/sampling_research.py` for Registry evidence and category values, `src/assemble_blueprint.py` for the `qwen35`/`reasoning_coding` mapping, and `src/benchmark_config.py`/`src/custom_benchmark.py` for runtime generation settings and API behavior. The Registry remains the source of truth; this guide documents the resulting policy and does not replace it.
+
 Qwen3.8 is Qwen’s new model family, featuring Qwen3.8-**27B**, Qwen3.8-**2.4T-A95B** and Qwen3.8-**Max**. Qwen3.8-27B has **vision** and reasoning capabilities, a **256K context** window, and runs locally on **17GB RAM/VRAM** setups. Qwen3.8 excels at agentic coding, vision and chat tasks, and can now run via Unsloth GGUFs, NVFP4 and [Unsloth Desktop](#run-qwen3.8-in-unsloth-desktop). Qwen3.8-2.4T-A95B is a 2.4T parameter (95B active) model with rivaling GPT-5.6 Sol.
 
 **Aug 19 Update:** Qwen3.8-27B GGUFs now use [Unsloth Dynamic V3.0](/docs/basics/dynamic-3.0-ggufs.md) for 10% more accuracy at the same size, largely outperforming others.

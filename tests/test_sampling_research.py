@@ -3,12 +3,22 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
-
-import pytest
+from typing import TYPE_CHECKING
 
 import registry_tool as rt
-from sampling_research import _normalise_url, research_sampling, research_sampling_report
+from sampling_research import (
+    SourceDocument,
+    _manufacturer_urls,
+    _normalise_url,
+    _research_source_urls,
+    research_sampling,
+    research_sampling_report,
+)
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    import pytest
 
 
 def test_research_uses_explicit_profiles_and_marks_fallbacks() -> None:
@@ -43,6 +53,8 @@ def test_research_uses_explicit_profiles_and_marks_fallbacks() -> None:
     assert math_evidence
     assert {item["evidence_kind"] for item in math_evidence} == {"derived"}
     assert {item["derived_from"] for item in math_evidence} == {"coding"}
+    assert math_evidence[0]["values"] == result["sampling"]["math"]
+    assert "url" not in math_evidence[0]
     assert result["sampling"]["thinking"]["enabled"] is True
     assert result["sampling"]["thinking"]["temperature"] == 0.6
     assert result["sampling_source"] == "web-research"
@@ -148,6 +160,28 @@ def test_research_checks_known_manufacturer_sources() -> None:
     assert result is not None
     assert any(url.startswith("https://qwenlm.github.io") for url in requested)
     assert any(url.startswith("https://qwen.readthedocs.io") for url in requested)
+
+
+def test_granite_manufacturer_source_is_generation_specific() -> None:
+    assert _manufacturer_urls(
+        {"publisher": "ibm-granite", "modelKey": "ibm-granite/granite-4.1-30b"}
+    ) == ["https://www.ibm.com/granite/docs/models/granite4-1"]
+    assert _manufacturer_urls(
+        {"publisher": "mradermacher", "modelKey": "mradermacher/granite-4.2-30b-i1"}
+    ) == ["https://www.ibm.com/granite/docs/models/granite4-2"]
+
+
+def test_terminal_source_list_discards_crawler_navigation_links() -> None:
+    documents = [
+        SourceDocument("https://example.test/navigation", "", 1),
+        SourceDocument("https://example.test/model-card", "", 4),
+    ]
+
+    assert _research_source_urls(documents) == ["https://example.test/model-card"]
+    assert _research_source_urls(
+        documents,
+        {"temperature": {"url": "https://example.test/evidence", "excerpt": "..."}},
+    ) == ["https://example.test/evidence"]
 
 
 def test_research_rejects_conflicting_values_at_same_source_priority() -> None:
