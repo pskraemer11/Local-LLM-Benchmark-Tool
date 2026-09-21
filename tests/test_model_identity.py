@@ -21,7 +21,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from field_owner import FIELD_OWNERSHIP, Drift, auto_fix_fields, resolve
 from model_identity import (
     MODEL_FAMILIES,
+    build_model_identity,
     classify_reasoning_by_family,
+    decompose_model_identity,
     family_for_arch,
     match_registry_key,
     normalize_for_config,
@@ -30,7 +32,6 @@ from model_identity import (
     normalize_variants,
     normalized_lms_key,
 )
-
 
 # ─────────────────────────────────────────────────────────────────────
 # Normalisierer (identisches Verhalten zur Vorgaenger-Logik)
@@ -70,6 +71,10 @@ class TestNormalizeForConfig:
     def test_dir_quant_suffixes_stripped(self) -> None:
         assert normalize_for_config("ERNIE-4.5-21B-A3B-PT-GGUF") == "ernie-4-5-21b-a3b-pt"
         assert normalize_for_config("Model-MXFP4") == "model"
+        assert (
+            normalize_for_config("FreedomAISVR/Gemma-4-12B-it-QAT-NVFP4-GGUF")
+            == "gemma-4-12b-it"
+        )
 
     def test_dir_three_part_quant_suffix_stripped(self) -> None:
         # JetBrains-Naming: "...-GGUF-Q4_K_M" -> "-q4-k-m" (3-teilig)
@@ -282,3 +287,10 @@ class TestFieldOwnership:
 
         with pytest.raises(ValueError):
             FieldRule("config", "registry", auto_fix=True)
+
+
+def test_identity_build_and_parse_round_trip():
+    key = build_model_identity("Publisher", "Model-Basis", "Q4_K_M")
+
+    assert key == "publisher/model-basis@q4_k_m"
+    assert decompose_model_identity(key) == ("publisher", "model-basis", "q4_k_m")

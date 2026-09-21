@@ -13,24 +13,22 @@ import os
 import sys
 from pathlib import Path
 
-
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import assemble_blueprint as ab
 from assemble_blueprint import (
-    normalize_model_name,
     classify_capabilities,
     classify_reasoning,
-    select_blueprint,
     extract_params,
-    read_lms_configs,
-    format_publishers,
-    format_capabilities,
-    truncation_from_context,
     find_config_for_registry_key,
     find_registry_key_for_config,
+    format_capabilities,
+    format_publishers,
+    normalize_model_name,
+    read_lms_configs,
+    select_blueprint,
+    truncation_from_context,
 )
-
 
 # ─────────────────────────────────────────────────────────────────────
 # normalize_model_name
@@ -309,10 +307,10 @@ class TestReadLmsConfigsCaching:
                 "load": {"fields": []},
             }, f)
 
-        # First call – populates cache
+        # First call - populates cache
         r1 = read_lms_configs(cfg_dir)
         assert len(r1) == 1
-        # Second call – within TTL, should return same list
+        # Second call - within TTL, should return same list
         r2 = read_lms_configs(cfg_dir)
         # Same list object (cached)
         assert r2 is r1
@@ -332,6 +330,21 @@ class TestReadLmsConfigsCaching:
         assert [config["file_name"] for config in configs] == ["model-Q4_K_M.gguf.json"]
         assert configs[0]["quant"] == "q4_k_m"
 
+    def test_quarantined_configs_are_not_active_configs(self, tmp_path):
+        cfg_root = tmp_path / "user-concrete-model-default-config"
+        active_dir = cfg_root / "publisher" / "model"
+        quarantine_dir = cfg_root / "_quarantine_missing_20260921_120000" / "publisher" / "model"
+        active_dir.mkdir(parents=True)
+        quarantine_dir.mkdir(parents=True)
+        payload = {"operation": {"fields": []}, "load": {"fields": []}}
+        (active_dir / "active.gguf.json").write_text(json.dumps(payload), encoding="utf-8")
+        (quarantine_dir / "old.gguf.json").write_text(json.dumps(payload), encoding="utf-8")
+
+        ab._LMS_CONFIGS_CACHE.clear()
+        configs = read_lms_configs(cfg_root)
+
+        assert [config["file_name"] for config in configs] == ["active.gguf.json"]
+
     def test_cache_expires(self, tmp_path, monkeypatch):
         cfg_dir = tmp_path / "user-concrete-model-default-config"
         cfg_dir.mkdir()
@@ -346,14 +359,14 @@ class TestReadLmsConfigsCaching:
 
         # The cache uses a local `import time as _time` inside the function.
         # We can't monkey-patch it from outside. Instead, manually clear
-        # the cache and re-call – this exercises the same path.
+        # the cache and re-call - this exercises the same path.
         ab._LMS_CONFIGS_CACHE.clear()
 
         r1 = read_lms_configs(cfg_dir)
         # Manually expire by clearing the cache (simulates TTL expiry)
         ab._LMS_CONFIGS_CACHE.clear()
         r2 = read_lms_configs(cfg_dir)
-        # After expiry, the cache is rebuilt – new list object
+        # After expiry, the cache is rebuilt - new list object
         assert r2 is not r1
         assert len(r2) == 1
 
@@ -462,6 +475,100 @@ class TestFindConfigForRegistryKey:
             "tooltd/qwen3.6-27b-mini-xs-mtp-16gb-vram@iq4_xs", configs
         )
         assert match == configs[0]
+
+    def test_embedded_iq4_xs_marker_matches_smaller_model(self):
+        configs = [
+            {
+                "publisher": "jrell",
+                "dir_name": "Qwen3.8-27B-i1-IQ4_XS-GGUF-Smaller",
+                "file_name": "Qwen3.8-27B-i1-IQ4_XS-GGUF-Smaller.gguf.json",
+                "json_path": Path("jrell-qwen38.json"),
+            }
+        ]
+
+        match = find_config_for_registry_key(
+            "jrell/qwen3.8-27b-i1-smaller@iq4_xs", configs
+        )
+        assert match == configs[0]
+
+    def test_q8_0_i_quant_matches_config(self):
+        configs = [
+            {
+                "publisher": "Nerdsking",
+                "dir_name": "Nerdsking-python-coder-7B-i",
+                "file_name": "nerdsking-python-coder-7B-i-Q8_0_i.gguf.json",
+                "json_path": Path("nerdsking-python.json"),
+            }
+        ]
+
+        match = find_config_for_registry_key(
+            "nerdsking/nerdsking-python-coder-7b-i@q8_0_i", configs
+        )
+        assert match == configs[0]
+
+    def test_bf16_format_marker_is_not_model_identity(self):
+        configs = [
+            {
+                "publisher": "mradermacher",
+                "dir_name": "Muse-Glimmer-30B-Heretic-Abliterated-BF16-i1-GGUF",
+                "file_name": "Muse-Glimmer-30B-Heretic-Abliterated-BF16.i1-IQ3_M.gguf.json",
+                "json_path": Path("muse-glimmer-bf16.json"),
+            }
+        ]
+
+        match = find_config_for_registry_key(
+            "mradermacher/muse-glimmer-30b-heretic-abliterated-i1@iq3_m", configs
+        )
+        assert match == configs[0]
+
+    def test_unknown_registry_quant_is_wildcard_for_config_matching(self):
+        configs = [
+            {
+                "publisher": "gguf-org",
+                "dir_name": "muse-glimmer-30b-gguf",
+                "file_name": "muse-glimmer-30b-nvfp4.gguf.json",
+                "json_path": Path("muse-glimmer-nvfp4.json"),
+            }
+        ]
+
+        match = find_config_for_registry_key("gguf-org/muse-glimmer-30b@?", configs)
+        assert match == configs[0]
+
+    def test_qat_nvfp4_directory_matches_registry_variant(self):
+        configs = [
+            {
+                "publisher": "FreedomAISVR",
+                "dir_name": "Gemma-4-12B-it-QAT-NVFP4-GGUF",
+                "file_name": "gemma-4-12b-it-qat-nvfp4.gguf.json",
+                "quant": "nvfp4",
+                "json_path": Path("gemma-nvfp4.json"),
+            }
+        ]
+
+        match = find_config_for_registry_key(
+            "freedomaisvr/gemma-4-12b-it-qat@nvfp4", configs
+        )
+        assert match == configs[0]
+
+    def test_reverse_qat_nvfp4_directory_matches_registry_variant(self):
+        registry = sorted(
+            [
+                (
+                    normalize_model_name("freedomaisvr/gemma-4-12b-it-qat@nvfp4"),
+                    "freedomaisvr/gemma-4-12b-it-qat@nvfp4",
+                )
+            ],
+            key=lambda item: -len(item[0]),
+        )
+
+        assert (
+            find_registry_key_for_config(
+                normalize_model_name("Gemma-4-12B-it-QAT-NVFP4-GGUF"),
+                registry,
+                config={"publisher": "FreedomAISVR", "quant": "nvfp4"},
+            )
+            == "freedomaisvr/gemma-4-12b-it-qat@nvfp4"
+        )
 
     def test_same_basename_uses_publisher_and_quant(self):
         configs = [

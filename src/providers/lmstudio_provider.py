@@ -9,7 +9,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from benchmark_config import is_support_file
+from benchmark_config import is_blacklisted_model_name, is_support_file
 from utils.terminal import error, info, ok, warn
 
 from .base import HttpProvider, ProviderCapabilities
@@ -169,7 +169,10 @@ class LMStudioProvider(HttpProvider):
             models = [
                 model
                 for model in models
-                if not any(keyword in (model["key"] + " " + model["display"]).lower() for keyword in exclude_keywords)
+                if not any(
+                    is_blacklisted_model_name(model[field], exclude_keywords)
+                    for field in ("key", "display")
+                )
             ]
         if registry_only:
             from assemble_blueprint import normalize_model_name

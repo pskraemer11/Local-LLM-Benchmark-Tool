@@ -12,6 +12,8 @@ Commands:
                 Sync offload, useUnifiedKvCache, context_length and KV-cache
                 quantization from JSON configs into registry
                 Report mode by default; use --write to persist GUI values
+                Use --write-context to persist only contextLength values in
+                registry.context_length (other Registry fields are untouched)
   fill-arch     Read n_layers and hidden_dim from local GGUF headers for
                 registry entries missing arch data
   sync-from-gguf
@@ -145,9 +147,9 @@ from assemble_blueprint import (
     validate_prompts,
 )
 from benchmark_config import (
-    BLACKLIST,
     GPTOSS_REASONING_BUDGET,
     GPTOSS_REASONING_EFFORT,
+    is_blacklisted_model_name,
     is_mtp_drafter,
     is_registry_candidate,
     is_support_file,
@@ -161,7 +163,7 @@ from benchmark_config import (
 from benchmark_config import (
     USE_UNIFIED_KV_CACHE_THRESHOLD_GB as _USE_UNIFIED_KV_CACHE_THRESHOLD_GB,  # noqa: F401 - re-export for tests
 )
-from model_identity import normalize_variants
+from model_identity import build_model_identity, decompose_model_identity, normalize_variants
 from model_paths import configured_gguf_roots
 from sampling_research import (
     RESEARCH_STATUSES,
@@ -614,23 +616,6 @@ def cmd_fix_np() -> None:
     print("       Arch-Reclassification: registry_tool.py sync-from-gguf.")
 
 
-def _identity_triple_from_key(key: str) -> tuple[str, str, str]:
-    """Extract (publisher, model, quant) from a registry key.
-
-    Key format: publisher/model@quant
-    Returns: (publisher, model_base, quant_or_empty)
-    """
-    if "@" in key:
-        base, quant = key.split("@", 1)
-    else:
-        base, quant = key, ""
-    if "/" in base:
-        pub, model = base.split("/", 1)
-    else:
-        pub, model = "", base
-    return pub.lower(), model.lower(), quant.lower()
-
-
 # ── compare command ────────────────────────────────────────────────
 
 
@@ -1000,7 +985,7 @@ def cmd_add(
             if base_entry is not None:
                 print(f"  [CLEANUP] Entferne Base-Eintrag '{base_key}' (ersetzt durch {mk})")
                 del reg[base_entry]
-        if any(kw in mk.lower() for kw in BLACKLIST):
+        if is_blacklisted_model_name(mk):
             skipped.append((mk, "blacklisted"))
             continue
         rp = m.get("path", "")
@@ -1171,7 +1156,7 @@ def cmd_suggest() -> dict[str, Any]:
         if not match:
             skipped += 1
             continue
-        if any(kw in match.lower() for kw in BLACKLIST):
+        if is_blacklisted_model_name(match):
             blacklisted += 1
             continue
         entry = reg[match]
@@ -1297,16 +1282,21 @@ def cmd_rm(model_key: str, delete_files: bool = False, assume_yes: bool = False)
 
 def cmd_sync_from_configs(
     write: bool = False,
+    write_context: bool = False,
     installed_models: list[dict[str, Any]] | None = None,
 ) -> None:
     """Compare GUI load settings and optionally persist them in the registry.
 
-    ``write=False`` is the safe report mode. With ``write=True``, only
-    values from LM Studio configs are copied. Conflicting values across
-    configs for one registry entry are reported and skipped. When
-    ``installed_models`` is provided by ``sync``, configs with no matching
-    current LMS inventory entry are ignored as stale runtime artifacts.
+    ``write=False`` is the safe report mode. With ``write=True``, values from
+    LM Studio configs are copied. ``write_context=True`` is the narrow variant
+    that persists only ``context_length`` and leaves offload/UKV/KV settings
+    untouched. Conflicting values across configs for one registry entry are
+    reported and skipped. When ``installed_models`` is provided by ``sync``,
+    configs with no matching current LMS inventory entry are ignored as stale
+    runtime artifacts.
     """
+    if write_context:
+        write = True
     if not REGISTRY_PATH.exists():
         print(f"[ERROR] Registry not found: {REGISTRY_PATH}")
         sys.exit(1)
@@ -1347,16 +1337,17 @@ def cmd_sync_from_configs(
         if not match:
             skipped_no_match += 1
             continue
-        if any(kw in match.lower() for kw in BLACKLIST):
+        if is_blacklisted_model_name(match):
             blacklisted += 1
             continue
-        for field, cfg_field in (
+        fields_to_sync = (("context_length", "context_length"),) if write_context else (
             ("offload", "offload"),
             ("useUnifiedKvCache", "use_unified_kv"),
             ("context_length", "context_length"),
             ("k_cache", "k_cache"),
             ("v_cache", "v_cache"),
-        ):
+        )
+        for field, cfg_field in fields_to_sync:
             value = cfg.get(cfg_field)
             if value is not None:
                 if field == "context_length":
@@ -1453,9 +1444,8 @@ def _canonical_key(mk: str, pub: str) -> str:
     s = mk.strip().lower()
     s = re.sub(r"\.gguf$", "", s)
     s = re.sub(r"-(gguf|mxpr4)$", "", s)
-    if "/" not in s:
-        s = f"{pub.lower().strip()}/{s}"
-    return s
+    parsed_publisher, model_name, quant = decompose_model_identity(s)
+    return build_model_identity(parsed_publisher or pub, model_name, quant)
 
 
 def _benchmark_lms_models(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1477,14 +1467,9 @@ def _benchmark_lms_models(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def _identity_aliases(key: str) -> set[str]:
     """Return stable aliases for publisher/model[@quant] identity matching."""
     raw = key.strip().lower()
-    base, separator, quant = raw.partition("@")
-    if "/" in base:
-        publisher, model = base.split("/", 1)
-    else:
-        publisher, model = "", base
-    publisher = publisher.strip()
-    model = model.strip()
-    quant = quant.strip()
+    _base, separator, quant = raw.partition("@")
+    publisher, model, parsed_quant = decompose_model_identity(raw)
+    quant = parsed_quant.strip()
     if not model:
         return set()
 
@@ -1519,11 +1504,13 @@ def _lms_identity_keys(model: dict[str, Any]) -> set[str]:
         variant_values.extend(str(value).strip() for value in raw_variants if value)
     quant = _quant_from_lms_record(model) or ""
     if quant and "@" not in base:
-        variant_values.append(f"{base}@{quant}")
+        publisher_name, model_name, _existing_quant = decompose_model_identity(base)
+        variant_values.append(build_model_identity(publisher_name, model_name, quant))
 
     for variant in variant_values:
         if "@" not in variant and quant:
-            variant = f"{variant}@{quant}"
+            publisher_name, model_name, _existing_quant = decompose_model_identity(variant)
+            variant = build_model_identity(publisher_name, model_name, quant)
         identities.add(_canonical_key(variant, publisher))
     return identities
 
@@ -1606,7 +1593,8 @@ def _canonical_lms_key(model: dict[str, Any]) -> str:
         return _canonical_key(selected, publisher)
     quant = _quant_from_lms_record(model)
     if quant and "@" not in base:
-        return f"{base}@{quant}"
+        publisher_name, model_name, _existing_quant = decompose_model_identity(base)
+        return build_model_identity(publisher_name, model_name, quant)
     return base
 
 
@@ -1827,7 +1815,7 @@ _REASONING_TOKEN_RE = re.compile(
 
 _KNOWN_QUANTS = (
     "q1_0", "q2_k", "q3_k_s", "q3_k_m", "q3_k_l", "q4_0", "q4_k_s", "q4_k_m",
-    "q5_0", "q5_k_s", "q5_k_m", "q6_k", "q8_0", "iq2_xxs", "iq2_xs", "iq2_s",
+    "q5_0", "q5_k_s", "q5_k_m", "q6_k", "q8_0_i", "q8_0", "iq2_xxs", "iq2_xs", "iq2_s",
     "iq2_m", "iq3_xxs", "iq3_xs", "iq3_s", "iq3_m", "iq4_xs", "iq4_nl",
     "q2_k_s", "q3_k_xs", "q4_k_xl", "mxfp4", "fp16", "f16",
 )
@@ -2128,7 +2116,7 @@ def cmd_fill_quant() -> None:
         if not new_key:
             pub = lms_pub_base.get(base, key.split("/")[0] if "/" in key else "")
             model_part = base.split("/", 1)[1] if "/" in base else base
-            new_key = f"{pub}/{model_part}@{quant.lower()}" if pub else f"{model_part}@{quant.lower()}"
+            new_key = build_model_identity(pub, model_part, quant)
 
         # Don't overwrite if new key already exists
         if new_key in reg and new_key != key:
@@ -2833,9 +2821,9 @@ def cmd_validate(verbose: bool = False, repro: bool = False, ci: bool = False) -
     # ── Check 4b: Modell-Identität = Publisher + Modellname + Quantisierung ──
     # Jeder Registry-Key MUSS die Form publisher/modelname@quant haben.
     # Base-Entries ohne @quant sind nicht eindeutig und gehören entfernt.
-    from model_identity import model_identity_triple
+    from model_identity import decompose_model_identity
     for model_key in reg:
-        pub, _model, quant = model_identity_triple(model_key)
+        pub, _model, quant = decompose_model_identity(model_key)
         if not pub:
             errors.setdefault("missing_publisher", []).append(
                 f"{model_key}: kein Publisher-Prefix (MUSS publisher/model@quant sein)"
@@ -3513,9 +3501,14 @@ def main() -> None:
     elif cmd == "suggest":
         cmd_suggest()
     elif cmd == "sync-from-configs":
-        installed_models = _benchmark_lms_models(_run_lms_ls())
+        write_context = "--write-context" in sys.argv[2:]
+        # The narrow context repair also covers matching retained configs that
+        # are no longer in the current LMS inventory; validation still checks
+        # those Registry identities and must be repairable deterministically.
+        installed_models = None if write_context else _benchmark_lms_models(_run_lms_ls())
         cmd_sync_from_configs(
-            write="--write" in sys.argv[2:],
+            write="--write" in sys.argv[2:] or write_context,
+            write_context=write_context,
             installed_models=installed_models,
         )
     elif cmd == "fill-ctx":

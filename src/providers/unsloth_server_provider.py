@@ -9,6 +9,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
+from benchmark_config import is_blacklisted_model_name
 from local_model_resolver import LocalModelResolver, ModelResolutionError
 from utils.terminal import warn
 
@@ -197,8 +198,8 @@ class UnslothServerProvider(HttpProvider):
             model
             for model in models
             if not any(
-                keyword in f"{model['key']} {model['display']}".lower()
-                for keyword in exclude_keywords
+                is_blacklisted_model_name(model[field], exclude_keywords)
+                for field in ("key", "display")
             )
         ]
 

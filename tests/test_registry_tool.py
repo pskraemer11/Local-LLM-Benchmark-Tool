@@ -198,6 +198,24 @@ class TestGuiConfigRegistrySync:
         assert entry["v_cache"] == "q5_1"
         save_registry.assert_called_once_with(registry)
 
+    def test_write_context_mode_only_persists_context(self, tmp_path):
+        registry, registry_path, configs = self._registry_and_configs(tmp_path)
+        with (
+            patch.object(rt, "REGISTRY_PATH", registry_path),
+            patch.object(rt, "load_registry", return_value=registry),
+            patch.object(rt, "read_lms_configs", return_value=configs),
+            patch.object(rt, "save_registry") as save_registry,
+        ):
+            rt.cmd_sync_from_configs(write_context=True)
+
+        entry = registry["publisher/model@q4_k_m"]
+        assert entry["context_length"] == 8192
+        assert entry["offload"] == 1.0
+        assert entry["useUnifiedKvCache"] is False
+        assert entry["k_cache"] == "q8_0"
+        assert entry["v_cache"] == "q8_0"
+        save_registry.assert_called_once_with(registry)
+
     def test_report_mode_detects_kv_quantization_drift(self, tmp_path, capsys):
         registry, registry_path, configs = self._registry_and_configs(tmp_path)
         with (
@@ -896,6 +914,9 @@ class TestIsSupportFile:
     def test_mmproj_detected(self):
         assert rt._is_support_file("unsloth/gemma-4-12B-it-qat-GGUF/mmproj-F32.gguf")
 
+    def test_dflash_support_file_detected(self):
+        assert rt._is_support_file("gguf-org/muse-glimmer-30b-gguf/dflash-q4_0.gguf")
+
     def test_standalone_mtp_model_not_detected(self):
         # Eigenständige MTP-Modelle sind KEINE Zusatzdateien
         assert not rt._is_support_file("unsloth/Qwen3.6-27B-MTP-GGUF/Qwen3.6-27B-UD-IQ3_XXS.gguf")
@@ -1384,7 +1405,11 @@ class TestRegistryTemplateName:
 
     def test_resolves_from_blueprint_direct_template(self):
         # openai/gpt-oss-20b@mxfp4 -> gptoss_reasoning -> template
-        name = rt._registry_template_name("openai/gpt-oss-20b@mxfp4")
+        registry = {
+            "openai/gpt-oss-20b@mxfp4": {"blueprint": "gptoss_reasoning"}
+        }
+        with patch.object(rt, "load_registry", return_value=registry):
+            name = rt._registry_template_name("openai/gpt-oss-20b@mxfp4")
         assert name == "gpt-oss-20b_harmony.jinja"
 
     def test_explicit_registry_template_overrides_blueprint(self) -> None:

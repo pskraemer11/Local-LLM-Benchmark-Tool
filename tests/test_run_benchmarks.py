@@ -32,6 +32,22 @@ from run_benchmarks import (
 )
 
 
+def _patch_gpt_oss_registry(mocker):
+    import benchmark_config as bc
+
+    registry = dict(bc._load_quant_registry())
+    registry["openai/gpt-oss-20b@mxfp4"] = {
+        "blueprint": "gptoss_reasoning",
+        "reasoning": "thinking",
+        "sampling_source": "web-research",
+        "sampling": {
+            category: {"temperature": 1.0, "top_p": 1.0}
+            for category in ("coding", "knowledge", "agentic", "math")
+        },
+    }
+    mocker.patch.object(bc, "_load_quant_registry", return_value=registry)
+
+
 # ======================================================================
 # Detection helpers
 # ======================================================================
@@ -330,9 +346,10 @@ class TestLmevalParams:
         assert params["temperature"] == 0.6  # leicht stochastisch fuer tool-use
         assert params["max_tokens"] == 4096
 
-    def test_registry_sampling_replaces_model_overrides(self):
+    def test_registry_sampling_replaces_model_overrides(self, mocker):
         # MODEL_TEMP_OVERRIDES sind entfernt; stattdessen entscheidet
         # Registry-Sampling (Modell x Kategorie) ueber die Defaults.
+        _patch_gpt_oss_registry(mocker)
         expected = {
             "unsloth/phi-4": 1.0,  # Registry-Sampling, coding
             "unsloth/gpt-oss-20b": 1.0,  # Zeile gpt-oss
@@ -360,10 +377,11 @@ class TestLmevalParams:
                 assert "until" not in params
                 assert "stop" not in params
 
-    def test_gptoss_until_from_blueprint(self):
+    def test_gptoss_until_from_blueprint(self, mocker):
         # Seit 14.08.: stop_strings kommen aus der Blueprint-Definition (SSOT).
         # gptoss_reasoning definiert <|return|> (Harmony-EOS, Template-Kommentar:
         # "<|return|> indicates the end of generation, <|end|> does not").
+        _patch_gpt_oss_registry(mocker)
         params = _get_evaluation_parameters("unsloth/gpt-oss-20b", "coding")
         assert params.get("until") == ["<|return|>"]
 
@@ -463,10 +481,11 @@ class TestBuildLmevalCmd:
             args_json = json.loads(cmd[idx + 1])
             assert args_json["eos_string"] == "<|return|>"
 
-    def test_gptoss_default_has_until_from_blueprint(self, tmp_path):
+    def test_gptoss_default_has_until_from_blueprint(self, tmp_path, mocker):
         # Seit 14.08.: stop_strings aus Blueprint (SSOT). gptoss_reasoning
         # liefert until=["<|return|>"], daher greift der eos_string-Fallback
         # fuer gpt-oss NICHT mehr (bis 13.08.: eos_string=<|endoftext|>).
+        _patch_gpt_oss_registry(mocker)
         cmd = _build_lmeval_cmd("gpt-oss-20b", "gpt-oss-20b", "task1", 5, str(tmp_path / "out"))
         idx = cmd.index("--gen_kwargs")
         kwargs = json.loads(cmd[idx + 1])

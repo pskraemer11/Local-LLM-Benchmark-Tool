@@ -297,6 +297,24 @@ class TestGetAvailableModels:
         assert len(models) == 1
         assert models[0]["model_identifier"] == "good_model"
 
+    def test_blacklist_ignores_publisher_component(self, mocker):
+        result = MagicMock()
+        result.returncode = 0
+        result.stdout = json.dumps([
+            {
+                "modelKey": "peculiar-ragdoll/tiel-coder-35b-a3b",
+                "displayName": "Tiel Coder 35B A3B",
+                "selectedVariant": "peculiar-ragdoll/tiel-coder-35b-a3b@iq3_xxs",
+                "variants": [],
+            }
+        ])
+        mocker.patch("subprocess.run", return_value=result)
+
+        models = get_available_models(exclude_keywords=["rag"])
+
+        assert len(models) == 1
+        assert models[0]["model_identifier"] == "peculiar-ragdoll/tiel-coder-35b-a3b"
+
     def test_includes_quant_in_display(self, mocker):
         result = MagicMock()
         result.returncode = 0

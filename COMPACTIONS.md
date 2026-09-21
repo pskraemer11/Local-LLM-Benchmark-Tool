@@ -1013,3 +1013,31 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 - `doc-git/model_registry.yaml`: durch den Refresh erzeugte Sampling- und aktuelle Inventardaten.
 - `doc-git/Temperature Recommondations_en.md`: Dokumentation des neuen Evidence-Schemas.
 - `CHANGELOG.md`: Eintrag `Generation-Safe Sampling Evidence` für diese Änderung.
+
+=============== Compaction 21.09.2026 / 01:33 ================
+## Objective
+- (Completed) Registry-/Config-Abgleich für die aktuelle LM-Studio-Modellmenge korrigieren und die neue enge Schreibvariante `sync-from-configs --write-context` dokumentieren.
+- (Completed) Quarantänisierte LM-Studio-JSONs aus aktiver Config-Erkennung und `validate` ausschließen.
+
+## Important Details
+- **Context import:** `--write-context` schreibt ausschließlich `context_length` in `model_registry.yaml`; Offload, UKV sowie K-/V-Cache bleiben unverändert. Passende erhaltene Configs werden auch dann berücksichtigt, wenn sie nicht mehr im aktuellen LMS-Inventar stehen.
+- **Quarantine boundary:** `quarantine-missing` bleibt ein ausdrücklich auszuführender Bereinigungsbefehl. `pipeline full` führt nur den Dry-Run aus, weil die echte Variante Configs verschiebt und Registry-Einträge entfernt. `read_lms_configs()` überspringt jetzt direkte `_quarantine_*`-Verzeichnisse.
+- **Identity/matching:** QAT/NVFP4-Namen werden symmetrisch erkannt; `q8_0_i`, BF16-Formatmarker, zusammengesetzte Quantmarker und unbekannte Quant-Platzhalter sind durch Regressionstests abgesichert. DFlash-Dateien gelten als Zusatzdateien.
+- **Registry cleanup:** Muse Glimmer ist als `@nvfp4` klassifiziert; der falsche Muse-`@q4_0`-Eintrag sowie stale Nerdsking- und F2LLM-Einträge wurden entfernt.
+
+## Work State
+### Completed / Active / Blocked
+- Completed: Dokumentation in README, Architektur-/Workflow-Doku, CHANGELOG und `registry_tool.py --help` aktualisiert; Markdown-Tabellen geprüft.
+- Verification: Fokussierte Assemble-/Registry-Suite `187 passed`; Ruff für geänderten Code und Test bestanden; neuer `validate --verbose` prüft keine Quarantäne-Configs mehr.
+- Active: Arbeitsbaum enthält zusätzlich bereits vorhandene Änderungen und ist nicht committed oder gepusht.
+- Open: Ein verbleibender Context-Drift betrifft eine nicht quarantänisierte `peculiar-ragdoll/tiel-coder-35b-a3b@iq3_xxs`-Config; er ist unabhängig von der Quarantänefilterung.
+
+## Next Move
+1. Bei Bedarf `quarantine-missing --dry-run` für den verbleibenden alten Modellbestand prüfen.
+2. Erst nach Scope-Abgrenzung den gewünschten Gesamtstand gezielt testen, über `.githooks/pre_commit.ps1` committen und mit `.githooks/pre_push.ps1` pushen.
+
+## Relevant Files
+- `src/assemble_blueprint.py`: Quarantänefilter und symmetrisches Config-/Registry-Matching.
+- `src/registry_tool.py`: `--write-context`, Registry-Synchronisierung und Dry-Run-Quarantäne in `pipeline full`.
+- `tests/test_assemble_blueprint.py`, `tests/test_registry_tool.py`: Regressionen für Quarantänefilterung, Matching und Config-Sync.
+- `README.md`, `doc-git/Architecture, Flow & ChangeLog_en.md`, `CHANGELOG.md`: Benutzer- und Workflow-Dokumentation.

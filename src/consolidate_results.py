@@ -52,7 +52,7 @@ from benchmark_config import (
     extract_quant_from_key,
     get_quant,
 )
-from model_identity import match_registry_key, model_identity_triple
+from model_identity import build_model_identity, decompose_model_identity, match_registry_key
 from utils.terminal import error, warn
 
 # --- Model info cache (from lms ls --json) ---
@@ -175,7 +175,7 @@ def _get_registry_data() -> tuple[list[str], dict[str, list[tuple[str, str]]], s
     base_map: dict[str, list[tuple[str, str]]] = {}
     publishers: set[str] = set()
     for k in keys:
-        pub, model, _ = model_identity_triple(k)
+        pub, model, _ = decompose_model_identity(k)
         if not model:
             continue
         publishers.add(pub)
@@ -206,8 +206,10 @@ def _strip_publisher_prefix(base_key: str) -> tuple[str, str]:
 
 def _join_triple(publisher: str, model: str, quant: str) -> str:
     """Assemble the canonical triple-key ``publisher/model@quant`` (any part may be empty)."""
-    base = f"{publisher}/{model}" if publisher else model
-    return f"{base}@{quant}" if quant else base
+    if not model:
+        base = f"{publisher}/{model}" if publisher else model
+        return f"{base}@{quant}" if quant else base
+    return build_model_identity(publisher, model, quant)
 
 
 def _get_canonical_key(model_key: str) -> str:
@@ -234,7 +236,7 @@ def _get_canonical_key(model_key: str) -> str:
     if reg_keys:
         hit = match_registry_key(model_key, reg_keys)
         if hit:
-            pub, model, _ = model_identity_triple(hit)
+            pub, model, _ = decompose_model_identity(hit)
             return _join_triple(pub, model, run_q)
         b = _publisherless_base(base_raw)
         cands = base_map.get(b, [])

@@ -6,6 +6,8 @@ import os
 import time
 from typing import Any
 
+from benchmark_config import is_blacklisted_model_name
+
 from .base import HttpProvider, ProviderCapabilities
 
 
@@ -91,8 +93,8 @@ class OpenAICompatProvider(HttpProvider):
                 model
                 for model in models
                 if not any(
-                    keyword in f"{model['key']} {model['display']}".lower()
-                    for keyword in exclude_keywords
+                    is_blacklisted_model_name(model[field], exclude_keywords)
+                    for field in ("key", "display")
                 )
             ]
         return models

@@ -4,6 +4,8 @@ Covers Registry-Sampling > Kategorie-/Thinking-Defaults, JSON-temp
 IGNORIERT (GUI-only), _source-Herkunft und Thinking-Klassifikation.
 """
 
+from typing import Any
+
 import pytest
 
 import benchmark_config as bc
@@ -11,13 +13,27 @@ from benchmark_config import get_model_config
 
 
 @pytest.fixture(autouse=True)
-def _no_real_lms_files(mocker):
+def _no_real_lms_files(mocker: Any) -> None:
     """Never touch the real LM Studio config dir in unit tests.
 
     Tests that need a JSON-config dict re-patch _lms_generation_config.
     """
     mocker.patch.object(bc, "_lms_generation_config", return_value=None)
     return None
+
+
+def _gpt_oss_test_entry() -> dict[str, Any]:
+    """Return the minimal GPT-OSS policy needed by registry-backed tests."""
+    sampling = {
+        category: {"temperature": 1.0, "top_p": 1.0}
+        for category in ("coding", "knowledge", "agentic", "math")
+    }
+    return {
+        "blueprint": "gptoss_reasoning",
+        "reasoning": "thinking",
+        "sampling_source": "web-research",
+        "sampling": sampling,
+    }
 
 
 class TestCategoryDefaults:
@@ -63,7 +79,10 @@ class TestRegistryBackedSampling:
         assert (cfg["temperature"], cfg["top_p"]) == (0.001, 1.0)
         assert cfg["_source"] == "registry-sampling"
 
-    def test_gpt_oss_registry_block(self):
+    def test_gpt_oss_registry_block(self, mocker):
+        registry = dict(bc._load_quant_registry())
+        registry["openai/gpt-oss-20b@mxfp4"] = _gpt_oss_test_entry()
+        mocker.patch.object(bc, "_load_quant_registry", return_value=registry)
         cfg = get_model_config("openai/gpt-oss-20b", category="math")
         assert (cfg["temperature"], cfg["top_p"]) == (1.0, 1.0)
         assert cfg["_source"] == "registry-sampling"
@@ -152,6 +171,19 @@ class TestRegistrySampling:
         assert (cfg["temperature"], cfg["top_p"]) == (0.2, 1.0)
         assert cfg["_source"] == "category-default"
 
+
+class TestBlacklistIdentityScope:
+    def test_publisher_keywords_do_not_blacklist_model(self):
+        model_key = "peculiar-ragdoll/tiel-coder-35b-a3b@iq3_xxs"
+
+        assert not bc.is_blacklisted_model_name(model_key)
+        assert bc.is_registry_candidate({"type": "llm", "modelKey": model_key})
+
+    def test_basis_name_keywords_still_blacklist_models(self):
+        assert bc.is_blacklisted_model_name("publisher/rag-retriever-7b@q4_k_m")
+        assert bc.is_blacklisted_model_name("publisher/ocr-model-7b@q8_0")
+        assert bc.is_blacklisted_model_name("publisher/embed-model-7b@q8_0")
+
     def test_unknown_model_no_registry_no_table(self):
         cfg = get_model_config("unknown/never-heard-8b", category="coding")
         assert cfg["_source"] == "category-default"
@@ -180,7 +212,10 @@ class TestThinkingRuns:
         assert (cfg["temperature"], cfg["top_p"]) == (1.0, 0.95)
         assert cfg["_source"] == "registry-sampling"
 
-    def test_thinking_gpt_oss_row(self):
+    def test_thinking_gpt_oss_row(self, mocker):
+        registry = dict(bc._load_quant_registry())
+        registry["openai/gpt-oss-20b@mxfp4"] = _gpt_oss_test_entry()
+        mocker.patch.object(bc, "_load_quant_registry", return_value=registry)
         cfg = get_model_config("openai/gpt-oss-20b", category="coding", is_thinking_enabled=True)
         assert (cfg["temperature"], cfg["top_p"]) == (1.0, 1.0)
 

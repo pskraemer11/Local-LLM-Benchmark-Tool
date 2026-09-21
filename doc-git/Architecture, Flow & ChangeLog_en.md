@@ -1,6 +1,6 @@
 # Architecture and User Workflow
 
-Status: 2026-09-19
+Status: 2026-09-21
 Audience: first-time users, maintainers, and reviewers
 Scope: model onboarding, Registry maintenance, prompt assembly, benchmark
 execution, providers, and result data
@@ -57,7 +57,7 @@ model_registry.yaml + provider ──> run_benchmarks.py
 | GGUF header and filename              | Model architecture and native limits           | Registry tool, resolver                   | Read-only source                            |
 | doc-git/blueprint_definitions.yaml    | Prompt blueprint definitions                   | Assembly and validation                   | Maintained as project policy                |
 | doc-git/Jinja-Chat-Templates/         | Explicit template files                        | Prompt assembly                           | Maintained as project assets                |
-| LM Studio config JSONs                | LM Studio runtime state                        | Drift checks and explicit runtime repair  | Never written by ordinary sync/full         |
+| LM Studio config JSONs                | LM Studio runtime state                        | Drift checks and explicit Registry import | Never written by ordinary sync/full         |
 | simple_evals/                         | Local custom benchmark tasks                   | Custom pipeline                           | Benchmark input; do not rewrite during runs |
 | EvalPlus/lm-eval/tool-eval-bench data | External benchmark tasks                       | Their respective pipelines                | Managed by the dependency/tool              |
 | ergebnisse/                           | Run outputs                                    | Human review and consolidation            | Runtime output, normally ignored            |
@@ -102,6 +102,12 @@ The matching code normalizes spelling differences such as dots, underscores,
 and quant suffix separators, but it does not intentionally erase publisher or
 quantization identity. This prevents one publisher's config from being
 assigned to another publisher's model with the same basename.
+
+The canonical identity is constructed by `build_model_identity()` and split
+by its counterpart `decompose_model_identity()`. Both helpers operate on the
+same three components—publisher, model base name, and quantization—so callers
+do not maintain separate parsing or formatting rules for the
+`publisher/model@quant` Registry key.
 
 ### 2.3 Registry entry shape
 
@@ -166,10 +172,10 @@ OCR and embedding models are deliberately excluded. Their local benchmark
 pipelines are not implemented in this repository, so adding them to the
 Registry would create entries that the launcher cannot evaluate correctly.
 
-MTP drafter companions, mmproj files, and iMatrix support files are also
-filtered as auxiliary files rather than standalone benchmark models. A real
-standalone model whose name contains mtp remains eligible when it is not a
-small companion file.
+MTP drafter companions, DFlash decoder/draft files, mmproj files, and iMatrix
+support files are also filtered as auxiliary rather than standalone benchmark
+models. A real standalone model whose name contains mtp remains eligible when
+it is not a small companion file.
 
 ### 3.2 The three pipeline modes
 
@@ -189,6 +195,10 @@ status is a read-only comparison:
 
 No Registry or LM Studio config JSON is written.
 
+Validation and active config matching ignore `_quarantine_*` directories below
+the LM Studio config root. Quarantined JSON files are historical runtime
+artifacts and do not represent installed model configurations.
+
 #### sync
 
 ~~~text
@@ -205,6 +215,26 @@ sync calls the direct maintenance function. It:
 - normalizes the Registry file.
 
 It may write model_registry.yaml. It does not write LM Studio config JSONs.
+
+#### sync-from-configs
+
+~~~text
+py -3.12 src\registry_tool.py sync-from-configs
+~~~
+
+`sync-from-configs` is report-only by default. The explicit narrow mode
+
+~~~text
+py -3.12 src\registry_tool.py sync-from-configs --write-context
+~~~
+
+imports only `llm.load.contextLength` into the Registry field
+`context_length`. It does not write LM Studio JSONs and does not change
+offload, `useUnifiedKvCache`, `k_cache`, or `v_cache`. It also considers
+matching retained Config JSONs that are absent from the current LMS inventory,
+because validation still checks their Registry identities. The broader
+`--write` mode imports all supported config-derived fields and must therefore
+be selected deliberately.
 
 #### pipeline sync
 
@@ -248,17 +278,17 @@ behavior only; it is not an automatic repair.
 The pipeline modes are the preferred user interface, but lower-level
 commands remain useful for focused repairs:
 
-| Command                 | Purpose                                                   | Writes config JSONs? |
-| ----------------------- | --------------------------------------------------------- | -------------------- |
-| compare                 | Report Registry/LMS/config differences                    | No                   |
-| validate --ci           | Headless consistency validation                           | No                   |
-| fill-quant              | Fill missing quantization from GGUF names                 | No                   |
-| fill-arch               | Read architecture values from GGUF headers                | No                   |
-| fill-reasoning          | Detect reasoning from GGUF templates                      | No                   |
-| sync-from-configs       | Report config-derived drift; --write is explicit          | No by default        |
-| sync-templates          | Explicitly copy missing prompt templates into configs     | Yes                  |
-| sync-template-from-gguf | Explicitly copy an embedded GGUF template into one config | Yes                  |
-| patch-reasoning-effort  | Explicit GLM runtime-config patch                         | Yes                  |
+| Command                 | Purpose                                                                                  | Writes config JSONs? |
+| ----------------------- | ---------------------------------------------------------------------------------------- | -------------------- |
+| compare                 | Report Registry/LMS/config differences                                                   | No                   |
+| validate --ci           | Headless consistency validation                                                          | No                   |
+| fill-quant              | Fill missing quantization from GGUF names                                                | No                   |
+| fill-arch               | Read architecture values from GGUF headers                                               | No                   |
+| fill-reasoning          | Detect reasoning from GGUF templates                                                     | No                   |
+| sync-from-configs       | Report drift; --write-context imports only context; --write imports all supported fields | No by default        |
+| sync-templates          | Explicitly copy missing prompt templates into configs                                    | Yes                  |
+| sync-template-from-gguf | Explicitly copy an embedded GGUF template into one config                                | Yes                  |
+| patch-reasoning-effort  | Explicit GLM runtime-config patch                                                        | Yes                  |
 
 The explicit write commands are intentionally separate from normal sync and
 full validation.

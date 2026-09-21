@@ -21,7 +21,12 @@ from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from type_defs import ModelConfig
-from model_identity import match_registry_key, normalize_lms_model_name, normalized_lms_key
+from model_identity import (
+    decompose_model_identity,
+    match_registry_key,
+    normalize_lms_model_name,
+    normalized_lms_key,
+)
 from utils.terminal import warn
 
 BLACKLIST = [
@@ -63,6 +68,27 @@ def is_mtp_drafter(model_name: str, file_size_bytes: int = 0) -> bool:
 EXCLUDE_KEYWORDS = BLACKLIST
 
 
+def blacklist_basis_name(identifier: str) -> str:
+    """Return the model-name part used for benchmark exclusion checks.
+
+    Model identities use ``publisher/model@quant``. Publisher text must not
+    trigger a model-family exclusion, so only the final slash component is
+    considered. Windows paths are handled as well for local GGUF discovery.
+    """
+    value = str(identifier or "").strip().lower().replace("\\", "/")
+    if value.count("/") == 1:
+        _publisher, model_name, _quant = decompose_model_identity(value)
+        return str(model_name)
+    return value.rsplit("/", 1)[-1].split("@", 1)[0]
+
+
+def is_blacklisted_model_name(identifier: str, keywords: list[str] | None = None) -> bool:
+    """Return whether a blacklist keyword occurs in the model basis name."""
+    basis_name = blacklist_basis_name(identifier)
+    active_keywords = BLACKLIST if keywords is None else keywords
+    return any(str(keyword).lower() in basis_name for keyword in active_keywords)
+
+
 def is_registry_candidate(model: dict[str, Any]) -> bool:
     """Return whether an LMS record belongs in the benchmark registry.
 
@@ -76,11 +102,18 @@ def is_registry_candidate(model: dict[str, Any]) -> bool:
     model_type = str(model.get("type", "")).strip().lower()
     if model_type and model_type != "llm":
         return False
-    searchable = " ".join(
-        str(model.get(field, ""))
-        for field in ("modelKey", "key", "displayName", "path", "indexedModelIdentifier")
-    ).lower()
-    return not any(keyword in searchable for keyword in BLACKLIST)
+    identifiers = [
+        model.get("modelKey"),
+        model.get("key"),
+        model.get("displayName"),
+        model.get("path"),
+        model.get("indexedModelIdentifier"),
+    ]
+    return not any(
+        is_blacklisted_model_name(str(identifier))
+        for identifier in identifiers
+        if identifier
+    )
 
 
 # ── Benchmark-Kategorie-Defaults (Fallback, seit 2026-08-05) ──
@@ -183,7 +216,7 @@ _KNOWN_QUANTS = (
     "q1_0", "q2_k", "q2_k_s", "q3_k_xs", "q3_k_s", "q3_k_m", "q3_k_l",
     "q4_0", "q4_1", "q4_k_s", "q4_k_m", "q4_k_xl",
     "q5_0", "q5_1", "q5_k_s", "q5_k_m",
-    "q6_k", "q8_0", "q8_1",
+    "q6_k", "q8_0_i", "q8_0", "q8_1",
     "iq1_s", "iq1_m",
     "iq2_xxs", "iq2_xs", "iq2_s", "iq2_m",
     "iq3_xxs", "iq3_xs", "iq3_s", "iq3_m", "iq3_nl",
@@ -734,6 +767,11 @@ def is_support_file(
     """
     name = os.path.basename(str(path)).lower()
     if "mmproj" in name:
+        return True
+    # DFlash decoder/draft GGUFs can be reported by LM Studio as if they were
+    # standalone models. They accompany the actual language model and must
+    # not create a second Registry identity (e.g. muse-glimmer/dflash-q4_0).
+    if name.startswith(("dflash-", "dflash_")):
         return True
     if name.startswith("mtp-"):
         return True

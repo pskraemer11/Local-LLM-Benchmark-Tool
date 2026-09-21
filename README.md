@@ -148,7 +148,9 @@ The registry tool operates on:
 - doc-git\model_registry.yaml
 - local GGUF headers
 - the LM Studio model inventory
-- LM Studio config JSONs as read-only runtime evidence
+- LM Studio config JSONs as read-only runtime evidence; an explicit
+  `sync-from-configs --write-context` may import only `contextLength` into
+  Registry `context_length`
 - blueprint definitions and Jinja templates
 - bounded web research for one-time sampling onboarding
 
@@ -189,6 +191,10 @@ Read-only report:
 It does not write model_registry.yaml and does not write LM Studio
 configuration JSONs.
 
+Validation and active config matching ignore the existing `_quarantine_*`
+directories below the LM Studio config root. Those files are historical
+artifacts and are not treated as installed model configurations.
+
 pipeline without a mode uses this status mode.
 
 #### sync
@@ -207,6 +213,28 @@ Direct registry maintenance:
 
 It may write doc-git\model_registry.yaml. It does not write LM Studio
 config JSONs.
+
+#### sync-from-configs
+
+~~~powershell
+py -3.12 .\src\registry_tool.py sync-from-configs
+~~~
+
+The command compares LM Studio config JSONs with the Registry and is
+report-only by default. To import the GUI context setting deliberately, use
+the narrow write mode:
+
+~~~powershell
+py -3.12 .\src\registry_tool.py sync-from-configs --write-context
+~~~
+
+`--write-context` writes only `llm.load.contextLength` to the Registry field
+`context_length`. It leaves offload, `useUnifiedKvCache`, `k_cache`, and
+`v_cache` unchanged. The narrow mode also considers matching retained Config
+JSONs that are not in the current LMS inventory, because validation still
+checks their Registry identities. The broader `--write` mode remains
+available when all supported config-derived fields should be imported
+intentionally.
 
 #### pipeline sync
 
@@ -281,7 +309,8 @@ Registry. Shared filters exclude, among others:
 - embedding models;
 - OCR, vision, audio, and transcription models;
 - RAG-only or feature-extraction models;
-- MTP drafter companion files and iMatrix support files.
+- MTP drafter companion files, DFlash decoder/draft files, and iMatrix
+  support files.
 
 OCR and embedding models are intentionally excluded because this repository
 does not yet contain local benchmark tests for them.
@@ -367,6 +396,12 @@ publisher/model@quant
 The publisher and quantization are part of the identity. Two files with the
 same base model name but different publishers or quantizations are different
 models for Registry matching.
+
+The shared helpers `build_model_identity()` and
+`decompose_model_identity()` keep construction and parsing of this
+`publisher/model@quant` triplet in one place. The publisher, model base name,
+and quantization are therefore handled consistently across registry matching,
+benchmark result consolidation, and blacklist filtering.
 
 ### Registry entry example
 

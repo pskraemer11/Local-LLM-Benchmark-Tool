@@ -11,7 +11,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from benchmark_config import BLACKLIST, guess_quant_from_filename, is_mtp_drafter, is_support_file
+from benchmark_config import (
+    guess_quant_from_filename,
+    is_blacklisted_model_name,
+    is_mtp_drafter,
+    is_support_file,
+)
 from model_identity import match_registry_key, normalize_for_config
 from model_paths import configured_gguf_roots
 
@@ -65,8 +70,7 @@ class LocalModelResolver:
 
     @staticmethod
     def _blacklisted(model_name: str) -> bool:
-        lowered = model_name.lower()
-        return any(keyword in lowered for keyword in BLACKLIST)
+        return is_blacklisted_model_name(model_name)
 
     def _model_base_id(self, path: Path) -> str:
         relative = path

@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 # ── Normalisierung (exakt wie assemble_blueprint.normalize_model_name) ──
 
 
-def model_identity_triple(key: str) -> tuple[str, str, str]:
+def decompose_model_identity(key: str) -> tuple[str, str, str]:
     """Extract the canonical identity triple (publisher, model, quant) from a registry key.
 
     A valid registry key ALWAYS has the form ``publisher/modelname@quant``.
@@ -41,6 +41,22 @@ def model_identity_triple(key: str) -> tuple[str, str, str]:
     else:
         publisher, model = "", base
     return publisher.lower(), model.lower(), quant.lower()
+
+
+def build_model_identity(publisher: str, model_name: str, quant: str = "") -> str:
+    """Build a canonical ``publisher/model@quant`` identity key.
+
+    Publisher, model, and quantization are normalized to lowercase. The
+    quantization suffix is optional for legacy base-key operations, although
+    benchmark Registry identities should normally provide it.
+    """
+    normalized_publisher = str(publisher or "").strip().lower()
+    normalized_model = str(model_name or "").strip().lower()
+    normalized_quant = str(quant or "").strip().lstrip("@").lower()
+    if not normalized_model:
+        raise ValueError("model_name must not be empty")
+    base = f"{normalized_publisher}/{normalized_model}" if normalized_publisher else normalized_model
+    return f"{base}@{normalized_quant}" if normalized_quant else base
 
 
 def normalize_model_name(name: str) -> str:
@@ -71,7 +87,7 @@ _VARIANT_SUFFIXES = (
 )
 
 _QUANT_DIR_SUFFIXES = (
-    "-mxfp4", "-gguf", "-mxpr4",
+    "-mxfp4", "-nvfp4", "-bf16", "-fp16", "-f16", "-gguf", "-mxpr4",
     # 2-teilige K/0-Quants (Ordner-Namen, z.B. "...-GGUF-Q4_K")
     "-q1-0", "-q2-k", "-q3-k", "-q4-0", "-q4-k", "-q5-0", "-q5-k", "-q6-k", "-q8-0",
     # 3-teilige K-Quants (z.B. "...-GGUF-Q4_K_M", "-Q3_K_S") - JetBrains-Naming
@@ -101,15 +117,20 @@ def normalize_for_config(name: str) -> str:
     idx = s.find("@")
     if idx > 0:
         s = s[:idx]
-    # Strip variant suffixes
-    for suffix in _VARIANT_SUFFIXES:
-        if s.endswith(suffix):
-            s = s[:-len(suffix)]
-            break
-    # Strip common quant/format suffixes in directory names
-    for suffix in _QUANT_DIR_SUFFIXES:
-        if s.endswith(suffix):
-            s = s[:-len(suffix)]
+    # Strip variant and quant/format suffixes repeatedly. LM Studio paths
+    # may combine them, e.g. ``...-QAT-NVFP4-GGUF``; a single pass leaves
+    # ``-qat`` behind and makes registry/config matching asymmetric.
+    while True:
+        before = s
+        for suffix in _VARIANT_SUFFIXES:
+            if s.endswith(suffix):
+                s = s[:-len(suffix)]
+                break
+        for suffix in _QUANT_DIR_SUFFIXES:
+            if s.endswith(suffix):
+                s = s[:-len(suffix)]
+                break
+        if s == before:
             break
     # Strip -gguf-* patterns (e.g., -gguf-mxfp4-moe, -gguf-q4-k-m)
     if "-gguf" in s:

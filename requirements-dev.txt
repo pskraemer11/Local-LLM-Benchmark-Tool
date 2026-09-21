@@ -6,6 +6,7 @@ pytest>=8.0
 pytest-cov>=5.0
 pytest-mock>=3.14       # mocker fixture, mocks for subprocess / HTTP
 responses>=0.25          # HTTP response mocking for LM Studio API
+gguf                      # GGUF header parsing used by registry-tool tests
 antlr4-python3-runtime==4.11  # lm_eval Minerva-Math requires the 4.11 runtime
 
 # Coverage

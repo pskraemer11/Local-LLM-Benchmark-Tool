@@ -28,7 +28,7 @@ from typing import Any
 
 from ruamel.yaml import YAML
 
-from benchmark_config import BLACKLIST, GPTOSS_REASONING_EFFORT, is_support_file
+from benchmark_config import GPTOSS_REASONING_EFFORT, is_blacklisted_model_name, is_support_file
 from model_identity import (
     _arch_reasoning_map,
     normalize_for_config,
@@ -85,7 +85,7 @@ _VARIANT_SUFFIXES = (
 
 
 _CONFIG_QUANT_RE = re.compile(
-    r"(?<![a-z0-9])(?:iq\d+(?:[_-](?:xxs|xs|s|m|l|nl|0|1|2))?|q\d+(?:[_-](?:k(?:[_-](?:s|m|l))?|s|m|l|0|1|2))?|mxfp4|nvfp4|fp16|f16)(?![a-z0-9])",
+    r"(?<![a-z0-9])(?:iq\d+(?:[_-](?:xxs|xs|s|m|l|nl|0|1|2))?(?:[_-]i)?|q\d+(?:[_-](?:k(?:[_-](?:s|m|l))?|s|m|l|0|1|2))?(?:[_-]i)?|mxfp4|nvfp4|fp16|f16)(?![a-z0-9])",
     re.IGNORECASE,
 )
 
@@ -114,7 +114,11 @@ def _registry_quant(registry_key: str) -> str | None:
     """Return a normalized ``@quant`` suffix from a registry key."""
     if "@" not in registry_key:
         return None
-    return _normalize_config_quant(registry_key.rsplit("@", 1)[1])
+    quant = _normalize_config_quant(registry_key.rsplit("@", 1)[1])
+    # ``@?`` is a temporary unknown-quant placeholder, not an identity-bearing
+    # quantization.  Treat it as a wildcard until the GGUF/header sync can
+    # resolve the canonical value.
+    return None if quant in {"", "?"} else quant
 
 
 def find_config_for_registry_key(
@@ -142,16 +146,28 @@ def find_all_configs_for_registry_key(
 
 
 def _config_quant_match_variants(value: str) -> set[str]:
-    """Return broad config keys with embedded GGUF quant markers removed.
+    """Return broad config keys with embedded GGUF markers removed.
 
     LM Studio directory names may insert a marker such as ``-IQ4`` before
     model-name tokens that are also present in the Registry key, e.g.
     ``...-mini-IQ4-XS-MTP`` versus ``...-mini-XS-MTP@iq4_xs``. Removing the
-    marker but retaining the following token preserves that model identity.
+    ``...-mini-IQ4-XS-MTP`` versus ``...-mini-XS-MTP@iq4_xs``. Both the
+    historical partial removal (needed when ``XS`` is part of the model name)
+    and complete composite-marker removal (``IQ4-XS``) are retained.
+
+    Format markers such as ``BF16`` in a GGUF directory are also represented
+    as variants because they describe the file format, not the model identity.
     """
     variants = {value}
     for match in re.finditer(r"-(?:iq|q)\d+(?=-|$)", value):
         variants.add(value[: match.start()] + value[match.end() :])
+    # Remove complete markers such as IQ4-XS, Q4-K-M, and Q8-0-I. Keep the
+    # partial variants above for legacy names where XS/M/S is model metadata.
+    composite_marker = r"-(?:iq|q)\d+(?:-(?:k|xxs|xs|s|m|l|nl|0|1|2|i))+"
+    for match in re.finditer(composite_marker + r"(?=-|$)", value):
+        variants.add(value[: match.start()] + value[match.end() :])
+    for marker in ("bf16", "fp16", "f16"):
+        variants.add(re.sub(rf"-{marker}(?=-|$)", "", value))
     return variants
 
 
@@ -248,10 +264,13 @@ def find_registry_key_for_config(
     for rn2, rnk in candidates:
         if rn2.endswith("-" + config_norm):
             return rnk
-    # Broad match: strip quant from registry keys and retry
+    # Broad match: strip quant, variant and format markers symmetrically from
+    # both sides. Config directories such as ``...-QAT-NVFP4-GGUF`` must
+    # match ``...-qat@nvfp4`` without relying on a publisher-specific alias.
+    config_broad = normalize_for_config(config_norm)
     for rn2, rnk in candidates:
         rn2_clean = normalize_for_config(rn2)
-        if config_norm == rn2_clean:
+        if config_broad == rn2_clean:
             return rnk
     return None
 
@@ -646,6 +665,10 @@ def read_lms_configs(config_root: Path) -> list:
 
     for publisher_dir in sorted(config_root.iterdir()):
         if not publisher_dir.is_dir():
+            continue
+        # Quarantined configs are historical runtime artifacts. They must not
+        # participate in active model matching, validation, or prompt assembly.
+        if publisher_dir.name.startswith("_quarantine_"):
             continue
         publisher = publisher_dir.name
         for item in sorted(publisher_dir.iterdir()):
@@ -1054,7 +1077,7 @@ def assemble_prompts(preview_only: bool = False) -> None:
         entry = registry[model_name]
         if not isinstance(entry, dict):
             continue
-        if any(kw in model_name.lower() for kw in BLACKLIST):
+        if is_blacklisted_model_name(model_name):
             stats["skipped"] += 1
             continue
 
