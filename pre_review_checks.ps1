@@ -68,6 +68,7 @@ if (-not (Test-Path -LiteralPath $projectPath)) {
     exit 1
 }
 Set-Location -LiteralPath $projectPath
+$repoRoot = $projectPath
 
 # Einheitliche Unicode-Ausgabe fuer Python auf Windows und in CI.
 $env:PYTHONUTF8 = "1"
