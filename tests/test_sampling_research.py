@@ -11,6 +11,7 @@ from sampling_research import (
     _manufacturer_urls,
     _normalise_url,
     _research_source_urls,
+    compact_sampling_block,
     research_sampling,
     research_sampling_report,
 )
@@ -41,23 +42,25 @@ def test_research_uses_explicit_profiles_and_marks_fallbacks() -> None:
 
     assert result is not None
     assert requested[0].endswith("https://huggingface.co/example/model/raw/main/README.md")
-    assert result["sampling"]["coding"] == {
+    assert {
+        key: result["sampling"]["coding"][key]
+        for key in ("temperature", "top_p", "top_k", "min_p")
+    } == {
         "temperature": 0.7,
         "top_p": 0.9,
         "top_k": 40,
         "min_p": 0.05,
     }
-    assert result["sampling"]["math"] == result["sampling"]["coding"]
-    assert result["sampling_category_status"]["math"] == "derived"
-    math_evidence = [item for item in result["sampling_evidence"] if item.get("profile") == "math"]
-    assert math_evidence
-    assert {item["evidence_kind"] for item in math_evidence} == {"derived"}
-    assert {item["derived_from"] for item in math_evidence} == {"coding"}
-    assert math_evidence[0]["values"] == result["sampling"]["math"]
-    assert "url" not in math_evidence[0]
+    assert all(
+        result["sampling"]["math"][key] == result["sampling"]["coding"][key]
+        for key in ("temperature", "top_p", "top_k", "min_p")
+    )
+    assert result["sampling"]["math"]["evidence_kind"] == "derived"
+    assert result["sampling"]["math"]["derived_from"] == "coding"
+    assert "sampling_evidence" not in result
     assert result["sampling"]["thinking"]["enabled"] is True
     assert result["sampling"]["thinking"]["temperature"] == 0.6
-    assert result["sampling_source"] == "web-research"
+    assert result["sampling"]["sampling_sources"]
 
 
 def test_research_prefers_direct_category_profiles() -> None:
@@ -82,9 +85,7 @@ def test_research_prefers_direct_category_profiles() -> None:
     assert result["sampling"]["math"]["temperature"] == 0.4
     assert result["sampling"]["knowledge"]["temperature"] == 0.7
     assert result["sampling"]["agentic"]["temperature"] == 0.8
-    assert result["sampling_category_status"]["math"] == "direct"
-    math_evidence = [item for item in result["sampling_evidence"] if item.get("profile") == "math"]
-    assert {item["evidence_kind"] for item in math_evidence} == {"direct"}
+    assert result["sampling"]["math"]["evidence_kind"] == "direct"
 
 
 def test_research_separates_profiles_sharing_one_markdown_line() -> None:
@@ -105,7 +106,8 @@ def test_research_separates_profiles_sharing_one_markdown_line() -> None:
     assert result["sampling"]["coding"]["temperature"] == 0.6
     assert result["sampling"]["knowledge"]["temperature"] == 0.7
     assert result["sampling"]["math"]["temperature"] == 0.6
-    assert result["sampling_category_status"]["math"] == "derived"
+    assert result["sampling"]["math"]["evidence_kind"] == "derived"
+    assert result["sampling"]["math"]["derived_from"] == "coding"
 
 
 def test_research_marks_math_unresolved_without_any_sampling_profile() -> None:
@@ -115,14 +117,12 @@ def test_research_marks_math_unresolved_without_any_sampling_profile() -> None:
     )
 
     assert result["sampling_research_status"] == "not_found"
-    assert result["sampling_category_status"]["math"] == "unresolved"
-    assert result["sampling_evidence"] == [
-        {
-            "profile": "math",
-            "evidence_kind": "unresolved",
-            "reason": "Kein allgemeines Profil; Coding-/Math-Fallback kann nicht belastbar bestimmt werden.",
-        }
-    ]
+    assert result["sampling"]["math"]["evidence_kind"] == "unresolved"
+    assert result["sampling"]["math"] == {
+        "evidence_kind": "unresolved",
+        "reason": "Kein allgemeines Profil; Coding-/Math-Fallback kann nicht belastbar bestimmt werden.",
+    }
+    assert "sampling_evidence" not in result
 
 
 def test_research_rejects_implausible_or_incomplete_values() -> None:
@@ -274,7 +274,8 @@ def test_research_report_marks_unresolved_and_persists_status_once(
     assert rt._research_missing_sampling(reg) == ["example/missing@q4_k"]
     assert rt._research_missing_sampling(rt.load_registry(registry_path)) == []
     assert calls == 1
-    assert rt.load_registry(registry_path)["example/missing@q4_k"]["sampling_research_status"] == "unresolved"
+    entry = rt.load_registry(registry_path)["example/missing@q4_k"]
+    assert entry["sampling"]["sampling_research_status"] == "unresolved"
 
 
 def test_manual_review_uses_validated_registry_write_seam(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -296,8 +297,8 @@ def test_manual_review_uses_validated_registry_write_seam(tmp_path: Path, monkey
     )
 
     entry = rt.load_registry(registry_path)["example/model@q4_k"]
-    assert entry["sampling_source"] == "manual-web-review"
-    assert entry["sampling_research_status"] == "confirmed"
+    assert entry["sampling"]["sampling_research_status"] == "confirmed"
+    assert entry["sampling"]["sampling_sources"] == ["https://example.com/model-card"]
     assert entry["sampling"]["thinking"]["enabled"] is True
 
 
@@ -327,7 +328,9 @@ def test_sampling_report_persists_category_status(tmp_path: Path, monkeypatch: p
     )
 
     assert changed is True
-    assert entry["sampling_category_status"] == {"coding": "direct", "math": "derived"}
+    assert entry["sampling"]["coding"]["evidence_kind"] == "direct"
+    assert entry["sampling"]["math"]["evidence_kind"] == "derived"
+    assert entry["sampling"]["math"]["derived_from"] == "coding"
 
 
 def test_forced_sampling_refresh_researches_existing_sampling(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -358,7 +361,8 @@ def test_forced_sampling_refresh_researches_existing_sampling(tmp_path: Path, mo
     assert calls == 1
     entry = rt.load_registry(registry_path)["example/model@q4_k"]
     assert entry["sampling"]["coding"]["temperature"] == 0.6
-    assert entry["sampling_category_status"]["math"] == "derived"
+    assert entry["sampling"]["math"]["evidence_kind"] == "derived"
+    assert entry["sampling"]["math"]["derived_from"] == "coding"
 
 
 def test_cmd_add_persists_researched_sampling_without_touching_lms_configs(
@@ -386,7 +390,31 @@ def test_cmd_add_persists_researched_sampling_without_touching_lms_configs(
     entry = rt.load_registry(registry_path)["example/example-coder-7b"]
     assert result["added"] == ["example/example-coder-7b"]
     assert entry["sampling"]["coding"]["temperature"] == 0.7
-    assert entry["sampling_sources"] == ["https://huggingface.co/example/model"]
+    assert entry["sampling"]["sampling_sources"] == ["https://huggingface.co/example/model"]
+
+
+def test_compact_sampling_block_removes_normal_and_repeated_urls() -> None:
+    compact = compact_sampling_block(
+        {
+            "coding": {"temperature": 0.6, "top_p": 0.95},
+            "knowledge": {"temperature": 0.6, "top_p": 0.95},
+            "math": {"temperature": 0.6, "top_p": 0.95},
+        },
+        status="confirmed",
+        researched_at="2026-09-21T00:00:00+00:00",
+        sources=["https://example.com/model-card", "https://example.com/model-card"],
+        evidence=[
+            {"profile": "normal", "evidence_kind": "direct", "url": "https://example.com/model-card"},
+            {"profile": "coding", "evidence_kind": "derived", "derived_from": "normal"},
+            {"profile": "math", "evidence_kind": "derived", "derived_from": "coding"},
+        ],
+    )
+
+    assert "normal" not in compact
+    assert compact["coding"]["evidence_kind"] == "direct"
+    assert compact["math"]["derived_from"] == "coding"
+    assert compact["sampling_sources"] == ["https://example.com/model-card"]
+    assert "sampling_evidence" not in compact
 
 
 def test_sync_researches_existing_entry_without_sampling(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

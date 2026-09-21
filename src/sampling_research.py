@@ -12,7 +12,7 @@ import html
 import json
 import re
 from collections import deque
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, cast
 from urllib.error import HTTPError, URLError
@@ -165,6 +165,120 @@ def validate_sampling_block(block: Any) -> list[str]:
             if field == "top_k" and float(value) != int(value):
                 issues.append(f"{category}.top_k: ganzzahliger Wert erwartet")
     return issues
+
+
+def compact_sampling_block(
+    sampling: Mapping[str, Any] | None,
+    *,
+    status: str | None = None,
+    researched_at: str | None = None,
+    sources: Sequence[str] | None = None,
+    evidence: Sequence[Mapping[str, Any]] | None = None,
+    category_status: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Return the compact Registry representation of sampling provenance.
+
+    The persisted schema keeps benchmark profiles and their provenance in one
+    ``sampling`` block. ``normal`` is an internal research profile only; when
+    it is used as a fallback, coding becomes the explicit benchmark anchor and
+    the other profiles refer to coding. The legacy evidence list is accepted
+    as input for migration but is never emitted by this helper.
+    """
+    source_urls: list[str] = []
+    for url in sources or ():
+        value = str(url).strip()
+        if value and value not in source_urls:
+            source_urls.append(value)
+
+    evidence_by_profile: dict[str, list[Mapping[str, Any]]] = {}
+    for item in evidence or ():
+        profile = str(item.get("profile") or "").strip().lower()
+        if profile in (*SAMPLING_CATEGORIES, "normal"):
+            evidence_by_profile.setdefault(profile, []).append(item)
+        url = str(item.get("url") or "").strip()
+        if url and url not in source_urls:
+            source_urls.append(url)
+
+    source = dict(sampling or {})
+    if status is None:
+        status = str(source.pop("sampling_research_status", "") or "") or None
+    if researched_at is None:
+        researched_at = str(source.pop("sampling_researched_at", "") or "") or None
+    if sources is None:
+        embedded_sources = source.pop("sampling_sources", [])
+        if isinstance(embedded_sources, Sequence) and not isinstance(embedded_sources, (str, bytes)):
+            for url in embedded_sources:
+                value = str(url).strip()
+                if value and value not in source_urls:
+                    source_urls.append(value)
+
+    compact: dict[str, Any] = {}
+    for category in SAMPLING_CATEGORIES:
+        raw_cell = source.get(category)
+        cell = dict(raw_cell) if isinstance(raw_cell, Mapping) else {}
+        profile_evidence = evidence_by_profile.get(category, [])
+        if not cell and not profile_evidence and not (category_status or {}).get(category):
+            continue
+
+        kind = str(cell.get("evidence_kind") or "").strip().lower() or None
+        derived_from = str(cell.get("derived_from") or "").strip().lower() or None
+        reason = str(cell.get("reason") or "").strip() or None
+        if profile_evidence:
+            kinds = {str(item.get("evidence_kind") or "").strip().lower() for item in profile_evidence}
+            if "unresolved" in kinds:
+                kind = "unresolved"
+            elif "direct" in kinds:
+                kind = "direct"
+            elif "derived" in kinds:
+                kind = "derived"
+            derived_values = {
+                str(item.get("derived_from") or "").strip().lower()
+                for item in profile_evidence
+                if item.get("derived_from")
+            }
+            if derived_values:
+                derived_from = sorted(derived_values)[0]
+            reasons = [str(item.get("reason") or "").strip() for item in profile_evidence if item.get("reason")]
+            if reasons:
+                reason = reasons[0]
+        if kind is None and category_status and category_status.get(category):
+            kind = str(category_status[category]).strip().lower()
+        if kind == "derived" and not derived_from and category == "math":
+            derived_from = "coding"
+
+        # ``normal`` is not a benchmark category. A general profile adopted as
+        # coding is direct evidence for the stored coding cell; other fallback
+        # categories are explicitly derived from that coding anchor.
+        if derived_from == "normal":
+            if category == "coding":
+                kind = "direct"
+                derived_from = None
+            else:
+                kind = "derived"
+                derived_from = "coding"
+
+        clean_cell = {
+            key: value
+            for key, value in cell.items()
+            if key in (*SUPPORTED_FIELDS, "enabled")
+        }
+        if kind:
+            clean_cell["evidence_kind"] = kind
+        if kind == "derived" and derived_from:
+            clean_cell["derived_from"] = derived_from
+        if kind == "unresolved" and reason:
+            clean_cell["reason"] = reason
+        compact[category] = clean_cell
+
+    if status is not None:
+        compact["sampling_research_status"] = status
+    if researched_at is not None:
+        compact["sampling_researched_at"] = researched_at
+    if source_urls:
+        compact["sampling_sources"] = source_urls
+    elif sources is not None:
+        compact["sampling_sources"] = []
+    return compact
 
 
 def _fetch_text(url: str, timeout_s: float) -> str | None:
@@ -813,10 +927,11 @@ def research_sampling_report(
             "Kein allgemeines Profil; Coding-/Math-Fallback kann nicht belastbar bestimmt werden.",
         )
         return {
+            "sampling": compact_sampling_block(
+                {}, status=status, sources=source_urls, evidence=unresolved, category_status={"math": "unresolved"}
+            ),
             "sampling_research_status": status,
             "sampling_sources": source_urls,
-            "sampling_evidence": unresolved,
-            "sampling_category_status": {"math": "unresolved"},
         }
 
     category_status: dict[str, str] = {}
@@ -826,13 +941,21 @@ def research_sampling_report(
     coding_values, coding_evidence, coding_conflicts = _resolve_profile(documents, "coding")
     source_urls = _research_source_urls(documents, normal_evidence, thinking_evidence, coding_evidence)
     if coding_conflicts:
+        conflict_evidence = (
+            evidence
+            + _unresolved_evidence("coding", "Widersprüchliche Coding-Profile.")
+            + _unresolved_evidence("math", "Coding-Profil widersprüchlich; Math-Ableitung nicht belastbar.")
+        )
         return {
+            "sampling": compact_sampling_block(
+                sampling,
+                status="conflict",
+                sources=source_urls,
+                evidence=conflict_evidence,
+                category_status={"coding": "unresolved", "math": "unresolved"},
+            ),
             "sampling_research_status": "conflict",
             "sampling_sources": source_urls,
-            "sampling_evidence": evidence
-            + _unresolved_evidence("coding", "Widersprüchliche Coding-Profile.")
-            + _unresolved_evidence("math", "Coding-Profil widersprüchlich; Math-Ableitung nicht belastbar."),
-            "sampling_category_status": {"coding": "unresolved", "math": "unresolved"},
         }
     if "temperature" in coding_values and "top_p" in coding_values:
         sampling["coding"] = dict(coding_values)
@@ -859,13 +982,21 @@ def research_sampling_report(
             profile_evidence,
         )
         if conflicts:
+            conflict_evidence = (
+                evidence
+                + _unresolved_evidence(category, f"Widersprüchliche {category}-Profile.")
+                + _unresolved_evidence("math", f"Widersprüchliches {category}-Profil; Math-Status bleibt ungeklärt.")
+            )
             return {
+                "sampling": compact_sampling_block(
+                    sampling,
+                    status="conflict",
+                    sources=source_urls,
+                    evidence=conflict_evidence,
+                    category_status={**category_status, category: "unresolved", "math": "unresolved"},
+                ),
                 "sampling_research_status": "conflict",
                 "sampling_sources": source_urls,
-                "sampling_evidence": evidence
-                + _unresolved_evidence(category, f"Widersprüchliche {category}-Profile.")
-                + _unresolved_evidence("math", f"Widersprüchliches {category}-Profil; Math-Status bleibt ungeklärt."),
-                "sampling_category_status": {**category_status, category: "unresolved", "math": "unresolved"},
             }
         if "temperature" in values and "top_p" in values:
             sampling[category] = dict(values)
@@ -900,11 +1031,17 @@ def research_sampling_report(
         math_evidence,
     )
     if math_conflicts:
+        conflict_evidence = evidence + _unresolved_evidence("math", "Widersprüchliche Math-Profile.")
         return {
+            "sampling": compact_sampling_block(
+                sampling,
+                status="conflict",
+                sources=source_urls,
+                evidence=conflict_evidence,
+                category_status={**category_status, "math": "unresolved"},
+            ),
             "sampling_research_status": "conflict",
             "sampling_sources": source_urls,
-            "sampling_evidence": evidence + _unresolved_evidence("math", "Widersprüchliche Math-Profile."),
-            "sampling_category_status": {**category_status, "math": "unresolved"},
         }
     if "temperature" in math_values and "top_p" in math_values:
         sampling["math"] = dict(math_values)
@@ -928,13 +1065,17 @@ def research_sampling_report(
         evidence.extend(_source_evidence("thinking", thinking_values, thinking_evidence))
         category_status["thinking"] = "direct"
 
+    final_sources = sorted({item["url"] for item in evidence if "url" in item})
     return {
-        "sampling": sampling,
-        "sampling_source": "web-research",
+        "sampling": compact_sampling_block(
+            sampling,
+            status="confirmed",
+            sources=final_sources,
+            evidence=evidence,
+            category_status=category_status,
+        ),
         "sampling_research_status": "confirmed",
-        "sampling_sources": sorted({item["url"] for item in evidence if "url" in item}),
-        "sampling_evidence": evidence,
-        "sampling_category_status": category_status,
+        "sampling_sources": final_sources,
     }
 
 

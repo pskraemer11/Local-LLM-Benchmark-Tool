@@ -11,9 +11,12 @@ Set-Location -LiteralPath $repoRoot
 
 $env:PYTHONUTF8 = "1"
 $env:PYTHONIOENCODING = "utf-8"
-$commitPytestBase = Join-Path ([System.IO.Path]::GetTempPath()) ("Benchmarks-PreCommit-Pytest-{0}" -f [Guid]::NewGuid().ToString("N"))
+$commitPytestRoot = Join-Path $repoRoot (".pytest-temp\precommit-{0}" -f [Guid]::NewGuid().ToString("N"))
+$commitPytestBase = Join-Path $commitPytestRoot "base"
+New-Item -ItemType Directory -Path $commitPytestRoot -Force | Out-Null
 
 function Stop-Hook([string]$Message) {
+    Remove-Item -LiteralPath $commitPytestRoot -Recurse -Force -ErrorAction SilentlyContinue
     Write-Host "[PRE-COMMIT BLOCKED] $Message" -ForegroundColor Red
     exit 1
 }
@@ -112,7 +115,7 @@ if ($needsRegistryTest) {
     Invoke-Checked "python" @("-m", "pytest", "tests/test_registry_tool.py", "-q", "--tb=short", "--basetemp", $commitPytestBase)
 }
 
-Remove-Item -LiteralPath $commitPytestBase -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $commitPytestRoot -Recurse -Force -ErrorAction SilentlyContinue
 
 Write-Host "[PRE-COMMIT] Alle staged Checks bestanden." -ForegroundColor Green
 exit 0

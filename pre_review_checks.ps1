@@ -73,9 +73,9 @@ Set-Location -LiteralPath $projectPath
 $env:PYTHONUTF8 = "1"
 $env:PYTHONIOENCODING = "utf-8"
 
-$runTemp = Join-Path ([System.IO.Path]::GetTempPath()) ("Benchmarks-PreReview-{0}-{1}" -f $PID, [Guid]::NewGuid().ToString("N"))
+$runTemp = Join-Path $repoRoot (".pytest-run-review-{0}-{1}" -f $PID, [Guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $runTemp -Force | Out-Null
-$pytestTempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("Benchmarks-PreReview-PytestRoot-{0}" -f [Guid]::NewGuid().ToString("N"))
+$pytestTempRoot = Join-Path $repoRoot (".pytest-push-{0}" -f [Guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $pytestTempRoot -Force | Out-Null
 $pytestBaseTemp = Join-Path $pytestTempRoot "base"
 

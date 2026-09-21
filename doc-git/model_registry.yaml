@@ -8,15 +8,26 @@ unsloth/ernie-4.5-21b-a3b-pt@iq4_nl:
     coding:
       temperature: 0.8
       top_p: 0.95
+      evidence_kind: direct
     knowledge:
       temperature: 0.8
       top_p: 0.95
+      evidence_kind: derived
+      derived_from: coding
     agentic:
       temperature: 0.8
       top_p: 0.95
+      evidence_kind: derived
+      derived_from: coding
     math:
       temperature: 0.8
       top_p: 0.95
+      evidence_kind: derived
+      derived_from: coding
+    sampling_research_status: confirmed
+    sampling_researched_at: '2026-09-20T19:41:24+00:00'
+    sampling_sources:
+      - https://github.com/PaddlePaddle/ERNIE
   experts: 14
   k_cache: q5_1
   v_cache: q4_nl
@@ -33,50 +44,6 @@ unsloth/ernie-4.5-21b-a3b-pt@iq4_nl:
   hidden_dim: 2560
   max_context_length: 131072
   architecture_family: ernie4_5-moe
-  sampling_research_status: confirmed
-  sampling_researched_at: '2026-09-20T19:41:24+00:00'
-  sampling_sources:
-    - https://github.com/PaddlePaddle/ERNIE
-  sampling_evidence:
-    - profile: normal
-      values:
-        temperature: 0.8
-        top_p: 0.95
-      evidence_kind: direct
-      url: https://github.com/PaddlePaddle/ERNIE
-      excerpt: prompt   =   "Write me a poem about large language model."
-        sampling_params   =   SamplingParams ( temperature  =  0.8 ,  top_p  =
-        0.95 )
-    - profile: coding
-      values:
-        temperature: 0.8
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        temperature: 0.8
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        temperature: 0.8
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: normal
-    - profile: math
-      values:
-        temperature: 0.8
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: coding
-  sampling_category_status:
-    coding: derived
-    knowledge: derived
-    agentic: derived
-    math: derived
-  sampling_source: web-research
 
 mradermacher/gemma-4-19b-a4b-it-reap-i1@q4_k_m:
   publisher: mradermacher
@@ -88,15 +55,26 @@ mradermacher/gemma-4-19b-a4b-it-reap-i1@q4_k_m:
     coding:
       temperature: 0.7
       top_p: 0.9
+      evidence_kind: direct
     knowledge:
       temperature: 0.7
       top_p: 0.9
+      evidence_kind: derived
+      derived_from: coding
     agentic:
       temperature: 0.7
       top_p: 0.9
+      evidence_kind: derived
+      derived_from: coding
     math:
       temperature: 0.7
       top_p: 0.9
+      evidence_kind: derived
+      derived_from: coding
+    sampling_research_status: confirmed
+    sampling_researched_at: '2026-09-20T19:41:44+00:00'
+    sampling_sources:
+      - https://huggingface.co/0xSero/Gemma-4-19B
   experts: 18
   k_cache: q8_0
   v_cache: q8_0
@@ -116,51 +94,6 @@ mradermacher/gemma-4-19b-a4b-it-reap-i1@q4_k_m:
   hidden_dim: 2816
   max_context_length: 262144
   architecture_family: gemma4
-  sampling_research_status: confirmed
-  sampling_researched_at: '2026-09-20T19:41:44+00:00'
-  sampling_sources:
-    - https://huggingface.co/0xSero/Gemma-4-19B
-  sampling_evidence:
-    - profile: normal
-      values:
-        temperature: 0.7
-        top_p: 0.9
-      evidence_kind: direct
-      url: https://huggingface.co/0xSero/Gemma-4-19B
-      excerpt: "}'                           Docker Model Runner            How to
-        use 0xSero/Gemma-4-19B with Docker Model Runner:       docker model run hf.co/0xSero/Gemma-4-19B\
-        \                      Browse \t\t\t\t\t\t\tQuantizations  to use this model
-        in        llama.cpp ,                Ollama ,                       "
-    - profile: coding
-      values:
-        temperature: 0.7
-        top_p: 0.9
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        temperature: 0.7
-        top_p: 0.9
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        temperature: 0.7
-        top_p: 0.9
-      evidence_kind: derived
-      derived_from: normal
-    - profile: math
-      values:
-        temperature: 0.7
-        top_p: 0.9
-      evidence_kind: derived
-      derived_from: coding
-  sampling_category_status:
-    coding: derived
-    knowledge: derived
-    agentic: derived
-    math: derived
-  sampling_source: web-research
 
 mradermacher/gemma-4-26b-a4b-it-i1@iq4_xs:
   publisher: mradermacher
@@ -172,18 +105,29 @@ mradermacher/gemma-4-26b-a4b-it-i1@iq4_xs:
       temperature: 1.0
       top_p: 0.95
       top_k: 64
+      evidence_kind: direct
     knowledge:
       temperature: 1.0
       top_p: 0.95
       top_k: 64
+      evidence_kind: derived
+      derived_from: coding
     agentic:
       temperature: 1.0
       top_p: 0.95
       top_k: 64
+      evidence_kind: derived
+      derived_from: coding
     math:
       temperature: 1.0
       top_p: 0.95
       top_k: 64
+      evidence_kind: derived
+      derived_from: coding
+    sampling_research_status: confirmed
+    sampling_researched_at: '2026-09-20T19:42:28+00:00'
+    sampling_sources:
+      - https://huggingface.co/google/gemma-4-26B-A4B-it
   quants: IQ4_XS
   k_cache: q8_0
   v_cache: q8_0
@@ -201,95 +145,6 @@ mradermacher/gemma-4-26b-a4b-it-i1@iq4_xs:
   max_context_length: 262144
   custom_template: true
   architecture_family: gemma4
-  sampling_research_status: confirmed
-  sampling_researched_at: '2026-09-20T19:42:28+00:00'
-  sampling_sources:
-    - https://huggingface.co/google/gemma-4-26B-A4B-it
-  sampling_evidence:
-    - profile: normal
-      values:
-        temperature: 1.0
-      evidence_kind: direct
-      url: https://huggingface.co/google/gemma-4-26B-A4B-it
-      excerpt: temperature=1.0
-    - profile: normal
-      values:
-        top_p: 0.95
-      evidence_kind: direct
-      url: https://huggingface.co/google/gemma-4-26B-A4B-it
-      excerpt: temperature=1.0       top_p=0.95
-    - profile: normal
-      values:
-        top_k: 64
-      evidence_kind: direct
-      url: https://huggingface.co/google/gemma-4-26B-A4B-it
-      excerpt: top_p=0.95       top_k=64
-    - profile: coding
-      values:
-        temperature: 1.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: coding
-      values:
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: normal
-    - profile: coding
-      values:
-        top_k: 64
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        temperature: 1.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        top_k: 64
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        temperature: 1.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        top_k: 64
-      evidence_kind: derived
-      derived_from: normal
-    - profile: math
-      values:
-        temperature: 1.0
-      evidence_kind: derived
-      derived_from: coding
-    - profile: math
-      values:
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: coding
-    - profile: math
-      values:
-        top_k: 64
-      evidence_kind: derived
-      derived_from: coding
-  sampling_category_status:
-    coding: derived
-    knowledge: derived
-    agentic: derived
-    math: derived
-  sampling_source: web-research
 
 unsloth/gemma-4-26b-a4b-it@iq3_s:
   publisher: unsloth
@@ -301,18 +156,29 @@ unsloth/gemma-4-26b-a4b-it@iq3_s:
       temperature: 1.0
       top_p: 0.95
       top_k: 64
+      evidence_kind: direct
     knowledge:
       temperature: 1.0
       top_p: 0.95
       top_k: 64
+      evidence_kind: derived
+      derived_from: coding
     agentic:
       temperature: 1.0
       top_p: 0.95
       top_k: 64
+      evidence_kind: derived
+      derived_from: coding
     math:
       temperature: 1.0
       top_p: 0.95
       top_k: 64
+      evidence_kind: derived
+      derived_from: coding
+    sampling_research_status: confirmed
+    sampling_researched_at: '2026-09-20T19:43:30+00:00'
+    sampling_sources:
+      - https://huggingface.co/google/gemma-4-26B-A4B/raw/main/README.md
   quants: IQ3_S
   k_cache: q8_0
   v_cache: q8_0
@@ -331,95 +197,6 @@ unsloth/gemma-4-26b-a4b-it@iq3_s:
   useUnifiedKvCache: true
   max_context_length: 262144
   architecture_family: gemma4
-  sampling_research_status: confirmed
-  sampling_researched_at: '2026-09-20T19:43:30+00:00'
-  sampling_sources:
-    - https://huggingface.co/google/gemma-4-26B-A4B/raw/main/README.md
-  sampling_evidence:
-    - profile: normal
-      values:
-        temperature: 1.0
-      evidence_kind: direct
-      url: https://huggingface.co/google/gemma-4-26B-A4B/raw/main/README.md
-      excerpt: '* `temperature=1.0`'
-    - profile: normal
-      values:
-        top_p: 0.95
-      evidence_kind: direct
-      url: https://huggingface.co/google/gemma-4-26B-A4B/raw/main/README.md
-      excerpt: '* `temperature=1.0`   * `top_p=0.95`'
-    - profile: normal
-      values:
-        top_k: 64
-      evidence_kind: direct
-      url: https://huggingface.co/google/gemma-4-26B-A4B/raw/main/README.md
-      excerpt: '* `top_p=0.95`   * `top_k=64`'
-    - profile: coding
-      values:
-        temperature: 1.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: coding
-      values:
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: normal
-    - profile: coding
-      values:
-        top_k: 64
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        temperature: 1.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        top_k: 64
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        temperature: 1.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        top_k: 64
-      evidence_kind: derived
-      derived_from: normal
-    - profile: math
-      values:
-        temperature: 1.0
-      evidence_kind: derived
-      derived_from: coding
-    - profile: math
-      values:
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: coding
-    - profile: math
-      values:
-        top_k: 64
-      evidence_kind: derived
-      derived_from: coding
-  sampling_category_status:
-    coding: derived
-    knowledge: derived
-    agentic: derived
-    math: derived
-  sampling_source: web-research
 
 unsloth/qwen3-30b-a3b-instruct-2507@q3_k_s:
   publisher: unsloth
@@ -433,21 +210,33 @@ unsloth/qwen3-30b-a3b-instruct-2507@q3_k_s:
       top_p: 0.95
       top_k: 20
       min_p: 0.0
+      evidence_kind: direct
     knowledge:
       temperature: 0.7
       top_p: 0.8
       top_k: 20
       min_p: 0.0
+      evidence_kind: derived
+      derived_from: coding
     agentic:
       temperature: 0.7
       top_p: 0.8
       top_k: 20
       min_p: 0.0
+      evidence_kind: derived
+      derived_from: coding
     math:
       temperature: 0.6
       top_p: 0.95
       top_k: 20
       min_p: 0.0
+      evidence_kind: derived
+      derived_from: coding
+    sampling_research_status: confirmed
+    sampling_researched_at: '2026-09-20T19:43:40+00:00'
+    sampling_sources:
+      - https://github.com/QwenLM/Qwen3
+      - https://huggingface.co/unsloth/Qwen3-30B-A3B-Instruct-2507-GGUF/raw/main/README.md
   experts: 16
   k_cache: q5_1
   v_cache: iq4_nl
@@ -466,62 +255,6 @@ unsloth/qwen3-30b-a3b-instruct-2507@q3_k_s:
   hidden_dim: 2048
   max_context_length: 262144
   architecture_family: qwen3moe
-  sampling_research_status: confirmed
-  sampling_researched_at: '2026-09-20T19:43:40+00:00'
-  sampling_sources:
-    - https://github.com/QwenLM/Qwen3
-    - https://huggingface.co/unsloth/Qwen3-30B-A3B-Instruct-2507-GGUF/raw/main/README.md
-  sampling_evidence:
-    - profile: normal
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: direct
-      url:
-        https://huggingface.co/unsloth/Qwen3-30B-A3B-Instruct-2507-GGUF/raw/main/README.md
-      excerpt: '1. **Sampling Parameters**:    - We suggest using `Temperature=0.7`,
-        `TopP=0.8`, `TopK=20`, and `MinP=0`.'
-    - profile: coding
-      values:
-        temperature: 0.6
-        top_p: 0.95
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: direct
-      url: https://github.com/QwenLM/Qwen3
-      excerpt: '{"payload":{"codeViewRepoRoute":{"path":"/","refInfo":{"name":"main","listCacheKey":"v0:1756722297.0","canEdit":false,"refType":"branch","currentOid":"7a2f61ffc7a20d47efcd2bf97f6f2bf52729042e"},"tree":{"items":[{"name":".github","path":".github","contentType":"directory"},{"name":"docker","path":"do'
-    - profile: knowledge
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: math
-      values:
-        temperature: 0.6
-        top_p: 0.95
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: coding
-  sampling_category_status:
-    coding: direct
-    knowledge: derived
-    agentic: derived
-    math: derived
-  sampling_source: web-research
 
 Qwen/Qwen3.5-9B-GGUF@q6_k:
   publisher: qwen
@@ -542,10 +275,17 @@ Qwen/Qwen3.5-9B-GGUF@q6_k:
     math:
       temperature: 1.0
       top_p: 1.0
+      evidence_kind: unresolved
+      reason: Kein allgemeines Profil; Coding-/Math-Fallback kann nicht
+        belastbar bestimmt werden.
     thinking:
       enabled: true
       temperature: 0.6
       top_p: 0.95
+    sampling_research_status: conflict
+    sampling_researched_at: '2026-09-20T19:44:29+00:00'
+    sampling_sources:
+      - https://huggingface.co/Qwen/Qwen3.5-9B/raw/main/README.md
   k_cache: q5_1
   v_cache: q8_0
   notes: 'Architektur: Qwen3.5 Hybrid Gated Delta Networks combined with sparse Mixture-of-Experts'
@@ -560,17 +300,6 @@ Qwen/Qwen3.5-9B-GGUF@q6_k:
   hidden_dim: 4096
   file_size_bytes: 8281142495
   max_context_length: 262144
-  sampling_research_status: conflict
-  sampling_researched_at: '2026-09-20T19:44:29+00:00'
-  sampling_sources:
-    - https://huggingface.co/Qwen/Qwen3.5-9B/raw/main/README.md
-  sampling_evidence:
-    - profile: math
-      evidence_kind: unresolved
-      reason: Kein allgemeines Profil; Coding-/Math-Fallback kann nicht
-        belastbar bestimmt werden.
-  sampling_category_status:
-    math: unresolved
 
 mradermacher/qwen3.6-28b-reap-i1@iq3_s:
   publisher: mradermacher
@@ -583,27 +312,39 @@ mradermacher/qwen3.6-28b-reap-i1@iq3_s:
       top_p: 0.8
       top_k: 20
       min_p: 0.0
+      evidence_kind: direct
     knowledge:
       temperature: 0.7
       top_p: 0.8
       top_k: 20
       min_p: 0.0
+      evidence_kind: derived
+      derived_from: coding
     agentic:
       temperature: 0.6
       top_p: 0.95
       top_k: 20
       min_p: 0.0
+      evidence_kind: derived
+      derived_from: thinking
     math:
       temperature: 0.7
       top_p: 0.8
       top_k: 20
       min_p: 0.0
+      evidence_kind: derived
+      derived_from: coding
     thinking:
       enabled: true
       temperature: 0.6
       top_p: 0.95
       top_k: 20
       min_p: 0.0
+      evidence_kind: direct
+    sampling_research_status: confirmed
+    sampling_researched_at: '2026-09-20T19:44:32+00:00'
+    sampling_sources:
+      - https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html
   quants: IQ3_S
   experts: 18
   k_cache: q8_0
@@ -622,75 +363,6 @@ mradermacher/qwen3.6-28b-reap-i1@iq3_s:
   hidden_dim: 2048
   max_context_length: 262144
   architecture_family: qwen35moe
-  sampling_research_status: confirmed
-  sampling_researched_at: '2026-09-20T19:44:32+00:00'
-  sampling_sources:
-    - https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html
-  sampling_evidence:
-    - profile: normal
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: direct
-      url: https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html
-      excerpt: We recommend `temperature=0.7`, `top_p=0.8`, `top_k=20`, and
-        `min_p=0` for Qwen3-Instruct-2507 models. For supported frameworks,
-        adjust `presence_penalty` between 0 and 2 to reduce repetitions.
-        However, using a higher value may occasionally result in language mixing
-        and a slight decrease in model pe
-    - profile: coding
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        temperature: 0.6
-        top_p: 0.95
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: thinking
-    - profile: math
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: coding
-    - profile: thinking
-      values:
-        temperature: 0.6
-        top_p: 0.95
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: direct
-      url: https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html
-      excerpt: For thinking mode, use Temperature=0.6, TopP=0.95, TopK=20, and
-        MinP=0 (the default setting in `generation_config.json`). DO NOT use
-        greedy decoding, as it can lead to performance degradation and endless
-        repetitions.
-  sampling_category_status:
-    coding: derived
-    knowledge: derived
-    agentic: derived
-    math: derived
-    thinking: direct
-  sampling_source: web-research
 
 mradermacher/qwen3.6-28b-reap-i1@q3_k_s:
   publisher: mradermacher
@@ -703,27 +375,39 @@ mradermacher/qwen3.6-28b-reap-i1@q3_k_s:
       top_p: 0.8
       top_k: 20
       min_p: 0.0
+      evidence_kind: direct
     knowledge:
       temperature: 0.7
       top_p: 0.8
       top_k: 20
       min_p: 0.0
+      evidence_kind: derived
+      derived_from: coding
     agentic:
       temperature: 0.6
       top_p: 0.95
       top_k: 20
       min_p: 0.0
+      evidence_kind: derived
+      derived_from: thinking
     math:
       temperature: 0.7
       top_p: 0.8
       top_k: 20
       min_p: 0.0
+      evidence_kind: derived
+      derived_from: coding
     thinking:
       enabled: true
       temperature: 0.6
       top_p: 0.95
       top_k: 20
       min_p: 0.0
+      evidence_kind: direct
+    sampling_research_status: confirmed
+    sampling_researched_at: '2026-09-20T19:44:34+00:00'
+    sampling_sources:
+      - https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html
   quants: q3_k_s
   experts: 18
   k_cache: q8_0
@@ -742,75 +426,6 @@ mradermacher/qwen3.6-28b-reap-i1@q3_k_s:
   hidden_dim: 2048
   max_context_length: 262144
   architecture_family: qwen35moe
-  sampling_research_status: confirmed
-  sampling_researched_at: '2026-09-20T19:44:34+00:00'
-  sampling_sources:
-    - https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html
-  sampling_evidence:
-    - profile: normal
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: direct
-      url: https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html
-      excerpt: We recommend `temperature=0.7`, `top_p=0.8`, `top_k=20`, and
-        `min_p=0` for Qwen3-Instruct-2507 models. For supported frameworks,
-        adjust `presence_penalty` between 0 and 2 to reduce repetitions.
-        However, using a higher value may occasionally result in language mixing
-        and a slight decrease in model pe
-    - profile: coding
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        temperature: 0.6
-        top_p: 0.95
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: thinking
-    - profile: math
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: coding
-    - profile: thinking
-      values:
-        temperature: 0.6
-        top_p: 0.95
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: direct
-      url: https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html
-      excerpt: For thinking mode, use Temperature=0.6, TopP=0.95, TopK=20, and
-        MinP=0 (the default setting in `generation_config.json`). DO NOT use
-        greedy decoding, as it can lead to performance degradation and endless
-        repetitions.
-  sampling_category_status:
-    coding: derived
-    knowledge: derived
-    agentic: derived
-    math: derived
-    thinking: direct
-  sampling_source: web-research
 
 noctrex/ernie-4.5-21b-a3b-pt_moe@mxfp4:
   publisher: noctrex
@@ -822,15 +437,26 @@ noctrex/ernie-4.5-21b-a3b-pt_moe@mxfp4:
     coding:
       temperature: 0.8
       top_p: 0.95
+      evidence_kind: direct
     knowledge:
       temperature: 0.8
       top_p: 0.95
+      evidence_kind: derived
+      derived_from: coding
     agentic:
       temperature: 0.8
       top_p: 0.95
+      evidence_kind: derived
+      derived_from: coding
     math:
       temperature: 0.8
       top_p: 0.95
+      evidence_kind: derived
+      derived_from: coding
+    sampling_research_status: confirmed
+    sampling_researched_at: '2026-09-20T19:44:41+00:00'
+    sampling_sources:
+      - https://github.com/PaddlePaddle/ERNIE
   k_cache: q8_0
   v_cache: iq4_nl
   offload: 1.0
@@ -846,50 +472,6 @@ noctrex/ernie-4.5-21b-a3b-pt_moe@mxfp4:
   useUnifiedKvCache: false
   max_context_length: 131072
   architecture_family: ernie4_5-moe
-  sampling_research_status: confirmed
-  sampling_researched_at: '2026-09-20T19:44:41+00:00'
-  sampling_sources:
-    - https://github.com/PaddlePaddle/ERNIE
-  sampling_evidence:
-    - profile: normal
-      values:
-        temperature: 0.8
-        top_p: 0.95
-      evidence_kind: direct
-      url: https://github.com/PaddlePaddle/ERNIE
-      excerpt: prompt   =   "Write me a poem about large language model."
-        sampling_params   =   SamplingParams ( temperature  =  0.8 ,  top_p  =
-        0.95 )
-    - profile: coding
-      values:
-        temperature: 0.8
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        temperature: 0.8
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        temperature: 0.8
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: normal
-    - profile: math
-      values:
-        temperature: 0.8
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: coding
-  sampling_category_status:
-    coding: derived
-    knowledge: derived
-    agentic: derived
-    math: derived
-  sampling_source: web-research
 
 mradermacher/kimi-linear-reap-35b-a3b-instruct-i1@iq3_xxs:
   publisher: mradermacher
@@ -907,10 +489,20 @@ mradermacher/kimi-linear-reap-35b-a3b-instruct-i1@iq3_xxs:
     math:
       temperature: 0.6
       top_p: 0.95
+      evidence_kind: unresolved
+      reason: Kein allgemeines Profil; Coding-/Math-Fallback kann nicht
+        belastbar bestimmt werden.
     thinking:
       enabled: true
       temperature: 0.6
       top_p: 0.95
+    sampling_research_status: unresolved
+    sampling_researched_at: '2026-09-20T19:44:54+00:00'
+    sampling_sources:
+      - https://github.com/CerebrasResearch/reap
+      - https://huggingface.co/cerebras/Kimi-Linear-REAP-35B-A3B-Instruct
+      - https://huggingface.co/cerebras/Kimi-Linear-REAP-35B-A3B-Instruct/raw/main/README.md
+      - https://huggingface.co/moonshotai/Kimi-Linear-48B-A3B-Instruct
   k_cache: q8_0
   v_cache: iq4_nl
   offload: 1
@@ -926,20 +518,6 @@ mradermacher/kimi-linear-reap-35b-a3b-instruct-i1@iq3_xxs:
   truncation: full
   useUnifiedKvCache: true
   architecture_family: kimi-linear
-  sampling_research_status: unresolved
-  sampling_researched_at: '2026-09-20T19:44:54+00:00'
-  sampling_sources:
-    - https://github.com/CerebrasResearch/reap
-    - https://huggingface.co/cerebras/Kimi-Linear-REAP-35B-A3B-Instruct
-    - https://huggingface.co/cerebras/Kimi-Linear-REAP-35B-A3B-Instruct/raw/main/README.md
-    - https://huggingface.co/moonshotai/Kimi-Linear-48B-A3B-Instruct
-  sampling_evidence:
-    - profile: math
-      evidence_kind: unresolved
-      reason: Kein allgemeines Profil; Coding-/Math-Fallback kann nicht
-        belastbar bestimmt werden.
-  sampling_category_status:
-    math: unresolved
 
 mradermacher/qwen3-coder-reap-25b-a3b-i1@q3_k_m:
   publisher: mradermacher
@@ -952,27 +530,39 @@ mradermacher/qwen3-coder-reap-25b-a3b-i1@q3_k_m:
       top_p: 0.8
       top_k: 20
       min_p: 0.0
+      evidence_kind: direct
     knowledge:
       temperature: 0.7
       top_p: 0.8
       top_k: 20
       min_p: 0.0
+      evidence_kind: derived
+      derived_from: coding
     agentic:
       temperature: 0.6
       top_p: 0.95
       top_k: 20
       min_p: 0.0
+      evidence_kind: derived
+      derived_from: thinking
     math:
       temperature: 0.7
       top_p: 0.8
       top_k: 20
       min_p: 0.0
+      evidence_kind: derived
+      derived_from: coding
     thinking:
       enabled: true
       temperature: 0.6
       top_p: 0.95
       top_k: 20
       min_p: 0.0
+      evidence_kind: direct
+    sampling_research_status: confirmed
+    sampling_researched_at: '2026-09-20T19:44:57+00:00'
+    sampling_sources:
+      - https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html
   k_cache: q8_0
   v_cache: iq4_nl
   offload: 1
@@ -988,75 +578,6 @@ mradermacher/qwen3-coder-reap-25b-a3b-i1@q3_k_m:
   truncation: full
   useUnifiedKvCache: true
   architecture_family: qwen3moe
-  sampling_research_status: confirmed
-  sampling_researched_at: '2026-09-20T19:44:57+00:00'
-  sampling_sources:
-    - https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html
-  sampling_evidence:
-    - profile: normal
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: direct
-      url: https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html
-      excerpt: We recommend `temperature=0.7`, `top_p=0.8`, `top_k=20`, and
-        `min_p=0` for Qwen3-Instruct-2507 models. For supported frameworks,
-        adjust `presence_penalty` between 0 and 2 to reduce repetitions.
-        However, using a higher value may occasionally result in language mixing
-        and a slight decrease in model pe
-    - profile: coding
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        temperature: 0.6
-        top_p: 0.95
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: thinking
-    - profile: math
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: coding
-    - profile: thinking
-      values:
-        temperature: 0.6
-        top_p: 0.95
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: direct
-      url: https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html
-      excerpt: For thinking mode, use Temperature=0.6, TopP=0.95, TopK=20, and
-        MinP=0 (the default setting in `generation_config.json`). DO NOT use
-        greedy decoding, as it can lead to performance degradation and endless
-        repetitions.
-  sampling_category_status:
-    coding: derived
-    knowledge: derived
-    agentic: derived
-    math: derived
-    thinking: direct
-  sampling_source: web-research
 
 unsloth/phi-4@q5_k_m:
   publisher: unsloth
@@ -1067,6 +588,7 @@ unsloth/phi-4@q5_k_m:
     coding:
       temperature: 1.0
       top_p: 0.95
+      evidence_kind: direct
     knowledge:
       temperature: 0.7
       top_p: 0.8
@@ -1074,6 +596,8 @@ unsloth/phi-4@q5_k_m:
       min_p: 0.0
       presence_penalty: 1.5
       repetition_penalty: 1.0
+      evidence_kind: derived
+      derived_from: coding
     agentic:
       temperature: 1.0
       top_p: 0.95
@@ -1081,9 +605,12 @@ unsloth/phi-4@q5_k_m:
       min_p: 0.0
       presence_penalty: 0.0
       repetition_penalty: 1.0
+      evidence_kind: derived
+      derived_from: thinking
     math:
       temperature: 0.4
       top_p: 1.0
+      evidence_kind: direct
     thinking:
       enabled: true
       temperature: 1.0
@@ -1092,6 +619,12 @@ unsloth/phi-4@q5_k_m:
       min_p: 0.0
       presence_penalty: 0.0
       repetition_penalty: 1.0
+      evidence_kind: direct
+    sampling_research_status: confirmed
+    sampling_researched_at: '2026-09-20T19:45:57+00:00'
+    sampling_sources:
+      - https://github.com/microsoft/PhiCookBook/blob/main/md/01.Introduction/02/02.GitHubModel.md
+      - https://huggingface.co/Qwen/Qwen3.8-27B/raw/main/README.md
   quants: Q5_K_M
   k_cache: q8_0
   v_cache: q5_1
@@ -1108,87 +641,6 @@ unsloth/phi-4@q5_k_m:
   hidden_dim: 5120
   max_context_length: 16384
   architecture_family: llama
-  sampling_research_status: confirmed
-  sampling_researched_at: '2026-09-20T19:45:57+00:00'
-  sampling_sources:
-    - https://github.com/microsoft/PhiCookBook/blob/main/md/01.Introduction/02/02.GitHubModel.md
-    - https://huggingface.co/Qwen/Qwen3.8-27B/raw/main/README.md
-  sampling_evidence:
-    - profile: normal
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-        presence_penalty: 1.5
-        repetition_penalty: 1.0
-      evidence_kind: direct
-      url: https://huggingface.co/Qwen/Qwen3.8-27B/raw/main/README.md
-      excerpt: '> - Thinking Mode: `temperature=1.0`, `top_p=0.95`, `top_k=20`, `min_p=0.0`,
-        `presence_penalty=0.0`, `repetition_penalty=1.0` > - Instruct (or non-thinking)
-        mode: `temperature=0.7`, `top_p=0.80`, `top_k=20`, `min_p=0.0`, `presence_penalty=1.5`,
-        `repetition_penalty=1.0`'
-    - profile: coding
-      values:
-        temperature: 1.0
-        top_p: 0.95
-      evidence_kind: direct
-      url: https://huggingface.co/Qwen/Qwen3.8-27B/raw/main/README.md
-      excerpt: 'SWE-bench Pro: Except for Opus4.6 Max, which uses the officially reported
-        score, all models are evaluated with the Claude Code harness at temp=1.0,
-        top_p=0.95, and a 256K context window. Problematic tasks were corrected, and
-        all baseline models were re-evaluated on the refined benchmark.'
-    - profile: knowledge
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-        presence_penalty: 1.5
-        repetition_penalty: 1.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        temperature: 1.0
-        top_p: 0.95
-        top_k: 20
-        min_p: 0.0
-        presence_penalty: 0.0
-        repetition_penalty: 1.0
-      evidence_kind: derived
-      derived_from: thinking
-    - profile: math
-      values:
-        temperature: 0.4
-        top_p: 1.0
-      evidence_kind: direct
-      url:
-        https://github.com/microsoft/PhiCookBook/blob/main/md/01.Introduction/02/02.GitHubModel.md
-      excerpt: '{"payload":{"codeViewBlobRoute":{"csv":null,"csvError":null,"headerInfo":{"toc":[{"level":2,"text":"Phi
-        Family in GitHub Models","anchor":"phi-family-in-github-models","htmlText":"Phi
-        Family in GitHub Models"},{"level":2,"text":"Models Available","anchor":"models-available","htmlText":"Models
-        Availa'
-    - profile: thinking
-      values:
-        temperature: 1.0
-        top_p: 0.95
-        top_k: 20
-        min_p: 0.0
-        presence_penalty: 0.0
-        repetition_penalty: 1.0
-      evidence_kind: direct
-      url: https://huggingface.co/Qwen/Qwen3.8-27B/raw/main/README.md
-      excerpt: '> We recommend using the following sets of sampling parameters for
-        generation: > - Thinking Mode: `temperature=1.0`, `top_p=0.95`, `top_k=20`,
-        `min_p=0.0`, `presence_penalty=0.0`, `repetition_penalty=1.0`'
-  sampling_category_status:
-    coding: direct
-    knowledge: derived
-    agentic: derived
-    math: direct
-    thinking: direct
-  sampling_source: web-research
 
 tiiuae/falcon3-10b-instruct@q8_0:
   publisher: tiiuae
@@ -1209,10 +661,18 @@ tiiuae/falcon3-10b-instruct@q8_0:
     math:
       temperature: 0.2
       top_p: 0.95
+      evidence_kind: unresolved
+      reason: Kein allgemeines Profil; Coding-/Math-Fallback kann nicht
+        belastbar bestimmt werden.
     thinking:
       enabled: true
       temperature: 0.6
       top_p: 0.95
+    sampling_research_status: unresolved
+    sampling_researched_at: '2026-09-20T19:47:22+00:00'
+    sampling_sources:
+      - https://huggingface.co/lmstudio-community/Falcon3-10B-Instruct-GGUF/raw/main/README.md
+      - https://huggingface.co/tiiuae/falcon3-10b-instruct/raw/main/README.md
   k_cache: q8_0
   v_cache: iq4_nl
   notes: 'Architektur: Falcon3 Dense. Multi-head Latent Attention (MLA) with RoPE'
@@ -1228,18 +688,6 @@ tiiuae/falcon3-10b-instruct@q8_0:
   hidden_dim: 3072
   max_context_length: 32768
   architecture_family: llama
-  sampling_research_status: unresolved
-  sampling_researched_at: '2026-09-20T19:47:22+00:00'
-  sampling_sources:
-    - https://huggingface.co/lmstudio-community/Falcon3-10B-Instruct-GGUF/raw/main/README.md
-    - https://huggingface.co/tiiuae/falcon3-10b-instruct/raw/main/README.md
-  sampling_evidence:
-    - profile: math
-      evidence_kind: unresolved
-      reason: Kein allgemeines Profil; Coding-/Math-Fallback kann nicht
-        belastbar bestimmt werden.
-  sampling_category_status:
-    math: unresolved
 
 unsloth/januscoder-14b@q6_k:
   publisher: unsloth
@@ -1257,10 +705,18 @@ unsloth/januscoder-14b@q6_k:
     math:
       temperature: 0.5
       top_p: 0.95
+      evidence_kind: unresolved
+      reason: Kein allgemeines Profil; Coding-/Math-Fallback kann nicht
+        belastbar bestimmt werden.
     thinking:
       enabled: true
       temperature: 0.6
       top_p: 0.95
+    sampling_research_status: unresolved
+    sampling_researched_at: '2026-09-20T19:47:57+00:00'
+    sampling_sources:
+      - https://huggingface.co/unsloth/JanusCoder-14B-GGUF/raw/main/README.md
+      - https://huggingface.co/unsloth/januscoder-14b/raw/main/README.md
   k_cache: q8_0
   v_cache: q5_1
   notes: 'Architektur: JanusCoder Dense | Coder-Modell'
@@ -1276,18 +732,6 @@ unsloth/januscoder-14b@q6_k:
   hidden_dim: 5120
   max_context_length: 32768
   architecture_family: qwen3
-  sampling_research_status: unresolved
-  sampling_researched_at: '2026-09-20T19:47:57+00:00'
-  sampling_sources:
-    - https://huggingface.co/unsloth/JanusCoder-14B-GGUF/raw/main/README.md
-    - https://huggingface.co/unsloth/januscoder-14b/raw/main/README.md
-  sampling_evidence:
-    - profile: math
-      evidence_kind: unresolved
-      reason: Kein allgemeines Profil; Coding-/Math-Fallback kann nicht
-        belastbar bestimmt werden.
-  sampling_category_status:
-    math: unresolved
 
 jetbrains/mellum2-12b-a2.5b-instruct@q4_k_m:
   publisher: JetBrains
@@ -1301,18 +745,29 @@ jetbrains/mellum2-12b-a2.5b-instruct@q4_k_m:
       temperature: 0.6
       top_p: 0.95
       top_k: 20
+      evidence_kind: direct
     knowledge:
       temperature: 0.6
       top_p: 0.95
       top_k: 20
+      evidence_kind: derived
+      derived_from: coding
     agentic:
       temperature: 0.6
       top_p: 0.95
       top_k: 20
+      evidence_kind: derived
+      derived_from: coding
     math:
       temperature: 0.6
       top_p: 0.95
       top_k: 20
+      evidence_kind: derived
+      derived_from: coding
+    sampling_research_status: confirmed
+    sampling_researched_at: '2026-09-20T19:48:06+00:00'
+    sampling_sources:
+      - https://huggingface.co/JetBrains/Mellum2-12B-A2.5B-Instruct-GGUF-Q4_K_M/raw/main/README.md
   experts: 16
   k_cache: q8_0
   v_cache: q5_1
@@ -1329,54 +784,6 @@ jetbrains/mellum2-12b-a2.5b-instruct@q4_k_m:
   hidden_dim: 2304
   max_context_length: 131072
   architecture_family: mellum
-  sampling_research_status: confirmed
-  sampling_researched_at: '2026-09-20T19:48:06+00:00'
-  sampling_sources:
-    - https://huggingface.co/JetBrains/Mellum2-12B-A2.5B-Instruct-GGUF-Q4_K_M/raw/main/README.md
-  sampling_evidence:
-    - profile: normal
-      values:
-        temperature: 0.6
-        top_p: 0.95
-        top_k: 20
-      evidence_kind: direct
-      url:
-        https://huggingface.co/JetBrains/Mellum2-12B-A2.5B-Instruct-GGUF-Q4_K_M/raw/main/README.md
-      excerpt: --ctx-size 131072 \   --temp 0.6 --top-p 0.95 --top-k 20
-    - profile: coding
-      values:
-        temperature: 0.6
-        top_p: 0.95
-        top_k: 20
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        temperature: 0.6
-        top_p: 0.95
-        top_k: 20
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        temperature: 0.6
-        top_p: 0.95
-        top_k: 20
-      evidence_kind: derived
-      derived_from: normal
-    - profile: math
-      values:
-        temperature: 0.6
-        top_p: 0.95
-        top_k: 20
-      evidence_kind: derived
-      derived_from: coding
-  sampling_category_status:
-    coding: derived
-    knowledge: derived
-    agentic: derived
-    math: derived
-  sampling_source: web-research
 
 unsloth/qwen3-coder-30b-a3b-instruct@q3_k_s:
   publisher: unsloth
@@ -1390,21 +797,32 @@ unsloth/qwen3-coder-30b-a3b-instruct@q3_k_s:
       top_p: 0.8
       top_k: 20
       repetition_penalty: 1.05
+      evidence_kind: direct
     knowledge:
       temperature: 0.7
       top_p: 0.8
       top_k: 20
       repetition_penalty: 1.05
+      evidence_kind: derived
+      derived_from: coding
     agentic:
       temperature: 0.7
       top_p: 0.8
       top_k: 20
       repetition_penalty: 1.05
+      evidence_kind: derived
+      derived_from: coding
     math:
       temperature: 0.7
       top_p: 0.8
       top_k: 20
       repetition_penalty: 1.05
+      evidence_kind: derived
+      derived_from: coding
+    sampling_research_status: confirmed
+    sampling_researched_at: '2026-09-20T19:48:15+00:00'
+    sampling_sources:
+      - https://huggingface.co/unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF/raw/main/README.md
   experts: 16
   k_cache: q5_1
   v_cache: iq4_nl
@@ -1422,60 +840,6 @@ unsloth/qwen3-coder-30b-a3b-instruct@q3_k_s:
   hidden_dim: 2048
   max_context_length: 262144
   architecture_family: qwen3moe
-  sampling_research_status: confirmed
-  sampling_researched_at: '2026-09-20T19:48:15+00:00'
-  sampling_sources:
-    - https://huggingface.co/unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF/raw/main/README.md
-  sampling_evidence:
-    - profile: normal
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        repetition_penalty: 1.05
-      evidence_kind: direct
-      url:
-        https://huggingface.co/unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF/raw/main/README.md
-      excerpt: '1. **Sampling Parameters**:    - We suggest using `temperature=0.7`,
-        `top_p=0.8`, `top_k=20`, `repetition_penalty=1.05`.'
-    - profile: coding
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        repetition_penalty: 1.05
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        repetition_penalty: 1.05
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        repetition_penalty: 1.05
-      evidence_kind: derived
-      derived_from: normal
-    - profile: math
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        repetition_penalty: 1.05
-      evidence_kind: derived
-      derived_from: coding
-  sampling_category_status:
-    coding: derived
-    knowledge: derived
-    agentic: derived
-    math: derived
-  sampling_source: web-research
 
 lmstudio-community/internlm2-math-plus-20b@q4_k_m:
   publisher: lmstudio-community
@@ -1503,12 +867,26 @@ lmstudio-community/internlm2-math-plus-20b@q4_k_m:
       top_p: 0.8
       top_k: 40
       repetition_penalty: 1.005
+      evidence_kind: unresolved
+      reason: Kein allgemeines Profil; Coding-/Math-Fallback kann nicht
+        belastbar bestimmt werden.
     thinking:
       enabled: true
       temperature: 1.0
       top_p: 0.8
       top_k: 40
       repetition_penalty: 1.005
+    sampling_research_status: unresolved
+    sampling_researched_at: '2026-09-20T19:49:25+00:00'
+    sampling_sources:
+      - https://github.com
+      - https://github.com/InternLM/InternLM-Math
+      - https://github.com/RichardErkhov
+      - https://github.com/RichardErkhov/quant_request
+      - https://github.com/features/actions
+      - https://github.com/features/ai/github-app
+      - https://github.com/features/codespaces
+      - https://github.com/features/copilot
   quants: Q4_K_M
   k_cache: q8_0
   v_cache: iq4_nl
@@ -1525,25 +903,6 @@ lmstudio-community/internlm2-math-plus-20b@q4_k_m:
   truncation: minimal
   max_context_length: 8192
   architecture_family: internlm2
-  sampling_research_status: unresolved
-  sampling_researched_at: '2026-09-20T19:49:25+00:00'
-  sampling_sources:
-    - https://github.com
-    - https://github.com/InternLM/InternLM-Math
-    - https://github.com/RichardErkhov
-    - https://github.com/RichardErkhov/quant_request
-    - https://github.com/features/actions
-    - https://github.com/features/ai/github-app
-    - https://github.com/features/codespaces
-    - https://github.com/features/copilot
-  sampling_evidence:
-    - profile: math
-      evidence_kind: unresolved
-      reason: Kein allgemeines Profil; Coding-/Math-Fallback kann nicht
-        belastbar bestimmt werden.
-  sampling_category_status:
-    math: unresolved
-  sampling_source: web-research
 
 quietimpostor/nemotron-3-nano-reap-21b-a3b@mxfp4:
   publisher: QuietImpostor
@@ -1563,10 +922,15 @@ quietimpostor/nemotron-3-nano-reap-21b-a3b@mxfp4:
     math:
       temperature: 1.0
       top_p: 1.0
+      evidence_kind: unresolved
+      reason: Kein allgemeines Profil; Coding-/Math-Fallback kann nicht
+        belastbar bestimmt werden.
     thinking:
       enabled: true
       temperature: 0.6
       top_p: 0.95
+    sampling_research_status: not_found
+    sampling_researched_at: '2026-09-20T19:49:26+00:00'
   quants: MXFP4
   k_cache: q8_0
   v_cache: iq4_nl
@@ -1583,16 +947,6 @@ quietimpostor/nemotron-3-nano-reap-21b-a3b@mxfp4:
   truncation: full
   useUnifiedKvCache: false
   architecture_family: nemotron_h_moe
-  sampling_research_status: not_found
-  sampling_researched_at: '2026-09-20T19:49:26+00:00'
-  sampling_sources: []
-  sampling_evidence:
-    - profile: math
-      evidence_kind: unresolved
-      reason: Kein allgemeines Profil; Coding-/Math-Fallback kann nicht
-        belastbar bestimmt werden.
-  sampling_category_status:
-    math: unresolved
 
 intel/qwen3-30b-a3b-instruct-2507-q2ks-mixed-autoround@q2_k_s:
   publisher: Intel
@@ -1606,27 +960,39 @@ intel/qwen3-30b-a3b-instruct-2507-q2ks-mixed-autoround@q2_k_s:
       top_p: 0.8
       top_k: 20
       min_p: 0.0
+      evidence_kind: direct
     knowledge:
       temperature: 0.7
       top_p: 0.8
       top_k: 20
       min_p: 0.0
+      evidence_kind: derived
+      derived_from: coding
     agentic:
       temperature: 0.6
       top_p: 0.95
       top_k: 20
       min_p: 0.0
+      evidence_kind: derived
+      derived_from: thinking
     math:
       temperature: 0.7
       top_p: 0.8
       top_k: 20
       min_p: 0.0
+      evidence_kind: derived
+      derived_from: coding
     thinking:
       enabled: true
       temperature: 0.6
       top_p: 0.95
       top_k: 20
       min_p: 0.0
+      evidence_kind: direct
+    sampling_research_status: confirmed
+    sampling_researched_at: '2026-09-20T19:49:30+00:00'
+    sampling_sources:
+      - https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html
   quants: Q2_K_S
   k_cache: q8_0
   v_cache: iq4_nl
@@ -1643,75 +1009,6 @@ intel/qwen3-30b-a3b-instruct-2507-q2ks-mixed-autoround@q2_k_s:
   truncation: full
   useUnifiedKvCache: true
   architecture_family: qwen3moe
-  sampling_research_status: confirmed
-  sampling_researched_at: '2026-09-20T19:49:30+00:00'
-  sampling_sources:
-    - https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html
-  sampling_evidence:
-    - profile: normal
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: direct
-      url: https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html
-      excerpt: We recommend `temperature=0.7`, `top_p=0.8`, `top_k=20`, and
-        `min_p=0` for Qwen3-Instruct-2507 models. For supported frameworks,
-        adjust `presence_penalty` between 0 and 2 to reduce repetitions.
-        However, using a higher value may occasionally result in language mixing
-        and a slight decrease in model pe
-    - profile: coding
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        temperature: 0.6
-        top_p: 0.95
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: thinking
-    - profile: math
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: coding
-    - profile: thinking
-      values:
-        temperature: 0.6
-        top_p: 0.95
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: direct
-      url: https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html
-      excerpt: For thinking mode, use Temperature=0.6, TopP=0.95, TopK=20, and
-        MinP=0 (the default setting in `generation_config.json`). DO NOT use
-        greedy decoding, as it can lead to performance degradation and endless
-        repetitions.
-  sampling_category_status:
-    coding: derived
-    knowledge: derived
-    agentic: derived
-    math: derived
-    thinking: direct
-  sampling_source: web-research
 
 essentialai/rnj-1@q8_0:
   publisher: essentialai
@@ -1722,15 +1019,26 @@ essentialai/rnj-1@q8_0:
     coding:
       temperature: 0.2
       top_p: 0.95
+      evidence_kind: direct
     knowledge:
       temperature: 0.2
       top_p: 0.95
+      evidence_kind: derived
+      derived_from: coding
     agentic:
       temperature: 0.2
       top_p: 0.95
+      evidence_kind: derived
+      derived_from: coding
     math:
       temperature: 0.2
       top_p: 0.95
+      evidence_kind: derived
+      derived_from: coding
+    sampling_research_status: confirmed
+    sampling_researched_at: '2026-09-20T19:49:38+00:00'
+    sampling_sources:
+      - https://huggingface.co/essentialai/rnj-1/raw/main/README.md
   k_cache: q8_0
   v_cache: iq4_nl
   offload: 1.0
@@ -1746,69 +1054,6 @@ essentialai/rnj-1@q8_0:
   hidden_dim: 4096
   max_context_length: 32768
   quants: Q8_0
-  sampling_research_status: confirmed
-  sampling_researched_at: '2026-09-20T19:49:38+00:00'
-  sampling_sources:
-    - https://huggingface.co/essentialai/rnj-1/raw/main/README.md
-  sampling_evidence:
-    - profile: normal
-      values:
-        temperature: 0.2
-      evidence_kind: direct
-      url: https://huggingface.co/essentialai/rnj-1/raw/main/README.md
-      excerpt: do_sample=True,          temperature=0.2,
-    - profile: normal
-      values:
-        top_p: 0.95
-      evidence_kind: direct
-      url: https://huggingface.co/essentialai/rnj-1/raw/main/README.md
-      excerpt: temperature=0.2,         top_p=0.95
-    - profile: coding
-      values:
-        temperature: 0.2
-      evidence_kind: derived
-      derived_from: normal
-    - profile: coding
-      values:
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        temperature: 0.2
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        temperature: 0.2
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: normal
-    - profile: math
-      values:
-        temperature: 0.2
-      evidence_kind: derived
-      derived_from: coding
-    - profile: math
-      values:
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: coding
-  sampling_category_status:
-    coding: derived
-    knowledge: derived
-    agentic: derived
-    math: derived
-  sampling_source: web-research
 
 qwen/qwen3.5-9b@q6_k:
   publisher: qwen
@@ -1828,10 +1073,17 @@ qwen/qwen3.5-9b@q6_k:
     math:
       temperature: 0.6
       top_p: 0.8
+      evidence_kind: unresolved
+      reason: Kein allgemeines Profil; Coding-/Math-Fallback kann nicht
+        belastbar bestimmt werden.
     thinking:
       enabled: true
       temperature: 1.0
       top_p: 0.95
+    sampling_research_status: conflict
+    sampling_researched_at: '2026-09-20T19:50:38+00:00'
+    sampling_sources:
+      - https://huggingface.co/qwen/qwen3.5-9b/raw/main/README.md
   k_cache: q8_0
   v_cache: iq4_nl
   offload: 1.0
@@ -1848,17 +1100,6 @@ qwen/qwen3.5-9b@q6_k:
   n_layers: 32
   hidden_dim: 4096
   architecture_family: qwen35
-  sampling_research_status: conflict
-  sampling_researched_at: '2026-09-20T19:50:38+00:00'
-  sampling_sources:
-    - https://huggingface.co/qwen/qwen3.5-9b/raw/main/README.md
-  sampling_evidence:
-    - profile: math
-      evidence_kind: unresolved
-      reason: Kein allgemeines Profil; Coding-/Math-Fallback kann nicht
-        belastbar bestimmt werden.
-  sampling_category_status:
-    math: unresolved
 
 qwen/qwen3-14b@q6_k:
   publisher: qwen
@@ -1871,27 +1112,40 @@ qwen/qwen3-14b@q6_k:
       top_p: 0.95
       top_k: 20
       min_p: 0.0
+      evidence_kind: direct
     knowledge:
       temperature: 0.7
       top_p: 0.8
       top_k: 20
       min_p: 0.0
+      evidence_kind: derived
+      derived_from: coding
     agentic:
       temperature: 0.6
       top_p: 0.95
       top_k: 20
       min_p: 0.0
+      evidence_kind: derived
+      derived_from: thinking
     math:
       temperature: 0.6
       top_p: 0.95
       top_k: 20
       min_p: 0.0
+      evidence_kind: derived
+      derived_from: coding
     thinking:
       enabled: true
       temperature: 0.6
       top_p: 0.95
       top_k: 20
       min_p: 0.0
+      evidence_kind: direct
+    sampling_research_status: confirmed
+    sampling_researched_at: '2026-09-20T19:50:47+00:00'
+    sampling_sources:
+      - https://github.com/QwenLM/Qwen3
+      - https://huggingface.co/qwen/qwen3-14b/raw/main/README.md
   k_cache: q8_0
   v_cache: iq4_nl
   offload: 1.0
@@ -1904,76 +1158,6 @@ qwen/qwen3-14b@q6_k:
   truncation: full
   useUnifiedKvCache: true
   quants: Q6_K
-  sampling_research_status: confirmed
-  sampling_researched_at: '2026-09-20T19:50:47+00:00'
-  sampling_sources:
-    - https://github.com/QwenLM/Qwen3
-    - https://huggingface.co/qwen/qwen3-14b/raw/main/README.md
-  sampling_evidence:
-    - profile: normal
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: direct
-      url: https://huggingface.co/qwen/qwen3-14b/raw/main/README.md
-      excerpt: '> [!NOTE] > For non-thinking mode, we suggest using `Temperature=0.7`,
-        `TopP=0.8`, `TopK=20`, and `MinP=0`. For more detailed guidance, please refer
-        to the [Best Practices](#best-practices) section.'
-    - profile: coding
-      values:
-        temperature: 0.6
-        top_p: 0.95
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: direct
-      url: https://github.com/QwenLM/Qwen3
-      excerpt: '{"payload":{"codeViewRepoRoute":{"path":"/","refInfo":{"name":"main","listCacheKey":"v0:1756722297.0","canEdit":false,"refType":"branch","currentOid":"7a2f61ffc7a20d47efcd2bf97f6f2bf52729042e"},"tree":{"items":[{"name":".github","path":".github","contentType":"directory"},{"name":"docker","path":"do'
-    - profile: knowledge
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        temperature: 0.6
-        top_p: 0.95
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: thinking
-    - profile: math
-      values:
-        temperature: 0.6
-        top_p: 0.95
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: coding
-    - profile: thinking
-      values:
-        temperature: 0.6
-        top_p: 0.95
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: direct
-      url: https://huggingface.co/qwen/qwen3-14b/raw/main/README.md
-      excerpt: '> [!NOTE] > For thinking mode, use `Temperature=0.6`, `TopP=0.95`,
-        `TopK=20`, and `MinP=0` (the default setting in `generation_config.json`).
-        **DO NOT use greedy decoding**, as it can lead to performance degradation
-        and endless repetitions. For more detailed guidance, please refer to the [Best
-        Pract'
-  sampling_category_status:
-    coding: direct
-    knowledge: derived
-    agentic: derived
-    math: derived
-    thinking: direct
-  sampling_source: web-research
 
 zai-org/glm-4.6v-flash@q6_k:
   publisher: zai-org
@@ -1993,10 +1177,17 @@ zai-org/glm-4.6v-flash@q6_k:
     math:
       temperature: 0.8
       top_p: 0.6
+      evidence_kind: unresolved
+      reason: Kein allgemeines Profil; Coding-/Math-Fallback kann nicht
+        belastbar bestimmt werden.
     thinking:
       enabled: true
       temperature: 0.6
       top_p: 0.95
+    sampling_research_status: unresolved
+    sampling_researched_at: '2026-09-20T19:51:19+00:00'
+    sampling_sources:
+      - https://huggingface.co/zai-org/glm-4.6v-flash/raw/main/README.md
   k_cache: q8_0
   v_cache: q8_0
   offload: 1
@@ -2010,17 +1201,6 @@ zai-org/glm-4.6v-flash@q6_k:
   blueprint: reasoning_assistant
   truncation: full
   quants: Q6_K
-  sampling_research_status: unresolved
-  sampling_researched_at: '2026-09-20T19:51:19+00:00'
-  sampling_sources:
-    - https://huggingface.co/zai-org/glm-4.6v-flash/raw/main/README.md
-  sampling_evidence:
-    - profile: math
-      evidence_kind: unresolved
-      reason: Kein allgemeines Profil; Coding-/Math-Fallback kann nicht
-        belastbar bestimmt werden.
-  sampling_category_status:
-    math: unresolved
 
 mradermacher/f2llm-v2-4b@q6_k:
   publisher: mradermacher
@@ -2087,79 +1267,27 @@ jetbrains/mellum2-12b-a2.5b-instruct@q6_k:
     coding:
       temperature: 0.6
       top_p: 0.95
+      evidence_kind: direct
     knowledge:
       temperature: 0.6
       top_p: 0.95
+      evidence_kind: derived
+      derived_from: coding
     agentic:
       temperature: 0.6
       top_p: 0.95
+      evidence_kind: derived
+      derived_from: coding
     math:
       temperature: 0.6
       top_p: 0.95
-  sampling_source: web-research
-  sampling_sources:
-    - https://huggingface.co/JetBrains/Mellum2-12B-A2.5B-Base
+      evidence_kind: derived
+      derived_from: coding
+    sampling_research_status: confirmed
+    sampling_researched_at: '2026-09-20T19:51:46+00:00'
+    sampling_sources:
+      - https://huggingface.co/JetBrains/Mellum2-12B-A2.5B-Base
   architecture_family: mellum
-  sampling_research_status: confirmed
-  sampling_researched_at: '2026-09-20T19:51:46+00:00'
-  sampling_evidence:
-    - profile: normal
-      values:
-        temperature: 0.6
-      evidence_kind: direct
-      url: https://huggingface.co/JetBrains/Mellum2-12B-A2.5B-Base
-      excerpt: max_tokens= 81920 ,     temperature= 0.6 ,
-    - profile: normal
-      values:
-        top_p: 0.95
-      evidence_kind: direct
-      url: https://huggingface.co/JetBrains/Mellum2-12B-A2.5B-Base
-      excerpt: temperature= 0.6 ,     top_p= 0.95 ,
-    - profile: coding
-      values:
-        temperature: 0.6
-      evidence_kind: derived
-      derived_from: normal
-    - profile: coding
-      values:
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        temperature: 0.6
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        temperature: 0.6
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: normal
-    - profile: math
-      values:
-        temperature: 0.6
-      evidence_kind: derived
-      derived_from: coding
-    - profile: math
-      values:
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: coding
-  sampling_category_status:
-    coding: derived
-    knowledge: derived
-    agentic: derived
-    math: derived
 
 unsloth/gemma-4-12b-it@q6_k:
   publisher: unsloth
@@ -2173,18 +1301,29 @@ unsloth/gemma-4-12b-it@q6_k:
       temperature: 1.0
       top_p: 0.95
       top_k: 64
+      evidence_kind: direct
     knowledge:
       temperature: 1.0
       top_p: 0.95
       top_k: 64
+      evidence_kind: derived
+      derived_from: coding
     agentic:
       temperature: 1.0
       top_p: 0.95
       top_k: 64
+      evidence_kind: derived
+      derived_from: coding
     math:
       temperature: 1.0
       top_p: 0.95
       top_k: 64
+      evidence_kind: derived
+      derived_from: coding
+    sampling_research_status: confirmed
+    sampling_researched_at: '2026-09-20T19:51:52+00:00'
+    sampling_sources:
+      - https://huggingface.co/unsloth/gemma-4-12b-it/raw/main/README.md
   notes: 'Architektur: dense | Vision'
   file_size_bytes: 9995544960
   context_length: 65536
@@ -2198,95 +1337,6 @@ unsloth/gemma-4-12b-it@q6_k:
   custom_template: true
   quants: Q6_K
   architecture_family: gemma4
-  sampling_research_status: confirmed
-  sampling_researched_at: '2026-09-20T19:51:52+00:00'
-  sampling_sources:
-    - https://huggingface.co/unsloth/gemma-4-12b-it/raw/main/README.md
-  sampling_evidence:
-    - profile: normal
-      values:
-        temperature: 1.0
-      evidence_kind: direct
-      url: https://huggingface.co/unsloth/gemma-4-12b-it/raw/main/README.md
-      excerpt: '* `temperature=1.0`'
-    - profile: normal
-      values:
-        top_p: 0.95
-      evidence_kind: direct
-      url: https://huggingface.co/unsloth/gemma-4-12b-it/raw/main/README.md
-      excerpt: '* `temperature=1.0`   * `top_p=0.95`'
-    - profile: normal
-      values:
-        top_k: 64
-      evidence_kind: direct
-      url: https://huggingface.co/unsloth/gemma-4-12b-it/raw/main/README.md
-      excerpt: '* `top_p=0.95`   * `top_k=64`'
-    - profile: coding
-      values:
-        temperature: 1.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: coding
-      values:
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: normal
-    - profile: coding
-      values:
-        top_k: 64
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        temperature: 1.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        top_k: 64
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        temperature: 1.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        top_k: 64
-      evidence_kind: derived
-      derived_from: normal
-    - profile: math
-      values:
-        temperature: 1.0
-      evidence_kind: derived
-      derived_from: coding
-    - profile: math
-      values:
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: coding
-    - profile: math
-      values:
-        top_k: 64
-      evidence_kind: derived
-      derived_from: coding
-  sampling_category_status:
-    coding: derived
-    knowledge: derived
-    agentic: derived
-    math: derived
-  sampling_source: web-research
 
 mmnga/moonlight-16b-a3b-instruct@q5_k_m:
   publisher: mmnga
@@ -2306,25 +1356,23 @@ mmnga/moonlight-16b-a3b-instruct@q5_k_m:
   capabilities: text
   blueprint: default_chat
   truncation: minimal
-  sampling_research_status: unresolved
-  sampling_researched_at: '2026-09-20T19:52:16+00:00'
-  sampling_sources:
-    - https://github.com
-    - https://github.com/KellerJordan/Muon
-    - https://github.com/MoonshotAI/Moonlight
-    - https://github.com/MoonshotAI/Moonlight/blob/master/Moonlight.pdf
-    - https://github.com/features/actions
-    - https://github.com/features/ai/github-app
-    - https://github.com/features/codespaces
-    - https://github.com/features/copilot
-  sampling_evidence:
-    - profile: math
+  architecture_family: deepseek2
+  sampling:
+    math:
       evidence_kind: unresolved
       reason: Kein allgemeines Profil; Coding-/Math-Fallback kann nicht
         belastbar bestimmt werden.
-  architecture_family: deepseek2
-  sampling_category_status:
-    math: unresolved
+    sampling_research_status: unresolved
+    sampling_researched_at: '2026-09-20T19:52:16+00:00'
+    sampling_sources:
+      - https://github.com
+      - https://github.com/KellerJordan/Muon
+      - https://github.com/MoonshotAI/Moonlight
+      - https://github.com/MoonshotAI/Moonlight/blob/master/Moonlight.pdf
+      - https://github.com/features/actions
+      - https://github.com/features/ai/github-app
+      - https://github.com/features/codespaces
+      - https://github.com/features/copilot
 
 peculiar-ragdoll/tiel-coder-35b-a3b@iq3_xxs:
   publisher: peculiar-ragdoll
@@ -2344,6 +1392,16 @@ peculiar-ragdoll/tiel-coder-35b-a3b@iq3_xxs:
   capabilities: vision, coding, text
   blueprint: reasoning_coding
   truncation: full
+  sampling:
+    math:
+      evidence_kind: unresolved
+      reason: Kein allgemeines Profil; Coding-/Math-Fallback kann nicht
+        belastbar bestimmt werden.
+    sampling_research_status: conflict
+    sampling_researched_at: '2026-09-21T07:10:24+00:00'
+    sampling_sources:
+      - https://huggingface.co/LuffyTheFox/Tiel-Coder-35B-A3B-Genesis-Hermes-GGUF/raw/main/README.md
+  architecture_family: qwen35moe
 
 empero-ai/qwythos-9b-claude-mythos-5-1m@q6_k:
   publisher: empero-ai
@@ -2384,19 +1442,14 @@ empero-ai/qwythos-9b-claude-mythos-5-1m@q6_k:
       top_p: 0.95
       top_k: 20
       min_p: 0.0
-  sampling_source: web-research
-  sampling_sources:
-    - https://huggingface.co/empero-ai/qwythos-9b-claude-mythos-5-1m/raw/main/README.md
-  architecture_family: qwen35
-  sampling_research_status: conflict
-  sampling_researched_at: '2026-09-20T19:52:59+00:00'
-  sampling_evidence:
-    - profile: math
       evidence_kind: unresolved
       reason: Kein allgemeines Profil; Coding-/Math-Fallback kann nicht
         belastbar bestimmt werden.
-  sampling_category_status:
-    math: unresolved
+    sampling_research_status: conflict
+    sampling_researched_at: '2026-09-20T19:52:59+00:00'
+    sampling_sources:
+      - https://huggingface.co/empero-ai/qwythos-9b-claude-mythos-5-1m/raw/main/README.md
+  architecture_family: qwen35
 
 mradermacher/darwin-28b-coder-i1@q3_k_s:
   publisher: mradermacher
@@ -2416,64 +1469,31 @@ mradermacher/darwin-28b-coder-i1@q3_k_s:
   capabilities: coding, text
   blueprint: reasoning_coding
   truncation: full
-  sampling_research_status: confirmed
-  sampling_researched_at: '2026-09-20T19:53:03+00:00'
-  sampling_sources:
-    - https://huggingface.co/FINAL-Bench/Darwin-28B-Coder/raw/main/README.md
-  sampling_evidence:
-    - profile: normal
-      values:
-        temperature: 0.7
-        top_p: 0.9
-      evidence_kind: direct
-      url:
-        https://huggingface.co/FINAL-Bench/Darwin-28B-Coder/raw/main/README.md
-      excerpt: inputs = tok(prompt, return_tensors="pt").to(model.device) out =
-        model.generate(**inputs, max_new_tokens=512, temperature=0.7, top_p=0.9)
-    - profile: coding
-      values:
-        temperature: 0.7
-        top_p: 0.9
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        temperature: 0.7
-        top_p: 0.9
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        temperature: 0.7
-        top_p: 0.9
-      evidence_kind: derived
-      derived_from: normal
-    - profile: math
-      values:
-        temperature: 0.7
-        top_p: 0.9
-      evidence_kind: derived
-      derived_from: coding
   sampling:
     coding:
       temperature: 0.7
       top_p: 0.9
+      evidence_kind: direct
     knowledge:
       temperature: 0.7
       top_p: 0.9
+      evidence_kind: derived
+      derived_from: coding
     agentic:
       temperature: 0.7
       top_p: 0.9
+      evidence_kind: derived
+      derived_from: coding
     math:
       temperature: 0.7
       top_p: 0.9
-  sampling_source: web-research
+      evidence_kind: derived
+      derived_from: coding
+    sampling_research_status: confirmed
+    sampling_researched_at: '2026-09-20T19:53:03+00:00'
+    sampling_sources:
+      - https://huggingface.co/FINAL-Bench/Darwin-28B-Coder/raw/main/README.md
   architecture_family: qwen35
-  sampling_category_status:
-    coding: derived
-    knowledge: derived
-    agentic: derived
-    math: derived
 
 mradermacher/gemma-4-31b-i1@iq3_s:
   publisher: mradermacher
@@ -2493,113 +1513,35 @@ mradermacher/gemma-4-31b-i1@iq3_s:
   capabilities: coding, vision, text
   blueprint: gemma_assistant
   truncation: full
-  sampling_research_status: confirmed
-  sampling_researched_at: '2026-09-20T19:53:51+00:00'
-  sampling_sources:
-    - https://huggingface.co/google/gemma-4-31B-it
-  sampling_evidence:
-    - profile: normal
-      values:
-        temperature: 1.0
-      evidence_kind: direct
-      url: https://huggingface.co/google/gemma-4-31B-it
-      excerpt: temperature=1.0
-    - profile: normal
-      values:
-        top_p: 0.95
-      evidence_kind: direct
-      url: https://huggingface.co/google/gemma-4-31B-it
-      excerpt: temperature=1.0       top_p=0.95
-    - profile: normal
-      values:
-        top_k: 64
-      evidence_kind: direct
-      url: https://huggingface.co/google/gemma-4-31B-it
-      excerpt: top_p=0.95       top_k=64
-    - profile: coding
-      values:
-        temperature: 1.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: coding
-      values:
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: normal
-    - profile: coding
-      values:
-        top_k: 64
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        temperature: 1.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        top_k: 64
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        temperature: 1.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        top_k: 64
-      evidence_kind: derived
-      derived_from: normal
-    - profile: math
-      values:
-        temperature: 1.0
-      evidence_kind: derived
-      derived_from: coding
-    - profile: math
-      values:
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: coding
-    - profile: math
-      values:
-        top_k: 64
-      evidence_kind: derived
-      derived_from: coding
   sampling:
     coding:
       temperature: 1.0
       top_p: 0.95
       top_k: 64
+      evidence_kind: direct
     knowledge:
       temperature: 1.0
       top_p: 0.95
       top_k: 64
+      evidence_kind: derived
+      derived_from: coding
     agentic:
       temperature: 1.0
       top_p: 0.95
       top_k: 64
+      evidence_kind: derived
+      derived_from: coding
     math:
       temperature: 1.0
       top_p: 0.95
       top_k: 64
-  sampling_source: web-research
+      evidence_kind: derived
+      derived_from: coding
+    sampling_research_status: confirmed
+    sampling_researched_at: '2026-09-20T19:53:51+00:00'
+    sampling_sources:
+      - https://huggingface.co/google/gemma-4-31B-it
   architecture_family: gemma4
-  sampling_category_status:
-    coding: derived
-    knowledge: derived
-    agentic: derived
-    math: derived
 
 ibm-granite/granite-4.0-h-tiny@q8_0:
   publisher: ibm-granite
@@ -2629,10 +1571,18 @@ ibm-granite/granite-4.0-h-tiny@q8_0:
     math:
       temperature: 1.0
       top_p: 0.95
+      evidence_kind: unresolved
+      reason: Kein allgemeines Profil; Coding-/Math-Fallback kann nicht
+        belastbar bestimmt werden.
     thinking:
       enabled: true
       temperature: 1.0
       top_p: 0.95
+    sampling_research_status: unresolved
+    sampling_researched_at: '2026-09-20T19:54:27+00:00'
+    sampling_sources:
+      - https://huggingface.co/ibm-granite/granite-4.0-h-tiny-GGUF/raw/main/README.md
+      - https://huggingface.co/ibm-granite/granite-4.0-h-tiny/raw/main/README.md
   truncation: full
   custom_template: true
   context_length: 262144
@@ -2643,19 +1593,6 @@ ibm-granite/granite-4.0-h-tiny@q8_0:
   hidden_dim: 1536
   max_context_length: 1048576
   architecture_family: granitehybrid
-  sampling_research_status: unresolved
-  sampling_researched_at: '2026-09-20T19:54:27+00:00'
-  sampling_sources:
-    - https://huggingface.co/ibm-granite/granite-4.0-h-tiny-GGUF/raw/main/README.md
-    - https://huggingface.co/ibm-granite/granite-4.0-h-tiny/raw/main/README.md
-  sampling_evidence:
-    - profile: math
-      evidence_kind: unresolved
-      reason: Kein allgemeines Profil; Coding-/Math-Fallback kann nicht
-        belastbar bestimmt werden.
-  sampling_category_status:
-    math: unresolved
-  sampling_source: web-research
 
 ibm-granite/granite-4.1-30b@q3_k_s:
   publisher: ibm-granite
@@ -2684,10 +1621,18 @@ ibm-granite/granite-4.1-30b@q3_k_s:
     math:
       temperature: 1.0
       top_p: 0.95
+      evidence_kind: unresolved
+      reason: Kein allgemeines Profil; Coding-/Math-Fallback kann nicht
+        belastbar bestimmt werden.
     thinking:
       enabled: true
       temperature: 1.0
       top_p: 0.95
+    sampling_research_status: unresolved
+    sampling_researched_at: '2026-09-20T19:55:01+00:00'
+    sampling_sources:
+      - https://huggingface.co/ibm-granite/granite-4.1-30b-GGUF/raw/main/README.md
+      - https://huggingface.co/ibm-granite/granite-4.1-30b/raw/main/README.md
   truncation: full
   custom_template: true
   context_length: 49152
@@ -2697,19 +1642,6 @@ ibm-granite/granite-4.1-30b@q3_k_s:
   hidden_dim: 4096
   max_context_length: 131072
   architecture_family: granite
-  sampling_research_status: unresolved
-  sampling_researched_at: '2026-09-20T19:55:01+00:00'
-  sampling_sources:
-    - https://huggingface.co/ibm-granite/granite-4.1-30b-GGUF/raw/main/README.md
-    - https://huggingface.co/ibm-granite/granite-4.1-30b/raw/main/README.md
-  sampling_evidence:
-    - profile: math
-      evidence_kind: unresolved
-      reason: Kein allgemeines Profil; Coding-/Math-Fallback kann nicht
-        belastbar bestimmt werden.
-  sampling_category_status:
-    math: unresolved
-  sampling_source: web-research
 
 internlm/internlm2_5-20b-chat@q4_k_m:
   publisher: internlm
@@ -2722,27 +1654,39 @@ internlm/internlm2_5-20b-chat@q4_k_m:
       top_p: 0.8
       top_k: 40
       repetition_penalty: 1.005
+      evidence_kind: direct
     knowledge:
       temperature: 1.0
       top_p: 0.8
       top_k: 40
       repetition_penalty: 1.005
+      evidence_kind: derived
+      derived_from: coding
     agentic:
       temperature: 1.0
       top_p: 0.8
       top_k: 40
       repetition_penalty: 1.005
+      evidence_kind: derived
+      derived_from: thinking
     math:
       temperature: 1.0
       top_p: 0.8
       top_k: 40
       repetition_penalty: 1.005
+      evidence_kind: derived
+      derived_from: coding
     thinking:
       enabled: true
       temperature: 1.0
       top_p: 0.8
       top_k: 40
       repetition_penalty: 1.005
+      evidence_kind: direct
+    sampling_research_status: confirmed
+    sampling_researched_at: '2026-09-20T19:55:47+00:00'
+    sampling_sources:
+      - https://github.com/InternLM/InternLM
   quants: Q4_K_M
   k_cache: q8_0
   v_cache: iq4_nl
@@ -2759,71 +1703,6 @@ internlm/internlm2_5-20b-chat@q4_k_m:
   useUnifiedKvCache: false
   max_context_length: 32768
   architecture_family: internlm2
-  sampling_research_status: confirmed
-  sampling_researched_at: '2026-09-20T19:55:47+00:00'
-  sampling_sources:
-    - https://github.com/InternLM/InternLM
-  sampling_evidence:
-    - profile: normal
-      values:
-        temperature: 1.0
-        top_p: 0.8
-        top_k: 40
-        repetition_penalty: 1.005
-      evidence_kind: direct
-      url: https://github.com/InternLM/InternLM
-      excerpt: llm   =   LLM ( model  =  "internlm/internlm3-8b-instruct" )
-        sampling_params   =   SamplingParams ( temperature  =  1 ,
-        repetition_penalty  =  1.005 ,  top_k  =  40 ,  top_p  =  0.8 )
-    - profile: coding
-      values:
-        temperature: 1.0
-        top_p: 0.8
-        top_k: 40
-        repetition_penalty: 1.005
-      evidence_kind: direct
-      url: https://github.com/InternLM/InternLM
-      excerpt: '{"payload":{"codeViewRepoRoute":{"path":"/","refInfo":{"name":"main","listCacheKey":"v0:1761784543.0","canEdit":false,"refType":"branch","currentOid":"68fdc71330059255fd647abf28219ad11e8e4865"},"tree":{"items":[{"name":".github","path":".github","contentType":"directory"},{"name":"agent","path":"age'
-    - profile: knowledge
-      values:
-        temperature: 1.0
-        top_p: 0.8
-        top_k: 40
-        repetition_penalty: 1.005
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        temperature: 1.0
-        top_p: 0.8
-        top_k: 40
-        repetition_penalty: 1.005
-      evidence_kind: derived
-      derived_from: thinking
-    - profile: math
-      values:
-        temperature: 1.0
-        top_p: 0.8
-        top_k: 40
-        repetition_penalty: 1.005
-      evidence_kind: derived
-      derived_from: coding
-    - profile: thinking
-      values:
-        temperature: 1.0
-        top_p: 0.8
-        top_k: 40
-        repetition_penalty: 1.005
-      evidence_kind: direct
-      url: https://github.com/InternLM/InternLM
-      excerpt: '{"payload":{"codeViewRepoRoute":{"path":"/","refInfo":{"name":"main","listCacheKey":"v0:1761784543.0","canEdit":false,"refType":"branch","currentOid":"68fdc71330059255fd647abf28219ad11e8e4865"},"tree":{"items":[{"name":".github","path":".github","contentType":"directory"},{"name":"agent","path":"age'
-  sampling_category_status:
-    coding: direct
-    knowledge: derived
-    agentic: derived
-    math: derived
-    thinking: direct
-  sampling_source: web-research
 
 noctrex/lfm2-24b-a2b_moe@mxfp4:
   publisher: noctrex
@@ -2840,10 +1719,22 @@ noctrex/lfm2-24b-a2b_moe@mxfp4:
     math:
       temperature: 0.1
       top_p: 0.95
+      evidence_kind: unresolved
+      reason: Kein allgemeines Profil; Coding-/Math-Fallback kann nicht
+        belastbar bestimmt werden.
     thinking:
       enabled: true
       temperature: 0.6
       top_p: 0.95
+    sampling_research_status: unresolved
+    sampling_researched_at: '2026-09-20T19:55:58+00:00'
+    sampling_sources:
+      - https://github.com/huggingface/transformers
+      - https://github.com/vllm-project/vllm
+      - https://huggingface.co/LiquidAI/LFM2-24B-A2B/raw/main/README.md
+      - https://huggingface.co/LiquidAI/LFM2-8B-A1B
+      - https://huggingface.co/docs/transformers/en/chat_extras
+      - https://huggingface.co/docs/transformers/en/chat_templating
   k_cache: q8_0
   v_cache: iq4_nl
   offload: 1.0
@@ -2860,22 +1751,6 @@ noctrex/lfm2-24b-a2b_moe@mxfp4:
   max_context_length: 128000
   quants: MXFP4
   architecture_family: lfm2moe
-  sampling_research_status: unresolved
-  sampling_researched_at: '2026-09-20T19:55:58+00:00'
-  sampling_sources:
-    - https://github.com/huggingface/transformers
-    - https://github.com/vllm-project/vllm
-    - https://huggingface.co/LiquidAI/LFM2-24B-A2B/raw/main/README.md
-    - https://huggingface.co/LiquidAI/LFM2-8B-A1B
-    - https://huggingface.co/docs/transformers/en/chat_extras
-    - https://huggingface.co/docs/transformers/en/chat_templating
-  sampling_evidence:
-    - profile: math
-      evidence_kind: unresolved
-      reason: Kein allgemeines Profil; Coding-/Math-Fallback kann nicht
-        belastbar bestimmt werden.
-  sampling_category_status:
-    math: unresolved
 
 unsloth/glm-4.7-flash@q3_k_s:
   publisher: unsloth
@@ -2895,10 +1770,17 @@ unsloth/glm-4.7-flash@q3_k_s:
     math:
       temperature: 1.0
       top_p: 0.95
+      evidence_kind: unresolved
+      reason: Kein allgemeines Profil; Coding-/Math-Fallback kann nicht
+        belastbar bestimmt werden.
     thinking:
       enabled: true
       temperature: 0.6
       top_p: 0.95
+    sampling_research_status: conflict
+    sampling_researched_at: '2026-09-20T19:56:34+00:00'
+    sampling_sources:
+      - https://huggingface.co/unsloth/glm-4.7-flash/raw/main/README.md
   k_cache: q8_0
   v_cache: q8_0
   offload: 1.0
@@ -2915,17 +1797,6 @@ unsloth/glm-4.7-flash@q3_k_s:
   truncation: full
   quants: Q3_K_S
   architecture_family: deepseek2
-  sampling_research_status: conflict
-  sampling_researched_at: '2026-09-20T19:56:34+00:00'
-  sampling_sources:
-    - https://huggingface.co/unsloth/glm-4.7-flash/raw/main/README.md
-  sampling_evidence:
-    - profile: math
-      evidence_kind: unresolved
-      reason: Kein allgemeines Profil; Coding-/Math-Fallback kann nicht
-        belastbar bestimmt werden.
-  sampling_category_status:
-    math: unresolved
 
 ibm-granite/granite-4.1-8b@q6_k:
   publisher: ibm-granite
@@ -2949,62 +1820,30 @@ ibm-granite/granite-4.1-8b@q6_k:
     coding:
       temperature: 0.001
       top_p: 1.0
+      evidence_kind: direct
     knowledge:
       temperature: 0.001
       top_p: 1.0
+      evidence_kind: derived
+      derived_from: coding
     agentic:
       temperature: 0.001
       top_p: 1.0
+      evidence_kind: derived
+      derived_from: coding
     math:
       temperature: 0.001
       top_p: 1.0
+      evidence_kind: derived
+      derived_from: coding
+    sampling_research_status: confirmed
+    sampling_researched_at: '2026-09-20T19:57:03+00:00'
+    sampling_sources:
+      - https://huggingface.co/datasets/Salesforce/xlam-function-calling-60k
   truncation: full
   max_context_length: 131072
   quants: Q6_K
   architecture_family: granite
-  sampling_research_status: confirmed
-  sampling_researched_at: '2026-09-20T19:57:03+00:00'
-  sampling_sources:
-    - https://huggingface.co/datasets/Salesforce/xlam-function-calling-60k
-  sampling_evidence:
-    - profile: normal
-      values:
-        temperature: 0.001
-        top_p: 1.0
-      evidence_kind: direct
-      url: https://huggingface.co/datasets/Salesforce/xlam-function-calling-60k
-      excerpt: Performance comparison on the BFCL benchmark as of date
-        07/18/2024. Evaluated with  temperature=0.001  and  top_p=1
-    - profile: coding
-      values:
-        temperature: 0.001
-        top_p: 1.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        temperature: 0.001
-        top_p: 1.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        temperature: 0.001
-        top_p: 1.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: math
-      values:
-        temperature: 0.001
-        top_p: 1.0
-      evidence_kind: derived
-      derived_from: coding
-  sampling_category_status:
-    coding: derived
-    knowledge: derived
-    agentic: derived
-    math: derived
-  sampling_source: web-research
 
 thebloke/em_german_13b_v01@q6_k:
   publisher: TheBloke
@@ -3026,75 +1865,35 @@ thebloke/em_german_13b_v01@q6_k:
   n_layers: 40
   hidden_dim: 5120
   max_context_length: 4096
-  sampling_research_status: confirmed
-  sampling_researched_at: '2026-09-20T19:57:44+00:00'
-  sampling_sources:
-    - https://huggingface.co/TheBloke/em_german_13b_v01-GPTQ/raw/main/README.md
-  sampling_evidence:
-    - profile: normal
-      values:
-        temperature: 0.7
-        top_p: 0.95
-        top_k: 40
-      evidence_kind: direct
-      url:
-        https://huggingface.co/TheBloke/em_german_13b_v01-GPTQ/raw/main/README.md
-      excerpt: input_ids = tokenizer(prompt_template,
-        return_tensors='pt').input_ids.cuda() output =
-        model.generate(inputs=input_ids, temperature=0.7, do_sample=True,
-        top_p=0.95, top_k=40, max_new_tokens=512)
-    - profile: coding
-      values:
-        temperature: 0.7
-        top_p: 0.95
-        top_k: 40
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        temperature: 0.7
-        top_p: 0.95
-        top_k: 40
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        temperature: 0.7
-        top_p: 0.95
-        top_k: 40
-      evidence_kind: derived
-      derived_from: normal
-    - profile: math
-      values:
-        temperature: 0.7
-        top_p: 0.95
-        top_k: 40
-      evidence_kind: derived
-      derived_from: coding
   sampling:
     coding:
       temperature: 0.7
       top_p: 0.95
       top_k: 40
+      evidence_kind: direct
     knowledge:
       temperature: 0.7
       top_p: 0.95
       top_k: 40
+      evidence_kind: derived
+      derived_from: coding
     agentic:
       temperature: 0.7
       top_p: 0.95
       top_k: 40
+      evidence_kind: derived
+      derived_from: coding
     math:
       temperature: 0.7
       top_p: 0.95
       top_k: 40
-  sampling_source: web-research
+      evidence_kind: derived
+      derived_from: coding
+    sampling_research_status: confirmed
+    sampling_researched_at: '2026-09-20T19:57:44+00:00'
+    sampling_sources:
+      - https://huggingface.co/TheBloke/em_german_13b_v01-GPTQ/raw/main/README.md
   architecture_family: llama
-  sampling_category_status:
-    coding: derived
-    knowledge: derived
-    agentic: derived
-    math: derived
 
 thebloke/em_german_leo_mistral@q4_k_m:
   publisher: TheBloke
@@ -3116,74 +1915,35 @@ thebloke/em_german_leo_mistral@q4_k_m:
   n_layers: 32
   hidden_dim: 4096
   max_context_length: 32768
-  sampling_research_status: confirmed
-  sampling_researched_at: '2026-09-20T19:58:09+00:00'
-  sampling_sources:
-    - https://huggingface.co/TheBloke/em_german_leo_mistral-GPTQ
-  sampling_evidence:
-    - profile: normal
-      values:
-        temperature: 0.7
-        top_p: 0.95
-        top_k: 40
-      evidence_kind: direct
-      url: https://huggingface.co/TheBloke/em_german_leo_mistral-GPTQ
-      excerpt: input_ids = tokenizer(prompt_template, return_tensors= 'pt'
-        ).input_ids.cuda() output = model.generate(inputs=input_ids,
-        temperature= 0.7 , do_sample= True , top_p= 0.95 , top_k= 40 ,
-        max_new_tokens= 512 )
-    - profile: coding
-      values:
-        temperature: 0.7
-        top_p: 0.95
-        top_k: 40
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        temperature: 0.7
-        top_p: 0.95
-        top_k: 40
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        temperature: 0.7
-        top_p: 0.95
-        top_k: 40
-      evidence_kind: derived
-      derived_from: normal
-    - profile: math
-      values:
-        temperature: 0.7
-        top_p: 0.95
-        top_k: 40
-      evidence_kind: derived
-      derived_from: coding
   sampling:
     coding:
       temperature: 0.7
       top_p: 0.95
       top_k: 40
+      evidence_kind: direct
     knowledge:
       temperature: 0.7
       top_p: 0.95
       top_k: 40
+      evidence_kind: derived
+      derived_from: coding
     agentic:
       temperature: 0.7
       top_p: 0.95
       top_k: 40
+      evidence_kind: derived
+      derived_from: coding
     math:
       temperature: 0.7
       top_p: 0.95
       top_k: 40
-  sampling_source: web-research
+      evidence_kind: derived
+      derived_from: coding
+    sampling_research_status: confirmed
+    sampling_researched_at: '2026-09-20T19:58:09+00:00'
+    sampling_sources:
+      - https://huggingface.co/TheBloke/em_german_leo_mistral-GPTQ
   architecture_family: llama
-  sampling_category_status:
-    coding: derived
-    knowledge: derived
-    agentic: derived
-    math: derived
 
 lmstudio-community/starcoder2-15b-instruct-v0.1@q6_k:
   publisher: lmstudio-community
@@ -3203,69 +1963,31 @@ lmstudio-community/starcoder2-15b-instruct-v0.1@q6_k:
   capabilities: coding, text
   blueprint: coding_agent
   truncation: medium
-  sampling_research_status: confirmed
-  sampling_researched_at: '2026-09-20T19:59:20+00:00'
-  sampling_sources:
-    - https://huggingface.co/papers/2402.19173
-  sampling_evidence:
-    - profile: normal
-      values:
-        temperature: 0.2
-        top_p: 0.95
-      evidence_kind: direct
-      url: https://huggingface.co/papers/2402.19173
-      excerpt: We sample 50 completions per prompt at temperature 0.2 with top-p
-        0.95. This is how MultiPL-E results are reported on the BigCode Models
-        Leaderboard (Ben Allal, 2023).
-    - profile: coding
-      values:
-        temperature: 0.2
-        top_p: 0.95
-      evidence_kind: direct
-      url: https://huggingface.co/papers/2402.19173
-      excerpt: We use a max sequence length of 16k for all models except for
-        StarCoderBase, which only supports 8k. In line with Ding et al. (2023),
-        we use the retrieve-and-generate (RG) method with OpenAI’s ada
-        embedding, which was found to perform well in their study. To optimize
-        the usage of the extended 16k co
-    - profile: knowledge
-      values:
-        temperature: 0.2
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        temperature: 0.2
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: normal
-    - profile: math
-      values:
-        temperature: 0.2
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: coding
   sampling:
     coding:
       temperature: 0.2
       top_p: 0.95
+      evidence_kind: direct
     knowledge:
       temperature: 0.2
       top_p: 0.95
+      evidence_kind: derived
+      derived_from: coding
     agentic:
       temperature: 0.2
       top_p: 0.95
+      evidence_kind: derived
+      derived_from: coding
     math:
       temperature: 0.2
       top_p: 0.95
-  sampling_source: web-research
+      evidence_kind: derived
+      derived_from: coding
+    sampling_research_status: confirmed
+    sampling_researched_at: '2026-09-20T19:59:20+00:00'
+    sampling_sources:
+      - https://huggingface.co/papers/2402.19173
   architecture_family: starcoder2
-  sampling_category_status:
-    coding: direct
-    knowledge: derived
-    agentic: derived
-    math: derived
 
 prism-ml/bonsai-27b@q1_0:
   publisher: prism-ml
@@ -3282,84 +2004,6 @@ prism-ml/bonsai-27b@q1_0:
   capabilities: vision, text
   blueprint: default_chat
   truncation: full
-  sampling_research_status: confirmed
-  sampling_researched_at: '2026-09-20T19:59:58+00:00'
-  sampling_sources:
-    - https://huggingface.co/Qwen/Qwen3.6-27B/raw/main/README.md
-    - https://huggingface.co/Qwen/Qwen3.8-27B/raw/main/README.md
-  sampling_evidence:
-    - profile: normal
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-        presence_penalty: 1.5
-        repetition_penalty: 1.0
-      evidence_kind: direct
-      url: https://huggingface.co/Qwen/Qwen3.8-27B/raw/main/README.md
-      excerpt: '> - Thinking Mode: `temperature=1.0`, `top_p=0.95`, `top_k=20`, `min_p=0.0`,
-        `presence_penalty=0.0`, `repetition_penalty=1.0` > - Instruct (or non-thinking)
-        mode: `temperature=0.7`, `top_p=0.80`, `top_k=20`, `min_p=0.0`, `presence_penalty=1.5`,
-        `repetition_penalty=1.0`'
-    - profile: coding
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-        presence_penalty: 1.5
-        repetition_penalty: 1.0
-      evidence_kind: direct
-      url: https://huggingface.co/Qwen/Qwen3.6-27B/raw/main/README.md
-      excerpt: '> - Thinking mode for precise coding tasks (e.g. WebDev): `temperature=0.6,
-        top_p=0.95, top_k=20, min_p=0.0, presence_penalty=0.0, repetition_penalty=1.0`
-        > - Instruct (or non-thinking) mode: `temperature=0.7, top_p=0.80, top_k=20,
-        min_p=0.0, presence_penalty=1.5, repetition_penalty=1.0`'
-    - profile: knowledge
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-        presence_penalty: 1.5
-        repetition_penalty: 1.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        temperature: 1.0
-        top_p: 0.95
-        top_k: 20
-      evidence_kind: direct
-      url: https://huggingface.co/Qwen/Qwen3.6-27B/raw/main/README.md
-      excerpt: '* SWE-Bench Series: Internal agent scaffold (bash + file-edit tools);
-        temp=1.0, top_p=0.95, 200K context window. We correct some problematic tasks
-        in the public set of SWE-bench Pro and evaluate all baselines on the refined
-        benchmark.  * Terminal-Bench 2.0: Harbor/Terminus-2 harness; 3h timeout, 32 '
-    - profile: math
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-        presence_penalty: 1.5
-        repetition_penalty: 1.0
-      evidence_kind: derived
-      derived_from: coding
-    - profile: thinking
-      values:
-        temperature: 1.0
-        top_p: 0.95
-        top_k: 20
-        min_p: 0.0
-        presence_penalty: 0.0
-        repetition_penalty: 1.0
-      evidence_kind: direct
-      url: https://huggingface.co/Qwen/Qwen3.8-27B/raw/main/README.md
-      excerpt: '> We recommend using the following sets of sampling parameters for
-        generation: > - Thinking Mode: `temperature=1.0`, `top_p=0.95`, `top_k=20`,
-        `min_p=0.0`, `presence_penalty=0.0`, `repetition_penalty=1.0`'
   sampling:
     coding:
       temperature: 0.7
@@ -3368,6 +2012,7 @@ prism-ml/bonsai-27b@q1_0:
       min_p: 0.0
       presence_penalty: 1.5
       repetition_penalty: 1.0
+      evidence_kind: direct
     knowledge:
       temperature: 0.7
       top_p: 0.8
@@ -3375,10 +2020,13 @@ prism-ml/bonsai-27b@q1_0:
       min_p: 0.0
       presence_penalty: 1.5
       repetition_penalty: 1.0
+      evidence_kind: derived
+      derived_from: coding
     agentic:
       temperature: 1.0
       top_p: 0.95
       top_k: 20
+      evidence_kind: direct
     math:
       temperature: 0.7
       top_p: 0.8
@@ -3386,6 +2034,8 @@ prism-ml/bonsai-27b@q1_0:
       min_p: 0.0
       presence_penalty: 1.5
       repetition_penalty: 1.0
+      evidence_kind: derived
+      derived_from: coding
     thinking:
       enabled: true
       temperature: 1.0
@@ -3394,13 +2044,12 @@ prism-ml/bonsai-27b@q1_0:
       min_p: 0.0
       presence_penalty: 0.0
       repetition_penalty: 1.0
-  sampling_source: web-research
-  sampling_category_status:
-    coding: direct
-    knowledge: derived
-    agentic: direct
-    math: derived
-    thinking: direct
+      evidence_kind: direct
+    sampling_research_status: confirmed
+    sampling_researched_at: '2026-09-20T19:59:58+00:00'
+    sampling_sources:
+      - https://huggingface.co/Qwen/Qwen3.6-27B/raw/main/README.md
+      - https://huggingface.co/Qwen/Qwen3.8-27B/raw/main/README.md
 
 freedomaisvr/gemma-4-12b-it-qat-nvfp4@nvfp4:
   publisher: FreedomAISVR
@@ -3415,18 +2064,29 @@ freedomaisvr/gemma-4-12b-it-qat-nvfp4@nvfp4:
       temperature: 1.0
       top_p: 0.95
       top_k: 64
+      evidence_kind: direct
     knowledge:
       temperature: 1.0
       top_p: 0.95
       top_k: 64
+      evidence_kind: derived
+      derived_from: coding
     agentic:
       temperature: 1.0
       top_p: 0.95
       top_k: 64
+      evidence_kind: derived
+      derived_from: coding
     math:
       temperature: 1.0
       top_p: 0.95
       top_k: 64
+      evidence_kind: derived
+      derived_from: coding
+    sampling_research_status: confirmed
+    sampling_researched_at: '2026-09-20T20:00:33+00:00'
+    sampling_sources:
+      - https://huggingface.co/google/gemma-4-12B-it-qat-q4_0-unquantized-assistant/raw/main/README.md
   notes: 'Architektur: dense | Vision'
   file_size_bytes: 6891470432
   context_length: 131072
@@ -3439,98 +2099,6 @@ freedomaisvr/gemma-4-12b-it-qat-nvfp4@nvfp4:
   truncation: full
   custom_template: true
   architecture_family: gemma4
-  sampling_research_status: confirmed
-  sampling_researched_at: '2026-09-20T20:00:33+00:00'
-  sampling_sources:
-    - https://huggingface.co/google/gemma-4-12B-it-qat-q4_0-unquantized-assistant/raw/main/README.md
-  sampling_evidence:
-    - profile: normal
-      values:
-        temperature: 1.0
-      evidence_kind: direct
-      url:
-        https://huggingface.co/google/gemma-4-12B-it-qat-q4_0-unquantized-assistant/raw/main/README.md
-      excerpt: '* `temperature=1.0`'
-    - profile: normal
-      values:
-        top_p: 0.95
-      evidence_kind: direct
-      url:
-        https://huggingface.co/google/gemma-4-12B-it-qat-q4_0-unquantized-assistant/raw/main/README.md
-      excerpt: '* `temperature=1.0`   * `top_p=0.95`'
-    - profile: normal
-      values:
-        top_k: 64
-      evidence_kind: direct
-      url:
-        https://huggingface.co/google/gemma-4-12B-it-qat-q4_0-unquantized-assistant/raw/main/README.md
-      excerpt: '* `top_p=0.95`   * `top_k=64`'
-    - profile: coding
-      values:
-        temperature: 1.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: coding
-      values:
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: normal
-    - profile: coding
-      values:
-        top_k: 64
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        temperature: 1.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        top_k: 64
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        temperature: 1.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        top_k: 64
-      evidence_kind: derived
-      derived_from: normal
-    - profile: math
-      values:
-        temperature: 1.0
-      evidence_kind: derived
-      derived_from: coding
-    - profile: math
-      values:
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: coding
-    - profile: math
-      values:
-        top_k: 64
-      evidence_kind: derived
-      derived_from: coding
-  sampling_category_status:
-    coding: derived
-    knowledge: derived
-    agentic: derived
-    math: derived
-  sampling_source: web-research
 
 unsloth/glm-4.7-flash-reap-23b-a3b@q4_k_s:
   publisher: unsloth
@@ -3550,22 +2118,20 @@ unsloth/glm-4.7-flash-reap-23b-a3b@q4_k_s:
   capabilities: coding, text
   blueprint: reasoning_coding
   truncation: full
-  sampling_research_status: conflict
-  sampling_researched_at: '2026-09-20T20:01:02+00:00'
-  sampling_sources:
-    - https://github.com/zai-org/GLM-4.5
-    - https://huggingface.co/cerebras/GLM-4.7-Flash-REAP-23B-A3B
-    - https://huggingface.co/cerebras/GLM-4.7-Flash-REAP-23B-A3B/raw/main/README.md
-    - https://huggingface.co/zai-org/GLM-4.7-Flash/raw/main/README.md
-    - https://z.ai/blog/glm-4.7
-  sampling_evidence:
-    - profile: math
+  architecture_family: deepseek2
+  sampling:
+    math:
       evidence_kind: unresolved
       reason: Kein allgemeines Profil; Coding-/Math-Fallback kann nicht
         belastbar bestimmt werden.
-  architecture_family: deepseek2
-  sampling_category_status:
-    math: unresolved
+    sampling_research_status: conflict
+    sampling_researched_at: '2026-09-20T20:01:02+00:00'
+    sampling_sources:
+      - https://github.com/zai-org/GLM-4.5
+      - https://huggingface.co/cerebras/GLM-4.7-Flash-REAP-23B-A3B
+      - https://huggingface.co/cerebras/GLM-4.7-Flash-REAP-23B-A3B/raw/main/README.md
+      - https://huggingface.co/zai-org/GLM-4.7-Flash/raw/main/README.md
+      - https://z.ai/blog/glm-4.7
 
 noctrex/glm-4.7-flash-reap-23b-a3b_moe@mxfp4:
   publisher: noctrex
@@ -3585,23 +2151,7 @@ noctrex/glm-4.7-flash-reap-23b-a3b_moe@mxfp4:
   capabilities: coding, text
   blueprint: reasoning_coding
   truncation: full
-  sampling_research_status: conflict
-  sampling_researched_at: '2026-09-20T20:01:06+00:00'
-  sampling_sources:
-    - https://github.com/CerebrasResearch/reap
-    - https://huggingface.co/cerebras/GLM-4.7-Flash-REAP-23B-A3B/raw/main/README.md
-    - https://huggingface.co/datasets/SWE-bench/SWE-smith-trajectories
-    - https://huggingface.co/datasets/Salesforce/xlam-function-calling-60k
-    - https://huggingface.co/datasets/theblackcat102/evol-codealpaca-v1
-    - https://huggingface.co/zai-org/GLM-4.7-Flash
-  sampling_evidence:
-    - profile: math
-      evidence_kind: unresolved
-      reason: Kein allgemeines Profil; Coding-/Math-Fallback kann nicht
-        belastbar bestimmt werden.
   architecture_family: deepseek2
-  sampling_category_status:
-    math: unresolved
   sampling:
     coding:
       temperature: 0.001
@@ -3615,7 +2165,18 @@ noctrex/glm-4.7-flash-reap-23b-a3b_moe@mxfp4:
     math:
       temperature: 0.001
       top_p: 1.0
-  sampling_source: web-research
+      evidence_kind: unresolved
+      reason: Kein allgemeines Profil; Coding-/Math-Fallback kann nicht
+        belastbar bestimmt werden.
+    sampling_research_status: conflict
+    sampling_researched_at: '2026-09-20T20:01:06+00:00'
+    sampling_sources:
+      - https://github.com/CerebrasResearch/reap
+      - https://huggingface.co/cerebras/GLM-4.7-Flash-REAP-23B-A3B/raw/main/README.md
+      - https://huggingface.co/datasets/SWE-bench/SWE-smith-trajectories
+      - https://huggingface.co/datasets/Salesforce/xlam-function-calling-60k
+      - https://huggingface.co/datasets/theblackcat102/evol-codealpaca-v1
+      - https://huggingface.co/zai-org/GLM-4.7-Flash
 
 bartowski/utter-project_eurollm-22b-instruct-2512@q4_k_s:
   publisher: bartowski
@@ -3636,19 +2197,17 @@ bartowski/utter-project_eurollm-22b-instruct-2512@q4_k_s:
   capabilities: text
   blueprint: default_chat
   truncation: full
-  sampling_research_status: unresolved
-  sampling_researched_at: '2026-09-20T20:01:18+00:00'
-  sampling_sources:
-    - https://huggingface.co/utter-project/EuroLLM-22B-2512/raw/main/README.md
-    - https://huggingface.co/utter-project/EuroLLM-22B-Instruct-2512
-  sampling_evidence:
-    - profile: math
+  architecture_family: llama
+  sampling:
+    math:
       evidence_kind: unresolved
       reason: Kein allgemeines Profil; Coding-/Math-Fallback kann nicht
         belastbar bestimmt werden.
-  architecture_family: llama
-  sampling_category_status:
-    math: unresolved
+    sampling_research_status: unresolved
+    sampling_researched_at: '2026-09-20T20:01:18+00:00'
+    sampling_sources:
+      - https://huggingface.co/utter-project/EuroLLM-22B-2512/raw/main/README.md
+      - https://huggingface.co/utter-project/EuroLLM-22B-Instruct-2512
 
 mradermacher/granite-4.2-30b-i1@iq3_m:
   publisher: mradermacher
@@ -3668,76 +2227,37 @@ mradermacher/granite-4.2-30b-i1@iq3_m:
   capabilities: coding, text
   blueprint: granite_coding_agent
   truncation: full
-  sampling_research_status: confirmed
-  sampling_researched_at: '2026-09-20T20:02:02+00:00'
-  sampling_sources:
-    - https://github.com/ibm-granite/granite-4.2-language-models
-    - https://www.ibm.com/granite/docs/models/granite4-2
-  sampling_evidence:
-    - profile: normal
-      values:
-        temperature: 1.0
-        top_p: 0.95
-      evidence_kind: direct
-      url: https://www.ibm.com/granite/docs/models/granite4-2
-      excerpt: 'Disable reasoning for a direct answer with no chain-of-thought overhead:         messages   =     [             {  "role"  :     "user"  ,     "content"  :     "What
-        is the capital of France?"  }  ,         ]       text   =   tokenizer  .  apply_chat_template  (  messages  ,   tokenize  =  False  , '
-    - profile: coding
-      values:
-        temperature: 1.0
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        temperature: 1.0
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        temperature: 1.0
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: thinking
-    - profile: math
-      values:
-        temperature: 1.0
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: coding
-    - profile: thinking
-      values:
-        temperature: 1.0
-        top_p: 0.95
-      evidence_kind: direct
-      url: https://github.com/ibm-granite/granite-4.2-language-models
-      excerpt: '{"payload":{"codeViewRepoRoute":{"path":"/","refInfo":{"name":"main","listCacheKey":"v0:1787691590.0","canEdit":false,"refType":"branch","currentOid":"75355e6ef8c17d72a7b3736654ab525352f5e0b8"},"tree":{"items":[{"name":"disclosures","path":"disclosures","contentType":"directory"},{"name":"figures","'
   sampling:
     coding:
       temperature: 1.0
       top_p: 0.95
+      evidence_kind: direct
     knowledge:
       temperature: 1.0
       top_p: 0.95
+      evidence_kind: derived
+      derived_from: coding
     agentic:
       temperature: 1.0
       top_p: 0.95
+      evidence_kind: derived
+      derived_from: thinking
     math:
       temperature: 1.0
       top_p: 0.95
+      evidence_kind: derived
+      derived_from: coding
     thinking:
       enabled: true
       temperature: 1.0
       top_p: 0.95
-  sampling_source: web-research
+      evidence_kind: direct
+    sampling_research_status: confirmed
+    sampling_researched_at: '2026-09-20T20:02:02+00:00'
+    sampling_sources:
+      - https://github.com/ibm-granite/granite-4.2-language-models
+      - https://www.ibm.com/granite/docs/models/granite4-2
   architecture_family: granite
-  sampling_category_status:
-    coding: derived
-    knowledge: derived
-    agentic: derived
-    math: derived
-    thinking: direct
 
 byteshape/qwen3.6-35b-a3b@iq3_s:
   publisher: byteshape
@@ -3757,103 +2277,46 @@ byteshape/qwen3.6-35b-a3b@iq3_s:
   capabilities: vision, coding, text
   blueprint: reasoning_coding
   truncation: full
-  sampling_research_status: confirmed
-  sampling_researched_at: '2026-09-20T20:02:06+00:00'
-  sampling_sources:
-    - https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html
-  sampling_evidence:
-    - profile: normal
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: direct
-      url: https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html
-      excerpt: We recommend `temperature=0.7`, `top_p=0.8`, `top_k=20`, and
-        `min_p=0` for Qwen3-Instruct-2507 models. For supported frameworks,
-        adjust `presence_penalty` between 0 and 2 to reduce repetitions.
-        However, using a higher value may occasionally result in language mixing
-        and a slight decrease in model pe
-    - profile: coding
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        temperature: 0.6
-        top_p: 0.95
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: thinking
-    - profile: math
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: coding
-    - profile: thinking
-      values:
-        temperature: 0.6
-        top_p: 0.95
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: direct
-      url: https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html
-      excerpt: For thinking mode, use Temperature=0.6, TopP=0.95, TopK=20, and
-        MinP=0 (the default setting in `generation_config.json`). DO NOT use
-        greedy decoding, as it can lead to performance degradation and endless
-        repetitions.
   sampling:
     coding:
       temperature: 0.7
       top_p: 0.8
       top_k: 20
       min_p: 0.0
+      evidence_kind: direct
     knowledge:
       temperature: 0.7
       top_p: 0.8
       top_k: 20
       min_p: 0.0
+      evidence_kind: derived
+      derived_from: coding
     agentic:
       temperature: 0.6
       top_p: 0.95
       top_k: 20
       min_p: 0.0
+      evidence_kind: derived
+      derived_from: thinking
     math:
       temperature: 0.7
       top_p: 0.8
       top_k: 20
       min_p: 0.0
+      evidence_kind: derived
+      derived_from: coding
     thinking:
       enabled: true
       temperature: 0.6
       top_p: 0.95
       top_k: 20
       min_p: 0.0
-  sampling_source: web-research
+      evidence_kind: direct
+    sampling_research_status: confirmed
+    sampling_researched_at: '2026-09-20T20:02:06+00:00'
+    sampling_sources:
+      - https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html
   architecture_family: qwen35moe
-  sampling_category_status:
-    coding: derived
-    knowledge: derived
-    agentic: derived
-    math: derived
-    thinking: direct
 
 byteshape/qwen3.8-27b@iq4_xs:
   publisher: byteshape
@@ -3873,103 +2336,46 @@ byteshape/qwen3.8-27b@iq4_xs:
   capabilities: coding, vision, text
   blueprint: reasoning_coding
   truncation: full
-  sampling_research_status: confirmed
-  sampling_researched_at: '2026-09-20T20:02:09+00:00'
-  sampling_sources:
-    - https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html
-  sampling_evidence:
-    - profile: normal
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: direct
-      url: https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html
-      excerpt: We recommend `temperature=0.7`, `top_p=0.8`, `top_k=20`, and
-        `min_p=0` for Qwen3-Instruct-2507 models. For supported frameworks,
-        adjust `presence_penalty` between 0 and 2 to reduce repetitions.
-        However, using a higher value may occasionally result in language mixing
-        and a slight decrease in model pe
-    - profile: coding
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        temperature: 0.6
-        top_p: 0.95
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: thinking
-    - profile: math
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: coding
-    - profile: thinking
-      values:
-        temperature: 0.6
-        top_p: 0.95
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: direct
-      url: https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html
-      excerpt: For thinking mode, use Temperature=0.6, TopP=0.95, TopK=20, and
-        MinP=0 (the default setting in `generation_config.json`). DO NOT use
-        greedy decoding, as it can lead to performance degradation and endless
-        repetitions.
   sampling:
     coding:
       temperature: 0.7
       top_p: 0.8
       top_k: 20
       min_p: 0.0
+      evidence_kind: direct
     knowledge:
       temperature: 0.7
       top_p: 0.8
       top_k: 20
       min_p: 0.0
+      evidence_kind: derived
+      derived_from: coding
     agentic:
       temperature: 0.6
       top_p: 0.95
       top_k: 20
       min_p: 0.0
+      evidence_kind: derived
+      derived_from: thinking
     math:
       temperature: 0.7
       top_p: 0.8
       top_k: 20
       min_p: 0.0
+      evidence_kind: derived
+      derived_from: coding
     thinking:
       enabled: true
       temperature: 0.6
       top_p: 0.95
       top_k: 20
       min_p: 0.0
-  sampling_source: web-research
+      evidence_kind: direct
+    sampling_research_status: confirmed
+    sampling_researched_at: '2026-09-20T20:02:09+00:00'
+    sampling_sources:
+      - https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html
   architecture_family: qwen35
-  sampling_category_status:
-    coding: derived
-    knowledge: derived
-    agentic: derived
-    math: derived
-    thinking: direct
 
 empero-ai/qwen3.8-9b-distill@q8_0:
   publisher: empero-ai
@@ -3995,63 +2401,33 @@ empero-ai/qwen3.8-9b-distill@q8_0:
       top_p: 0.95
       top_k: 20
       min_p: 0.0
+      evidence_kind: direct
     knowledge:
       temperature: 0.6
       top_p: 0.95
       top_k: 20
       min_p: 0.0
+      evidence_kind: derived
+      derived_from: coding
     agentic:
       temperature: 0.6
       top_p: 0.95
       top_k: 20
       min_p: 0.0
+      evidence_kind: unresolved
+      reason: Widersprüchliche agentic-Profile.
     math:
       temperature: 0.6
       top_p: 0.95
       top_k: 20
       min_p: 0.0
-  sampling_source: manual-web-review
-  sampling_sources:
-    - https://huggingface.co/empero-ai/qwen3.8-9b-distill/raw/main/README.md
-  sampling_research_status: conflict
-  sampling_researched_at: '2026-09-20T20:02:21+00:00'
-  sampling_evidence:
-    - profile: normal
-      values:
-        temperature: 0.6
-        top_p: 0.95
-        top_k: 20
-      evidence_kind: direct
-      url:
-        https://huggingface.co/empero-ai/qwen3.8-9b-distill/raw/main/README.md
-      excerpt: 'Sampling for generation: `temperature=0.6, top_p=0.95, top_k=20` (Qwen3.5
-        recommended settings).'
-    - profile: coding
-      values:
-        temperature: 0.6
-        top_p: 0.95
-        top_k: 20
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        temperature: 0.6
-        top_p: 0.95
-        top_k: 20
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      evidence_kind: unresolved
-      reason: Widersprüchliche agentic-Profile.
-    - profile: math
       evidence_kind: unresolved
       reason: Widersprüchliches agentic-Profil; Math-Status bleibt ungeklärt.
+    sampling_research_status: conflict
+    sampling_researched_at: '2026-09-20T20:02:21+00:00'
+    sampling_sources:
+      - https://huggingface.co/empero-ai/qwen3.8-9b-distill/raw/main/README.md
   architecture_family: qwen35
-  sampling_category_status:
-    coding: derived
-    knowledge: derived
-    agentic: unresolved
-    math: unresolved
 
 qwen/qwen2.5-coder-14b-instruct@q6_k:
   publisher: Qwen
@@ -4071,18 +2447,16 @@ qwen/qwen2.5-coder-14b-instruct@q6_k:
   capabilities: coding, text
   blueprint: coding_agent
   truncation: full
-  sampling_research_status: conflict
-  sampling_researched_at: '2026-09-20T20:02:50+00:00'
-  sampling_sources:
-    - https://qwen.readthedocs.io/en/latest/deployment/vllm.html
-  sampling_evidence:
-    - profile: math
+  architecture_family: qwen2
+  sampling:
+    math:
       evidence_kind: unresolved
       reason: Kein allgemeines Profil; Coding-/Math-Fallback kann nicht
         belastbar bestimmt werden.
-  architecture_family: qwen2
-  sampling_category_status:
-    math: unresolved
+    sampling_research_status: conflict
+    sampling_researched_at: '2026-09-20T20:02:50+00:00'
+    sampling_sources:
+      - https://qwen.readthedocs.io/en/latest/deployment/vllm.html
 
 jrell/qwen3.8-27b-i1-smaller@iq4_xs:
   publisher: jrell
@@ -4102,103 +2476,46 @@ jrell/qwen3.8-27b-i1-smaller@iq4_xs:
   capabilities: coding, vision, text
   blueprint: reasoning_coding
   truncation: full
-  sampling_research_status: confirmed
-  sampling_researched_at: '2026-09-20T20:02:52+00:00'
-  sampling_sources:
-    - https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html
-  sampling_evidence:
-    - profile: normal
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: direct
-      url: https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html
-      excerpt: We recommend `temperature=0.7`, `top_p=0.8`, `top_k=20`, and
-        `min_p=0` for Qwen3-Instruct-2507 models. For supported frameworks,
-        adjust `presence_penalty` between 0 and 2 to reduce repetitions.
-        However, using a higher value may occasionally result in language mixing
-        and a slight decrease in model pe
-    - profile: coding
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        temperature: 0.6
-        top_p: 0.95
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: thinking
-    - profile: math
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: coding
-    - profile: thinking
-      values:
-        temperature: 0.6
-        top_p: 0.95
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: direct
-      url: https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html
-      excerpt: For thinking mode, use Temperature=0.6, TopP=0.95, TopK=20, and
-        MinP=0 (the default setting in `generation_config.json`). DO NOT use
-        greedy decoding, as it can lead to performance degradation and endless
-        repetitions.
   sampling:
     coding:
       temperature: 0.7
       top_p: 0.8
       top_k: 20
       min_p: 0.0
+      evidence_kind: direct
     knowledge:
       temperature: 0.7
       top_p: 0.8
       top_k: 20
       min_p: 0.0
+      evidence_kind: derived
+      derived_from: coding
     agentic:
       temperature: 0.6
       top_p: 0.95
       top_k: 20
       min_p: 0.0
+      evidence_kind: derived
+      derived_from: thinking
     math:
       temperature: 0.7
       top_p: 0.8
       top_k: 20
       min_p: 0.0
+      evidence_kind: derived
+      derived_from: coding
     thinking:
       enabled: true
       temperature: 0.6
       top_p: 0.95
       top_k: 20
       min_p: 0.0
-  sampling_source: web-research
+      evidence_kind: direct
+    sampling_research_status: confirmed
+    sampling_researched_at: '2026-09-20T20:02:52+00:00'
+    sampling_sources:
+      - https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html
   architecture_family: qwen35
-  sampling_category_status:
-    coding: derived
-    knowledge: derived
-    agentic: derived
-    math: derived
-    thinking: direct
 
 unsloth/qwen3.6-27b-mtp@iq3_xxs:
   publisher: unsloth
@@ -4218,103 +2535,46 @@ unsloth/qwen3.6-27b-mtp@iq3_xxs:
   capabilities: coding, vision, text
   blueprint: reasoning_coding
   truncation: full
-  sampling_research_status: confirmed
-  sampling_researched_at: '2026-09-20T20:02:54+00:00'
-  sampling_sources:
-    - https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html
-  sampling_evidence:
-    - profile: normal
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: direct
-      url: https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html
-      excerpt: We recommend `temperature=0.7`, `top_p=0.8`, `top_k=20`, and
-        `min_p=0` for Qwen3-Instruct-2507 models. For supported frameworks,
-        adjust `presence_penalty` between 0 and 2 to reduce repetitions.
-        However, using a higher value may occasionally result in language mixing
-        and a slight decrease in model pe
-    - profile: coding
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        temperature: 0.6
-        top_p: 0.95
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: thinking
-    - profile: math
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: coding
-    - profile: thinking
-      values:
-        temperature: 0.6
-        top_p: 0.95
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: direct
-      url: https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html
-      excerpt: For thinking mode, use Temperature=0.6, TopP=0.95, TopK=20, and
-        MinP=0 (the default setting in `generation_config.json`). DO NOT use
-        greedy decoding, as it can lead to performance degradation and endless
-        repetitions.
   sampling:
     coding:
       temperature: 0.7
       top_p: 0.8
       top_k: 20
       min_p: 0.0
+      evidence_kind: direct
     knowledge:
       temperature: 0.7
       top_p: 0.8
       top_k: 20
       min_p: 0.0
+      evidence_kind: derived
+      derived_from: coding
     agentic:
       temperature: 0.6
       top_p: 0.95
       top_k: 20
       min_p: 0.0
+      evidence_kind: derived
+      derived_from: thinking
     math:
       temperature: 0.7
       top_p: 0.8
       top_k: 20
       min_p: 0.0
+      evidence_kind: derived
+      derived_from: coding
     thinking:
       enabled: true
       temperature: 0.6
       top_p: 0.95
       top_k: 20
       min_p: 0.0
-  sampling_source: web-research
+      evidence_kind: direct
+    sampling_research_status: confirmed
+    sampling_researched_at: '2026-09-20T20:02:54+00:00'
+    sampling_sources:
+      - https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html
   architecture_family: qwen35
-  sampling_category_status:
-    coding: derived
-    knowledge: derived
-    agentic: derived
-    math: derived
-    thinking: direct
 
 tooltd/qwen3.6-27b-mini-xs-mtp-16gb-vram@iq4_xs:
   publisher: tooltd
@@ -4334,103 +2594,46 @@ tooltd/qwen3.6-27b-mini-xs-mtp-16gb-vram@iq4_xs:
   capabilities: coding, vision, text
   blueprint: reasoning_coding
   truncation: full
-  sampling_research_status: confirmed
-  sampling_researched_at: '2026-09-20T20:02:57+00:00'
-  sampling_sources:
-    - https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html
-  sampling_evidence:
-    - profile: normal
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: direct
-      url: https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html
-      excerpt: We recommend `temperature=0.7`, `top_p=0.8`, `top_k=20`, and
-        `min_p=0` for Qwen3-Instruct-2507 models. For supported frameworks,
-        adjust `presence_penalty` between 0 and 2 to reduce repetitions.
-        However, using a higher value may occasionally result in language mixing
-        and a slight decrease in model pe
-    - profile: coding
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        temperature: 0.6
-        top_p: 0.95
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: thinking
-    - profile: math
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: coding
-    - profile: thinking
-      values:
-        temperature: 0.6
-        top_p: 0.95
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: direct
-      url: https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html
-      excerpt: For thinking mode, use Temperature=0.6, TopP=0.95, TopK=20, and
-        MinP=0 (the default setting in `generation_config.json`). DO NOT use
-        greedy decoding, as it can lead to performance degradation and endless
-        repetitions.
   sampling:
     coding:
       temperature: 0.7
       top_p: 0.8
       top_k: 20
       min_p: 0.0
+      evidence_kind: direct
     knowledge:
       temperature: 0.7
       top_p: 0.8
       top_k: 20
       min_p: 0.0
+      evidence_kind: derived
+      derived_from: coding
     agentic:
       temperature: 0.6
       top_p: 0.95
       top_k: 20
       min_p: 0.0
+      evidence_kind: derived
+      derived_from: thinking
     math:
       temperature: 0.7
       top_p: 0.8
       top_k: 20
       min_p: 0.0
+      evidence_kind: derived
+      derived_from: coding
     thinking:
       enabled: true
       temperature: 0.6
       top_p: 0.95
       top_k: 20
       min_p: 0.0
-  sampling_source: web-research
+      evidence_kind: direct
+    sampling_research_status: confirmed
+    sampling_researched_at: '2026-09-20T20:02:57+00:00'
+    sampling_sources:
+      - https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html
   architecture_family: qwen35
-  sampling_category_status:
-    coding: derived
-    knowledge: derived
-    agentic: derived
-    math: derived
-    thinking: direct
 
 bytkim/qwen3.6-27b-mtp-pi-tune@q3_k_s:
   publisher: bytkim
@@ -4450,103 +2653,46 @@ bytkim/qwen3.6-27b-mtp-pi-tune@q3_k_s:
   capabilities: coding, vision, text
   blueprint: reasoning_coding
   truncation: full
-  sampling_research_status: confirmed
-  sampling_researched_at: '2026-09-20T20:02:59+00:00'
-  sampling_sources:
-    - https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html
-  sampling_evidence:
-    - profile: normal
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: direct
-      url: https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html
-      excerpt: We recommend `temperature=0.7`, `top_p=0.8`, `top_k=20`, and
-        `min_p=0` for Qwen3-Instruct-2507 models. For supported frameworks,
-        adjust `presence_penalty` between 0 and 2 to reduce repetitions.
-        However, using a higher value may occasionally result in language mixing
-        and a slight decrease in model pe
-    - profile: coding
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        temperature: 0.6
-        top_p: 0.95
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: thinking
-    - profile: math
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: coding
-    - profile: thinking
-      values:
-        temperature: 0.6
-        top_p: 0.95
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: direct
-      url: https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html
-      excerpt: For thinking mode, use Temperature=0.6, TopP=0.95, TopK=20, and
-        MinP=0 (the default setting in `generation_config.json`). DO NOT use
-        greedy decoding, as it can lead to performance degradation and endless
-        repetitions.
   sampling:
     coding:
       temperature: 0.7
       top_p: 0.8
       top_k: 20
       min_p: 0.0
+      evidence_kind: direct
     knowledge:
       temperature: 0.7
       top_p: 0.8
       top_k: 20
       min_p: 0.0
+      evidence_kind: derived
+      derived_from: coding
     agentic:
       temperature: 0.6
       top_p: 0.95
       top_k: 20
       min_p: 0.0
+      evidence_kind: derived
+      derived_from: thinking
     math:
       temperature: 0.7
       top_p: 0.8
       top_k: 20
       min_p: 0.0
+      evidence_kind: derived
+      derived_from: coding
     thinking:
       enabled: true
       temperature: 0.6
       top_p: 0.95
       top_k: 20
       min_p: 0.0
-  sampling_source: web-research
+      evidence_kind: direct
+    sampling_research_status: confirmed
+    sampling_researched_at: '2026-09-20T20:02:59+00:00'
+    sampling_sources:
+      - https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html
   architecture_family: qwen35
-  sampling_category_status:
-    coding: derived
-    knowledge: derived
-    agentic: derived
-    math: derived
-    thinking: direct
 
 byteshape/qwen3-coder-30b-a3b-instruct@iq3_s:
   publisher: byteshape
@@ -4562,106 +2708,49 @@ byteshape/qwen3-coder-30b-a3b-instruct@iq3_s:
   hidden_dim: 2048
   max_context_length: 262144
   reasoning: instruct
-  sampling_research_status: confirmed
-  sampling_researched_at: '2026-09-20T20:03:02+00:00'
-  sampling_sources:
-    - https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html
-  sampling_evidence:
-    - profile: normal
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: direct
-      url: https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html
-      excerpt: We recommend `temperature=0.7`, `top_p=0.8`, `top_k=20`, and
-        `min_p=0` for Qwen3-Instruct-2507 models. For supported frameworks,
-        adjust `presence_penalty` between 0 and 2 to reduce repetitions.
-        However, using a higher value may occasionally result in language mixing
-        and a slight decrease in model pe
-    - profile: coding
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        temperature: 0.6
-        top_p: 0.95
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: thinking
-    - profile: math
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: coding
-    - profile: thinking
-      values:
-        temperature: 0.6
-        top_p: 0.95
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: direct
-      url: https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html
-      excerpt: For thinking mode, use Temperature=0.6, TopP=0.95, TopK=20, and
-        MinP=0 (the default setting in `generation_config.json`). DO NOT use
-        greedy decoding, as it can lead to performance degradation and endless
-        repetitions.
   sampling:
     coding:
       temperature: 0.7
       top_p: 0.8
       top_k: 20
       min_p: 0.0
+      evidence_kind: direct
     knowledge:
       temperature: 0.7
       top_p: 0.8
       top_k: 20
       min_p: 0.0
+      evidence_kind: derived
+      derived_from: coding
     agentic:
       temperature: 0.6
       top_p: 0.95
       top_k: 20
       min_p: 0.0
+      evidence_kind: derived
+      derived_from: thinking
     math:
       temperature: 0.7
       top_p: 0.8
       top_k: 20
       min_p: 0.0
+      evidence_kind: derived
+      derived_from: coding
     thinking:
       enabled: true
       temperature: 0.6
       top_p: 0.95
       top_k: 20
       min_p: 0.0
-  sampling_source: web-research
+      evidence_kind: direct
+    sampling_research_status: confirmed
+    sampling_researched_at: '2026-09-20T20:03:02+00:00'
+    sampling_sources:
+      - https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html
   capabilities: coding, vision, text
   blueprint: coding_agent
   truncation: full
   architecture_family: qwen3moe
-  sampling_category_status:
-    coding: derived
-    knowledge: derived
-    agentic: derived
-    math: derived
-    thinking: direct
 
 byteshape/qwen3.5-9b@q5_k_s:
   publisher: byteshape
@@ -4677,106 +2766,49 @@ byteshape/qwen3.5-9b@q5_k_s:
   hidden_dim: 4096
   max_context_length: 262144
   reasoning: thinking
-  sampling_research_status: confirmed
-  sampling_researched_at: '2026-09-20T20:03:47+00:00'
-  sampling_sources:
-    - https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html
-  sampling_evidence:
-    - profile: normal
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: direct
-      url: https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html
-      excerpt: We recommend `temperature=0.7`, `top_p=0.8`, `top_k=20`, and
-        `min_p=0` for Qwen3-Instruct-2507 models. For supported frameworks,
-        adjust `presence_penalty` between 0 and 2 to reduce repetitions.
-        However, using a higher value may occasionally result in language mixing
-        and a slight decrease in model pe
-    - profile: coding
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        temperature: 0.6
-        top_p: 0.95
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: thinking
-    - profile: math
-      values:
-        temperature: 0.7
-        top_p: 0.8
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: derived
-      derived_from: coding
-    - profile: thinking
-      values:
-        temperature: 0.6
-        top_p: 0.95
-        top_k: 20
-        min_p: 0.0
-      evidence_kind: direct
-      url: https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html
-      excerpt: For thinking mode, use Temperature=0.6, TopP=0.95, TopK=20, and
-        MinP=0 (the default setting in `generation_config.json`). DO NOT use
-        greedy decoding, as it can lead to performance degradation and endless
-        repetitions.
   sampling:
     coding:
       temperature: 0.7
       top_p: 0.8
       top_k: 20
       min_p: 0.0
+      evidence_kind: direct
     knowledge:
       temperature: 0.7
       top_p: 0.8
       top_k: 20
       min_p: 0.0
+      evidence_kind: derived
+      derived_from: coding
     agentic:
       temperature: 0.6
       top_p: 0.95
       top_k: 20
       min_p: 0.0
+      evidence_kind: derived
+      derived_from: thinking
     math:
       temperature: 0.7
       top_p: 0.8
       top_k: 20
       min_p: 0.0
+      evidence_kind: derived
+      derived_from: coding
     thinking:
       enabled: true
       temperature: 0.6
       top_p: 0.95
       top_k: 20
       min_p: 0.0
-  sampling_source: web-research
+      evidence_kind: direct
+    sampling_research_status: confirmed
+    sampling_researched_at: '2026-09-20T20:03:47+00:00'
+    sampling_sources:
+      - https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html
   capabilities: vision, coding, text
   blueprint: reasoning_coding
   truncation: full
   architecture_family: qwen35
-  sampling_category_status:
-    coding: derived
-    knowledge: derived
-    agentic: derived
-    math: derived
-    thinking: direct
 
 nerdsking/nerdsking-python-coder-7b-i@q8_0_i:
   publisher: Nerdsking
@@ -4792,21 +2824,19 @@ nerdsking/nerdsking-python-coder-7b-i@q8_0_i:
   hidden_dim: 3584
   max_context_length: 32768
   reasoning: instruct
-  sampling_research_status: unresolved
-  sampling_researched_at: '2026-09-20T20:04:31+00:00'
-  sampling_sources:
-    - https://huggingface.co/nerdsking/nerdsking-python-coder-7b-i/raw/main/README.md
-  sampling_evidence:
-    - profile: math
-      evidence_kind: unresolved
-      reason: Kein allgemeines Profil; Coding-/Math-Fallback kann nicht
-        belastbar bestimmt werden.
   capabilities: coding, text
   blueprint: coding_agent
   truncation: full
   architecture_family: qwen2
-  sampling_category_status:
-    math: unresolved
+  sampling:
+    math:
+      evidence_kind: unresolved
+      reason: Kein allgemeines Profil; Coding-/Math-Fallback kann nicht
+        belastbar bestimmt werden.
+    sampling_research_status: unresolved
+    sampling_researched_at: '2026-09-20T20:04:31+00:00'
+    sampling_sources:
+      - https://huggingface.co/nerdsking/nerdsking-python-coder-7b-i/raw/main/README.md
 
 mradermacher/gemma-4-31b-i1@iq3_xs:
   publisher: mradermacher
@@ -4822,116 +2852,38 @@ mradermacher/gemma-4-31b-i1@iq3_xs:
   hidden_dim: 5376
   max_context_length: 262144
   reasoning: instruct
-  sampling_research_status: confirmed
-  sampling_researched_at: '2026-09-20T20:05:18+00:00'
-  sampling_sources:
-    - https://huggingface.co/google/gemma-4-31B-it
-  sampling_evidence:
-    - profile: normal
-      values:
-        temperature: 1.0
-      evidence_kind: direct
-      url: https://huggingface.co/google/gemma-4-31B-it
-      excerpt: temperature=1.0
-    - profile: normal
-      values:
-        top_p: 0.95
-      evidence_kind: direct
-      url: https://huggingface.co/google/gemma-4-31B-it
-      excerpt: temperature=1.0       top_p=0.95
-    - profile: normal
-      values:
-        top_k: 64
-      evidence_kind: direct
-      url: https://huggingface.co/google/gemma-4-31B-it
-      excerpt: top_p=0.95       top_k=64
-    - profile: coding
-      values:
-        temperature: 1.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: coding
-      values:
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: normal
-    - profile: coding
-      values:
-        top_k: 64
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        temperature: 1.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        top_k: 64
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        temperature: 1.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        top_k: 64
-      evidence_kind: derived
-      derived_from: normal
-    - profile: math
-      values:
-        temperature: 1.0
-      evidence_kind: derived
-      derived_from: coding
-    - profile: math
-      values:
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: coding
-    - profile: math
-      values:
-        top_k: 64
-      evidence_kind: derived
-      derived_from: coding
   sampling:
     coding:
       temperature: 1.0
       top_p: 0.95
       top_k: 64
+      evidence_kind: direct
     knowledge:
       temperature: 1.0
       top_p: 0.95
       top_k: 64
+      evidence_kind: derived
+      derived_from: coding
     agentic:
       temperature: 1.0
       top_p: 0.95
       top_k: 64
+      evidence_kind: derived
+      derived_from: coding
     math:
       temperature: 1.0
       top_p: 0.95
       top_k: 64
-  sampling_source: web-research
+      evidence_kind: derived
+      derived_from: coding
+    sampling_research_status: confirmed
+    sampling_researched_at: '2026-09-20T20:05:18+00:00'
+    sampling_sources:
+      - https://huggingface.co/google/gemma-4-31B-it
   capabilities: coding, vision, text
   blueprint: gemma_assistant
   truncation: full
   architecture_family: gemma4
-  sampling_category_status:
-    coding: derived
-    knowledge: derived
-    agentic: derived
-    math: derived
 
 mradermacher/muse-glimmer-30b-heretic-abliterated-i1@iq3_m:
   publisher: mradermacher
@@ -4948,25 +2900,23 @@ mradermacher/muse-glimmer-30b-heretic-abliterated-i1@iq3_m:
   hidden_dim: 6656
   max_context_length: 131072
   reasoning: instruct
-  sampling_research_status: unresolved
-  sampling_researched_at: '2026-09-20T20:05:25+00:00'
-  sampling_sources:
-    - https://huggingface.co/meta-models/Muse-Glimmer-30B
-    - https://huggingface.co/mlasli/Muse-Glimmer-30B-Heretic-Abliterated-BF16/raw/main/README.md
-    - https://huggingface.co/mlasli/Muse-Glimmer-30B-Heretic-Abliterated-Q4_K_M-GGUF
-    - https://huggingface.co/mlasli/Muse-Glimmer-30B-Heretic-Abliterated-Q6_K-GGUF
-    - https://huggingface.co/mlasli/Muse-Glimmer-30B-Heretic-Abliterated-Q8_0-GGUF
-  sampling_evidence:
-    - profile: math
-      evidence_kind: unresolved
-      reason: Kein allgemeines Profil; Coding-/Math-Fallback kann nicht
-        belastbar bestimmt werden.
   capabilities: text
   blueprint: default_chat
   truncation: full
   architecture_family: muse-glimmer
-  sampling_category_status:
-    math: unresolved
+  sampling:
+    math:
+      evidence_kind: unresolved
+      reason: Kein allgemeines Profil; Coding-/Math-Fallback kann nicht
+        belastbar bestimmt werden.
+    sampling_research_status: unresolved
+    sampling_researched_at: '2026-09-20T20:05:25+00:00'
+    sampling_sources:
+      - https://huggingface.co/meta-models/Muse-Glimmer-30B
+      - https://huggingface.co/mlasli/Muse-Glimmer-30B-Heretic-Abliterated-BF16/raw/main/README.md
+      - https://huggingface.co/mlasli/Muse-Glimmer-30B-Heretic-Abliterated-Q4_K_M-GGUF
+      - https://huggingface.co/mlasli/Muse-Glimmer-30B-Heretic-Abliterated-Q6_K-GGUF
+      - https://huggingface.co/mlasli/Muse-Glimmer-30B-Heretic-Abliterated-Q8_0-GGUF
 
 gguf-org/muse-glimmer-30b@nvfp4:
   publisher: gguf-org
@@ -4982,82 +2932,38 @@ gguf-org/muse-glimmer-30b@nvfp4:
   hidden_dim: 6656
   max_context_length: 131072
   reasoning: instruct
-  sampling_research_status: confirmed
-  sampling_researched_at: '2026-09-20T20:06:11+00:00'
-  sampling_sources:
-    - https://huggingface.co/0bserverx/Muse-Glimmer-30B-Heretic-Uncensored-GGUF/raw/main/README.md
-    - https://huggingface.co/Blackfrost-AI/Muse-Glimmer-30B-Abliterated-BF16/raw/main/README.md
-  sampling_evidence:
-    - profile: normal
-      values:
-        temperature: 1.0
-        top_p: 0.95
-        top_k: 64
-      evidence_kind: direct
-      url:
-        https://huggingface.co/Blackfrost-AI/Muse-Glimmer-30B-Abliterated-BF16/raw/main/README.md
-      excerpt: OpenAI-compatible at `http://localhost:30000/v1`. **Sampling:**
-        `temperature 1.0, top_p 0.95, top_k 64`; use a generous `max_tokens`
-        (heavy thinker — reasoning is returned separately from the answer).
-    - profile: coding
-      values:
-        temperature: 1.0
-        top_p: 0.95
-        top_k: 64
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        temperature: 1.0
-        top_p: 0.95
-        top_k: 64
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        temperature: 1.0
-        top_p: 0.95
-        top_k: 64
-      evidence_kind: direct
-      url:
-        https://huggingface.co/0bserverx/Muse-Glimmer-30B-Heretic-Uncensored-GGUF/raw/main/README.md
-      excerpt: "For agentic deployments, the upstream card's recommended sampling
-        configuration applies (temperature = 1.0, top_p = 0.95, top_k = 64; `Reasoning
-        strength: high` for complex tasks)."
-    - profile: math
-      values:
-        temperature: 1.0
-        top_p: 0.95
-        top_k: 64
-      evidence_kind: derived
-      derived_from: coding
   sampling:
     coding:
       temperature: 1.0
       top_p: 0.95
       top_k: 64
+      evidence_kind: direct
     knowledge:
       temperature: 1.0
       top_p: 0.95
       top_k: 64
+      evidence_kind: derived
+      derived_from: coding
     agentic:
       temperature: 1.0
       top_p: 0.95
       top_k: 64
+      evidence_kind: direct
     math:
       temperature: 1.0
       top_p: 0.95
       top_k: 64
-  sampling_source: web-research
+      evidence_kind: derived
+      derived_from: coding
+    sampling_research_status: confirmed
+    sampling_researched_at: '2026-09-20T20:06:11+00:00'
+    sampling_sources:
+      - https://huggingface.co/0bserverx/Muse-Glimmer-30B-Heretic-Uncensored-GGUF/raw/main/README.md
+      - https://huggingface.co/Blackfrost-AI/Muse-Glimmer-30B-Abliterated-BF16/raw/main/README.md
   capabilities: vision, text
   blueprint: default_chat
   truncation: full
   architecture_family: muse-glimmer
-  sampling_category_status:
-    coding: derived
-    knowledge: derived
-    agentic: direct
-    math: derived
 
 techhermit/gemma-4-26b-a4b-it-reap126@iq4_nl:
   publisher: techhermit
@@ -5074,21 +2980,19 @@ techhermit/gemma-4-26b-a4b-it-reap126@iq4_nl:
   hidden_dim: 2816
   max_context_length: 262144
   reasoning: thinking
-  sampling_research_status: unresolved
-  sampling_researched_at: '2026-09-20T20:06:20+00:00'
-  sampling_sources:
-    - https://huggingface.co/techhermit/gemma-4-26b-a4b-it-reap126/raw/main/README.md
-  sampling_evidence:
-    - profile: math
-      evidence_kind: unresolved
-      reason: Kein allgemeines Profil; Coding-/Math-Fallback kann nicht
-        belastbar bestimmt werden.
   capabilities: coding, vision, text
   blueprint: gemma_reasoning
   truncation: full
   custom_template: true
-  sampling_category_status:
-    math: unresolved
+  sampling:
+    math:
+      evidence_kind: unresolved
+      reason: Kein allgemeines Profil; Coding-/Math-Fallback kann nicht
+        belastbar bestimmt werden.
+    sampling_research_status: unresolved
+    sampling_researched_at: '2026-09-20T20:06:20+00:00'
+    sampling_sources:
+      - https://huggingface.co/techhermit/gemma-4-26b-a4b-it-reap126/raw/main/README.md
 
 nani-nithin/k2-horizon-7b@q8_0:
   publisher: NANI-Nithin
@@ -5105,65 +3009,30 @@ nani-nithin/k2-horizon-7b@q8_0:
   hidden_dim: 4096
   max_context_length: 524288
   reasoning: thinking
-  sampling_research_status: confirmed
-  sampling_researched_at: '2026-09-20T20:06:58+00:00'
-  sampling_sources:
-    - https://huggingface.co/IFM/K2-Horizon-7B/raw/main/README.md
-  sampling_evidence:
-    - profile: normal
-      values:
-        temperature: 1.0
-        top_p: 0.95
-      evidence_kind: direct
-      url: https://huggingface.co/IFM/K2-Horizon-7B/raw/main/README.md
-      excerpt: '1. **Reasoning effort: always `high`.** All reported results use high
-        reasoning effort. Pass `{"chat_template_kwargs": {"reasoning_effort": "high"}}`
-        on every request; `medium` and `low` trade accuracy for speed and are not
-        recommended for evaluation. 2. **Sampling parameters.** `temperature=1.0`,
-        `'
-    - profile: coding
-      values:
-        temperature: 1.0
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        temperature: 1.0
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        temperature: 1.0
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: normal
-    - profile: math
-      values:
-        temperature: 1.0
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: coding
-  sampling_category_status:
-    coding: derived
-    knowledge: derived
-    agentic: derived
-    math: derived
   sampling:
     coding:
       temperature: 1.0
       top_p: 0.95
+      evidence_kind: direct
     knowledge:
       temperature: 1.0
       top_p: 0.95
+      evidence_kind: derived
+      derived_from: coding
     agentic:
       temperature: 1.0
       top_p: 0.95
+      evidence_kind: derived
+      derived_from: coding
     math:
       temperature: 1.0
       top_p: 0.95
-  sampling_source: web-research
+      evidence_kind: derived
+      derived_from: coding
+    sampling_research_status: confirmed
+    sampling_researched_at: '2026-09-20T20:06:58+00:00'
+    sampling_sources:
+      - https://huggingface.co/IFM/K2-Horizon-7B/raw/main/README.md
   capabilities: text
   blueprint: reasoning_assistant
   truncation: full
@@ -5183,72 +3052,30 @@ nani-nithin/k2-horizon-mova-36b-a4b@iq2_m:
   hidden_dim: 2560
   max_context_length: 524288
   reasoning: thinking
-  sampling_research_status: confirmed
-  sampling_researched_at: '2026-09-20T20:07:26+00:00'
-  sampling_sources:
-    - https://huggingface.co/NANI-Nithin/K2-Horizon-MoVA-36B-A4B-GGUF/raw/main/README.md
-    - https://huggingface.co/primitive-ai/Laguna-XS-2.1-mixed-NVFP4-MXFP8
-  sampling_evidence:
-    - profile: normal
-      values:
-        temperature: 1.0
-        top_p: 0.95
-      evidence_kind: direct
-      url:
-        https://huggingface.co/NANI-Nithin/K2-Horizon-MoVA-36B-A4B-GGUF/raw/main/README.md
-      excerpt: obtained at high reasoning effort. 2. **Recommended sampling:**
-        `temperature=1.0`, `top_p=0.95`,
-    - profile: coding
-      values:
-        temperature: 1.0
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        temperature: 0.6
-        top_p: 0.95
-      evidence_kind: direct
-      url: https://huggingface.co/primitive-ai/Laguna-XS-2.1-mixed-NVFP4-MXFP8
-      excerpt: '1,370 items across fourteen public benchmarks.  A 1,170-item knowledge
-        suite and a 200-item tool-calling suite, under one fixed protocol for every
-        row:  temperature 0.6  /  top_p 0.95  /'
-    - profile: agentic
-      values:
-        temperature: 1.0
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: normal
-    - profile: math
-      values:
-        temperature: 0.6
-        top_p: 0.95
-        top_k: 20
-      evidence_kind: direct
-      url: https://huggingface.co/primitive-ai/Laguna-XS-2.1-mixed-NVFP4-MXFP8
-      excerpt: CommonsenseQA, BoolQ, OpenBookQA, GSM8K, MATH-500) and a 200-item
-        tool-calling suite (BFCL v4, xLAM/APIGen, ToolACE, Glaive v2, nvidia
-        When2Call).  temperature 0.6 ,  top_p 0.95 ,  top_k 20 ,
-  sampling_category_status:
-    coding: derived
-    knowledge: direct
-    agentic: derived
-    math: direct
   sampling:
     coding:
       temperature: 1.0
       top_p: 0.95
+      evidence_kind: direct
     knowledge:
       temperature: 0.6
       top_p: 0.95
+      evidence_kind: direct
     agentic:
       temperature: 1.0
       top_p: 0.95
+      evidence_kind: derived
+      derived_from: coding
     math:
       temperature: 0.6
       top_p: 0.95
       top_k: 20
-  sampling_source: web-research
+      evidence_kind: direct
+    sampling_research_status: confirmed
+    sampling_researched_at: '2026-09-20T20:07:26+00:00'
+    sampling_sources:
+      - https://huggingface.co/NANI-Nithin/K2-Horizon-MoVA-36B-A4B-GGUF/raw/main/README.md
+      - https://huggingface.co/primitive-ai/Laguna-XS-2.1-mixed-NVFP4-MXFP8
   capabilities: text
   blueprint: reasoning_assistant
   truncation: full
@@ -5268,103 +3095,35 @@ freedomaisvr/gemma-4-12b-it-qat@nvfp4:
   hidden_dim: 3840
   max_context_length: 262144
   reasoning: thinking
-  sampling_research_status: confirmed
-  sampling_researched_at: '2026-09-20T20:08:38+00:00'
-  sampling_sources:
-    - https://huggingface.co/SC117/gemma-4-12B-it-heretic-QAT-GGUF/raw/main/README.md
-    - https://huggingface.co/google/gemma-4-12B-it-qat-q4_0-unquantized/raw/main/README.md
-  sampling_evidence:
-    - profile: normal
-      values:
-        temperature: 1.0
-      evidence_kind: direct
-      url:
-        https://huggingface.co/google/gemma-4-12B-it-qat-q4_0-unquantized/raw/main/README.md
-      excerpt: '* `temperature=1.0`'
-    - profile: normal
-      values:
-        top_p: 0.95
-      evidence_kind: direct
-      url:
-        https://huggingface.co/google/gemma-4-12B-it-qat-q4_0-unquantized/raw/main/README.md
-      excerpt: '* `temperature=1.0`   * `top_p=0.95`'
-    - profile: normal
-      values:
-        top_k: 64
-      evidence_kind: direct
-      url:
-        https://huggingface.co/google/gemma-4-12B-it-qat-q4_0-unquantized/raw/main/README.md
-      excerpt: '* `top_p=0.95`   * `top_k=64`'
-    - profile: coding
-      values:
-        temperature: 0.6
-        top_p: 0.95
-        top_k: 64
-      evidence_kind: direct
-      url:
-        https://huggingface.co/SC117/gemma-4-12B-it-heretic-QAT-GGUF/raw/main/README.md
-      excerpt: General  temp=1.0, top_p=0.95, top_k=64               Coding
-        temp=0.6, top_p=0.95, top_k=64
-    - profile: knowledge
-      values:
-        temperature: 1.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        top_k: 64
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        temperature: 1.0
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        top_k: 64
-      evidence_kind: derived
-      derived_from: normal
-    - profile: math
-      values:
-        temperature: 0.6
-        top_p: 0.95
-        top_k: 64
-      evidence_kind: derived
-      derived_from: coding
-  sampling_category_status:
-    coding: direct
-    knowledge: derived
-    agentic: derived
-    math: derived
   sampling:
     coding:
       temperature: 0.6
       top_p: 0.95
       top_k: 64
+      evidence_kind: direct
     knowledge:
       temperature: 1.0
       top_p: 0.95
       top_k: 64
+      evidence_kind: derived
+      derived_from: coding
     agentic:
       temperature: 1.0
       top_p: 0.95
       top_k: 64
+      evidence_kind: derived
+      derived_from: coding
     math:
       temperature: 0.6
       top_p: 0.95
       top_k: 64
-  sampling_source: web-research
+      evidence_kind: derived
+      derived_from: coding
+    sampling_research_status: confirmed
+    sampling_researched_at: '2026-09-20T20:08:38+00:00'
+    sampling_sources:
+      - https://huggingface.co/SC117/gemma-4-12B-it-heretic-QAT-GGUF/raw/main/README.md
+      - https://huggingface.co/google/gemma-4-12B-it-qat-q4_0-unquantized/raw/main/README.md
   capabilities: vision, coding, audio, text
   blueprint: gemma_reasoning
   truncation: full
@@ -5385,75 +3144,83 @@ ibm-granite/granite-4.2-8b@q6_k:
   hidden_dim: 4096
   max_context_length: 131072
   reasoning: thinking
-  sampling_research_status: confirmed
-  sampling_researched_at: '2026-09-20T21:03:33+00:00'
-  sampling_sources:
-    - https://github.com/ibm-granite/granite-4.2-language-models
-    - https://huggingface.co/ibm-granite/granite-4.2-8b/raw/main/README.md
-  sampling_evidence:
-    - profile: normal
-      values:
-        temperature: 1.0
-        top_p: 0.95
-      evidence_kind: direct
-      url: https://huggingface.co/ibm-granite/granite-4.2-8b/raw/main/README.md
-      excerpt: 'with torch.no_grad():     output = model.generate(**inputs, max_new_tokens=8192,
-        temperature=1.0, top_p=0.95, do_sample=True)'
-    - profile: coding
-      values:
-        temperature: 1.0
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: normal
-    - profile: knowledge
-      values:
-        temperature: 1.0
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: normal
-    - profile: agentic
-      values:
-        temperature: 1.0
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: thinking
-    - profile: math
-      values:
-        temperature: 1.0
-        top_p: 0.95
-      evidence_kind: derived
-      derived_from: coding
-    - profile: thinking
-      values:
-        temperature: 1.0
-        top_p: 0.95
-      evidence_kind: direct
-      url: https://github.com/ibm-granite/granite-4.2-language-models
-      excerpt: '{"payload":{"codeViewRepoRoute":{"path":"/","refInfo":{"name":"main","listCacheKey":"v0:1787691590.0","canEdit":false,"refType":"branch","currentOid":"75355e6ef8c17d72a7b3736654ab525352f5e0b8"},"tree":{"items":[{"name":"disclosures","path":"disclosures","contentType":"directory"},{"name":"figures","'
-  sampling_category_status:
-    coding: derived
-    knowledge: derived
-    agentic: derived
-    math: derived
-    thinking: direct
   sampling:
     coding:
       temperature: 1.0
       top_p: 0.95
+      evidence_kind: direct
     knowledge:
       temperature: 1.0
       top_p: 0.95
+      evidence_kind: derived
+      derived_from: coding
     agentic:
       temperature: 1.0
       top_p: 0.95
+      evidence_kind: derived
+      derived_from: thinking
     math:
       temperature: 1.0
       top_p: 0.95
+      evidence_kind: derived
+      derived_from: coding
     thinking:
       enabled: true
       temperature: 1.0
       top_p: 0.95
-  sampling_source: web-research
+      evidence_kind: direct
+    sampling_research_status: confirmed
+    sampling_researched_at: '2026-09-20T21:03:33+00:00'
+    sampling_sources:
+      - https://github.com/ibm-granite/granite-4.2-language-models
+      - https://huggingface.co/ibm-granite/granite-4.2-8b/raw/main/README.md
   capabilities: coding, text
   blueprint: granite_coding_agent
+  truncation: full
+
+gguf-org/muse-glimmer-30b@?:
+  publisher: gguf-org
+  hf_url: https://huggingface.co/gguf-org/muse-glimmer-30b
+  arch: dense
+  k_cache: q8_0
+  v_cache: iq4_nl
+  offload: 1
+  notes: 'Architektur: dense | Vision'
+  architecture_family: muse-glimmer
+  file_size_bytes: 10072485600
+  context_length: 24576
+  n_layers: 52
+  hidden_dim: 6656
+  max_context_length: 131072
+  reasoning: instruct
+  sampling:
+    coding:
+      temperature: 1.0
+      top_p: 0.95
+      top_k: 64
+      evidence_kind: direct
+    knowledge:
+      temperature: 1.0
+      top_p: 0.95
+      top_k: 64
+      evidence_kind: derived
+      derived_from: coding
+    agentic:
+      temperature: 1.0
+      top_p: 0.95
+      top_k: 64
+      evidence_kind: direct
+    math:
+      temperature: 1.0
+      top_p: 0.95
+      top_k: 64
+      evidence_kind: derived
+      derived_from: coding
+    sampling_research_status: confirmed
+    sampling_researched_at: '2026-09-21T07:10:06+00:00'
+    sampling_sources:
+      - https://huggingface.co/0bserverx/Muse-Glimmer-30B-Heretic-Uncensored-GGUF/raw/main/README.md
+      - https://huggingface.co/Blackfrost-AI/Muse-Glimmer-30B-Abliterated-BF16/raw/main/README.md
+  capabilities: vision, text
+  blueprint: default_chat
   truncation: full

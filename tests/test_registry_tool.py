@@ -41,8 +41,33 @@ def test_help_describes_pipeline_modes() -> None:
     assert "pipeline status" in help_text
     assert "pipeline sync" in help_text
     assert "pipeline full" in help_text
-    assert "May write model_registry.yaml; does not write config JSONs." in help_text
-    assert "--ignore-drift keeps it report-only." in help_text
+    assert "May write" in help_text
+    assert "model_registry.yaml; does not write config JSONs." in help_text
+    assert "`--ignore-drift` keeps it report-only." in help_text
+    assert "Sample Size (SS)" in help_text
+    assert "Unified KV-cache (UKV)" in help_text
+    assert "Fill only missing or zero context_length values" in help_text
+    assert "`pipeline full` runs prompt assembly as a preview only" in help_text
+    assert "assemble_blueprint.py assemble" in help_text
+
+
+def test_fix_ctx_only_fills_missing_or_zero_values(monkeypatch) -> None:
+    registry = {
+        "publisher/missing": {"file_size_bytes": 4_000_000_000},
+        "publisher/zero": {"file_size_bytes": 4_000_000_000, "context_length": 0},
+        "publisher/existing": {"file_size_bytes": 4_000_000_000, "context_length": 12345},
+    }
+    saved: dict[str, dict] = {}
+    monkeypatch.setattr(rt, "load_registry", lambda: registry)
+    monkeypatch.setattr(rt, "save_registry", lambda value: saved.update(value))
+
+    rt.cmd_fix_ctx()
+
+    expected = rt._default_ctx_from_size(4_000_000_000, rt._NP_POLICY, "q8_0", "iq4_nl")
+    assert registry["publisher/missing"]["context_length"] == expected
+    assert registry["publisher/zero"]["context_length"] == expected
+    assert registry["publisher/existing"]["context_length"] == 12345
+    assert saved["publisher/existing"]["context_length"] == 12345
 
 
 # ─────────────────────────────────────────────────────────────────────

@@ -30,6 +30,14 @@ from assemble_blueprint import (
     truncation_from_context,
 )
 
+
+def test_help_documents_commands_and_registry_pipeline_write_boundary() -> None:
+    help_text = ab.__doc__ or ""
+    assert "assemble_blueprint.py --help" in help_text
+    assert "assemble_blueprint.py preview" in help_text
+    assert "pipeline full runs prompt assembly as a preview only" in help_text
+    assert "assemble_blueprint.py assemble directly" in help_text
+
 # ─────────────────────────────────────────────────────────────────────
 # normalize_model_name
 # ─────────────────────────────────────────────────────────────────────

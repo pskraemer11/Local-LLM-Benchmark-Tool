@@ -403,6 +403,13 @@ The shared helpers `build_model_identity()` and
 and quantization are therefore handled consistently across registry matching,
 benchmark result consolidation, and blacklist filtering.
 
+Sampling values and provenance are stored together in each entry's `sampling`
+block. The four benchmark categories are `coding`, `knowledge`, `agentic`, and
+`math`; instruction following is covered by `agentic`. Category provenance
+uses `evidence_kind` and, for derived values, `derived_from`. The research
+status, timestamp, and deduplicated source URLs are stored once in that same
+block; there is no separate `normal` category or parallel evidence list.
+
 ### Registry entry example
 
 ~~~yaml

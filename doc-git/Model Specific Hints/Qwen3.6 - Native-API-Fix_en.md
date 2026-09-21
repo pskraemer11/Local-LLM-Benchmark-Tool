@@ -23,7 +23,7 @@ The current `model_registry.yaml` differentiates the benchmark categories instea
 | math      | 0.7         | 0.80  | 20    | 0.0   | deliberately aligned with the precise coding/instruct path where no separate math profile is documented |
 | thinking  | 0.6         | 0.95  | 20    | 0.0   | direct thinking profile where available                                                                 |
 
-The source material distinguishes precise coding/thinking from ordinary instruct mode. The repository's sampling research records whether a category is direct or derived in `sampling_category_status`; this is the reason the YAML contains differentiated categories even when several values happen to be close. `presence_penalty` and `repetition_penalty` remain source/runtime-specific fields and are not silently invented for Registry profiles that do not define them.
+The source material distinguishes precise coding/thinking from ordinary instruct mode. The repository's sampling research records whether a category is direct or derived in `sampling.<category>.evidence_kind` and, for derived values, `derived_from`; this is the reason the YAML contains differentiated categories even when several values happen to be close. `presence_penalty` and `repetition_penalty` remain source/runtime-specific fields and are not silently invented for Registry profiles that do not define them.
 
 ## Blueprint and API Contract
 

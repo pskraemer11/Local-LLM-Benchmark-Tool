@@ -22,7 +22,7 @@ if (-not (Test-Path -LiteralPath $gate)) {
     Stop-Hook "pre_review_checks.ps1 fehlt."
 }
 
-$pytestTempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("Benchmarks-PrePush-PytestRoot-{0}" -f [Guid]::NewGuid().ToString("N"))
+$pytestTempRoot = Join-Path $repoRoot (".pytest-push-{0}" -f [Guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $pytestTempRoot -Force | Out-Null
 $pytestBase = Join-Path $pytestTempRoot "base"
 & python -m pytest -q --basetemp $pytestBase

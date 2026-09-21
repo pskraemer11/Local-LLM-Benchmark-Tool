@@ -6,7 +6,7 @@
 
 ## Current Registry Snapshot (2026-09-20)
 
-The current Registry contains 74 model entries. Sampling research currently reports:
+The current Registry contains 66 model entries. Sampling research currently reports:
 
 The reproducible refresh path is:
 
@@ -19,11 +19,11 @@ policy and snapshot, not a second source of truth.
 
 | Research status | Entries | Meaning                                                             |
 | --------------- | ------: | ------------------------------------------------------------------- |
-| `confirmed`     | 47      | Accepted direct or derived category profiles with evidence          |
+| `confirmed`     | 41      | Accepted direct or derived category profiles with evidence          |
 | `conflict`      | 8       | Sources or profiles disagree; values require explicit review        |
-| `unresolved`    | 14      | A model is in scope, but at least one required profile remains open |
+| `unresolved`    | 13      | A model is in scope, but at least one required profile remains open |
 | `not_found`     | 1       | No usable source was found                                          |
-| no status yet   | 4       | No completed sampling research record                               |
+| no status yet   | 3       | No completed sampling research record                               |
 
 ### Fallback policy
 
@@ -38,11 +38,12 @@ These are fallback values only. A confirmed Registry cell always takes precedenc
 | `--thinking` fallback | 0.6         | 0.95    | enabled  |
 
 `math` is a real research category. If an official source documents a Math
-profile, the Registry stores it as `sampling.math` with category status
-`direct`. If no Math profile exists, the research logic derives Math from the
-precise Coding profile and records category status `derived`. Contradictory or
-missing evidence remains `unresolved`; it is not silently replaced by a
-family-wide guess.
+profile, the Registry stores it as `sampling.math` with
+`evidence_kind: direct`. If no Math profile exists, the research logic derives
+Math from the precise Coding profile and records
+`evidence_kind: derived` with `derived_from: coding`. Contradictory or missing
+evidence remains `unresolved`; it is not silently replaced by a family-wide
+guess.
 
 ### Precedence and provenance
 
@@ -53,14 +54,13 @@ family-wide guess.
 4. LM Studio JSON values for non-temperature runtime fields only (`top_k`,
    `min_p`, context, thinking controls and related runtime settings).
 
-The evidence fields distinguish `direct`, `derived`, and `unresolved` per
-category. A single overall status of `confirmed` does not mean that every
-category was directly documented; consumers must inspect
-`sampling_category_status` and `sampling_evidence`. Each accepted profile is
-stored with one `values` mapping instead of one evidence record per field.
-Direct records carry the source URL and excerpt; derived records point to
-`derived_from` and deliberately inherit the source without repeating the URL
-and excerpt. The unique URLs are listed once in `sampling_sources`.
+The `sampling` block stores both the four benchmark profiles and their compact
+provenance. Each category may carry `evidence_kind: direct|derived|unresolved`;
+derived cells additionally carry `derived_from`, normally `coding` for the
+Math fallback. The research status, timestamp, and unique source URLs are
+stored once inside the same `sampling` block as `sampling_research_status`,
+`sampling_researched_at`, and `sampling_sources`. There is no separate
+`normal` benchmark category and no parallel `sampling_evidence` list.
 
 ### Current architecture/blueprint coverage
 

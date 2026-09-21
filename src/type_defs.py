@@ -25,6 +25,9 @@ class SamplingCell(TypedDict):
     presence_penalty: NotRequired[float]
     repetition_penalty: NotRequired[float]
     enabled: NotRequired[bool]
+    evidence_kind: NotRequired[str]
+    derived_from: NotRequired[str]
+    reason: NotRequired[str]
 
 
 class SamplingBlock(TypedDict, total=False):
@@ -33,6 +36,9 @@ class SamplingBlock(TypedDict, total=False):
     agentic: SamplingCell
     math: SamplingCell
     thinking: SamplingCell
+    sampling_research_status: str
+    sampling_researched_at: str
+    sampling_sources: list[str]
 
 
 class AvailableModelInfo(TypedDict):
@@ -132,12 +138,6 @@ class RegistryEntry(TypedDict):
     display_name: NotRequired[str]
     blueprint: NotRequired[str]
     sampling: NotRequired[SamplingBlock]
-    sampling_source: NotRequired[str]
-    sampling_research_status: NotRequired[str]
-    sampling_researched_at: NotRequired[str]
-    sampling_sources: NotRequired[list[str]]
-    sampling_evidence: NotRequired[list[dict[str, Any]]]
-    sampling_category_status: NotRequired[dict[str, str]]
 
 
 class SystemMetrics(TypedDict):

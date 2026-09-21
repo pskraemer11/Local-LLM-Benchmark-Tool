@@ -1,22 +1,36 @@
 #!/usr/bin/env python3
 """
-assemble_blueprint.py - Prompt-Standardisierung per Blueprint-System
+assemble_blueprint.py - Prompt standardization through the blueprint system
 
-Generiert System-Prompts und Jinja-Templates aus Blueprint-Definitionen
-und schreibt sie in die LM-Studio JSON-Configs.
+Generates system prompts and Jinja templates from blueprint definitions and
+writes them to LM Studio JSON configurations.
 
 Phases:
-  Phase 1: Klassifikation in model_registry.yaml (reasoning, capabilities, blueprint)
-  Phase 2: Textbaustein-Bibliothek definieren (blueprint_definitions.yaml)
-  Phase 3: Assembly - System-Prompts aus Blueprints generieren und in
-           JSON-Configs schreiben (systemPrompt, promptTemplate)
-  Phase 4: Validierung - Syntax-Check, Regression-Prüfung
+  Phase 1: Classify model_registry.yaml (reasoning, capabilities, blueprint)
+  Phase 2: Define the text-module library (blueprint_definitions.yaml)
+  Phase 3: Assemble system prompts from blueprints and write them to
+           JSON configurations (systemPrompt, promptTemplate)
+  Phase 4: Validate syntax and regression conditions
 
 Usage:
-  python assemble_blueprint.py classify   -> Phase 1: Klassifikation
-  python assemble_blueprint.py assemble   -> Phase 3: Assembly + Write JSON
-  python assemble_blueprint.py validate   -> Phase 4: Syntax-Check
-  python assemble_blueprint.py all         -> Alle Phasen ausführen
+  python assemble_blueprint.py --help     -> Show this help
+  python assemble_blueprint.py classify   -> Phase 1: Classify registry entries
+  python assemble_blueprint.py assemble   -> Phase 3: Assemble and write JSON
+  python assemble_blueprint.py preview    -> Preview assembly without writing
+  python assemble_blueprint.py validate   -> Phase 4: Validate prompts
+  python assemble_blueprint.py all         -> Run all phases
+
+Commands:
+  classify  Read the registry and classify reasoning, capabilities, and blueprints
+  assemble  Generate system prompts and Jinja templates and write LM Studio configs
+  preview   Compute and display the assembly without writing LM Studio JSON configs
+  validate  Check prompt syntax, length, and remaining Jinja placeholders
+  all       Run classify, assemble, and validate in sequence
+
+Important: pipeline full runs prompt assembly as a preview only and does not
+write LM Studio JSON configurations. To write the configurations, run
+assemble_blueprint.py assemble directly or use the corresponding explicit
+write path.
 """
 
 import json
@@ -1054,23 +1068,6 @@ def assemble_prompts(preview_only: bool = False) -> None:
     # Read LM Studio configs
     lms_configs = read_lms_configs(CONFIG_ROOT)
 
-    # Build reverse lookup: normalized config name -> list of (publisher, info)
-    # Zusaetzlich Broad-Keys (ohne @quant/Variant-Suffix) einfuegen, damit
-    # Registry-Keys mit Quant-Suffix (z.B. "...@iq4_nl") matchen koennen.
-    config_lookup = {}
-    for info in lms_configs:
-        name = info.get("dir_name", "")
-        key = normalize_model_name(name)
-        config_lookup.setdefault(key, []).append((info["publisher"], info))
-        key_broad = normalize_for_config(name)
-        config_lookup.setdefault(key_broad, []).append((info["publisher"], info))
-        pub = info.get("publisher", "")
-        if pub:
-            key2 = normalize_model_name(f"{pub}-{name}")
-            config_lookup.setdefault(key2, []).append((info["publisher"], info))
-            key2_broad = normalize_for_config(f"{pub}-{name}")
-            config_lookup.setdefault(key2_broad, []).append((info["publisher"], info))
-
     stats = {"assembled": 0, "skipped": 0, "not_found": 0, "errors": 0, "total_configs_written": 0}
 
     for model_name in registry:
@@ -1113,61 +1110,16 @@ def assemble_prompts(preview_only: bool = False) -> None:
                 prompt_parts.append(content)
         assembled_prompt = "\n\n".join(prompt_parts)
 
-        # Find all matching JSON configs (all publisher variants, exact + fuzzy)
-        # @quant-Suffixe (z.B. @iq4_nl) bleiben in normalize_model_name erhalten und
-        # verhindern den Match. Deshalb zusaetzlich den Broad-Key (ohne Quant/
-        # Variant-Suffix) pruefen. Fix 2026-08-07: NOT FOUND fuer @quant-Keys.
-        search_keys = [normalize_model_name(model_name)]
-        broad_key = normalize_for_config(model_name)
-        if broad_key != search_keys[0]:
-            search_keys.append(broad_key)
-        candidates = []
-        seen_paths = set()
-
-        # Exact match
-        for search_key in search_keys:
-            if search_key in config_lookup:
-                for pub, info in config_lookup[search_key]:
-                    p = str(info.get("json_path", ""))
-                    if p not in seen_paths:
-                        candidates.append((pub, info))
-                        seen_paths.add(p)
-
-        # Fuzzy match all keys (not just fallback)
-        for search_key in search_keys:
-            for ck, ci_list in config_lookup.items():
-                if ck == search_key:
-                    continue
-                if search_key in ck or ck in search_key:
-                    for pub, info in ci_list:
-                        p = str(info.get("json_path", ""))
-                        if p in seen_paths:
-                            continue
-                        if ck in search_key:
-                            # Config key is shorter: verify file name has distinguishing suffix
-                            file_stem = info.get("file_name", "")
-                            file_stem = file_stem.removesuffix(".json")
-                            file_key = normalize_model_name(file_stem)
-                            if search_key not in file_key:
-                                continue
-                        else:
-                            # search_key in ck: exclude variant-suffixed configs not matching
-                            suffix = ck[len(search_key) :].lstrip("-")
-                            for vs in _VARIANT_SUFFIXES:
-                                vs_clean = vs.lstrip("-")
-                                if suffix.startswith(vs_clean) and not search_key.endswith(vs_clean):
-                                    break
-                            else:
-                                candidates.append((pub, info))
-                                seen_paths.add(p)
-                            continue
-                        candidates.append((pub, info))
-                        seen_paths.add(p)
+        # Use the shared identity-aware matcher so publisher and quantization
+        # rules stay identical to registry/config synchronization and validation.
+        candidates = [
+            (str(info.get("publisher", "")), info)
+            for info in find_all_configs_for_registry_key(model_name, lms_configs)
+        ]
 
         if not candidates:
             stats["not_found"] += 1
-            if not preview_only:
-                print(f"  [NOT FOUND] {model_name}")
+            print(f"  [NOT FOUND] {model_name}")
             continue
 
         # Publisher-Filter: Configs anderer Publisher nicht mit diesem
@@ -1342,6 +1294,10 @@ def _interactive_menu() -> None:
 
 
 if __name__ == "__main__":
+    if len(sys.argv) >= 2 and sys.argv[1] in ("-h", "--help"):
+        print(__doc__)
+        raise SystemExit(0)
+
     if len(sys.argv) < 2:
         _interactive_menu()
 

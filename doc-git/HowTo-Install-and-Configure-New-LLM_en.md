@@ -35,7 +35,7 @@ This is the canonical onboarding/maintenance command for a new model. It:
 
 - discovers benchmark-candidate models from LM Studio; OCR and embedding models are filtered out
 - performs one bounded web search for sampling recommendations in the Hugging Face card/API/base-model chain and official documentation
-- stores `sampling`, source URLs, evidence, timestamp, and a terminal research status in the Registry
+- stores category-specific `sampling` values, compact provenance, unique source URLs, timestamp, and a terminal research status in the Registry
 - reads the GGUF header for architecture facts and fills Registry-owned metadata
 - reports LM Studio config drift without writing LM Studio JSON files
 - formats and validates the Registry
@@ -67,8 +67,10 @@ If the model is already known and only needs a partial refresh, the lower-level 
 | `context_length`                                        | GGUF + registry policy      | Derived from architecture and runtime policy                  |
 | `reasoning` / `thinking`                                | GGUF chat template          | No more keyword fallback for the default path                 |
 | `sampling`                                              | HF card/API + official docs | Accepted only after plausibility, profile and conflict checks |
-| `sampling_research_status`                              | Onboarding/review           | `confirmed`, `unresolved`, `conflict`, or `not_found`         |
-| `sampling_sources/evidence`                             | Onboarding/review           | Provenance for accepted or investigated values                |
+| `sampling.sampling_research_status`                     | Onboarding/review           | `confirmed`, `unresolved`, `conflict`, or `not_found`         |
+| `sampling.sampling_sources`                             | Onboarding/review           | Unique source URLs stored once inside the sampling block      |
+| `sampling.<category>.evidence_kind`                     | Onboarding/review           | `direct`, `derived`, or `unresolved` per category             |
+| `sampling.<category>.derived_from`                      | Onboarding/review           | Provenance anchor for derived category values                 |
 | `capabilities`                                          | Registry classification     | For example coding, text, vision, audio exclusions            |
 | `blueprint`                                             | Registry classification     | Derived from reasoning plus capability hints                  |
 | `truncation`                                            | Registry / context policy   | Based on effective context length                             |

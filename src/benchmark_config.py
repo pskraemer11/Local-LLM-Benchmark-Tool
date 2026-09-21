@@ -709,9 +709,9 @@ def _sampling_cell(
     reg = _registry_sampling_block(model_identifier)
     if reg:
         registry_entry = _registry_entry(model_identifier) or {}
+        research_status = reg.get("sampling_research_status") or registry_entry.get("sampling_research_status")
         use_thinking_profile = prefer_thinking and (
-            registry_entry.get("sampling_source") in {"web-research", "manual-web-review"}
-            or registry_entry.get("sampling_research_status") == "confirmed"
+            research_status == "confirmed"
         )
         entry = reg.get("thinking") if use_thinking_profile and isinstance(reg.get("thinking"), dict) else reg.get(cat)
         if isinstance(entry, dict) and "temperature" in entry and "top_p" in entry:
@@ -729,9 +729,9 @@ def _registry_sampling_params(
     if not block:
         return {}
     registry_entry = _registry_entry(model_identifier) or {}
+    research_status = block.get("sampling_research_status") or registry_entry.get("sampling_research_status")
     use_thinking_profile = prefer_thinking and (
-        registry_entry.get("sampling_source") in {"web-research", "manual-web-review"}
-        or registry_entry.get("sampling_research_status") == "confirmed"
+        research_status == "confirmed"
     )
     cell = block.get("thinking") if use_thinking_profile and isinstance(block.get("thinking"), dict) else block.get(cat)
     if not isinstance(cell, dict):

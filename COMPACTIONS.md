@@ -1041,3 +1041,32 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 - `src/registry_tool.py`: `--write-context`, Registry-Synchronisierung und Dry-Run-Quarantäne in `pipeline full`.
 - `tests/test_assemble_blueprint.py`, `tests/test_registry_tool.py`: Regressionen für Quarantänefilterung, Matching und Config-Sync.
 - `README.md`, `doc-git/Architecture, Flow & ChangeLog_en.md`, `CHANGELOG.md`: Benutzer- und Workflow-Dokumentation.
+
+=============== Compaction 21.09.2026 / 12:05 ================
+## Objective
+- (Completed) Translate the `--help` documentation of `assemble_blueprint.py` and `registry_tool.py` into English.
+- (Completed) Audit directly executable Python scripts for missing or inadequate help output.
+
+## Important Details
+- **Help language:** Both user-facing help texts are now consistently English, including the distinction between `pipeline full` preview behavior and the explicit write command `assemble_blueprint.py assemble`.
+- **Regression coverage:** Help assertions in the focused tests were updated to the English wording. The `fix-ctx` behavior and the earlier help requirements remain covered.
+- **CLI audit:** Core entry points already provide argparse help. `evalplus_subset_eval.py`, `gguf_full_metadata_reader.py`, and `parallel_ab.py` have sparse or mixed-language help. `correlation_export.py` is directly executable but has no safe `--help` path and should be treated as the next candidate for a focused CLI documentation change.
+- **Internal workers:** `evalplus_task_worker.py` and `sandbox_worker.py` use stdin/JSON protocols and are not normal user-facing command-line entry points.
+
+## Work State
+### Completed / Active / Blocked
+- Completed: English help text, updated regression assertions, direct help smoke checks.
+- Verification: 189 focused tests passed; Ruff, Python compilation, and `git diff --check` passed.
+- Active: Worktree remains uncommitted and contains other pre-existing user changes; only the scoped files were modified in this step.
+- Blocked: Nothing.
+
+## Next Move
+1. If desired, improve the three mixed-language/sparse help texts and add a guarded help path to `correlation_export.py`.
+2. Before any commit, inspect the complete staged diff and run the repository hooks as required.
+
+## Relevant Files
+- `src/assemble_blueprint.py`: English module help and explicit prompt-assembly write-path explanation.
+- `src/registry_tool.py`: Completely restructured English workflow, ownership, pipeline, command, and technical help.
+- `tests/test_assemble_blueprint.py`: English help assertions.
+- `tests/test_registry_tool.py`: English help assertions and `fix-ctx` regression coverage.
+- `CHANGELOG.md`: Corresponding entry `English CLI Help and Entry-Point Audit`.

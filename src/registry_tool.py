@@ -1,96 +1,156 @@
 #!/usr/bin/env python3
-"""
-Consolidated tool for model_registry.yaml and LM Studio JSON config maintenance.
+r"""
+Registry and prompt-policy tool for local LLM benchmarks.
 
-Commands:
-  compare       Compare registry vs LMS vs JSON configs (report only)
-  add           Add LMS models to registry from piped JSON (lms ls --json | python registry_tool.py add)
-                Web-research plausible sampling values from HF/official sources;
-                unresolved models keep the category-default fallback.
-  suggest       Dry-run: VRAM-based UKV/context recommendation (writes NOTHING)
-  sync-from-configs
-                Sync offload, useUnifiedKvCache, context_length and KV-cache
-                quantization from JSON configs into registry
-                Report mode by default; use --write to persist GUI values
-                Use --write-context to persist only contextLength values in
-                registry.context_length (other Registry fields are untouched)
-  fill-arch     Read n_layers and hidden_dim from local GGUF headers for
-                registry entries missing arch data
+This program prepares models for `run_benchmarks.py`. It discovers benchmarkable
+LM Studio models, uses the canonical identity `publisher/model@quant`, reads
+technical facts from GGUF files, maintains `doc-git\model_registry.yaml`, and
+checks prompt and runtime drift.
+
+1. RECOMMENDED WORKFLOW FOR NEW USERS
+
+After downloading a model or changing the local model inventory:
+
+  1) Show the current state:		py -3.12 .\src\registry_tool.py pipeline status
+
+  2) Synchronize the registry:	py -3.12 .\src\registry_tool.py pipeline sync
+
+  3) Check prompts and drift:	py -3.12 .\src\registry_tool.py pipeline full
+
+  4) Write prompt assembly:	py -3.12 .\src\assemble_blueprint.py assemble
+
+  5) Start benchmarks:		py -3.12 .\src\run_benchmarks.py --help
+
+`pipeline full` runs prompt assembly as a preview only and does not write LM
+Studio JSON configurations. To write the configurations, run
+`assemble_blueprint.py assemble` directly or use the corresponding explicit
+write path.
+
+2. DATA OWNERSHIP AND WRITE BOUNDARIES
+
+  Registry policy		doc-git\model_registry.yaml — benchmark and provider-neutral model metadata.
+  Technical facts		GGUF files and headers — architecture, quantization, and native limits.
+  Prompt policy			doc-git\blueprint_definitions.yaml — blueprints, roles, and prompt modules.
+  Runtime artifacts	LM Studio JSON configurations
+			Local backend settings; normal sync and `pipeline full` do not silently overwrite them.
+  Results			ergebnisse\ — CSVs, telemetry, and summaries.
+
+The Registry is the source of truth for benchmark policy, especially
+`useUnifiedKvCache` and `context_length`. The fixed `num_parallel` policy uses
+Sample Size (SS): SS >= 10 selects four slots; smaller runs select one slot.
+Unified KV-cache (UKV) and local runtime configurations remain separate
+responsibility areas.
+
+3. PIPELINE MODES
+
+  pipeline status
+      Default: pipeline status. Read-only. Compares benchmarkable LM Studio
+      models, the Registry, and config JSONs. Writes nothing.
+
+  pipeline sync
+      Status comparison and full Registry synchronization: new models,
+      sampling onboarding, quantization, GGUF architecture, reasoning,
+      config drift in report mode, and YAML formatting. May write
+      model_registry.yaml; does not write config JSONs.
+
+  pipeline full
+      `pipeline sync` plus quarantine dry run, blueprint/reasoning
+      classification, prompt preview, prompt validation, and Registry drift
+      validation. Open blocking ownership drift returns exit code 1.
+      `--ignore-drift` changes only the exit code; it does not repair drift.
+      `--ignore-drift` keeps it report-only.
+
+  --refresh-sampling
+      Re-run sampling research for all benchmarkable candidates. Without this
+      option, terminal research statuses are skipped.
+
+4. REGISTRY AND DIAGNOSTIC COMMANDS
+
+  compare       Compare the Registry, LM Studio inventory, and config JSONs.
+  sync          Run the full direct Registry synchronization.
+  add [JSON]    Add models from JSON, stdin, or LM Studio and research
+                sampling values once.
+  validate      Check Registry, template, config, and ownership rules.
+                Options: --ci/--headless, --verbose, --repro.
+  suggest       Show a VRAM-based context/UKV recommendation; writes nothing.
+  fill-ctx      Fill missing context_length values; otherwise use 16384.
+  fix-ctx       Fill only missing or zero context_length values using the
+                size-based formula; existing values remain unchanged.
+  fill-size     Fill missing file_size_bytes from GGUF or LM Studio.
+  fill-quant    Derive missing @quant identity from GGUF filenames.
+  fill-arch     Read missing n_layers and hidden_dim values from GGUF headers.
   sync-from-gguf
-                Auto-Fix registry from GGUF headers (Feld-Ownership):
-                n_layers, hidden_dim, max_context_length, arch werden bei
-                Abweichung korrigiert (unveraenderliche GGUF-Quelle)
+                Automatically correct GGUF-owned fields n_layers, hidden_dim,
+                max_context_length, and arch.
   fill-reasoning
-                Read reasoning (thinking/instruct) from GGUF chat_template
-                for registry entries without reasoning field
-  fill-ctx      Add default context_length to entries missing it
-                (size-based rule or 16384 fallback)
-  fix-ctx       Recompute context_length for ALL entries (size-based formula)
-  fill-size     Look up file_size_bytes from LMS for registry entries missing it
-  fill-quant    Read @quant from GGUF filename for registry entries missing
-                quant suffix (Source of Truth: GGUF, not LMS)
-  fmt           Normalize blank lines in registry YAML (no blanks within entries,
-                one blank between entries)
-  migrate-keys  Re-key entries without publisher prefix to publisher/model-name
-  rm            Remove registry entry (optionally delete files + configs too):
-                python registry_tool.py rm <model-key> [--delete-files] [--yes]
-  validate      Check model_registry.yaml consistency: template files exist,
-                Config JSON promptTemplate matches YAML, override overlap,
-                required fields present, registry-vs-config drift, etc.
-                Usage: validate [--ci|--headless] [--verbose] [--repro]
-                --ci/--headless: headless CI validation without LM-Studio state.
+                Fill reasoning mode from GGUF chat templates.
+  fmt           Format the Registry YAML.
+  migrate-keys  Convert Registry keys without a publisher.
+  sync-from-configs [--write|--write-context]
+                Compare config values. Read-only by default.
+                --write-context imports only contextLength into context_length;
+                --write deliberately imports all supported config fields.
   sync-templates
-                Write promptTemplate from registry template files into config
-                JSONs that are missing it (fixes validate template_missing_config)
+                Write missing promptTemplate values from Registry templates
+                into LM Studio config JSONs.
   sync-template-from-gguf <model-key>
-                Copy tokenizer.chat_template from the matching GGUF into the
-                matching LM Studio config (explicit runtime-artifact repair)
-  pipeline      One-shot maintenance (replaces sync_model_configs.ps1).
-                Default: pipeline status
-                pipeline status
-                  Read-only status report: query the benchmarkable LMS models
-                  and compare Registry, LMS inventory and config JSONs.
-                  Does not write model_registry.yaml or config JSONs.
-                pipeline sync
-                  Run status plus the full Registry sync: add new models,
-                  research sampling for new models, fill quant/architecture/
-                  reasoning fields, reconcile GGUF metadata, import config
-                  drift in report mode and format model_registry.yaml.
-                  May write model_registry.yaml; does not write config JSONs.
-                pipeline full
-                  Run sync plus a dry-run quarantine report, blueprint and
-                  reasoning classification, read-only prompt assembly preview,
-                  prompt validation and Registry-drift validation.
-                  Does not write config JSONs. Exits with code 1 when blocking
-                  ownership drift remains; --ignore-drift keeps it report-only.
-                Optional: --refresh-sampling re-researches sampling for every
-                benchmarkable Registry candidate during the sync stage.
-  patch-reasoning-effort
-                Add gpt-oss-20b reasoningEffort/budgetTokens to LMS configs
-                (--dry-run, --wait-for-lock, --effort, --budget)
-  sync          Full sync: add + web sampling research → fill-quant → fill-arch
-                → sync-from-gguf → fill-reasoning → sync-from-configs → fmt
-                --refresh-sampling: Sampling für alle Kandidaten neu recherchieren
+                Copy tokenizer.chat_template from the matching GGUF into a
+                config.
+  patch-reasoning-effort [--dry-run] [--wait-for-lock] [--effort] [--budget]
+                Add gpt-oss reasoning fields to LM Studio configs.
+  patch-glm-configs [--dry-run]
+                Run the explicit GLM config patch.
+  rm <model-key> [--delete-files] [--yes]
+                Remove a Registry entry. File/config deletion requires both
+                --delete-files and --yes; verify target and scope first.
 
-Prinzip (seit 13.08.2026): Die **Registry (model_registry.yaml) ist Single Source of Truth**
-für useUnifiedKvCache und context_length. **num_parallel ist eine feste Benchmark-Policy**
-(SS>=10 → 4, sonst 1) und KEIN Registry-Feld mehr. JSON-Configs sind Runtime-Artefakte
-(LM Studio liest sie beim Load, API kann sie nicht überschreiben). GGUF-Header liefern
-Architektur-Daten (n_layers, hidden_dim,
-max_context_length). UKV: >= 12 GB → True, Ausnahmen
-(gemma-4, kimi-linear, gpt-oss) → immer True. blueprint_definitions.yaml ist
-die Quelle für Systemprompts; assemble_blueprint.py generiert die Prompts und
-schreibt sie in die JSON-Configs (systemPrompt, promptTemplate). Dieser Code
-überschreibt keine Benchmark-Parameter in JSON-Configs (UKV/ctx kommen aus
-der Registry).
+These runtime commands deliberately modify local JSONs and should be used only
+after a preview or targeted review.
 
-Sampling-Onboarding ist ein einmaliger Web-Recherche-Schritt für neue Modelle:
-Hugging-Face-Modellkarten, Base-Model-Metadaten und begrenzte offizielle
-Dokumentationspfade werden geprüft. Das Ergebnis wird als `confirmed`,
-`unresolved`, `conflict` oder `not_found` mit Quellen/Evidenz gespeichert.
-Benchmark-Läufe lesen ausschließlich lokale Registry-Werte und führen keine
-Websuche aus. Terminale Recherche-Status werden bei späterem `sync` übersprungen;
-`--refresh-sampling` erzwingt eine vollständige, kategorisierte Neubewertung.
+5. SAMPLING ONBOARDING AND MODEL FILTERS
+
+New models can be researched once through Hugging Face model cards,
+base-model metadata, and bounded official documentation paths. The Registry
+stores status, sources, and evidence in the `sampling` block. Possible status
+values are `confirmed`, `unresolved`, `conflict`, and `not_found`. Benchmark
+runs do not perform web searches; they read only local Registry values and
+use category defaults when evidence is missing.
+
+Only models with local benchmark pipelines belong in the Registry. Embedding,
+OCR, vision, audio, and RAG-only models, as well as MTP, DFlash, mmproj, and
+iMatrix helper files, are excluded.
+
+The identity of every Registry entry is:
+
+  publisher/model@quant
+
+Publisher, base model, and quantization are authoritative for matching and
+comparisons.
+
+6. PROMPT ASSEMBLY AND RELATED ENTRY POINTS
+
+  py -3.12 .\src\assemble_blueprint.py --help
+      Explain prompt assembly, preview, and validation.
+
+  py -3.12 .\src\assemble_blueprint.py assemble
+      Write system prompts and Jinja templates to LM Studio configs.
+
+  py -3.12 .\src\run_benchmarks.py --help
+      Explain benchmark selection and run options.
+
+`registry_tool.py` classifies and validates prompt policy. The actual write
+assembly remains an explicit step in `assemble_blueprint.py`.
+
+7. TECHNICAL NOTES
+
+  - Windows PowerShell and Python 3.12 are the reference environment.
+  - `validate --ci`/`--headless` is for CI without local LM Studio state.
+  - `--ignore-drift` suppresses only the exit code; it does not repair drift.
+  - Registry synchronization and benchmark execution do not perform sampling
+    web searches.
+  - Before commit and push, the project's Registry, Ruff, test, and review
+    gates apply.
+
 """
 
 from __future__ import annotations
@@ -167,6 +227,7 @@ from model_identity import build_model_identity, decompose_model_identity, norma
 from model_paths import configured_gguf_roots
 from sampling_research import (
     RESEARCH_STATUSES,
+    compact_sampling_block,
     research_sampling,
     research_sampling_report,
     validate_sampling_block,
@@ -192,9 +253,39 @@ def _normalize_quants_flow_style(path: Path) -> None:
         path.write_text(new, "utf-8")
 
 
+def _normalize_sampling_schema(reg: dict[str, Any]) -> None:
+    """Merge legacy sampling provenance fields into each sampling block."""
+    legacy_fields = (
+        "sampling_source",
+        "sampling_research_status",
+        "sampling_researched_at",
+        "sampling_sources",
+        "sampling_evidence",
+        "sampling_category_status",
+    )
+    for entry in reg.values():
+        if not isinstance(entry, dict):
+            continue
+        sampling = entry.get("sampling")
+        has_legacy = any(field in entry for field in legacy_fields)
+        if not isinstance(sampling, dict) and not has_legacy:
+            continue
+        entry["sampling"] = compact_sampling_block(
+            sampling if isinstance(sampling, dict) else {},
+            status=entry.get("sampling_research_status"),
+            researched_at=entry.get("sampling_researched_at"),
+            sources=entry.get("sampling_sources"),
+            evidence=entry.get("sampling_evidence"),
+            category_status=entry.get("sampling_category_status"),
+        )
+        for field in legacy_fields:
+            entry.pop(field, None)
+
+
 def save_registry(reg: dict[str, Any], path: Path | None = None) -> None:
     if path is None:
         path = REGISTRY_PATH
+    _normalize_sampling_schema(reg)
     with open(path, "w", encoding="utf-8") as f:
         y.dump(reg, f)
     _format_blank_lines(path)
@@ -224,19 +315,31 @@ def _apply_sampling_report(entry: dict[str, Any], report: dict[str, Any]) -> boo
     status = str(report.get("sampling_research_status") or "unresolved")
     if status not in {"confirmed", "unresolved", "conflict", "not_found"}:
         status = "unresolved"
-    entry["sampling_research_status"] = status
-    entry["sampling_researched_at"] = _sampling_researched_at()
-    entry["sampling_sources"] = list(report.get("sampling_sources") or [])
-    entry["sampling_evidence"] = list(report.get("sampling_evidence") or [])
+    researched_at = _sampling_researched_at()
     category_status = report.get("sampling_category_status")
-    entry["sampling_category_status"] = (
-        dict(category_status) if isinstance(category_status, dict) else {}
+    sampling = compact_sampling_block(
+        report.get("sampling") if isinstance(report.get("sampling"), dict) else {},
+        status=status,
+        researched_at=researched_at,
+        sources=report.get("sampling_sources"),
+        evidence=report.get("sampling_evidence"),
+        category_status=category_status if isinstance(category_status, dict) else None,
     )
-    if status == "confirmed" and isinstance(report.get("sampling"), dict):
-        entry["sampling"] = report["sampling"]
-        entry["sampling_source"] = report.get("sampling_source", "web-research")
-        return True
-    return False
+    entry["sampling"] = sampling
+    for field in (
+        "sampling_source",
+        "sampling_research_status",
+        "sampling_researched_at",
+        "sampling_sources",
+        "sampling_evidence",
+        "sampling_category_status",
+    ):
+        entry.pop(field, None)
+    return status == "confirmed" and any(
+        isinstance(value, dict) and "temperature" in value and "top_p" in value
+        for key, value in sampling.items()
+        if key in ("coding", "knowledge", "agentic", "math", "thinking")
+    )
 
 
 def apply_sampling_review(
@@ -257,12 +360,22 @@ def apply_sampling_review(
     entry = reg.get(model_key)
     if not isinstance(entry, dict):
         raise KeyError(f"Registry-Key nicht gefunden: {model_key}")
-    entry["sampling"] = sampling
-    entry["sampling_source"] = "manual-web-review"
-    entry["sampling_research_status"] = "confirmed"
-    entry["sampling_researched_at"] = _sampling_researched_at()
-    entry["sampling_sources"] = list(sources)
-    entry["sampling_evidence"] = list(evidence)
+    entry["sampling"] = compact_sampling_block(
+        sampling,
+        status="confirmed",
+        researched_at=_sampling_researched_at(),
+        sources=sources,
+        evidence=evidence,
+    )
+    for field in (
+        "sampling_source",
+        "sampling_research_status",
+        "sampling_researched_at",
+        "sampling_sources",
+        "sampling_evidence",
+        "sampling_category_status",
+    ):
+        entry.pop(field, None)
     save_registry(reg)
 
 
@@ -395,7 +508,7 @@ def cmd_fill_ctx(default: int = 16384) -> None:
 
 
 def cmd_fix_ctx() -> None:
-    """Recompute context_length for ALL entries based on np policy and KV-cache settings."""
+    """Fill missing or zero context_length values using the size-based formula."""
     reg = load_registry()
     updated = 0
     for entry in reg.values():
@@ -406,7 +519,7 @@ def cmd_fix_ctx() -> None:
             kc = entry.get("k_cache", "q8_0")
             vc = entry.get("v_cache", "iq4_nl")
             new_ctx = _default_ctx_from_size(int(sb), _NP_POLICY, kc, vc)
-            if entry.get("context_length") != new_ctx:
+            if entry.get("context_length") in (None, 0):
                 entry["context_length"] = new_ctx
                 updated += 1
     if updated:
@@ -1067,9 +1180,10 @@ def cmd_add(
                 )
             else:
                 sampling_unresolved.append(canonical)
+                current_status = (entry.get("sampling") or {}).get("sampling_research_status")
                 print(
                     f"  [SAMPLING-WARN] {canonical}: Status "
-                    f"{entry['sampling_research_status']} - keine eindeutige, "
+                    f"{current_status} - keine eindeutige, "
                     "plausible Temperatur/top_p-Kombination gefunden; "
                     "Kategorie-Defaults bleiben aktiv"
                 )
@@ -1098,7 +1212,11 @@ def _research_missing_sampling(reg: dict[str, Any], force: bool = False) -> list
             continue
         if not force and "sampling" in entry:
             continue
-        if not force and entry.get("sampling_research_status"):
+        sampling_block = entry.get("sampling") if isinstance(entry.get("sampling"), dict) else {}
+        if not force and (
+            entry.get("sampling_research_status")
+            or sampling_block.get("sampling_research_status")
+        ):
             continue
         if not is_registry_candidate({"modelKey": model_key}):
             continue
@@ -1115,9 +1233,14 @@ def _research_missing_sampling(reg: dict[str, Any], force: bool = False) -> list
         changed = True
         if not confirmed:
             unresolved.append(model_key)
+            current_sampling = entry.get("sampling")
+            current_status = entry.get("sampling_research_status")
+            if not current_status and isinstance(current_sampling, dict):
+                current_status = current_sampling.get("sampling_research_status")
             print(
                 f"  [SAMPLING-WARN] {model_key}: Status "
-                f"{entry['sampling_research_status']} - keine Web-Empfehlung gefunden"
+                f"{current_status} "
+                "- keine Web-Empfehlung gefunden"
             )
             continue
         if force:
@@ -2814,7 +2937,8 @@ def cmd_validate(verbose: bool = False, repro: bool = False, ci: bool = False) -
     for model_key, entry in reg.items():
         if not isinstance(entry, dict):
             continue
-        status = entry.get("sampling_research_status")
+        sampling_block = entry.get("sampling") if isinstance(entry.get("sampling"), dict) else {}
+        status = entry.get("sampling_research_status") or sampling_block.get("sampling_research_status")
         if status is not None and status not in RESEARCH_STATUSES:
             errors["sampling_research_status_invalid"].append(f"{model_key}: {status!r}")
 
@@ -3429,12 +3553,12 @@ def _interactive_menu() -> None:
         ("patch-reasoning-effort", "gpt-oss-20b Reasoning-Effort in LMS-Configs nachtragen"),
         ("validate", "Check model_registry.yaml consistency (inkl. Config-Abweichungen)"),
         ("sync-templates", "promptTemplate aus Registry-Templates in Config-JSONs nachtragen"),
-        ("suggest", "Dry-run: VRAM-basierte np/UKV/ctx-Empfehlung (schreibt NICHTS)"),
+        ("suggest", "Dry-run: VRAM-basierte Unified-KV-cache (UKV)/ctx-Empfehlung (schreibt NICHTS)"),
         ("compare", "Compare registry vs LMS vs JSON configs"),
         ("add", "Add LMS models to registry (pipe JSON or provide file)"),
         ("fmt", "Normalize blank lines in registry YAML"),
         ("fix-np", "DEPRECATED: np ist feste Policy seit 13.08. (zeigt Info, tut nichts)"),
-        ("fix-ctx", "Recompute context_length for ALL entries"),
+        ("fix-ctx", "Fehlende oder 0 gesetzte context_length-Werte ergänzen"),
         ("fill-arch", "Read n_layers/hidden_dim from GGUF headers"),
         ("sync-from-gguf", "Auto-Fix n_layers/hidden_dim/ctx/arch aus GGUF (Feld-Ownership)"),
         ("fill-reasoning", "Read reasoning from GGUF chat_template"),

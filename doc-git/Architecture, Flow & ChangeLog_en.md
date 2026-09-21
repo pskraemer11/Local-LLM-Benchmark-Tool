@@ -306,11 +306,16 @@ checks:
 Accepted values pass plausibility checks and must form a coherent sampling
 profile. The Registry records:
 
-- category/profile values;
-- sampling_research_status;
-- timestamp;
-- source URLs;
-- field-level evidence and excerpts.
+- the four benchmark category values (`coding`, `knowledge`, `agentic`, and
+  `math`) plus an optional `thinking` runtime profile;
+- `evidence_kind` and optional `derived_from` inside each category cell;
+- `sampling_research_status`, the timestamp, and deduplicated source URLs
+  inside the same `sampling` block.
+
+The old `normal` profile is an internal research fallback only. It is mapped
+to the explicit coding anchor and is not persisted as a Registry category.
+There is no parallel `sampling_evidence` list; source URLs are stored once in
+`sampling.sampling_sources`.
 
 Typical statuses are confirmed, unresolved, conflict, and not_found.
 Terminal statuses prevent repeated network searches on every sync. Use:
