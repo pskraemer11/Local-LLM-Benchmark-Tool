@@ -441,6 +441,19 @@ def select_blueprint(reasoning: str, capabilities: str, arch: str = "", model_na
             return "gemma_reasoning"
         return "gemma_assistant"
 
+    # GLM-4.7 Flash/REAP is a separate DeepSeek2-based forced-thinking
+    # family. It needs request-level structured output and a non-streaming
+    # response path; keep those runtime conditions out of the generic
+    # reasoning blueprint.
+    if "glm-4.7" in name_lower or "deepseek2" in arch_lower:
+        return "glm_reasoning_coding"
+
+    # GLM-4.6V is a different glm4 vision architecture. Keep it separate
+    # from the DeepSeek2-based GLM-4.7 Flash variants until its API behavior
+    # has been verified independently.
+    if "glm-4.6v" in name_lower or "glm4" in arch_lower:
+        return "glm4v_reasoning"
+
     # GPT-OSS (Harmony-Format, Configurable Reasoning Effort)
     if "gpt-oss" in name_lower:
         return "gptoss_reasoning"
@@ -542,7 +555,9 @@ def blueprint_features(bp_name: str, model_name: str = "") -> dict[str, Any]:
 
     Liefert ``template``/``stop_strings``/``reasoning_parsing`` (falls der
     Blueprint sie definiert) fuer die Benchmark-Config. ``model_name`` wird
-    nur fuer die ``template_map``-Aufloesung benoetigt.
+    nur fuer die ``template_map``-Aufloesung benoetigt. Die optionalen
+    ``benchmark_runtime``-Werte bilden modellfamilien-spezifische API-Regeln
+    ab und werden nicht in LM-Studio-GUI-Defaults geschrieben.
     """
     bp = load_blueprint_defs().get("blueprints", {}).get(bp_name) or {}
     features: dict[str, Any] = {}
@@ -558,6 +573,9 @@ def blueprint_features(bp_name: str, model_name: str = "") -> dict[str, Any]:
     thinking_cats = bp.get("enable_thinking_by_category")
     if isinstance(thinking_cats, dict) and thinking_cats:
         features["enable_thinking_by_category"] = {str(k): bool(v) for k, v in thinking_cats.items()}
+    runtime = bp.get("benchmark_runtime")
+    if isinstance(runtime, dict):
+        features["benchmark_runtime"] = dict(runtime)
     return features
 
 
@@ -638,6 +656,23 @@ def render_role(entry: dict, model_name: str, role_template: str | None, static_
     except KeyError as e:
         print(f"[WARN] Template key not found: {e} for {model_name}, using static role")
         return static_role
+
+
+def _harmonify_prompt(prompt: str) -> str:
+    """Convert blueprint XML section wrappers to Harmony-friendly Markdown."""
+    headings = {
+        "role": "Role",
+        "reasoning": "Reasoning",
+        "coding": "Coding",
+        "safety": "Safety",
+        "output": "Output",
+        "capabilities": "Capabilities",
+    }
+    result = prompt
+    for tag, heading in headings.items():
+        result = result.replace(f"<{tag}>", f"\n## {heading}\n")
+        result = result.replace(f"</{tag}>", "\n")
+    return result.strip()
 
 
 def truncation_from_context(ctx_len: int) -> str:
@@ -910,6 +945,27 @@ def create_blueprint_definitions() -> None:
             "role_template": "You are {name}, a {arch} model{params_label} by {publisher}, specialized in {capabilities}{type_label}.",
             "modules": ["coding_principles", "safety_block", "output_style_technical"],
         },
+        "glm_reasoning_coding": {
+            "description": "GLM-4.7 Flash/REAP Forced-Thinking-Coding (DeepSeek2)",
+            "role": "You are an expert software engineer with strong coding skills.",
+            "role_template": "You are {name}, a {arch} model{params_label} by {publisher}, specialized in {capabilities}{type_label}.",
+            "modules": ["coding_principles", "safety_block", "output_style_technical"],
+            "reasoning_parsing": {"enabled": True, "startString": " thinking", "endString": " response"},
+            "benchmark_runtime": {
+                "structured_output": True,
+                "streaming": False,
+                "prompt_suffix": "none",
+                "max_tokens": 8192,
+                "reasoning_budget_tokens": 4096,
+            },
+        },
+        "glm4v_reasoning": {
+            "description": "GLM-4.6V Reasoning (glm4 Vision)",
+            "role": "You are GLM-4.6V, an AI assistant with visual and reasoning capabilities.",
+            "role_template": "You are {name}, a {arch} model{params_label} by {publisher}, optimized for {capabilities}{type_label}.",
+            "modules": ["safety_block", "output_style_default"],
+            "reasoning_parsing": {"enabled": True, "startString": " thinking", "endString": " response"},
+        },
         "gemma_assistant": {
             "description": "Gemma-4 spezifisch (Standard)",
             "role": "You are Gemma-4, a helpful AI assistant.",
@@ -951,6 +1007,15 @@ def create_blueprint_definitions() -> None:
             "role": "You are GPT-OSS, a helpful AI assistant with coding and reasoning skills.",
             "role_template": "You are {name}, a {arch} model{params_label} by {publisher}, optimized for {capabilities}{type_label}.",
             "modules": ["gptoss_reasoning_level", "coding_principles", "safety_block", "output_style_technical"],
+            "custom_template": True,
+            "template": "gpt-oss-20b_harmony.jinja",
+            "stop_strings": ["<|return|>"],
+            "benchmark_runtime": {
+                "structured_output": False,
+                "streaming": True,
+                "max_tokens": 4096,
+                "max_thinking_tokens": 4096,
+            },
         },
         "magistral_reasoning": {
             "description": "Magistral [THINK]-Format (Reasoning + Coding)",
@@ -1109,6 +1174,8 @@ def assemble_prompts(preview_only: bool = False) -> None:
             if content:
                 prompt_parts.append(content)
         assembled_prompt = "\n\n".join(prompt_parts)
+        if bp_name == "gptoss_reasoning":
+            assembled_prompt = _harmonify_prompt(assembled_prompt)
 
         # Use the shared identity-aware matcher so publisher and quantization
         # rules stay identical to registry/config synchronization and validation.
@@ -1159,6 +1226,10 @@ def assemble_prompts(preview_only: bool = False) -> None:
                     fields = data.setdefault("operation", {}).setdefault("fields", [])
                     found_system_prompt = False
                     found_pt = False
+                    parsing_cfg = bp.get("reasoning_parsing")
+                    runtime_cfg = bp.get("benchmark_runtime")
+                    found_parsing = False
+                    found_budget = False
                     for field in fields:
                         if field.get("key") == "llm.prediction.systemPrompt":
                             field["value"] = assembled_prompt
@@ -1167,10 +1238,34 @@ def assemble_prompts(preview_only: bool = False) -> None:
                             if tpl_content is not None:
                                 field["value"] = tpl_content
                             found_pt = True
+                        if field.get("key") == "llm.prediction.reasoning.parsing" and isinstance(parsing_cfg, dict):
+                            field["value"] = dict(parsing_cfg)
+                            found_parsing = True
+                        if field.get("key") == "llm.prediction.reasoning.budgetTokens":
+                            budget = runtime_cfg.get("reasoning_budget_tokens") if isinstance(runtime_cfg, dict) else None
+                            if isinstance(budget, int) and budget > 0:
+                                current = field.get("value")
+                                if isinstance(current, dict):
+                                    current["checked"] = True
+                                    current["value"] = budget
+                                else:
+                                    field["value"] = {"checked": True, "value": budget}
+                                found_budget = True
                     if not found_system_prompt:
                         fields.append({"key": "llm.prediction.systemPrompt", "value": assembled_prompt})
                     if tpl_content is not None and not found_pt:
                         fields.append({"key": "llm.prediction.promptTemplate", "value": tpl_content})
+                    if isinstance(parsing_cfg, dict) and not found_parsing:
+                        fields.append({"key": "llm.prediction.reasoning.parsing", "value": dict(parsing_cfg)})
+                    budget = runtime_cfg.get("reasoning_budget_tokens") if isinstance(runtime_cfg, dict) else None
+                    if isinstance(budget, int) and budget > 0 and not found_budget:
+                        fields.append({"key": "llm.prediction.reasoning.budgetTokens",
+                                       "value": {"checked": True, "value": budget}})
+
+                    # ``llm.prediction.structured`` is intentionally not
+                    # written here. Structured output is a request-level API
+                    # choice for benchmarks; changing this GUI default would
+                    # affect interactive LM Studio use.
 
                     with open(json_path, "w", encoding="utf-8") as f:
                         json.dump(data, f, indent=2, ensure_ascii=False)

@@ -82,12 +82,14 @@ def test_model_registry_derives_provider_specific_runtime(tmp_path: Path) -> Non
             "useUnifiedKvCache": True,
             "template_policy": "explicit_file",
             "template": "gpt-oss-20b-template_unsloth.jinja",
+            "reasoning_format": "deepseek",
         }
     }
     model_registry = ModelRegistry(lambda: registry, template_root=tmp_path)
 
     tabbyapi_runtime = model_registry.provider_runtime("unsloth/gpt-oss-20b-GGUF@q8_0", "tabbyapi")
     unsloth_runtime = model_registry.provider_runtime("unsloth/gpt-oss-20b-GGUF@q8_0", "unsloth_server")
+    llama_runtime = model_registry.provider_runtime("unsloth/gpt-oss-20b-GGUF@q8_0", "llama_cpp")
 
     assert tabbyapi_runtime["max_seq_len"] == 32768
     assert tabbyapi_runtime["cache_size"] == 32768
@@ -97,6 +99,13 @@ def test_model_registry_derives_provider_specific_runtime(tmp_path: Path) -> Non
     assert unsloth_runtime["cache_type_v"] == "f16"
     assert unsloth_runtime["kv_unified"] is True
     assert unsloth_runtime["chat_template_file"] == str(
+        tmp_path / "gpt-oss-20b-template_unsloth.jinja"
+    )
+    assert llama_runtime["context_length"] == 32768
+    assert llama_runtime["cache_type_k"] == "f16"
+    assert llama_runtime["kv_unified"] is True
+    assert llama_runtime["reasoning_format"] == "deepseek"
+    assert llama_runtime["chat_template_file"] == str(
         tmp_path / "gpt-oss-20b-template_unsloth.jinja"
     )
 

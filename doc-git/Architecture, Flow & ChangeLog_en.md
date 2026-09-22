@@ -1,6 +1,6 @@
 # Architecture and User Workflow
 
-Status: 2026-09-21
+Status: 2026-09-22
 Audience: first-time users, maintainers, and reviewers
 Scope: model onboarding, Registry maintenance, prompt assembly, benchmark
 execution, providers, and result data
@@ -25,9 +25,9 @@ The repository has two phases:
 
 The central rule is:
 
-> The Registry describes benchmark policy. LM Studio config JSONs describe
-> backend-local runtime state. A normal sync or benchmark run must not
-> silently overwrite the latter.
+> The Registry describes benchmark policy. LM Studio JSONs and llama.cpp
+> config/preset files describe backend-local runtime state. A normal sync or
+> benchmark run must not silently overwrite those backend artifacts.
 
 High-level flow:
 
@@ -51,16 +51,18 @@ model_registry.yaml + provider ──> run_benchmarks.py
 
 ### 2.1 Authoritative and derived data
 
-| Data                                  | Authority                                      | Used by                                   | Write policy                                |
-| ------------------------------------- | ---------------------------------------------- | ----------------------------------------- | ------------------------------------------- |
-| doc-git/model_registry.yaml           | Benchmark policy and provider-neutral metadata | Registry tool, launcher, model resolution | Updated by registry maintenance             |
-| GGUF header and filename              | Model architecture and native limits           | Registry tool, resolver                   | Read-only source                            |
-| doc-git/blueprint_definitions.yaml    | Prompt blueprint definitions                   | Assembly and validation                   | Maintained as project policy                |
-| doc-git/Jinja-Chat-Templates/         | Explicit template files                        | Prompt assembly                           | Maintained as project assets                |
-| LM Studio config JSONs                | LM Studio runtime state                        | Drift checks and explicit Registry import | Never written by ordinary sync/full         |
-| simple_evals/                         | Local custom benchmark tasks                   | Custom pipeline                           | Benchmark input; do not rewrite during runs |
-| EvalPlus/lm-eval/tool-eval-bench data | External benchmark tasks                       | Their respective pipelines                | Managed by the dependency/tool              |
-| ergebnisse/                           | Run outputs                                    | Human review and consolidation            | Runtime output, normally ignored            |
+| Data                                  | Authority                                      | Used by                                   | Write policy                                      |
+| ------------------------------------- | ---------------------------------------------- | ----------------------------------------- | ------------------------------------------------- |
+| doc-git/model_registry.yaml           | Benchmark policy and provider-neutral metadata | Registry tool, launcher, model resolution | Updated by registry maintenance                   |
+| GGUF header and filename              | Model architecture and native limits           | Registry tool, resolver                   | Read-only source                                  |
+| doc-git/blueprint_definitions.yaml    | Prompt blueprint definitions                   | Assembly and validation                   | Maintained as project policy                      |
+| doc-git/Jinja-Chat-Templates/         | Explicit template files                        | Prompt assembly                           | Maintained as project assets                      |
+| LM Studio config JSONs                | LM Studio runtime state                        | Drift checks and explicit Registry import | Never written by ordinary sync/full               |
+| llama.cpp `config.ini`                | Hardware-wide llama.cpp defaults               | Direct CLI/server processes               | User/system runtime configuration                 |
+| llama.cpp `preset.ini`                | Derived model router catalog                   | Direct server provider                    | Generated from Registry; preserve custom sections |
+| simple_evals/                         | Local custom benchmark tasks                   | Custom pipeline                           | Benchmark input; do not rewrite during runs       |
+| EvalPlus/lm-eval/tool-eval-bench data | External benchmark tasks                       | Their respective pipelines                | Managed by the dependency/tool                    |
+| ergebnisse/                           | Run outputs                                    | Human review and consolidation            | Runtime output, normally ignored                  |
 
 ### 2.1.1 GGUF model root resolution
 
@@ -79,10 +81,56 @@ when both roots expose the same model identity, the primary-root candidate
 wins. The registry tool, local resolver, benchmark runner, and Unsloth
 provider all use this same order.
 
-The important separation is between Registry policy and LM Studio runtime
+The important separation is between Registry policy and backend runtime
 artifacts. A GUI setting such as a system prompt, chat template, KV-cache
 quantization, or parallel-session setting is not automatically a global
 benchmark policy.
+
+### 2.1.2 llama.cpp configuration layers
+
+The direct llama.cpp backend uses the CUDA installation at
+`C:\Program Files\llama.cpp\llama-server.exe`. The WindowsApps `llama.exe`
+wrapper and the desktop llama GUI are separate installations and are not the
+production benchmark executable. The provider resolves a concrete GGUF file
+and starts `llama-server.exe`; the GUI catalog is not the source of model
+eligibility.
+
+llama.cpp automatically reads the user configuration from
+`%APPDATA%\llama.cpp\config.ini` (on the current machine this is
+`C:\Users\<user>\AppData\Roaming\llama.cpp\config.ini`) and may also read
+the system configuration from `%PROGRAMDATA%\llama.cpp\config.ini`. These
+files are suitable for hardware-wide defaults. They are deliberately not a
+second model registry.
+
+The model router preset is an explicit derived artifact at
+`C:\Users\<user>\.config\llama.cpp\preset.ini`. It is selected with
+`--models-preset` or `LLAMA_ARG_MODELS_PRESET`. Its `[*]` section contains
+shared preset defaults; named sections contain model-specific server options.
+The Registry remains the authoritative source for model identity, benchmark
+policy, context/KV settings, templates, reasoning behavior, and sampling
+evidence. `registry_tool.py export-llama-preset` translates that policy into
+the preset; it does not make the preset authoritative.
+
+The effective precedence is two related sequences:
+
+~~~text
+standalone llama.cpp:
+  built-in defaults -> config.ini -> LLAMA_ARG_* -> explicit CLI
+
+router/preset mode:
+  built-in defaults -> config.ini -> LLAMA_ARG_* -> preset [*]
+  -> preset [model] -> explicit outer CLI -> request-level API options
+~~~
+
+Within a preset, a named model section overrides `[*]`, and explicit outer
+CLI options have the highest priority. Sampling, structured output, seed,
+stop conditions, and reasoning format are request or model-policy decisions;
+they do not belong in a generic hardware baseline. The separate LM Studio
+JSON configuration remains an LM Studio-only runtime artifact.
+
+The current build accepts the relevant settings as CLI options but rejects
+`mmap` when it appears in a models preset. The generated preset therefore
+does not put `mmap` in `[*]` until the installed preset parser supports it.
 
 ### 2.2 Canonical model identity
 
@@ -389,6 +437,7 @@ run_benchmarks.py
     └─ model_manager.py
         └─ Provider
             ├─ lmstudio_provider.py
+            ├─ llama_cpp_provider.py
             ├─ tabbyapi_provider.py
             ├─ unsloth_server_provider.py
             └─ openai_compat_provider.py
@@ -400,6 +449,28 @@ Select one provider for a process:
 $env:LLM_PROVIDER = "lmstudio"
 $env:LMSTUDIO_API_BASE = "http://127.0.0.1:1234/v1"
 ~~~
+
+For the production llama.cpp path, the launcher starts the CUDA server binary
+directly and resolves a local GGUF through `LocalModelResolver`; it does not
+call `lms.exe` or the WindowsApps `llama.exe` wrapper:
+
+~~~powershell
+py -3.12 src/run_benchmarks.py --provider llama_cpp --api-base http://127.0.0.1:8080/v1 --model all --benchmarks all
+~~~
+
+The direct provider uses `C:\Program Files\llama.cpp\llama-server.exe` by
+default. `LLAMA_CPP_SERVER_EXE`, `LLAMA_CPP_API_BASE`,
+`LLAMA_CPP_MODEL_ROOT`, and `LLAMA_CPP_LOG_DIR` override the executable,
+endpoint, local GGUF root, and server-log directory. The provider owns only
+the process it started; a foreign server already using the configured port is
+reported as a conflict and is never terminated.
+
+The provider-level runtime policy is assembled from the Registry and the
+resolved GGUF. A router deployment may additionally use the generated
+`%USERPROFILE%\.config\llama.cpp\preset.ini`, but direct model execution can
+pass the concrete GGUF path to `llama-server.exe` without using the router
+catalog. This keeps the benchmark model identity tied to the resolved file,
+not to a GUI or cache entry.
 
 Other providers use their documented API-base variables. The exact model
 identifier passed to the provider is retained separately from the canonical
@@ -582,10 +653,13 @@ hook does not replace CI.
 ## 12. Short architecture change log
 
 The current architecture consolidates Registry maintenance behind
-registry_tool.py, separates benchmark policy from LM Studio runtime
-artifacts, and makes sampling onboarding a one-time evidence-producing step.
-run_benchmarks.py remains the single model-lifecycle owner and all four
-benchmark pipelines share the provider and result boundaries described above.
+registry_tool.py, separates benchmark policy from LM Studio and llama.cpp
+runtime artifacts, and makes sampling onboarding a one-time evidence-
+producing step. The direct llama.cpp provider uses a CUDA server and a
+Registry-derived preset while leaving global `config.ini` available for
+hardware defaults. run_benchmarks.py remains the single model-lifecycle owner
+and all four benchmark pipelines share the provider and result boundaries
+described above.
 
 Historical implementation details and code-review records remain in Git
 history, doc-git/Reviews/, and the other focused documents under doc-git/.

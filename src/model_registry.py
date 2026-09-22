@@ -162,7 +162,7 @@ class ResolvedRegistryEntry:
             overrides.update({key: value for key, value in explicit.items() if value is not None})
             return overrides
 
-        if provider == "unsloth_server":
+        if provider in {"unsloth_server", "llama_cpp"}:
             overrides = {}
             context_length = runtime.get("context_length")
             if isinstance(context_length, int) and context_length > 0:
@@ -181,6 +181,25 @@ class ResolvedRegistryEntry:
                 if isinstance(template_name, str) and template_name.strip():
                     root = template_root or _DEFAULT_TEMPLATE_ROOT
                     overrides["chat_template_file"] = str(root / template_name.strip())
+            # llama-server exposes these controls directly.  Keep them
+            # provider-specific: they are not part of the LM Studio JSON
+            # contract and must never be inferred from a GUI artifact.
+            if provider == "llama_cpp":
+                for field in (
+                    "reasoning_format",
+                    "reasoning",
+                    "reasoning_budget",
+                    "reasoning_effort",
+                    "batch_size",
+                    "ubatch_size",
+                    "gpu_layers",
+                    "flash_attn",
+                    "cont_batching",
+                    "jinja",
+                ):
+                    value = self.entry.get(field)
+                    if value is not None:
+                        overrides[field] = value
             # Registry-specific provider fields win over the derived defaults.
             overrides.update({key: value for key, value in explicit.items() if value is not None})
             return overrides

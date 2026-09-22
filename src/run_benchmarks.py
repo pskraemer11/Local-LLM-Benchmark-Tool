@@ -75,6 +75,7 @@ from typing import TYPE_CHECKING, Any
 import psutil
 
 import csv_writer as csv_writer
+import model_manager as _model_manager
 from model_paths import configured_gguf_roots
 
 if TYPE_CHECKING:
@@ -105,7 +106,8 @@ from benchmark_config import (
     get_model_config,
 )
 from model_manager import (
-    API_BASE,
+    configure_provider,
+    get_api_base,
     get_available_models,
     get_current_loaded_model,
     get_provider_capabilities,
@@ -115,6 +117,11 @@ from model_manager import (
     parse_selection,
     unload_all,
 )
+
+# Compatibility export for older tests and integrations. Runtime requests use
+# get_api_base() so a CLI-selected provider is not stuck on this import-time
+# snapshot.
+API_BASE = _model_manager.API_BASE
 from utils.terminal import (
     cyan,
     green,
@@ -181,6 +188,11 @@ def _check_reasoning_registry(model_identifier: str) -> bool | None:
 
 def _is_mamba_model(model_identifier: str) -> bool:
     return "mamba" in model_identifier.lower()
+
+
+def _is_glm_47_model(model_identifier: str) -> bool:
+    """Return whether GLM-4.7's native reasoning/template path is active."""
+    return "glm-4.7" in model_identifier.lower()
 
 def _is_moe_model(model_identifier: str) -> bool:
     return bool(MOE_PATTERN.search(model_identifier))
@@ -607,12 +619,16 @@ def _get_safe_context(model_identifier: str) -> int | None:
 
 
 def _resolve_num_parallel(sample_size: int) -> int:
-    """Determine num_parallel for a model benchmark run (hardcoded policy).
+    """Determine requested slots, capped by the selected provider.
 
     Seit 13.08.: np ist eine feste Benchmark-Policy, keine Registry-Eigenschaft.
     SampleSize >= 10 → 4 Slots (batching benefit), sonst 1.
     """
-    return 4 if sample_size >= 10 else 1
+    desired = 4 if sample_size >= 10 else 1
+    max_parallel = getattr(get_provider_capabilities(), "max_parallel", None)
+    if isinstance(max_parallel, int) and max_parallel > 0:
+        return min(desired, max_parallel)
+    return desired
 
 
 def _model_family(model_identifier: str) -> str:
@@ -875,7 +891,7 @@ def _build_lmeval_cmd(model_identifier: str, api_model: str, subset_task: str, p
     gptoss = _is_gptoss_model(model_identifier)
     evaluation_parameters = _get_evaluation_parameters(model_identifier, bench_name=bench_name)
     model_settings = {
-        "base_url": f"{API_BASE}/chat/completions",
+        "base_url": f"{get_api_base()}/chat/completions",
         "model": api_model,
         "num_concurrent": num_parallel,
     }
@@ -1006,9 +1022,11 @@ def run_custom_benchmark(model_info: AvailableModelInfo, bench: BenchmarkDef, sa
     # force override on top.
     if IS_THINKING_ENABLED and _is_reasoning_model(model_identifier):
         cmd.append("--thinking")
-    # Pre-emptive --no-structured-output for reasoning and Mamba models
-    # (structured output grammar constraints break thinking tokens / SSM architectures)
-    if _is_reasoning_model(model_identifier) or _is_mamba_model(model_identifier):
+    # Most reasoning and Mamba models cannot combine constrained decoding with
+    # thinking. GLM-4.7 is the documented exception: its native template and
+    # LM Studio's reasoning parser keep thinking separate from JSON content.
+    if ((_is_reasoning_model(model_identifier) and not _is_glm_47_model(model_identifier))
+            or _is_mamba_model(model_identifier)):
         cmd.append("--no-structured-output")
         is_structured_output_disabled = True
     # Fallback: retry with --no-structured-output on channel error (see below)
@@ -1142,7 +1160,7 @@ def run_evalplus(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_siz
         model=EVALPLUS_SENTINEL_MODEL,
         backend="openai",
         dataset=dataset,
-        base_url=API_BASE,
+        base_url=get_api_base(),
         temperature=gen_temp,
         instruction_prefix="Please provide a self-contained Python script that solves the following problem in a markdown code block:",
         response_prefix="Below is a Python script with a self-contained function that solves the problem and passes corresponding tests:",
@@ -1353,7 +1371,7 @@ def run_lmeval(model_info: AvailableModelInfo, bench: BenchmarkDef, limit: int =
     #           (no timeout, no error response) - therefore ALWAYS use api_model.
     # Use proxy only when explicitly started (e.g. for custom base_url routing)
     use_proxy = _proxy_is_running()
-    lm_base_url = f"http://127.0.0.1:{LMEVAL_PROXY_PORT}/v1/chat/completions" if use_proxy else f"{API_BASE}/chat/completions"
+    lm_base_url = f"http://127.0.0.1:{LMEVAL_PROXY_PORT}/v1/chat/completions" if use_proxy else f"{get_api_base()}/chat/completions"
     model_settings = {
         "base_url": lm_base_url,
         "model": api_model,
@@ -1568,7 +1586,7 @@ def run_agentic(model_info: AvailableModelInfo, limit: int = 5, mode: str = "ran
     agentic_runner = os.path.join(SRC_DIR, "tools", "tool_eval_bench_runner.py")
     cmd = [
         sys.executable, agentic_runner,
-        "--base-url", API_BASE,
+        "--base-url", get_api_base(),
         "--scenarios", *selected,
         "--json-file", json_path,
         "--timeout", str(PIPELINE_TIMEOUTS["agentic_scenario"]),
@@ -1674,6 +1692,7 @@ def save_summary_csv(results: list[dict[str, Any]], model_info: dict[str, Any] |
 
 # YAML-Schlüssel -> CLI-Dest. Mehrere Aliase erlaubt (kebab/snake).
 RUN_SPEC_DEST_MAP = {
+    "provider": "provider", "api_base": "api_base", "api-base": "api_base",
     "sample_size": "sample_size", "sample-size": "sample_size",
     "model": "model", "models": "model",
     "benchmark": "benchmarks", "benchmarks": "benchmarks",
@@ -1696,6 +1715,7 @@ _RUN_SPEC_BOOL_KEYS = {"thinking", "unload_between", "unload-between",
 
 # CLI-Defaults je Dest - für Precedence-Check (CLI explizit > YAML).
 RUN_SPEC_PARSER_DEFAULTS: dict[str, Any] = {
+    "provider": None, "api_base": None,
     "sample_size": 20, "model": None, "benchmarks": None, "seed": None,
     "thinking": False, "agentic_mode": "random", "exclude_benchmarks": None,
     "no_structured_output": False, "unload_between": False, "keep_response": False,
@@ -1824,6 +1844,10 @@ def _run_spec_yaml() -> Any:
 
 # Argument-Definitionen, geteilt zwischen Haupt- und Probe-Parser.
 _LAUNCHER_ARG_SPECS: list[tuple[tuple[str, ...], dict[str, Any]]] = [
+    (("--provider",), {"type": str, "default": None,
+                       "help": "Inference backend (e.g. llama_cpp or lmstudio; default: environment)"}),
+    (("--api-base",), {"type": str, "default": None,
+                       "help": "OpenAI-compatible provider base URL (overrides the provider default)"}),
     (("--sample-size", "-s"), {"type": int, "default": 20,
                                "help": "Tasks per benchmark (default: 20)"}),
     (("--model", "-m"), {"type": str, "default": None,
@@ -1868,8 +1892,14 @@ def _parse_args(argv: list[str] | None = None) -> tuple[Any, str]:
     parser = _build_launcher_parser()
     args = parser.parse_args(argv)
 
+    # Select the backend before a Run-Spec triggers provider model discovery.
+    if args.provider or args.api_base:
+        configure_provider(args.provider, args.api_base)
+
     if args.run_spec:
         spec = _load_run_spec(args.run_spec)
+        if spec.get("provider") or spec.get("api_base"):
+            configure_provider(spec.get("provider"), spec.get("api_base"))
         if spec.get("model"):
             available = get_available_models(exclude_keywords=EXCLUDE_KEYWORDS, registry_only=True)
         else:
@@ -1892,6 +1922,8 @@ def _parse_args(argv: list[str] | None = None) -> tuple[Any, str]:
             explicit_dests = None
 
         args = _apply_run_spec(args, spec, explicit_dests=explicit_dests)
+        if args.provider or args.api_base:
+            configure_provider(args.provider, args.api_base)
         print(f"[INFO] Run-Spec angewendet: {os.path.basename(args.run_spec)} (CLI-Flags haben Vorrang)")
 
     _version = "13.0.0-p7"

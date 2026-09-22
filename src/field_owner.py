@@ -79,6 +79,10 @@ FIELD_OWNERSHIP: dict[str, FieldRule] = {
         "registry", "registry", False, checks=("gguf_max",),
         description="SSOT: Benchmark-Wert; darf GGUF-Native-Max nicht uebersteigen",
     ),
+    "reasoning_format": FieldRule(
+        "registry", "registry", False,
+        description="Provider-spezifische Reasoning-Kanalpolicy, z. B. llama.cpp deepseek",
+    ),
     # ── Registry (menschliche Entscheidung) → Config, nur Pruefung ─
     "blueprint": FieldRule(
         "registry", "config", False, description="Blueprint-Auswahl (menschlich)"

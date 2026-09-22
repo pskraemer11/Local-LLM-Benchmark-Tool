@@ -98,6 +98,19 @@ The template is overwritten by LM Studio updates. After every update:
 1. `python assemble_blueprint.py assemble` (restores prompt + template)
 2. Reload the model: `lms unload --all && lms load openai/gpt-oss-20b`
 
+## Current project integration review (2026-09-21)
+
+`assemble_blueprint.py` now keeps the Harmony template and `<|return|>` stop
+string in both the YAML blueprint and its embedded fallback definition. It
+also converts the generic blueprint section wrappers (`<role>`, `<coding>`,
+`<safety>`, and `<output>`) to Markdown headings for GPT-OSS, because those
+XML wrappers are not part of the Harmony instruction format.
+
+The benchmark runtime profile keeps structured output disabled for GPT-OSS,
+uses the Harmony stop string, and sends a bounded `max_thinking_tokens`
+budget of 4096. This budget is sent only for GPT-OSS requests; it is not
+copied to unrelated models and is separate from LM Studio's GUI profile.
+
 ## Template-Quelle
 `doc-git/Jinja-Chat-Templates/gpt-oss-20b_harmony.jinja`
 

@@ -932,4 +932,244 @@ print(f"Emotions: {result['emotions']}")
   When designing JSON Schema, it's recommended to start with simple structures and gradually increase complexity. Also, providing detailed descriptions and examples for key fields helps AI better understand and generate JSON data that meets requirements.
 </Tip>
 
+## Local benchmark policy (2026-09-21)
+
+The local LM Studio tests established two separate GLM families. GLM-4.7
+Flash and GLM-4.7 Flash REAP are DeepSeek2-based (`architecture_family:
+deepseek2`), whereas GLM-4.6V is a separate `glm4` vision architecture. The
+two families must not inherit the same untested runner exception.
+
+For GLM-4.7 Flash/REAP the benchmark blueprint is
+`glm_reasoning_coding` and defines these API-side conditions:
+
+- structured output is enabled per request with the OpenAI-compatible
+  `response_format`; it is not enabled by adding a global GUI field;
+- the response is requested without streaming because a streamed LM Studio
+  response can deliver `reasoning_content` but lose the final `content` delta;
+- the generic code-only/thinking suffix is omitted; the native template
+  already separates the thinking and response channels;
+- the benchmark `max_tokens` budget is 8192 for the complete response, while
+  the LM Studio reasoning budget is synchronized to 4096. The two budgets
+  must remain distinct so a long thinking trace does not consume the final
+  code response. Both values are configurable in the blueprint; neither is a
+  hard-coded 1024-token cap.
+
+`llm.prediction.reasoning.parsing` remains enabled with `startString:
+" thinking"` and `endString: " response"`. `assemble_blueprint.py` writes
+this parser configuration and the reasoning budget to the LM Studio model
+JSON. It deliberately does not write `llm.prediction.structured`: that field
+controls the interactive GUI default, while benchmark structured output is a
+request-level API decision.
+
+`registry_tool.py patch-glm-configs` applies the same parser/budget policy,
+preserves an existing GUI structured-output field, removes only stale
+` response` stop strings and legacy manual JSON instructions, and excludes
+OCR/projector/quarantine configs. The command is therefore safe to run after an LM
+Studio update without changing the benchmark/API distinction.
+
+The current runner exception is intentionally limited to GLM-4.7. GLM-4.6V
+uses `glm4v_reasoning` and remains on the generic reasoning path until an
+independent text/vision API test justifies a narrower override.
+
+## API and direct llama.cpp migration note (2026-09-21)
+
+The Z.AI documentation describes JSON mode as
+`response_format={"type":"json_object"}`. That is the provider/API
+recommendation and should not be confused with LM Studio's GUI preset field
+`llm.prediction.structured`.
+
+LM Studio's own [Structured Output documentation](https://lmstudio.ai/docs/developer/openai-compat/structured-output)
+defines the local `/v1/chat/completions` contract more narrowly: it requires a
+JSON schema in `response_format.type = "json_schema"` and returns the JSON as
+a string in `choices[0].message.content`. For GGUF models, LM Studio states
+that the structured-output engine uses llama.cpp's grammar-based sampling.
+
+The local LM Studio OpenAI-compatible endpoint was tested directly on
+2026-09-21. It rejected the Z.AI form with HTTP 400:
+
+```text
+'response_format.type' must be 'json_schema' or 'text'
+```
+
+Therefore the current LM Studio benchmark path uses the supported strict
+`json_schema` request shape. The GUI's structured-output field is preserved as
+runtime UI state by `registry_tool.py`; it is not used as the benchmark
+request's source of truth. If a future LM Studio version accepts
+`json_object`, this must be verified by an API smoke test before changing the
+runner.
+
+The local observation of an empty final GLM response therefore remains a
+deviation from the documented LM Studio response contract, not an argument to
+replace `json_schema` with `json_object`. The next diagnostic step is to retain
+the complete raw `message` object, including `tool_calls`, `content`, and
+reasoning fields, before extraction/classification.
+
+The direct llama.cpp migration introduces a separate control plane. The
+`llama-cli` help for the installed build exposes:
+
+```text
+--reasoning-format FORMAT
+  none             leave thoughts in message.content
+  deepseek         put thoughts in message.reasoning_content
+  deepseek-legacy  keep <think> tags in message.content and also populate
+                   message.reasoning_content
+  auto             backend default
+```
+
+This option belongs to the direct llama.cpp provider and must not be mapped
+directly from the LM Studio parser fields `startString`/`endString`. The
+non-streamed `llama-server.exe` comparison for GLM-4.7 has now covered `auto`,
+`none`, `deepseek`, and `deepseek-legacy`. A streamed comparison remains
+separate because the benchmark's GLM path deliberately uses non-streaming.
+The acceptance criteria are a non-empty final response, valid structured
+output/code, correct reasoning metadata, and no token-budget truncation.
+
+The LM Studio menu “llama.cpp Arguments Override” is useful for controlled
+parameter experiments, including reasoning-related arguments. It is an
+experimental GUI override, however, not the provider-neutral registry policy
+and not proof that the separately installed llama.cpp binary uses identical
+defaults.
+
+## Direct llama.cpp Structured-Output Rule (2026-09-22)
+
+The first direct `llama-server.exe` smoke exposed an important boundary:
+LM Studio's strict `json_schema` request must not be copied unchanged into
+every llama.cpp request. With a generic Mistral-style template, the schema
+grammar can fail before generation with:
+
+```text
+Failed to initialize samplers: Unexpected empty grammar stack after accepting piece
+```
+
+The direct provider now applies this policy:
+
+* unspecified Structured Output is disabled for llama.cpp; normal models use
+  ordinary text responses;
+* an explicit structured-output model profile uses the simpler
+  `response_format={"type":"json_object"}` request shape;
+* `--reasoning-format none` disables constrained JSON as well, because GLM's
+  thoughts remain in `message.content` and would be forced through the JSON
+  grammar;
+* LM Studio keeps its separate `json_schema` contract.
+
+For Unsloth GLM-4.7 Flash Q3_K_S, the post-fix non-streaming smoke completed
+without grammar or sampler errors for `auto`, `none`, `deepseek`, and
+`deepseek-legacy`. The observed task status was respectively `json_ok`,
+`fenced`, `json_ok`, and `json_ok`; all four runs still scored zero on the
+single DS1000 task, so this is an infrastructure result, not a quality claim.
+The recurring tokenizer warnings about `special_eot_id`/`special_eom_id` and
+the default reasoning preservation are model metadata warnings, not request
+failures.
+
+The Registry therefore records `reasoning_format: deepseek` for the three
+GLM-4.7 deepseek2 entries. This keeps reasoning in
+`message.reasoning_content` and leaves the final answer channel available to
+the benchmark extractor. GLM-4.6V (`glm4`) remains a separate family and does
+not inherit this rule.
+
+Some GLM responses use the native object shape
+`{"name":"code","content":"..."}` rather than a `{"code":"..."}`
+field. The benchmark extractor accepts both shapes; a syntactically valid
+object is not by itself a correctness score.
+
+The current local evidence remains split by model variant:
+
+| Variant                        | Architecture | Local observation                                                                                                                                              |
+| ------------------------------ | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Unsloth `GLM 4.7 Flash@Q3_K_S` | `deepseek2`  | Non-streaming request completed without truncation, but the DS1000 run returned empty final content (`tasks_20260921_204117_DS1000_glm-4.7-flash@Q3_K_S.csv`). |
+| GLM-4.7 Flash REAP             | `deepseek2`  | The tested DS1000 requests exhausted the configured generation budget before a usable final code response.                                                     |
+| GLM-4.6V                       | `glm4`       | Separate family; no GLM-4.7 exception is inferred.                                                                                                             |
+
+The empty-content result is not sufficient evidence to switch the current
+LM Studio runner to `json_object`; it is a reason to inspect the raw API
+message/tool-call fields and to resolve the behavior in the direct llama.cpp
+provider with `--reasoning-format`.
+
+## llama.cpp configuration layers and GLM policy (2026-09-22)
+
+The backend configuration hierarchy is separate from the GLM prompt and
+response policy. For the direct llama.cpp backend, the effective order is:
+
+```text
+built-in defaults
+  -> %APPDATA%\llama.cpp\config.ini          hardware-wide defaults
+  -> LLAMA_ARG_* environment variables
+  -> llama.cpp preset [*]                     shared router defaults
+  -> llama.cpp preset [model]                 model-specific server options
+  -> explicit outer CLI options
+  -> API request options                       sampling and response format
+```
+
+The global Windows user path is `%APPDATA%\llama.cpp\config.ini` (normally
+`C:\Users\<user>\AppData\Roaming\llama.cpp\config.ini`). The project keeps
+the generated model router preset at
+`C:\Users\<user>\.config\llama.cpp\preset.ini`. The Registry remains the
+source of truth for GLM identity, architecture, context/KV policy, blueprint,
+reasoning format, and benchmark sampling evidence. The preset is only a
+derived llama.cpp runtime artifact; it must not be edited as a replacement for
+the Registry.
+
+For GLM, the architecture boundary is mandatory:
+
+| Family                       | GGUF architecture | Project policy                                                                              |
+| ---------------------------- | ----------------- | ------------------------------------------------------------------------------------------- |
+| GLM-4.7 Flash and Flash REAP | `deepseek2`       | `glm_reasoning_coding`, non-streaming comparison, and explicit `reasoning-format` handling  |
+| GLM-4.6V                     | `glm4`            | Separate text/vision path; do not inherit the GLM-4.7 exception without an independent test |
+
+The three GLM-4.7 `deepseek2` Registry entries currently use
+`reasoning_format: deepseek`, which keeps the thought trace in
+`message.reasoning_content` and leaves the final answer in the normal content
+channel. `auto`, `none`, `deepseek`, and `deepseek-legacy` remain explicit
+diagnostic variants, not four interchangeable defaults. Structured output is
+only enabled where the model profile and response path have been tested; a
+generic grammar must not be forced through a reasoning stream.
+
+### GLM sampling policy
+
+The official [GLM-4.7 settings](https://z.ai/blog/glm-4.7) distinguish the
+benchmark task families from the general default:
+
+| Project category       | Current policy                    | Evidence interpretation                                                                    |
+| ---------------------- | --------------------------------- | ------------------------------------------------------------------------------------------ |
+| Knowledge / most tasks | `temperature: 1.0`, `top_p: 0.95` | Directly documented default                                                                |
+| Coding                 | `temperature: 0.7`, `top_p: 1.0`  | Direct Terminal Bench / SWE-bench Verified setting                                         |
+| Math                   | `temperature: 0.7`, `top_p: 1.0`  | Derived from the explicit coding setting; not claimed as a separate Z.AI math prescription |
+| Agentic / τ²-Bench     | `temperature: 0`                  | Direct τ²-Bench temperature; Z.AI does not specify `top_p` in that footnote                |
+
+The Registry therefore does not invent an official agentic `top_p` value. If a
+runtime needs a complete sampling request, the fallback must remain visible as
+a runtime default rather than being recorded as direct manufacturer evidence.
+`sampling_research.py` recognizes concrete benchmark names such as Terminal
+Bench, SWE-bench, and τ²-Bench and preserves partial profiles; it no longer
+requires the source text to use the project's exact category labels. Math is
+marked as derived from coding where that is the only supported evidence.
+
+The generation budget is a separate control from sampling temperature. The
+current GLM reasoning blueprint uses an 8192-token benchmark response budget
+and a distinct 4096-token LM Studio reasoning budget. These are configurable
+runtime values and must not be reduced to a blanket 1024-token limit.
+
+### Interpreting recurring llama.cpp warnings
+
+The following messages were observed during local GLM smoke tests:
+
+* `special_eot_id is not in special_eog_ids`
+* `special_eom_id is not in special_eog_ids`
+* reasoning preservation is enabled
+
+The first two are tokenizer/end-of-generation metadata warnings from the GGUF
+model definition. They are not, by themselves, request failures. They become
+actionable when generation fails to terminate, terminates too early, or
+exhausts the response budget. The reasoning-preservation message describes
+the selected template/runtime behavior; it is relevant for multi-turn
+agentic traces, but it is not evidence that a JSON response is valid. Inspect
+the final content, reasoning channel, stop reason, and token usage together.
+
+For the direct backend, the installed CUDA binary is
+`C:\Program Files\llama.cpp\llama-server.exe`. The separate GUI log directory
+under `AppData\Local\Llama\logs` is unrelated to the automatic llama.cpp
+`config.ini` path. This distinction matters when reproducing a GLM issue:
+record the concrete GGUF path, Registry key, preset/config layers, CLI
+overrides, API request body, and server log together.
+
 

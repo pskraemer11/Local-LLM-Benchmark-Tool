@@ -87,13 +87,18 @@ from benchmark_config import EXCLUDE_KEYWORDS, get_model_config
 # is done exclusively by run_benchmarks.py as the parent
 # launcher. The exact model ID is passed via --api-model.
 from model_manager import (
-    API_BASE,
+    get_api_base,
     get_available_models,
     get_current_loaded_model,
+    get_provider_name,
     has_unloaded_all_models,
     is_api_available,
     parse_selection,
 )
+
+# Compatibility export for helper modules that still inspect the historical
+# import-time endpoint. Requests themselves use get_api_base().
+API_BASE = get_api_base()
 from type_defs import (
     GenerationConfig,
     MetricsSummary,
@@ -192,9 +197,12 @@ def _can_use_structured_output(model_identifier: str | None) -> bool:
     """Whether the JSON-schema response format can be requested for a model.
 
     Disabled when structured output is globally off (--no-structured-output),
-    when thinking mode is enabled, when the registry marks the model as
-    reasoning (thinking), or for Mamba architectures which reject
-    constrained decoding. Also disabled for Codestral-22B whose grammar
+    when thinking mode is enabled, or for Mamba architectures which reject
+    constrained decoding. GLM-4.7 is an explicit exception to the general
+    reasoning-model rule: its native template supports forced thinking and
+    JSON-schema output, while LM Studio separates ``reasoning_content`` from
+    the structured final ``content``. Other registry-marked reasoning models
+    remain disabled. Also disabled for Codestral-22B whose grammar
     generation fails server-side ("Failed to initialize samplers:
     Unexpected empty grammar stack after accepting piece", Server-Log
     03.08.2026, Code-Review_2026-08-03.md F5). Falls back to regex-based
@@ -202,15 +210,43 @@ def _can_use_structured_output(model_identifier: str | None) -> bool:
     """
     if not HAS_STRUCTURED_OUTPUT:
         return False
-    if IS_THINKING_MODE:
+    is_glm_47 = bool(model_identifier and "glm-4.7" in model_identifier.lower())
+    # GLM-4.7's blueprint explicitly enables structured output even when the
+    # launcher uses --thinking. Its native template separates the reasoning
+    # channel from the final JSON content.
+    if IS_THINKING_MODE and not is_glm_47:
         return False
-    if model_identifier and _model_supports_reasoning(model_identifier) is True:
+    if model_identifier and _model_supports_reasoning(model_identifier) is True and not is_glm_47:
         return False
     if model_identifier and "mamba" in model_identifier.lower():
         return False
     if model_identifier and "codestral" in model_identifier.lower():
         return False
     return True
+
+
+def _structured_output_format(structured_policy: Any) -> dict[str, Any] | None:
+    """Return the provider-compatible response format for one policy.
+
+    LM Studio accepts the project's strict ``json_schema`` contract.  The
+    direct llama.cpp server currently has a fragile grammar path for that
+    schema (notably with Mistral-family templates), while its generic JSON
+    mode is stable.  Therefore llama.cpp uses ``json_object`` only for an
+    explicit model policy such as GLM-4.7; an unspecified policy disables
+    constrained decoding instead of silently enabling it for every model.
+    """
+    if not HAS_STRUCTURED_OUTPUT or structured_policy is False:
+        return None
+    if get_provider_name() == "llama_cpp":
+        reasoning_format = os.environ.get("LLAMA_CPP_REASONING_FORMAT", "auto").strip().lower()
+        if reasoning_format == "none":
+            # ``none`` leaves GLM's <think> block in message.content.  It
+            # cannot be accepted by the JSON grammar at the same time.
+            return None
+        if structured_policy is True:
+            return {"type": "json_object"}
+        return None
+    return STRUCTURED_OUTPUT_SCHEMA
 
 
 SAMPLE_SIZE = 20
@@ -878,6 +914,11 @@ def _supports_chat_template_kwargs(model_identifier: str | None) -> bool:
     return "qwen" in name or "gemma" in name
 
 
+def _is_glm_47_model(model_identifier: str | None) -> bool:
+    """Identify GLM-4.7-Flash/REAP, not the separate GLM-4.6V family."""
+    return bool(model_identifier and "glm-4.7" in model_identifier.lower())
+
+
 def generate_answer(cfg: GenerationConfig) -> tuple[str | None, float, int, int, float, int, bool, str | None, str | None]:
     """Send one chat-completions request (streaming first, then fallback).
 
@@ -909,6 +950,8 @@ def generate_answer(cfg: GenerationConfig) -> tuple[str | None, float, int, int,
         value = getattr(cfg, key, None)
         if value is not None:
             body[key] = value
+    if cfg.max_thinking_tokens is not None and "gpt-oss" in (cfg.model_identifier or "").lower():
+        body["max_thinking_tokens"] = cfg.max_thinking_tokens
     # ── Thinking-Modus ueber OpenAI-kompatibles API steuern ──
     #
     # Quelle:
@@ -939,7 +982,7 @@ def generate_answer(cfg: GenerationConfig) -> tuple[str | None, float, int, int,
         body["stop"] = cfg.stop
     if cfg.response_format is not None:
         body["response_format"] = cfg.response_format
-    url = f"{API_BASE}/chat/completions"
+    url = f"{get_api_base()}/chat/completions"
     headers = {"Content-Type": "application/json"}
     if cfg.is_streaming:
         content, elapsed, t_in, t_out, tps, think_tok, truncated, err_type, err_detail = _stream_chat_completion(url, headers, body)
@@ -970,7 +1013,10 @@ def classify_output(code: str, response: str, is_structured: bool, entry_point: 
             except (json.JSONDecodeError, TypeError, AttributeError):
                 status = "json_invalid"
             else:
-                if isinstance(parsed, dict) and parsed.get("code"):
+                if isinstance(parsed, dict) and (
+                    parsed.get("code")
+                    or (parsed.get("name") == "code" and parsed.get("content"))
+                ):
                     status = "json_ok"
                 else:
                     status = "json_missing_code"
@@ -1011,6 +1057,10 @@ def extract_code(text: str | None, is_structured: bool = False) -> str:
         try:
             parsed = json.loads(text)
             code = parsed.get("code", "")
+            if not code and parsed.get("name") == "code":
+                # GLM's llama.cpp chat template may return the generic
+                # json_object in its native tool-like form.
+                code = parsed.get("content", "")
             if code:
                 return code.strip()
         except (json.JSONDecodeError, AttributeError, TypeError):
@@ -1664,11 +1714,31 @@ def run_task(task: dict[str, Any], task_type: str, model_identifier: str | None 
         "repetition_penalty": model_config.get("repetition_penalty"),
         "is_thinking_enabled": model_config.get("enable_thinking"),
         "reasoning_effort": model_config.get("reasoning_effort"),
+        "max_thinking_tokens": model_config.get("max_thinking_tokens"),
         "stop": model_config.get("stop", STOP_TOKENS_CODING),
+        "max_tokens": int(model_config.get("max_tokens", MAX_TOKENS_GENERAL)),
     }
+    runtime = model_config.get("_benchmark_runtime", {})
+    if isinstance(runtime, dict):
+        if isinstance(runtime.get("max_tokens"), int) and runtime["max_tokens"] > 0:
+            generation_parameters["max_tokens"] = runtime["max_tokens"]
+        if isinstance(runtime.get("max_thinking_tokens"), int) and runtime["max_thinking_tokens"] > 0:
+            generation_parameters["max_thinking_tokens"] = runtime["max_thinking_tokens"]
+        generation_parameters["is_streaming"] = bool(runtime.get("streaming", True))
+        structured_policy = runtime.get("structured_output")
+    else:
+        generation_parameters["is_streaming"] = True
+        structured_policy = None
 
     no_system_msg = model_config.get("no_system_msg", False)
-    code_only = bool(model_config.get("enable_thinking"))
+    # GLM-4.7's native DeepSeek2 template already separates forced thinking
+    # from the final channel. Adding the generic thinking suffix here makes
+    # that model repeat the prompt or emit reasoning only; JSON-schema output
+    # supplies the code-only contract instead. GLM-4.6V (glm4 architecture)
+    # does not match this family and keeps the existing prompt policy.
+    code_only = bool(model_config.get("enable_thinking")) and structured_policy != "native_channels"
+    if isinstance(runtime, dict) and runtime.get("prompt_suffix") == "none":
+        code_only = False
 
     # Qwen3.5 compatibility: embed system message in user prompt
     if no_system_msg and IS_QWEN_PROMPT_MODE:
@@ -1680,7 +1750,8 @@ def run_task(task: dict[str, Any], task_type: str, model_identifier: str | None 
         tests_field = task.get("tests", [])
         setup_code = task.get("setup_code", "")
         full_prompt = _make_codereval_prompt(prompt, entry_point, code_only=code_only)
-        result = _call_and_evaluate(full_prompt, generation_parameters, model_identifier, entry_point, tests_field, "", setup_code)
+        result = _call_and_evaluate(full_prompt, generation_parameters, model_identifier, entry_point, tests_field, "", setup_code,
+                                    structured_policy=structured_policy)
         return result
 
     elif task_type == "data_science":
@@ -1689,7 +1760,8 @@ def run_task(task: dict[str, Any], task_type: str, model_identifier: str | None 
         reference_code = task.get("reference_code", "")
         full_prompt = _make_datascience_prompt(prompt, entry_point, code_only=code_only)
         setup_code = _extract_setup_code(task, prompt, reference_code)
-        result = _call_and_evaluate(full_prompt, generation_parameters, model_identifier, entry_point, tests_field, reference_code, setup_code)
+        result = _call_and_evaluate(full_prompt, generation_parameters, model_identifier, entry_point, tests_field, reference_code, setup_code,
+                                    structured_policy=structured_policy)
         try:
             import matplotlib.pyplot as _plt
             _plt.close("all")
@@ -1767,16 +1839,29 @@ def _extract_setup_code(task: dict[str, Any], prompt: str, reference_code: str) 
 
 
 def _call_and_evaluate(full_prompt: str, generation_parameters: dict[str, Any], model_identifier: str | None,
-                       entry_point: str, tests_field: list, reference_code: str, setup_code: str) -> TaskResult:
+                       entry_point: str, tests_field: list, reference_code: str, setup_code: str,
+                       structured_policy: Any = None) -> TaskResult:
     """Generate an answer, extract code, classify output and evaluate it.
 
     Wires generate_answer -> extract_code/classify_output -> evaluate_code
     into a complete TaskResult dict, or an error result when generation
     returned nothing.
     """
+    structured = _can_use_structured_output(model_identifier)
+    if isinstance(structured_policy, bool):
+        structured = structured_policy and HAS_STRUCTURED_OUTPUT
+    elif get_provider_name() == "llama_cpp":
+        # Structured output is opt-in for direct llama.cpp.  Generic models
+        # must not enter its schema grammar path accidentally; explicit
+        # profiles (currently GLM-4.7) are handled below with json_object.
+        structured = False
+    if get_provider_name() == "llama_cpp" and os.environ.get(
+        "LLAMA_CPP_REASONING_FORMAT", "auto"
+    ).strip().lower() == "none":
+        structured = False
     gcfg = GenerationConfig(
         prompt=full_prompt, **generation_parameters,
-        response_format=STRUCTURED_OUTPUT_SCHEMA if _can_use_structured_output(model_identifier) else None
+        response_format=_structured_output_format(structured_policy) if structured else None
     )
     response, latency, t_in, t_out, tps, think_tok, truncated, err_type, err_detail = generate_answer(gcfg)
     if response is None:
@@ -1786,7 +1871,7 @@ def _call_and_evaluate(full_prompt: str, generation_parameters: dict[str, Any], 
                 "thinking_tokens": think_tok, "truncated": truncated,
                 "output_status": "empty", "entry_point_found": None,
                 "error_type": err_type, "error_detail": err_detail}
-    is_structured = _can_use_structured_output(model_identifier)
+    is_structured = structured
     code = extract_code(response, is_structured=is_structured) if response else ""
     if not code and response:
         m = re.search(r"```(?:python)?\s*\n(.*?)```", response, re.DOTALL)
@@ -2234,9 +2319,9 @@ def _verify_environment() -> Monitor:
     """Create the resource Monitor and verify API reachability + DS1000 deps."""
     monitor = Monitor()
     if not is_api_available():
-        error(f"LM Studio API not reachable: {API_BASE}")
+        error(f"Provider API not reachable: {get_api_base()}")
         sys.exit(1)
-    ok(f"LM Studio API: {API_BASE}")
+    ok(f"Provider API: {get_api_base()}")
 
     # Check DS1000 dependencies
     ds_deps = ["numpy", "pandas", "matplotlib", "seaborn"]

@@ -203,6 +203,7 @@ class GenerationConfig:
     repetition_penalty: float | None = None
     is_thinking_enabled: bool | None = None
     reasoning_effort: str | None = None
+    max_thinking_tokens: int | None = None
     is_streaming: bool = True
     stop: list[str] | None = None
     response_format: dict[str, Any] | None = None

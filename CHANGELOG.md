@@ -6,6 +6,71 @@ Hinweise:
 - Stand: 06.08.2026 — umgezogen aus §20 der `doc-git/Architecture, Flow & ChangeLog_en.md` (dort nur noch Verweis).
 - Commit-Hashes beziehen sich auf `main`.
 
+## Konfigurationshierarchie und Sampling-Alias-Erkennung (22.09.2026)
+
+| Date | Change |
+| ---- | ------ |
+| 22.09. | `PLANUNG.md`, `COMPACTIONS.md` | **DOC/ARCHITECTURE:** Globale Hardwaredefaults in `%APPDATA%\llama.cpp\config.ini` und explizite Router-/Modell-Presets unter `.config\llama.cpp\preset.ini` getrennt beschrieben. Priorität von Defaults, Config, Umgebungsvariablen, Presets und CLI festgehalten. Siehe Compaction 22.09.2026 / 10:50. |
+| 22.09. | `src/sampling_research.py`, `src/benchmark_config.py`, `tests/test_sampling_research.py`, `tests/test_benchmark_config.py` | **FIX/TEST:** Hersteller-Benchmarknamen und partielle Samplingangaben werden belastbar erkannt und ohne erfundene Gegenwerte in die Request-Fallbacklogik überführt. |
+
+## Sampling-Erkennung und llama.cpp-Preset-Verifikation (22.09.2026)
+
+| Date | Change |
+| ---- | ------ |
+| 22.09. | `src/sampling_research.py`, `src/benchmark_config.py`, `tests/test_sampling_research.py`, `tests/test_benchmark_config.py` | **fix:** Konkrete Herstellerbezeichnungen wie `Terminal Bench`, `SWE-bench Verified` und `τ²-Bench` werden den internen Kategorien zugeordnet. Partielle offizielle Angaben bleiben partiell; der Runner ergänzt nur den konfigurierten Kategorie-Default. Die GLM-4.7-Policy ist damit Coding `0.7/1.0`, Math als Coding-Ableitung `0.7/1.0` und Agentic `temperature=0` mit offenem `top_p`. |
+| 22.09. | `doc-git/model_registry.yaml` | **policy:** Die bestätigte Z.AI-Fußnote wurde über den vorgesehenen Sampling-Review-Schreibpfad für `unsloth/glm-4.7-flash@q3_k_s` übernommen. |
+| 22.09. | `C:\Users\pskra\.config\llama.cpp\preset.ini` | **verification:** Bestehende Datei gesichert, mit 63 lokalen Registry-Modellsektionen zusammengeführt und über `LLAMA_ARG_MODELS_PRESET` mit `llama-server.exe` geprüft. Die Datei listet 65 Modelle einschließlich `gpt-oss-20b` und GLM-4.7. Der vom aktuellen Server nicht akzeptierte globale Schlüssel `mmap` wurde entfernt; globale `[*]`-Defaults bleiben im portablen Router-Preset. |
+
+## Structured-Output-Fix und llama.cpp-Verifikation (22.09.2026)
+
+| Date | Change |
+| ---- | ------ |
+| 22.09. | `src/custom_benchmark.py`, `src/field_owner.py`, `tests/test_prio2.py`, `tests/test_custom_benchmark.py` | **fix:** Structured Output wird providerabhängig behandelt. LM Studio behält `json_schema`; llama.cpp erzwingt generisch keine Grammatik, nutzt bei einer expliziten Policy `json_object` und deaktiviert die Grammatik bei `reasoning-format=none`. Dadurch verschwindet der Fehler `Unexpected empty grammar stack after accepting piece`. GLM-native `{"name":"code","content":"..."}`-Antworten werden zusätzlich extrahiert; die neue Registry-Policy besitzt eine Ownership-Regel. |
+| 22.09. | `doc-git/model_registry.yaml` | **policy:** Für GLM-4.7 Flash/REAP (`deepseek2`) und die MXFP4-Variante ist `reasoning_format: deepseek` als direkter llama.cpp-Standard hinterlegt. GLM-4.6V (`glm4`) bleibt getrennt. |
+| 22.09. | `ergebnisse/glm47-reasoning-compare-fixed-20260922/` | **verification:** Nicht gestreamter GLM-4.7-Flash-Q3_K_S-Vergleich mit `auto`, `none`, `deepseek` und `deepseek-legacy` beendet; alle Runner-stderr-Dateien leer, keine Grammar-/Samplerfehler. Taskstatus: `json_ok`, `fenced`, `json_ok`, `json_ok`; je ein DS1000-Test mit 0 %. |
+| 22.09. | `ergebnisse/llama-cpp-multimodel-sequential-20260922/` | **verification:** Drei Modelle (`em_german_leo_mistral`, `glm-4.7-flash`, `qwen3-14b`) sequenziell auf demselben direkten Serverport getestet. Jeder Wechsel entlud das vorherige Modell; stdout, stderr und drei modellbezogene Serverlogs wurden getrennt archiviert. |
+| 22.09. | `src/registry_tool.py`, `tests/test_registry_tool.py`, `ergebnisse/llama-cpp-generated/preset.ini` | **feature:** `export-llama-preset [PATH]` erzeugt ein report-only llama.cpp-Preset aus Registry-Runtime und lokal aufgelösten GGUF-Dateien. 63 Modellsektionen wurden erzeugt; vier Einträge ohne lokale GGUF wurden übersprungen und gemeldet. Der Router-Smoke akzeptierte alle 63 Sektionen und listete sie über `/v1/models`, ohne ein Modell zu laden. |
+
+## Direkter llama.cpp Preflight und Pipeline-Smoke (21.09.2026)
+
+| Date | Change |
+| ---- | ------ |
+| 21.09. | `ergebnisse/llama-cpp-pipeline-smoke-20260921/` | **verification:** `llama-bench.exe` Build 11081 wurde mit `thebloke/em_german_leo_mistral@q4_k_m` ausgeführt. Die CUDA-Binary erkannte die RTX 5060 Ti (16 283 MiB), nutzte CUDA, Flash Attention und vollständigen GPU-Offload; Version, Geräteliste, JSON-Ausgabe und stderr wurden archiviert. |
+| 21.09. | `ergebnisse/llama-cpp-pipeline-smoke-20260921/` | **verification:** Direkter `run_benchmarks.py --provider llama_cpp`-Lauf mit SampleSize 1, Seed 42 und DS1000, HumanEval+, ARC-Challenge sowie Agentic erfolgreich beendet. Der Lauf bestätigt Serverstart, Readiness, API, Pipeline-Aufrufe und kontrolliertes Unload, ist wegen der Einzelfallgröße aber keine Qualitätsbaseline. |
+| 21.09. | `src/local_model_resolver.py`, `README.md`, `PLANUNG.md` | **discovery:** HF-Cache-Pfade mit `models--publisher--model\snapshots\<revision>\*.gguf` werden neben normalen Publisherordnern erkannt. Die llama-GUI-/Router-Anzeige bleibt außerhalb des Benchmark-Inventars. |
+| 21.09. | `ergebnisse/llama-cpp-pipeline-smoke-20260921/server/` | **finding:** llama.cpp meldete beim Structured-Output-Grammatikpfad wiederholt `Unexpected empty grammar stack`; die Pipelines fielen auf normale Antworten zurück. Die Wahl von JSON-Schema/Grammar und Modellspezialprofil bleibt vor dem GLM-Vergleich offen. |
+
+## Direkter llama.cpp-Provider als Benchmark-Backend (21.09.2026)
+
+| Date | Change |
+| ---- | ------ |
+| 21.09. | `src/providers/llama_cpp_provider.py`, `src/model_manager.py`, `src/model_registry.py` | **backend:** Neuer `llama_cpp`-Provider startet ausschließlich `C:\Program Files\llama.cpp\llama-server.exe` mit einer konkret aufgelösten lokalen GGUF-Datei. Start, Readiness, `/v1/models`, Chat-Completions und Stop sind process-owned; ein fremder Serverprozess auf dem Zielport wird erkannt und nicht beendet. Registry-Runtimewerte werden in llama.cpp-Argumente wie `--ctx-size`, `--cache-type-k/v`, `--kv-unified` und `--reasoning-format` übersetzt. |
+| 21.09. | `src/run_benchmarks.py`, `src/custom_benchmark.py` | **runner:** Provider und API-Basis können per `--provider`/`--api-base` bzw. Run-Spec gewählt werden. Die vier Pipelines beziehen ihre URL dynamisch aus dem Provider-Kontext; die LM-Studio-Kompatibilität bleibt als Default erhalten. |
+| 21.09. | `src/local_model_resolver.py`, `tests/test_llama_cpp_provider.py`, `tests/test_local_model_resolver.py`, `tests/test_provider_architecture.py`, `tests/test_model_registry.py` | **tests:** Root-level Hugging-Face-Snapshotpfade (`models--publisher--model/snapshots/...`) werden korrekt auf Registry-Identitäten abgebildet. Provider-Verträge und echter CUDA-Server-Smoke sind verifiziert. |
+
+## Modellfamilien-Regeln für GLM, GPT-OSS und Gemma konsolidiert (21.09.2026)
+
+| Date | Change |
+| ---- | ------ |
+| 21.09. | `src/assemble_blueprint.py`, `doc-git/blueprint_definitions.yaml`, `doc-git/model_registry.yaml` | GLM-4.7 Flash/REAP (`deepseek2`) erhält ein eigenes Runtime-Profil: Structured Output pro API-Anfrage, nicht gestreamte Antwort, kein generischer Thinking-Code-Suffix, 8192 Tokens Gesamtbudget und 4096 Tokens Reasoning-Budget. GLM-4.6V (`glm4`) wird als separate Modellfamilie `glm4v_reasoning` geführt. |
+| 21.09. | `src/benchmark_config.py`, `src/custom_benchmark.py`, `src/type_defs.py` | Blueprint-Runtime-Regeln werden in die Benchmark-Konfiguration übernommen. Die frühere hartcodierte GLM-4.7-Grenze von 1024 Tokens entfällt; Reasoning-Budget (4096) und Gesamtbudget (8192) bleiben getrennte Werte. GPT-OSS kann sein Harmony-spezifisches `max_thinking_tokens`-Budget gezielt erhalten. |
+| 21.09. | `src/registry_tool.py` | `patch-glm-configs` synchronisiert Parser und Reasoning-Budget, lässt das GUI-Feld `llm.prediction.structured` unverändert und ignoriert OCR-/Projektor-Konfigurationen. Dadurch bleibt die Trennung zwischen LM-Studio-GUI-Default und Benchmark-API erhalten. |
+| 21.09. | `doc-git/Model Specific Hints/GLM 4.5 - 4.7_Structured Output_en.md`, `Doku-intern/Modellspezifisches/GLM (Z.AI)/` | LM-Studios offizieller `json_schema`-Vertrag, llama.cpp Grammar-Sampling, der lokale `json_object`-HTTP-400-Befund, die GLM-Familientrennung sowie `--reasoning-format` für die direkte llama.cpp-Migration dokumentiert. |
+| 21.09. | `tests/test_registry_tool.py` | Regressionen an die neue GLM-Patch-Semantik angepasst: bestehende GUI-Structured-Output-Felder bleiben erhalten; Parser und Budget werden idempotent synchronisiert. |
+
+## GLM Structured Output und llama.cpp Reasoning-Grenze (21.09.2026)
+
+| Date | Change |
+| ---- | ------ |
+| 21.09. | `doc-git/Model Specific Hints/GLM 4.5 - 4.7_Structured Output_en.md`, `Doku-intern/Modellspezifisches/GLM (Z.AI)/`, `PLANUNG.md` | **docs/architecture:** Offiziellen LM-Studio-`json_schema`-Vertrag, lokalen `json_object`-HTTP-400-Befund, llama.cpp Grammar-Sampling sowie `--reasoning-format` als separaten Providerparameter dokumentiert. Siehe Compaction 21.09.2026 / 20:56. |
+
+## llama.cpp-Preset-Grenze und Vulkan-Installation bereinigt (21.09.2026)
+
+| Date | Change |
+| ---- | ------ |
+| 21.09. | `PLANUNG.md` | **architecture/operations:** Detaillierte Hybridplanung ergänzt: `model_registry.yaml` bleibt fachliche Quelle, llama.cpp-Argumente und optionale `preset.ini` werden daraus generiert. Zuständigkeiten, Exportpfad, Einzelprozess-/Router-Grenze, Phasen und Abnahmekriterien dokumentiert. |
+| 21.09. | lokale Installation | **maintenance:** Das als `llama-b11046-bin-win-vulkan-x64.zip` identifizierte WinGet-Paket `ggml.llamacpp` über `winget uninstall --id ggml.llamacpp --exact --silent` entfernt. Der CUDA-Produktionspfad `C:\Program Files\llama.cpp` bleibt erhalten. Siehe Compaction 21.09.2026 / 22:05. |
+
 ## Sampling-Provenienz in ein kompaktes Registry-Schema überführt (21.09.2026)
 
 | Date   | File                                                                                                                                                          | Change                                                                                                                                                                                                                                                                                                                                                                |

@@ -347,6 +347,17 @@ class TestCanUseStructuredOutput:
         with patch("custom_benchmark._model_supports_reasoning", return_value=True):
             assert _can_use_structured_output("openai/gpt-oss-20b") is False
 
+    def test_glm47_reasoning_model_supports_structured_output(self):
+        with patch("custom_benchmark._model_supports_reasoning", return_value=True):
+            assert _can_use_structured_output("noctrex/glm-4.7-flash-reap-23b-a3b_moe@mxfp4") is True
+
+    def test_glm47_structured_output_remains_enabled_in_thinking_mode(self):
+        with (
+            patch("custom_benchmark.IS_THINKING_MODE", True),
+            patch("custom_benchmark._model_supports_reasoning", return_value=True),
+        ):
+            assert _can_use_structured_output("unsloth/glm-4.7-flash@q3_k_s") is True
+
     def test_mamba(self):
         with patch("custom_benchmark._model_supports_reasoning", return_value=False):
             assert _can_use_structured_output("gabriellarson/mamba-codestral-7b-v0.1") is False
@@ -359,3 +370,32 @@ class TestCanUseStructuredOutput:
 
     def test_none(self):
         assert _can_use_structured_output(None) is True
+
+
+class TestProviderStructuredOutputFormat:
+    """Direct llama.cpp uses opt-in JSON mode instead of JSON-schema grammar."""
+
+    def test_lmstudio_keeps_strict_schema(self):
+        from custom_benchmark import STRUCTURED_OUTPUT_SCHEMA, _structured_output_format
+
+        with patch("custom_benchmark.get_provider_name", return_value="lmstudio"):
+            assert _structured_output_format(None) == STRUCTURED_OUTPUT_SCHEMA
+
+    def test_llama_cpp_disables_unspecified_policy(self):
+        from custom_benchmark import _structured_output_format
+
+        with patch("custom_benchmark.get_provider_name", return_value="llama_cpp"):
+            assert _structured_output_format(None) is None
+
+    def test_llama_cpp_uses_json_object_for_explicit_policy(self):
+        from custom_benchmark import _structured_output_format
+
+        with patch("custom_benchmark.get_provider_name", return_value="llama_cpp"):
+            assert _structured_output_format(True) == {"type": "json_object"}
+
+    def test_llama_cpp_none_reasoning_disables_structured_output(self, monkeypatch):
+        from custom_benchmark import _structured_output_format
+
+        monkeypatch.setenv("LLAMA_CPP_REASONING_FORMAT", "none")
+        with patch("custom_benchmark.get_provider_name", return_value="llama_cpp"):
+            assert _structured_output_format(True) is None

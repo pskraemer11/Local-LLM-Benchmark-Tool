@@ -658,6 +658,21 @@ class TestBlueprintFeatures:
         f = ab.blueprint_features("gptoss_reasoning", "gpt-oss-20b")
         assert f["stop_strings"] == ["<|return|>"]
         assert f["template"] == "gpt-oss-20b_harmony.jinja"
+        assert f["benchmark_runtime"]["max_thinking_tokens"] == 4096
+
+    def test_glm_families_have_separate_runtime_policies(self):
+        glm47 = ab.blueprint_features("glm_reasoning_coding", "glm-4.7-flash")
+        glm46v = ab.blueprint_features("glm4v_reasoning", "glm-4.6v-flash")
+        assert glm47["benchmark_runtime"] == {
+            "structured_output": True,
+            "streaming": False,
+            "prompt_suffix": "none",
+            "max_tokens": 8192,
+            "reasoning_budget_tokens": 4096,
+        }
+        assert "benchmark_runtime" not in glm46v
+        assert select_blueprint("thinking", "coding, text", arch="deepseek2", model_name="glm-4.7-flash") == "glm_reasoning_coding"
+        assert select_blueprint("thinking", "vision, text", arch="glm4", model_name="glm-4.6v-flash") == "glm4v_reasoning"
 
     def test_gemma_template_map_and_parsing(self):
         f = ab.blueprint_features("gemma_reasoning", "gemma4-26b-a4b")

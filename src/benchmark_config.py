@@ -659,6 +659,16 @@ def get_model_config(model_identifier: str, category: str = "coding", is_thinkin
         config["stop"] = bp_features["stop_strings"]
     if bp_features.get("reasoning_parsing"):
         config["reasoning_parsing"] = bp_features["reasoning_parsing"]
+    runtime = bp_features.get("benchmark_runtime")
+    if isinstance(runtime, dict):
+        # Runtime policy is benchmark/API configuration, not a blanket copy
+        # of LM Studio GUI fields. Keep it namespaced so callers choose the
+        # relevant behavior explicitly.
+        config["_benchmark_runtime"] = dict(runtime)
+        if isinstance(runtime.get("max_tokens"), int) and runtime["max_tokens"] > 0:
+            config["max_tokens"] = runtime["max_tokens"]
+        if isinstance(runtime.get("max_thinking_tokens"), int) and runtime["max_thinking_tokens"] > 0:
+            config["max_thinking_tokens"] = runtime["max_thinking_tokens"]
     # Kategorie-basierte Thinking-Steuerung aus dem Blueprint (SSOT, 15.08.):
     # ueberschreibt den LMS-Config-Wert (budgetTokens). Reihenfolge: zuerst die
     # Kategorie-Steuerung anwenden, damit das --thinking-Flag danach als Force
@@ -714,8 +724,14 @@ def _sampling_cell(
             research_status == "confirmed"
         )
         entry = reg.get("thinking") if use_thinking_profile and isinstance(reg.get("thinking"), dict) else reg.get(cat)
-        if isinstance(entry, dict) and "temperature" in entry and "top_p" in entry:
-            return float(entry["temperature"]), float(entry["top_p"]), "registry-sampling"
+        if isinstance(entry, dict) and ("temperature" in entry or "top_p" in entry):
+            # Some official benchmark footnotes specify only the changed
+            # parameter. Preserve that explicit value and use the configured
+            # category/thinking default for the omitted counterpart.
+            defaults = BENCHMARK_THINKING_DEFAULTS if prefer_thinking else BENCHMARK_CATEGORY_DEFAULTS[cat]
+            temperature = float(entry.get("temperature", defaults["temperature"]))
+            top_p = float(entry.get("top_p", defaults["top_p"]))
+            return temperature, top_p, "registry-sampling"
     return None
 
 

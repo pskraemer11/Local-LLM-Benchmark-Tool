@@ -1192,13 +1192,14 @@ zai-org/glm-4.6v-flash@q6_k:
   v_cache: q8_0
   offload: 1
   notes: 'Architektur: dense | Vision'
+  architecture_family: glm4
   file_size_bytes: 10053622727
   context_length: 32768
   useUnifiedKvCache: false
   max_context_length: 131072
   reasoning: thinking
   capabilities: vision, text
-  blueprint: reasoning_assistant
+  blueprint: glm4v_reasoning
   truncation: full
   quants: Q6_K
 
@@ -1761,26 +1762,23 @@ unsloth/glm-4.7-flash@q3_k_s:
     coding:
       temperature: 0.7
       top_p: 1.0
+      evidence_kind: direct
     knowledge:
       temperature: 1.0
       top_p: 0.95
+      evidence_kind: direct
     agentic:
-      temperature: 0.7
-      top_p: 0.95
+      temperature: 0.0
+      evidence_kind: direct
     math:
-      temperature: 1.0
-      top_p: 0.95
-      evidence_kind: unresolved
-      reason: Kein allgemeines Profil; Coding-/Math-Fallback kann nicht
-        belastbar bestimmt werden.
-    thinking:
-      enabled: true
-      temperature: 0.6
-      top_p: 0.95
-    sampling_research_status: conflict
-    sampling_researched_at: '2026-09-20T19:56:34+00:00'
+      temperature: 0.7
+      top_p: 1.0
+      evidence_kind: derived
+      derived_from: coding
+    sampling_research_status: confirmed
+    sampling_researched_at: '2026-09-22T07:53:37+00:00'
     sampling_sources:
-      - https://huggingface.co/unsloth/glm-4.7-flash/raw/main/README.md
+      - https://z.ai/blog/glm-4.7
   k_cache: q8_0
   v_cache: q8_0
   offload: 1.0
@@ -1791,7 +1789,8 @@ unsloth/glm-4.7-flash@q3_k_s:
   n_layers: 47
   hidden_dim: 2048
   reasoning: thinking
-  blueprint: reasoning_coding
+  reasoning_format: deepseek
+  blueprint: glm_reasoning_coding
   capabilities: coding, text
   useUnifiedKvCache: true
   truncation: full
@@ -2114,9 +2113,10 @@ unsloth/glm-4.7-flash-reap-23b-a3b@q4_k_s:
   hidden_dim: 2048
   max_context_length: 202752
   reasoning: thinking
+  reasoning_format: deepseek
   quants: Q4_K_S
   capabilities: coding, text
-  blueprint: reasoning_coding
+  blueprint: glm_reasoning_coding
   truncation: full
   architecture_family: deepseek2
   sampling:
@@ -2147,9 +2147,10 @@ noctrex/glm-4.7-flash-reap-23b-a3b_moe@mxfp4:
   hidden_dim: 2048
   max_context_length: 202752
   reasoning: thinking
+  reasoning_format: deepseek
   quants: MXFP4
   capabilities: coding, text
-  blueprint: reasoning_coding
+  blueprint: glm_reasoning_coding
   truncation: full
   architecture_family: deepseek2
   sampling:

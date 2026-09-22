@@ -1,6 +1,9 @@
 # Qwen3.8 - How to Run Locally
 Quelle: https://unsloth.ai/docs/models/qwen3.8
 
+look also HF discussions: "Single 16GB RTX 5060 Ti: 53 t/s with MTP and Quantized KV Cache" #26
+at https://huggingface.co/unsloth/Qwen3.8-27B-GGUF/discussions/26, especially https://huggingface.co/unsloth/Qwen3.8-27B-GGUF/discussions/26#6a889aa562f65933c12ed94f
+
 ## Project integration update (2026-09-20)
 
 This document contains the upstream local-run guide below. The following project-specific findings record how Qwen3.8 is currently represented in the Benchmarks Registry, blueprint and runtime path.

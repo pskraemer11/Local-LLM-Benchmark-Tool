@@ -42,7 +42,14 @@ class LocalModelCandidate:
 
 
 class LocalModelResolver:
-    """Discover and resolve benchmarkable GGUF files below ordered roots."""
+    """Discover benchmarkable GGUF files below ordered roots.
+
+    Discovery is file-based and deliberately independent of a llama.cpp GUI
+    or router catalog.  In addition to the conventional
+    ``publisher/model/*.gguf`` layout, the resolver understands Hugging Face
+    cache layouts such as ``models--publisher--model/snapshots/<revision>``
+    and the same layout below a ``hub`` directory.
+    """
 
     def __init__(
         self,
@@ -83,9 +90,18 @@ class LocalModelResolver:
         parts = relative.parts
         # Unsloth's local HF cache lives below models/hub, not below the
         # separate LM Studio config tree at .lmstudio/hub.
+        snapshot_index = 1 if len(parts) >= 2 and parts[0].startswith("models--") else None
+        repository_part = parts[0] if snapshot_index is not None else None
         if len(parts) >= 4 and parts[0].casefold() == "hub" and parts[1].startswith("models--"):
-            repository = parts[1][len("models--") :]
-            if "--" in repository and parts[2].casefold() == "snapshots":
+            snapshot_index = 2
+            repository_part = parts[1]
+        if (
+            repository_part
+            and snapshot_index is not None
+            and "--" in repository_part[len("models--") :]
+        ):
+            repository = repository_part[len("models--") :]
+            if parts[snapshot_index].casefold() == "snapshots":
                 publisher, model_name = repository.split("--", 1)
                 return f"{publisher}/{model_name}"
         parents = relative.parts[:-1]

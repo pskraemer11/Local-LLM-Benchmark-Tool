@@ -20,12 +20,13 @@ Imported by run_benchmarks.py AND custom_benchmark.py.
      - NEVER calls load/unload (initiated by the launcher)
      - Uses is_api_available() as health-check (legacy)
 
-── API- vs. CLI-Zugriff ────────────────────────────────────────────
-  - lms CLI:     load, unload, ps, ls (Subprozesse)
-  - REST API:    /v1/chat/completions, /v1/models (Inference)
-  Die Konstanten API_BASE und TIMEOUT_* werden pipeline-uebergreifend
-  von allen Skripten genutzt, sodass Aenderungen (z.B. Port) zentral
-  erfolgen koennen.
+── Provider-Zugriff ────────────────────────────────────────────────
+  - LM Studio:   legacy lms CLI/REST lifecycle and OpenAI-compatible API
+  - llama.cpp:   process-owned llama-server.exe plus OpenAI-compatible API
+  - other:       provider-specific lifecycle/API implementations
+  API_BASE remains a compatibility alias. New pipeline code uses
+  get_api_base() so an explicit provider selected by the launcher is visible
+  to every child pipeline.
 
 ── Wichtige Hinweise ───────────────────────────────────────────────
   - is_model_ready() wird vom Launcher nach load_model()
@@ -70,6 +71,12 @@ def _configured_api_base() -> str:
             if explicit_base and explicit_base != default_base
             else os.environ.get("UNSLOTH_LOCAL_API_BASE", "http://127.0.0.1:8890/v1")
         )
+    if provider in {"llama_cpp", "llama.cpp", "llama"}:
+        return (
+            explicit_base
+            if explicit_base and explicit_base != default_base
+            else os.environ.get("LLAMA_CPP_API_BASE", "http://127.0.0.1:8080/v1")
+        )
     return os.environ.get("LMSTUDIO_API_BASE") or explicit_base or default_base
 
 
@@ -89,7 +96,7 @@ TIMEOUT_UNLOAD_WAIT = 2
 # need to know that the server is reachable but no model is loaded yet.
 HEALTH_CHECK_SENTINEL_MODEL = "check"
 
-SUPPORTED_PROVIDERS = {"lmstudio", "tabbyapi", "openai_compat", "unsloth_server"}
+SUPPORTED_PROVIDERS = {"lmstudio", "tabbyapi", "openai_compat", "unsloth_server", "llama_cpp"}
 
 
 def get_provider_name() -> str:
@@ -102,6 +109,8 @@ def get_provider_name() -> str:
         "unsloth": "openai_compat",
         "unsloth-local": "unsloth_server",
         "unsloth_local": "unsloth_server",
+        "llama": "llama_cpp",
+        "llama.cpp": "llama_cpp",
     }
     name = aliases.get(name, name)
     if name not in SUPPORTED_PROVIDERS:
@@ -116,6 +125,7 @@ def get_provider() -> Any:
     Imports stay local so the legacy LM Studio path keeps its current import
     graph and tests can continue to patch ``model_manager`` seams.
     """
+    from providers.llama_cpp_provider import LlamaCppProvider
     from providers.lmstudio_provider import LMStudioProvider
     from providers.openai_compat_provider import OpenAICompatProvider
     from providers.tabbyapi_provider import TabbyAPIProvider
@@ -145,6 +155,18 @@ def get_provider() -> Any:
             registry_loader=_load_registry_data,
             runtime_loader=_unsloth_server_runtime_overrides,
         )
+    if provider_name == "llama_cpp":
+        return LlamaCppProvider(
+            API_BASE,
+            model_root=(
+                os.environ.get("LLAMA_CPP_MODEL_ROOT")
+                or os.environ.get("GGUF_MODEL_ROOT")
+                or os.environ.get("LMSTUDIO_MODELS_DIR")
+            ),
+            executable=os.environ.get("LLAMA_CPP_SERVER_EXE"),
+            registry_loader=_load_registry_data,
+            runtime_loader=_llama_cpp_runtime_overrides,
+        )
     return LMStudioProvider(
         API_BASE,
         cli_timeout=TIMEOUT_CLI,
@@ -161,6 +183,28 @@ def get_provider() -> Any:
 def get_provider_capabilities() -> Any:
     """Return capabilities of the configured provider without adding LMS calls."""
     return get_provider().capabilities
+
+
+def get_api_base() -> str:
+    """Return the current provider endpoint for child pipelines."""
+    return API_BASE
+
+
+def configure_provider(provider: str | None = None, api_base: str | None = None) -> str:
+    """Apply explicit launcher provider options before discovery starts.
+
+    The module-level ``API_BASE`` remains as a compatibility alias for older
+    imports, while new callers can retrieve the refreshed endpoint through
+    :func:`get_api_base`.
+    """
+    global API_BASE, _REST_API_BASE
+    if provider:
+        os.environ["LLM_PROVIDER"] = provider
+    if api_base:
+        os.environ["LLM_API_BASE"] = api_base
+    API_BASE = _configured_api_base()
+    _REST_API_BASE = API_BASE.rsplit("/v1", 1)[0] if API_BASE.endswith("/v1") else API_BASE
+    return API_BASE
 
 
 def _uses_legacy_lmstudio_path() -> bool:
@@ -182,6 +226,11 @@ def has_assembled_system_prompt(model_identifier: str) -> bool | None:
 def _unsloth_server_runtime_overrides(model_identifier: str) -> dict[str, Any]:
     """Map provider-neutral registry runtime values to llama-server options."""
     return _registry_view().provider_runtime(model_identifier, "unsloth_server")
+
+
+def _llama_cpp_runtime_overrides(model_identifier: str) -> dict[str, Any]:
+    """Map Registry values to direct llama-server arguments."""
+    return _registry_view().provider_runtime(model_identifier, "llama_cpp")
 
 
 # ── Legacy adapters ───────────────────────────────────────────────

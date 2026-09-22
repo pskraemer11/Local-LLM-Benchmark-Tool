@@ -1,5 +1,19 @@
 # Gemma-4 – Consolidated Model Hints
 
+## Project integration review (2026-09-21)
+
+`assemble_blueprint.py` selects the dedicated `gemma_assistant` or
+`gemma_reasoning` blueprint and resolves the size-specific Jinja template
+through `template_map`. The reasoning blueprint keeps thinking category-aware:
+coding and agentic runs disable thinking, while knowledge and math runs enable
+it. `benchmark_config.py` carries that policy into the API request through
+`chat_template_kwargs`; it does not blindly inherit a GUI budget for every
+benchmark category.
+
+The f16 K/V-cache requirement remains a registry/load-policy concern and is
+not replaced by prompt assembly. No GLM-4.7 streaming or structured-output
+exception is applied to Gemma-4.
+
 > Status: 2026-07-29
 > Sources: 8 documents from `doc-git/Model Specific Hints/`,
 > `doc-git/Jinja-Chat-Templates/`, `doc-git/model_registry.yaml`, `doc-git/Architecture-and-Flow.md`

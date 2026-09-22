@@ -64,6 +64,23 @@ def test_resolver_maps_unsloth_hf_cache_to_logical_model_id(tmp_path: Path) -> N
     assert candidates[0].path == path
 
 
+def test_resolver_maps_root_level_hf_cache_to_logical_model_id(tmp_path: Path) -> None:
+    path = (
+        tmp_path
+        / "models--ggml-org--gpt-oss-20b-GGUF"
+        / "snapshots"
+        / "revision"
+        / "gpt-oss-20b-MXFP4.gguf"
+    )
+    _touch(path)
+
+    candidates = LocalModelResolver(tmp_path).candidates()
+
+    assert len(candidates) == 1
+    assert candidates[0].model_identifier == "ggml-org/gpt-oss-20b-GGUF@mxfp4"
+    assert candidates[0].path == path
+
+
 def test_resolver_matches_registry_and_exposes_local_path(tmp_path: Path) -> None:
     path = tmp_path / "openai" / "gpt-oss-20b" / "gpt-oss-20b-MXFP4.gguf"
     _touch(path)

@@ -91,8 +91,8 @@ class TestRegistryBackedSampling:
         expected = {
             "coding": (0.7, 1.0),
             "knowledge": (1.0, 0.95),
-            "agentic": (0.7, 0.95),
-            "math": (1.0, 0.95),
+            "agentic": (0.0, 0.95),
+            "math": (0.7, 1.0),
         }
         for cat, (temp, top_p) in expected.items():
             cfg = get_model_config("unsloth/glm-4.7-flash", category=cat)

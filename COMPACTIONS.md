@@ -1070,3 +1070,245 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 - `tests/test_assemble_blueprint.py`: English help assertions.
 - `tests/test_registry_tool.py`: English help assertions and `fix-ctx` regression coverage.
 - `CHANGELOG.md`: Corresponding entry `English CLI Help and Entry-Point Audit`.
+
+=============== Compaction 21.09.2026 / 20:56 ================
+## Objective
+- (Completed) GLM Structured-Output-Befunde mit der offiziellen LM-Studio-Dokumentation abgleichen.
+- (Completed) Die direkte llama.cpp-Migration um den Reasoning-Format-Vorbehalt ergänzen.
+- (Active) Den leeren finalen Inhalt des normalen Unsloth-GLM-4.7-Flash-Laufs weiter diagnostizieren.
+
+## Important Details
+- **LM Studio contract:** Die offizielle Dokumentation beschreibt für `/v1/chat/completions` JSON Schema als Structured-Output-Vertrag und nennt `choices[0].message.content` als JSON-String. Für GGUF wird llama.cpp Grammar-Sampling verwendet.
+- **API evidence:** Der lokale LM-Studio-Endpunkt lehnt `response_format: {"type":"json_object"}` mit HTTP 400 ab: `response_format.type` muss `json_schema` oder `text` sein. Die Z.AI-Empfehlung `json_object` wird daher nicht in den LM-Studio-Runner übernommen.
+- **Unresolved GLM result:** Der normale Unsloth-GLM-4.7-Flash-DS1000-Lauf war nicht trunciert, schrieb aber keinen finalen Inhalt in die CSV; REAP zeigte zusätzlich Budget-/Reasoning-Probleme. Vor weiterer Extraktion müssen rohe `message`-Felder einschließlich `content`, `reasoning_content`, `tool_calls` und `finish_reason` gesichert werden.
+- **Migration decision:** `llama-cli --reasoning-format` (`auto`, `none`, `deepseek`, `deepseek-legacy`) ist ein separater llama.cpp-Providerparameter. Vor der Übernahme in `run_benchmarks.py` sind CLI und Server sowie Streaming und Nicht-Streaming per A/B-Smoke zu vergleichen.
+- **GUI boundary:** LM Studios „llama.cpp Arguments Override“ bleibt ein Tuning-/Diagnosewerkzeug. Die Werte sind keine automatische Registry-Policy und beweisen keine identischen Defaults der separaten llama.cpp-Installation.
+
+## Work State
+### Completed / Active / Blocked
+- Completed: GLM-Dokumentation in `doc-git/Model Specific Hints/` sowie den internen `Doku-intern/Modellspezifisches/GLM (Z.AI)`-Notizen ergänzt; `PLANUNG.md` und `CHANGELOG.md` aktualisiert; `git diff --check` ohne inhaltliche Fehler.
+- Active: Mehrere Code-, Registry-, Test- und Dokumentationsänderungen liegen uncommittet im Worktree; vorhandene fremde Änderungen insbesondere in `src/model_manager.py` und `src/run_benchmarks.py` bleiben erhalten.
+- Blocked: Keine technische Blockade, aber der GLM-Leerinhalt ist noch nicht behoben; ein vorschneller Wechsel von `json_schema` zu `json_object` wäre durch die LM-Studio-API widerlegt.
+
+## Next Move
+1. Den vollständigen Rohantwortpfad im LM-Studio-Client diagnostisch sichtbar machen, ohne die bestehende `json_schema`-Anfrage zu ändern.
+2. Einen kleinen normalen GLM-4.7-Flash-Smoke mit derselben Prompt-/Schema-Kombination und vollständiger `message`-Aufzeichnung durchführen.
+3. Danach `llama-server.exe`/`llama-cli.exe` mit `--reasoning-format` testen und erst dann den direkten Provider implementieren.
+4. Vor Commit/Push Scope, staged Diff und die verpflichtenden `.githooks` prüfen.
+
+## Relevant Files
+- `doc-git/Model Specific Hints/GLM 4.5 - 4.7_Structured Output_en.md`: LM-Studio-`json_schema`-Vertrag, lokale 400-Antwort und llama.cpp-Migrationshinweis.
+- `Doku-intern/Modellspezifisches/GLM (Z.AI)/`: interne GLM-Befunde, Familiengrenzen, API- und `--reasoning-format`-Hinweise.
+- `PLANUNG.md`: neue A/B- und Provider-Aufgaben für `--reasoning-format` und GUI-Override-Abgrenzung.
+- `src/custom_benchmark.py`: aktueller API-/Extraktionspfad; möglicher nächster Diagnosepunkt für rohe `message`-Felder.
+- `CHANGELOG.md`: Eintrag `GLM Structured Output and llama.cpp Reasoning Boundary` für diese Compaction.
+
+=============== Compaction 21.09.2026 / 22:05 ================
+## Objective
+- (Completed) Die llama.cpp-Migration als detaillierte, dokumentierte Hybridarchitektur planen.
+- (Completed) Die drei lokalen `llama.exe`-Fundstellen prüfen und die eindeutig identifizierte Vulkan-Installation entfernen.
+- (Active) Vor der Implementierung die Registry-/Preset-Schnittstelle und den GLM-Testabschluss vorbereiten.
+
+## Important Details
+- **Architecture decision:** `model_registry.yaml` bleibt die fachliche Quelle für Modellidentität, GGUF-/Architekturmetadaten, Blacklists, Blueprints, Sampling je Benchmarkkategorie, Provenienz und Validierungsstatus. llama.cpp-Argumente sowie optionale `preset.ini`-Dateien werden daraus generiert und nicht parallel manuell gepflegt.
+- **Preset boundary:** Die aktuelle llama.cpp-Dokumentation beschreibt `preset.ini` als Runtime-/Routerkonfiguration. Für den geplanten Einzelprozess pro Modell sind explizite Startargumente beziehungsweise ein generiertes Argumentmanifest zunächst deterministischer; `--models-preset` wird separat als Routeroption geprüft.
+- **Installation cleanup:** Das WinGet-Paket `ggml.llamacpp` wurde als `llama-b11046-bin-win-vulkan-x64.zip` identifiziert und mit `winget uninstall --id ggml.llamacpp --exact --silent` entfernt. Der Pfad unter `C:\Program Files\llama.cpp` mit `ggml-cuda.dll`, Build 10964, bleibt Produktionspfad.
+- **Remaining llama.exe:** `C:\Users\pskra\AppData\Local\Microsoft\WindowsApps\llama.exe` bleibt vorerst unfreigegeben, weil es eine separate GUI/CLI-Bündelung Build 11046 ist und Backend/Lifecycle noch nicht unabhängig belegt sind. Der Provider soll nie von PATH-Reihenfolge abhängen.
+- **Technical nuance:** Vulkan kann grundsätzlich NVIDIA-Hardware über den Vulkan-Treiber nutzen, ist aber nicht der für dieses Projekt gewünschte CUDA-Backendpfad. Deshalb wurde die Vulkan-Distribution entfernt, ohne die WindowsApps-Installation ungeprüft zu löschen.
+
+## Work State
+### Completed / Active / Blocked
+- Completed: Migrationsphasen A–E, Verantwortungsmatrix, Exportstrategie, Installations-/PATH-Policy und Abnahmekriterien in `PLANUNG.md` ergänzt; CHANGELOG aktualisiert; WinGet-Vulkan-Paket entfernt; `where.exe llama.exe` zeigt nur noch WindowsApps und Program Files.
+- Active: Der SampleSize-5-Lauf bleibt unvollständig; GLM-Rohantwortdiagnose, Providerimplementierung und Exportpfad sind offen. Der Worktree enthält weiterhin uncommittete Code-, Registry-, Test- und Dokumentationsänderungen.
+- Blocked: Nichts technisch blockiert. Vor einer Umsetzung müssen die offenen GLM-Befunde und die konkrete Entscheidung „Einzelprozess-Argumentmanifest versus Router-Preset“ als Testspezifikation festgelegt werden.
+
+## Next Move
+1. GLM-Rohantwortpfad mit SampleSize 1 instrumentieren und den normalen Flash-/REAP-Unterschied sichern.
+2. Einen kleinen `registry_tool.py`-Exportentwurf für ein Modell erstellen, ohne Runner-Code zu ändern.
+3. Mit dem CUDA-`llama-server.exe` einen Einzelmodell-Lifecycle-Smoke inklusive Reasoning-Format, JSON-Schema und Logs durchführen.
+4. Danach Providergrenze und Exportvertrag implementieren; erst anschließend den fehlenden SampleSize-5-Lauf auf dem neuen Backend starten.
+5. Vor Commit/Push Scope, staged Diff und die verpflichtenden Hooks prüfen.
+
+## Relevant Files
+- `PLANUNG.md`: Hybridarchitektur, Installationsbereinigung, PATH-Policy, Migrationsphasen und Abnahmekriterien.
+- `CHANGELOG.md`: Eintrag `llama.cpp-Preset-Grenze und Vulkan-Installation bereinigt`.
+- `src/providers/`: Zielort für den neuen direkten llama.cpp-Provider; noch nicht implementiert.
+- `doc-git/model_registry.yaml`: fachliche Registry-Quelle, nicht durch eine Runtime-INI zu ersetzen.
+
+=============== Compaction 21.09.2026 / direct llama.cpp provider ================
+## Objective
+- (Completed) Die erste produktive Provider-Schnittstelle für direkte llama.cpp-
+  Benchmarks implementieren, ohne den pausierten LM-Studio-SampleSize-5-Lauf
+  fortzusetzen.
+- (Completed) Start, Readiness, OpenAI-kompatible Inferenz, Modellauflistung und
+  Stop über `C:\Program Files\llama.cpp\llama-server.exe` integrieren.
+- (Active) Vollständige Pipeline-Smokes und der spätere Mehrmodelllauf bleiben
+  nach der Backend-Integration offen.
+
+## Important Details
+- `LLM_PROVIDER=llama_cpp` bzw. `run_benchmarks.py --provider llama_cpp`
+  aktiviert `src/providers/llama_cpp_provider.py`. Standardmäßig wird die
+  CUDA-Binary unter `C:\Program Files\llama.cpp\llama-server.exe` verwendet;
+  PATH und die WindowsApps-GUI werden nicht verwendet.
+- `LLAMA_CPP_SERVER_EXE`, `LLAMA_CPP_API_BASE`, `LLAMA_CPP_MODEL_ROOT`,
+  `LLAMA_CPP_LOG_DIR`, `LLAMA_CPP_REASONING_FORMAT` und
+  `LLAMA_CPP_MAX_PARALLEL` sind explizite Providerkonfigurationen. Der Provider
+  beendet ausschließlich den Prozess, den er selbst gestartet hat; ein fremder
+  Server auf dem Zielport wird als Konflikt gemeldet.
+- `model_registry.yaml` bleibt die fachliche Quelle. `context_length`, K-/V-
+  Cache, Unified KV, Jinja, GPU-Layer, Batch-/Reasoning-Werte und
+  `--reasoning-format` werden provider-spezifisch zu llama.cpp-Argumenten
+  abgeleitet. Die Pipelines beziehen den Endpoint dynamisch über
+  `get_api_base()`; `API_BASE` bleibt nur als Kompatibilitätsalias bestehen.
+- Der lokale Resolver erkennt jetzt auch Root-level-Hugging-Face-Snapshots im
+  Schema `models--publisher--model/snapshots/<revision>/*.gguf`.
+- Echter CUDA-Server-Smoke am 21.09.2026 mit dem lokalen
+  `gpt-oss-20b-MXFP4.gguf` war erfolgreich: Provider-Start, Modellladung,
+  `/health`, `/v1/models`, Chat-Completions und kontrolliertes Stoppen. Log:
+  `ergebnisse/llama-cpp-smoke-20260921/llama-server_ggml-org_gpt-oss-20b-GGUF_mxfp4.log`.
+
+## Work State
+### Completed / Active / Blocked
+- Completed: Provider, Registry-Runtime-Mapping, Runner-Provideroptionen,
+  Snapshot-Resolver, Provider-/Registry-/Runner-Regressionen, Registry-
+  Validierung und echter Server-Smoke.
+- Verification: Ruff und 142 fokussierte Tests bestanden; Registry
+  `validate --ci` meldet 0 blockierende Probleme und 0 Hinweise.
+- Known unrelated/pre-existing failure: vollständige Suite 1004/1005 grün;
+  `tests/test_benchmark_config.py::TestRegistryBackedSampling::test_per_category_row_glm_4_7`
+  erwartet noch Temperatur `1.0`, während die bereits geänderte GLM-Registry
+  `0.7` liefert.
+- Blocked: Nichts technisch blockiert. Der eigentliche Benchmarklauf wird auf
+  ausdrückliche Fortsetzung nach dem Backend-Abschluss verschoben.
+
+## Next Move
+1. Mit einem festen Registry-Modell je Pipeline einen SampleSize-1-Smoke auf
+   llama.cpp ausführen und stdout/stderr/Serverlog getrennt archivieren.
+2. GLM-4.7 mit `auto`, `none`, `deepseek` und `deepseek-legacy` sowie Streaming
+   und Nicht-Streaming vergleichen.
+3. `llama-bench.exe` als technischen Preflight ergänzen und danach den
+   sequenziellen Mehrmodell-Benchmarklauf starten.
+4. Erst danach den pausierten LM-Studio-Lauf bzw. eine Vergleichsmessung
+   wieder aufnehmen.
+
+=============== Compaction 21.09.2026 / llama.cpp smoke and GGUF cache layout ================
+## Ergebnis
+- Der technische `llama-bench.exe`-Preflight mit
+  `thebloke/em_german_leo_mistral@q4_k_m` ist abgeschlossen. Build 11081
+  meldete CUDA und die RTX 5060 Ti mit 16 283 MiB VRAM.
+- Der direkte Provider-Smoke mit SampleSize 1 wurde für DS1000, HumanEval+,
+  ARC-Challenge und Agentic abgeschlossen. Die vier Pipelines erreichten den
+  Server über `127.0.0.1:18080`, erhielten Antworten und wurden kontrolliert
+  beendet. Die Einzelscores waren 0; daraus wird keine Qualitätsaussage
+  abgeleitet.
+- Die geforderten Laufdateien liegen getrennt unter
+  `ergebnisse/llama-cpp-pipeline-smoke-20260921/`: Runner-stdout/stderr,
+  llama-bench-Ausgaben und llama-server-Log.
+
+## GGUF-Ablagebefund
+- Der Resolver erkennt normale Publisher-/Modellordner sowie den in der
+  llama-GUI verwendeten HF-Cache `models--publisher--model/snapshots/<revision>`
+  direkt aus den vorhandenen `*.gguf`-Dateien.
+- Die GUI muss ein Verzeichnis nicht anzeigen; der direkte Provider benötigt
+  nur den aufgelösten lokalen Dateipfad und nutzt keine Router-Autodownloads.
+- Das getestete gpt-oss-20b-Modell war zum Laufbeginn noch über die GUI als
+  `unloaded` registriert. Es wurde nicht vom Benchmarkprovider geladen.
+
+## Offene Befunde
+- llama.cpp protokollierte wiederholt `Failed to initialize samplers` und
+  `Unexpected empty grammar stack after accepting piece` für Structured Output.
+  Die Testpipelines konnten danach normale Antworten verarbeiten. Vor GLM-
+  Tests muss der Structured-Output-Vertrag pro Modell/Template geklärt werden.
+- Der sequenzielle Mehrmodelllauf und der GLM-Reasoning-Format-A/B-Test sind
+  weiterhin offen.
+
+=============== Compaction 22.09.2026 / Structured Output and preset verification ===============
+## Ergebnis
+- Der llama.cpp-Structured-Outputpfad ist providerabhängig korrigiert. LM
+  Studio verwendet weiterhin `json_schema`; llama.cpp erzwingt bei einer
+  nicht expliziten Policy keine Grammatik, nutzt bei einem expliziten Profil
+  `json_object` und deaktiviert Structured Output bei
+  `reasoning-format=none`.
+- Die fokussierten Tests für Registry, Provider, Resolver und Custom-Benchmark
+  bestanden mit 299 Tests. `registry_tool.py validate --ci` meldete 0
+  blockierende Probleme und 0 Hinweise. Die vollständige Ruff-Prüfung der
+  betroffenen Testdatei meldet weiterhin bereits vorhandene Stilprobleme in
+  `tests/test_registry_tool.py`; die geänderten Produktionsdateien sind sauber.
+- GLM-4.7-Flash Q3_K_S wurde nicht gestreamt mit `auto`, `none`, `deepseek`
+  und `deepseek-legacy` geprüft. Alle vier Läufe beendeten sich erfolgreich,
+  ohne Grammar-/Samplerfehler; Taskstatus waren `json_ok`, `fenced`, `json_ok`,
+  `json_ok`. `reasoning_format: deepseek` ist für die drei GLM-4.7-
+  `deepseek2`-Registryeinträge gesetzt. GLM-4.6V bleibt getrennt.
+- Ein sequenzieller direkter Lauf wechselte auf demselben Port zwischen
+  `thebloke/em_german_leo_mistral@q4_k_m`,
+  `unsloth/glm-4.7-flash@q3_k_s` und `qwen/qwen3-14b@q6_k`. Jeder Wechsel
+  entlud das vorige Modell. Runner-stdout/stderr und drei Serverlogs liegen
+  unter `ergebnisse/llama-cpp-multimodel-sequential-20260922/`.
+- `registry_tool.py export-llama-preset` erzeugte unter
+  `ergebnisse/llama-cpp-generated/preset.ini` 63 lokale Modellsektionen und
+  meldete vier Einträge ohne lokale GGUF-Datei. Das Preset ist ein abgeleitetes
+  Artefakt; `model_registry.yaml` bleibt die fachliche Quelle. Ein Router-Smoke
+  mit `--models-preset` akzeptierte alle 63 Sektionen und listete sie über
+  `/v1/models`, ohne ein Modell zu laden.
+
+## Offene Punkte
+- Der Streaming-Vergleich für GLM ist noch nicht durchgeführt; der produktive
+  GLM-Benchmarkpfad bleibt bewusst nicht gestreamt.
+- Ein separates llama.cpp-Argumentmanifest mit Registry-Hash, Build und
+  Zeitstempel ist noch offen. Das generierte `preset.ini` ist der erste
+  funktionale Exportpfad.
+- Der pausierte SampleSize-5-Gesamtlauf wird erst nach Abschluss der Migration
+  wieder aufgenommen.
+
+=============== Compaction 22.09.2026 / 10:50 / config hierarchy and sampling aliases ================
+## Objective
+- (Current) Direkte llama.cpp-Migration mit reproduzierbarer Konfigurations-
+  und Registry-Grenze fortführen.
+- (Completed) Sampling-Alias-Erkennung, GLM-4.7-Policy, Preset-Merge und
+  Umgebungsvariablen-Smoke dokumentiert und verifiziert.
+
+## Important Details
+- **Konfigurationsentscheidung:** Eine globale `config.ini` ist für getestete
+  Hardware-Baselines sinnvoll. Die effektive Reihenfolge ist eingebaute
+  Defaults, globale `config.ini`, `LLAMA_ARG_*`, Preset-`[*]`,
+  modellbezogene Preset-Sektion und äußere CLI-Argumente. Die CLI gewinnt bei
+  gleichnamigen Werten; Sampling und Request-Parameter bleiben pro Benchmark-
+  Request steuerbar.
+- **Pfadentscheidung:** Auf diesem System ist `%APPDATA%` gleich
+  `C:\Users\pskra\AppData\Roaming`; die automatische globale Datei wäre
+  `AppData\Roaming\llama.cpp\config.ini`. Das portable
+  `C:\Users\pskra\.config\llama.cpp\preset.ini` bleibt ein explizit über
+  `LLAMA_ARG_MODELS_PRESET` ausgewähltes Router-Preset. Die GUI-Logs unter
+  `AppData\Local\Llama\logs` sind davon unabhängig.
+- **Sampling:** `Terminal Bench`/`SWE-bench Verified` werden als Coding,
+  `τ²-Bench` als Agentic erkannt. Nicht genannte Werte werden nicht erfunden;
+  der Runner ergänzt nur Kategorie-Defaults. GLM-4.7 normal nutzt damit
+  Coding/Math `0.7/1.0` und Agentic `temperature=0`.
+- **Preset-Smoke:** `llama-server.exe` fand über die korrigierte
+  Umgebungsvariable 65 Modelle einschließlich `gpt-oss-20b` und GLM-4.7.
+  `mmap` wurde aus dem aktiven Preset entfernt, weil der aktuelle Router-
+  Presetparser diesen Schlüssel ablehnt; die Sicherung liegt als
+  `preset.ini.bak-20260922` vor.
+
+## Work State
+### Completed / Active / Blocked
+- Completed: 160 fokussierte Tests, `validate --ci` ohne blockierende Probleme,
+  Ruff für die geänderten Produktionspfade sauber.
+- Active: direkte Provider-Migration und Konfigurationsmanifest weiterführen.
+- Blocked/deferred: pausierter SampleSize-5-Lauf bleibt bis zum Abschluss der
+  Backend-Migration zurückgestellt; GLM-REAP-Sampling bleibt wegen Quellenkonflikt
+  separat ungeklärt.
+
+## Next Move
+1. Hardware-Baseline für `AppData\Roaming\llama.cpp\config.ini` festlegen,
+   ohne modellabhängige Registrywerte zu duplizieren.
+2. Direkten Provider gegen diese Hierarchie mit expliziten effektiven
+   Startargumenten und Logs prüfen.
+3. Danach SampleSize-5-Lauf und verbleibende GLM-/Streaming-Vergleiche planen.
+
+## Relevant Files
+- `src/sampling_research.py`: Benchmark-Aliase und partielle Samplingprofile.
+- `src/benchmark_config.py`: Fallback für offiziell nicht angegebene Gegenwerte.
+- `doc-git/model_registry.yaml`: bestätigte GLM-4.7-Basispolicy.
+- `src/registry_tool.py`: llama.cpp-Preset-Export und idempotentes Merge.
+- `PLANUNG.md`, `CHANGELOG.md`: Konfigurationshierarchie und Verifikation.

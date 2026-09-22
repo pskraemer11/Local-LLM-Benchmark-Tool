@@ -12,6 +12,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import model_manager
+from providers.llama_cpp_provider import LlamaCppProvider
 from providers.lmstudio_provider import LMStudioProvider
 from providers.openai_compat_provider import OpenAICompatProvider
 from providers.tabbyapi_provider import TabbyAPIProvider
@@ -25,6 +26,21 @@ def test_provider_factory_selects_explicit_provider(monkeypatch: pytest.MonkeyPa
     monkeypatch.setenv("LLM_API_BASE", "http://127.0.0.1:5000/v1")
     monkeypatch.setenv("LLM_PROVIDER", "tabbyapi")
     assert isinstance(model_manager.get_provider(), TabbyAPIProvider)
+
+
+def test_provider_factory_selects_direct_llama_cpp_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "llama_cpp")
+    monkeypatch.setenv("LLAMA_CPP_API_BASE", "http://127.0.0.1:18080/v1")
+    monkeypatch.setenv("LLAMA_CPP_SERVER_EXE", "C:/Program Files/llama.cpp/llama-server.exe")
+    monkeypatch.setattr(model_manager, "API_BASE", model_manager._configured_api_base())
+
+    provider = model_manager.get_provider()
+
+    assert isinstance(provider, LlamaCppProvider)
+    assert provider.base_url == "http://127.0.0.1:18080/v1"
+    assert provider.capabilities.can_load_models is True
+    assert provider.capabilities.can_unload_models is True
+    assert provider.capabilities.max_parallel == 1
 
 
 def test_provider_specific_api_base_aliases(monkeypatch: pytest.MonkeyPatch) -> None:

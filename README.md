@@ -2,8 +2,8 @@
 
 This repository measures how language models behave on a local Windows
 machine. It is designed for realistic constraints such as limited VRAM,
-quantized GGUF files, a local LM Studio server, and several
-OpenAI-compatible providers.
+quantized GGUF files, a local LM Studio server, a direct llama.cpp server,
+and several OpenAI-compatible providers.
 
 The project has two user-facing entry points:
 
@@ -30,6 +30,7 @@ blueprint_definitions.yaml ─────────┘
 
 model_registry.yaml + provider ──> run_benchmarks.py
                                       │
+                                      ├─> llama.cpp config/preset + GGUF
                                       ├─> load / readiness / unload
                                       ├─> Custom, EvalPlus, LM-Eval, Agentic
                                       └─> CSV results ──> consolidation
@@ -64,8 +65,10 @@ Prerequisites:
 
 - Windows 11 or a compatible Windows Python environment
 - Python 3.12
-- LM Studio for the native local provider
-- downloaded GGUF models in LM Studio
+- LM Studio for the native local provider and parameter-tuning workflow
+- downloaded GGUF models in a configured local model root
+- the CUDA build of llama.cpp for the direct local provider (optional when
+  using LM Studio only)
 - an NVIDIA GPU is recommended; the current reference machine has 16 GB VRAM
 - the dependencies required by the selected providers and benchmark suites
 
@@ -99,7 +102,8 @@ py -3.12 -m pytest -q
 
 The repository is easiest to use in five steps:
 
-1. Download or update a model in LM Studio.
+1. Download or update a model in LM Studio or another supported local model
+   store.
 2. Let registry_tool.py discover and classify it.
 3. Review the registry and prompt validation output.
 4. Run the selected benchmarks with run_benchmarks.py.
@@ -165,12 +169,111 @@ The fallback also covers installations that still expose the old location or
 use a Windows Junction.  The resolver canonicalizes paths and keeps the
 primary copy when the same model identity is visible through both locations.
 
+The direct llama.cpp provider does not use the llama GUI or router catalog to
+discover benchmark models.  It recursively resolves concrete local `*.gguf`
+files, so both of these layouts are supported:
+
+~~~text
+<root>\<publisher>\<model-folder>\<file>.gguf
+<root>\models--<publisher>--<model>\snapshots\<revision>\<file>.gguf
+<root>\hub\models--<publisher>--<model>\snapshots\<revision>\<file>.gguf
+~~~
+
+The llama.cpp GUI may display only models from its own catalog/cache and may
+therefore omit otherwise valid publisher directories.  That display is not a
+benchmark eligibility check.  The benchmark provider passes the resolved
+GGUF file directly to `llama-server.exe --model`; the file path, GGUF header,
+and registry match are authoritative.  For example, a file below
+`models--ggml-org--gpt-oss-20b-GGUF\snapshots\<revision>` is discovered even
+when the GUI does not list the surrounding directory.
+
 For an isolated or different installation, set `GGUF_MODEL_ROOT` to one
 directory.  The existing `UNSLOTH_MODEL_ROOT` and `LMSTUDIO_MODELS_DIR`
 variables remain supported as lower-priority compatibility overrides.  An
 explicit override scans only that directory; it does not silently add the
 default fallback.  The same resolution order is used by the registry tool,
 the local resolver, the benchmark runner, and the Unsloth provider.
+
+### llama.cpp configuration, presets, and Registry
+
+The direct production backend is the CUDA build at
+`C:\Program Files\llama.cpp\llama-server.exe`. The WindowsApps
+`llama.exe` wrapper and the llama desktop GUI are separate installations and
+are not the benchmark backend. The direct provider resolves a concrete GGUF
+file and starts `llama-server.exe`; it does not depend on the GUI model list.
+
+llama.cpp has two different configuration layers. The automatically loaded
+user configuration is:
+
+~~~text
+%APPDATA%\llama.cpp\config.ini
+C:\Users\<user>\AppData\Roaming\llama.cpp\config.ini
+~~~
+
+The system-wide counterpart is `%PROGRAMDATA%\llama.cpp\config.ini`. These
+`config.ini` files are appropriate for hardware-wide defaults, such as a GPU
+offload policy, context baseline, or conservative server defaults. They are
+not the project's model registry and should not contain benchmark scores or
+model identity metadata.
+
+The project-specific router preset is kept separately at:
+
+~~~text
+C:\Users\<user>\.config\llama.cpp\preset.ini
+~~~
+
+It is selected explicitly with `--models-preset` or
+`LLAMA_ARG_MODELS_PRESET`. The current generated file contains a global
+`[*]` section and model sections. The global section supplies defaults shared
+by the model sections; a named section supplies model-specific server
+options. The preset is a derived runtime catalog, not a replacement for
+`doc-git\model_registry.yaml`.
+
+For a normal standalone llama.cpp command, the effective order is:
+
+~~~text
+built-in defaults -> config.ini -> LLAMA_ARG_* environment variables -> CLI
+~~~
+
+For the router/preset path, the model-specific layers are added between the
+environment defaults and the outer command-line overrides:
+
+~~~text
+built-in defaults
+  -> config.ini
+  -> LLAMA_ARG_* environment variables
+  -> preset [*]
+  -> preset [model]
+  -> explicit outer CLI options
+  -> request-level API options
+~~~
+
+The exact preset precedence is handled by llama.cpp: named model options
+override `[*]`, and explicit outer CLI options have the highest priority.
+Sampling, structured output, seed, stop conditions, and reasoning format are
+request or model-policy decisions; they must not be inferred from a generic
+hardware `config.ini` default.
+
+The Registry remains the single source of truth for benchmark identity,
+context/KV policy, templates, reasoning behavior, and category-specific
+sampling evidence. `registry_tool.py` derives the llama.cpp preset from that
+source:
+
+~~~powershell
+py -3.12 .\src\registry_tool.py export-llama-preset "C:\Users\<user>\.config\llama.cpp\preset.ini" --merge-existing
+~~~
+
+The export preserves existing non-Registry sections and updates the derived
+Registry sections. Review the generated diff rather than editing those
+sections as the primary maintenance path. The current llama.cpp build rejects
+`mmap` in a models preset even though the corresponding CLI capability exists;
+that option is therefore kept out of the generated `[*]` section until the
+preset parser supports it.
+
+The separate GUI log directory
+`C:\Users\<user>\AppData\Local\Llama\logs` is not the automatic llama.cpp
+`config.ini` location. Server logs used for benchmark diagnostics are
+controlled by the direct provider's `LLAMA_CPP_LOG_DIR` setting.
 
 ### The important pipeline variants
 
@@ -440,6 +543,7 @@ registry_tool.py, inspect its diff, and then run validation.
 Select one provider per benchmark process with LLM_PROVIDER:
 
 - lmstudio
+- llama_cpp
 - tabbyapi
 - unsloth_server
 - an OpenAI-compatible provider
@@ -449,6 +553,14 @@ Common local API variables:
 ~~~powershell
 $env:LLM_PROVIDER = "lmstudio"
 $env:LMSTUDIO_API_BASE = "http://127.0.0.1:1234/v1"
+~~~
+
+For direct llama.cpp execution:
+
+~~~powershell
+$env:LLM_PROVIDER = "llama_cpp"
+$env:LLAMA_CPP_SERVER_EXE = "C:\Program Files\llama.cpp\llama-server.exe"
+$env:LLAMA_CPP_API_BASE = "http://127.0.0.1:8080/v1"
 ~~~
 
 The provider layer keeps model selection, load/unload, readiness checks, and
@@ -491,7 +603,7 @@ Benchmarks/
 │   ├── model_registry.py        Registry resolution and runtime derivation
 │   ├── benchmark_config.py      Filters, defaults, benchmark definitions
 │   ├── model_manager.py         Provider facade for model operations
-│   ├── providers/                LM Studio and OpenAI-compatible providers
+│   ├── providers/                LM Studio, llama.cpp, and API providers
 │   ├── custom_benchmark.py      DS1000 and CoderEval implementation
 │   ├── csv_writer.py            Uniform result output
 │   └── consolidate_results.py   Weighted summaries and comparisons

@@ -88,6 +88,55 @@ def test_research_prefers_direct_category_profiles() -> None:
     assert result["sampling"]["math"]["evidence_kind"] == "direct"
 
 
+def test_research_maps_named_benchmarks_and_preserves_partial_agentic_profile() -> None:
+    def fetcher(url: str, _timeout: float) -> str | None:
+        if url.endswith("/raw/main/README.md"):
+            return """
+            Default settings (most tasks): temperature 1.0, top-p 0.95, max new tokens 131072.
+            Terminal Bench and SWE-bench Verified settings: temperature 0.7, top-p 1.0, max new tokens 16384.
+            τ²-Bench settings: temperature 0, max new tokens 16384.
+            """
+        return None
+
+    result = research_sampling(
+        {"publisher": "zai-org", "modelKey": "zai-org/glm-4.7-flash"},
+        fetcher=fetcher,
+    )
+
+    assert result is not None
+    assert result["sampling"]["knowledge"]["temperature"] == 1.0
+    assert result["sampling"]["knowledge"]["top_p"] == 0.95
+    assert result["sampling"]["coding"]["temperature"] == 0.7
+    assert result["sampling"]["coding"]["top_p"] == 1.0
+    assert result["sampling"]["math"]["temperature"] == 0.7
+    assert result["sampling"]["math"]["top_p"] == 1.0
+    assert result["sampling"]["math"]["derived_from"] == "coding"
+    assert result["sampling"]["agentic"]["temperature"] == 0.0
+    assert "top_p" not in result["sampling"]["agentic"]
+    assert result["sampling"]["agentic"]["evidence_kind"] == "direct"
+
+
+def test_partial_registry_sampling_fills_only_omitted_pair_value(mocker) -> None:
+    mocker.patch.object(
+        __import__("benchmark_config"),
+        "_load_quant_registry",
+        return_value={
+            "zai-org/glm-4.7-flash@q3_k_s": {
+                "sampling": {
+                    "agentic": {"temperature": 0.0},
+                    "sampling_research_status": "confirmed",
+                }
+            }
+        },
+    )
+
+    from benchmark_config import get_model_config
+
+    config = get_model_config("zai-org/glm-4.7-flash", category="agentic")
+    assert (config["temperature"], config["top_p"]) == (0.0, 0.95)
+    assert config["_source"] == "registry-sampling"
+
+
 def test_research_separates_profiles_sharing_one_markdown_line() -> None:
     def fetcher(url: str, _timeout: float) -> str | None:
         if url.endswith("/raw/main/README.md"):

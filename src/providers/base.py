@@ -25,6 +25,7 @@ class ProviderCapabilities:
     can_report_current_model: bool = False
     supports_chat_completions: bool = True
     supports_completions: bool = True
+    max_parallel: int | None = None
 
 
 class ProviderError(RuntimeError):

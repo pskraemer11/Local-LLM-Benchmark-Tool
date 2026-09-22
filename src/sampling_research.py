@@ -24,12 +24,20 @@ SUPPORTED_FIELDS = ("temperature", "top_p", "top_k", "min_p", "presence_penalty"
 RESEARCH_STATUSES = ("confirmed", "unresolved", "conflict", "not_found")
 
 _CATEGORY_MARKERS: dict[str, re.Pattern[str]] = {
-    "coding": re.compile(r"(?i)\b(?:coding|code|programming|webdev|software engineering)\b"),
+    "coding": re.compile(
+        r"(?i)\b(?:coding|code|programming|webdev|software engineering|"
+        r"terminal\s+bench(?:mark)?|swe[- ]?bench(?:\s+verified)?|"
+        r"livecodebench|human[- ]?eval|mbpp|ds[- ]?1000)\b"
+    ),
     "knowledge": re.compile(r"(?i)\b(?:knowledge|factual|fact[- ]?based|question answering|qa)\b"),
     "agentic": re.compile(
-        r"(?i)\b(?:agentic|agent|tool[- ]use|function calling|instruction following|reasoning tasks)\b"
+        r"(?i)(?<![\w])(?:agentic|agent|tool[- ]use|function calling|"
+        r"instruction following|reasoning tasks|τ\s*[²2]\s*[- ]?bench|tau[- ]?bench)(?![\w])"
     ),
-    "math": re.compile(r"(?i)\b(?:math|mathematics|gsm8k|aime|hmmt|math problems?)\b"),
+    "math": re.compile(
+        r"(?i)\b(?:math|mathematics|gsm8k|aime|hmmt|math problems?|"
+        r"mathlib|minerva(?:\s+math)?|math[- ]?500)\b"
+    ),
 }
 _PROFILE_MODE_MARKER = re.compile(
     r"(?i)\b(?:thinking mode|reasoning mode|enable_thinking\s*[:=]\s*(?:true|false)|"
@@ -763,7 +771,12 @@ def _resolve_profile(
             values[field] = int(candidate.value) if field == "top_k" else candidate.value
             evidence[field] = {"url": candidate.url, "excerpt": candidate.excerpt}
             cue = max(cue, candidate.cue)
-        if not conflict and "temperature" in values and "top_p" in values:
+        # Keep a partial category profile. Manufacturer footnotes often give
+        # only the parameter they changed, e.g. ``tau^2-Bench: temperature 0``
+        # while inheriting the general top-p. The caller can then preserve the
+        # explicit value and apply the normal category fallback for the missing
+        # field instead of discarding the whole profile.
+        if not conflict and values:
             viable.append((priority, cue + len(values), values, evidence))
 
     if not viable:
@@ -998,7 +1011,7 @@ def research_sampling_report(
                 "sampling_research_status": "conflict",
                 "sampling_sources": source_urls,
             }
-        if "temperature" in values and "top_p" in values:
+        if values:
             sampling[category] = dict(values)
             evidence.extend(_source_evidence(category, values, profile_evidence))
             category_status[category] = "direct"

@@ -49,6 +49,7 @@ def test_help_describes_pipeline_modes() -> None:
     assert "Fill only missing or zero context_length values" in help_text
     assert "`pipeline full` runs prompt assembly as a preview only" in help_text
     assert "assemble_blueprint.py assemble" in help_text
+    assert "export-llama-preset" in help_text
 
 
 def test_fix_ctx_only_fills_missing_or_zero_values(monkeypatch) -> None:
@@ -68,6 +69,59 @@ def test_fix_ctx_only_fills_missing_or_zero_values(monkeypatch) -> None:
     assert registry["publisher/zero"]["context_length"] == expected
     assert registry["publisher/existing"]["context_length"] == 12345
     assert saved["publisher/existing"]["context_length"] == 12345
+
+
+def test_build_llama_preset_uses_local_gguf_and_provider_runtime(tmp_path: Path, monkeypatch) -> None:
+    models_root = tmp_path / "models"
+    gguf = models_root / "publisher" / "model" / "model-q4_k_m.gguf"
+    gguf.parent.mkdir(parents=True)
+    gguf.write_bytes(b"fixture")
+    monkeypatch.setattr(rt, "MODELS_CACHE", models_root)
+    registry = {
+        "publisher/model@q4_k_m": {
+            "context_length": 32768,
+            "k_cache": "q8_0",
+            "v_cache": "q8_0",
+            "useUnifiedKvCache": True,
+            "reasoning_format": "deepseek",
+            "batch_size": 512,
+        },
+        "publisher/missing@q4_k_m": {},
+    }
+
+    content, skipped = rt.build_llama_preset(registry)
+
+    assert "[publisher/model@q4_k_m]" in content
+    assert f"model = {gguf}" in content
+    assert "ctx-size = 32768" in content
+    assert "cache-type-k = q8_0" in content
+    assert "kv-unified = true" in content
+    assert "reasoning-format = deepseek" in content
+    assert skipped == ["publisher/missing@q4_k_m"]
+
+
+def test_merge_llama_preset_preserves_custom_sections_and_is_idempotent() -> None:
+    existing = """[*]
+parallel = 4
+
+[gpt-oss-20b]
+hf = ggml-org/gpt-oss-20b-GGUF:MXFP4
+"""
+    generated = """# generated
+
+[publisher/model@q4_k_m]
+model = D:\\models\\model.gguf
+ctx-size = 32768
+"""
+
+    merged = rt.merge_llama_preset(existing, generated)
+    merged_again = rt.merge_llama_preset(merged, generated)
+
+    assert "parallel = 4" in merged
+    assert "hf = ggml-org/gpt-oss-20b-GGUF:MXFP4" in merged
+    assert merged.count("[publisher/model@q4_k_m]") == 1
+    assert merged_again.count("[publisher/model@q4_k_m]") == 1
+    assert merged_again.count("[gpt-oss-20b]") == 1
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -1480,6 +1534,10 @@ class TestGlmPatchConfig:
                     "value": {"enabled": enabled, "startString": " thinking", "endString": " response"},
                 }
             )
+        fields.append({
+            "key": "llm.prediction.reasoning.budgetTokens",
+            "value": {"checked": True, "value": 4096},
+        })
         return {"operation": {"fields": fields}}
 
     def _write(self, tmp_path, data) -> Path:
@@ -1495,7 +1553,7 @@ class TestGlmPatchConfig:
         with patch.object(rt, "_pre_backup_path", return_value=str(tmp_path / "backup.json")):
             changed, actions, _ = rt.glm_patch_config(str(p))
         assert changed is True
-        assert "reasoning.parsing enabled" in actions
+        assert "reasoning.parsing synchronized" in actions
         assert self._parsing(json.loads(p.read_text(encoding="utf-8")))["value"]["enabled"] is True
 
     def test_adds_parsing_when_missing(self, tmp_path: Path) -> None:
@@ -1503,7 +1561,7 @@ class TestGlmPatchConfig:
         with patch.object(rt, "_pre_backup_path", return_value=str(tmp_path / "backup.json")):
             changed, actions, _ = rt.glm_patch_config(str(p))
         assert changed is True
-        assert "reasoning.parsing added (enabled)" in actions
+        assert "reasoning.parsing added" in actions
         rp = self._parsing(json.loads(p.read_text(encoding="utf-8")))
         assert rp["value"]["enabled"] is True
         assert rp["value"]["startString"] == " thinking"
@@ -1516,13 +1574,13 @@ class TestGlmPatchConfig:
         assert changed is False
         assert actions == []
 
-    def test_removes_structured_field(self, tmp_path: Path) -> None:
+    def test_preserves_gui_structured_field(self, tmp_path: Path) -> None:
         p = self._write(tmp_path, self._config(enabled=False))
         with patch.object(rt, "_pre_backup_path", return_value=str(tmp_path / "backup.json")):
             rt.glm_patch_config(str(p))
         data = json.loads(p.read_text(encoding="utf-8"))
         keys = [f["key"] for f in data["operation"]["fields"]]
-        assert "llm.prediction.structured" not in keys
+        assert "llm.prediction.structured" in keys
 
     def test_dry_run_writes_nothing(self, tmp_path: Path) -> None:
         p = self._write(tmp_path, self._config(enabled=False))

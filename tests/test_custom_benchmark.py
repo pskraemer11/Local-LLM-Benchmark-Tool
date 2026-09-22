@@ -180,6 +180,12 @@ class TestExtractCode:
         assert "def foo():" in result
         assert "return 42" in result
 
+    def test_extracts_glm_native_code_object(self):
+        text = json.dumps({"name": "code", "content": "def foo():\n    return 42"})
+        result = extract_code(text, is_structured=True)
+        assert "def foo():" in result
+        assert "return 42" in result
+
     def test_structured_falls_through_to_text(self):
         # Invalid JSON → fall through to regex fallback
         text = "```python\nx = 1\n```"

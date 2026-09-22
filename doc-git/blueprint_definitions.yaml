@@ -50,6 +50,37 @@ blueprints:
       - coding_principles
       - safety_block
       - output_style_technical
+  glm_reasoning_coding:
+    description: GLM-4.7 Flash/REAP Forced-Thinking-Coding (DeepSeek2) mit API-Structured-Output
+    role: You are an expert software engineer with strong coding skills.
+    role_template: You are {name}, a {arch} model{params_label} by {publisher}, specialized
+      in {capabilities}{type_label}.
+    modules:
+      - coding_principles
+      - safety_block
+      - output_style_technical
+    reasoning_parsing:
+      enabled: true
+      startString: " thinking"
+      endString: " response"
+    benchmark_runtime:
+      structured_output: true
+      streaming: false
+      prompt_suffix: none
+      max_tokens: 8192
+      reasoning_budget_tokens: 4096
+  glm4v_reasoning:
+    description: GLM-4.6V Reasoning (glm4 Vision) – getrennt von GLM-4.7 Flash
+    role: You are GLM-4.6V, an AI assistant with visual and reasoning capabilities.
+    role_template: You are {name}, a {arch} model{params_label} by {publisher}, optimized
+      for {capabilities}{type_label}.
+    modules:
+      - safety_block
+      - output_style_default
+    reasoning_parsing:
+      enabled: true
+      startString: " thinking"
+      endString: " response"
   gemma_assistant:
     description: Gemma-4 spezifisch (Standard)
     role: You are Gemma-4, a helpful AI assistant.
@@ -107,6 +138,11 @@ blueprints:
     custom_template: true
     template: gpt-oss-20b_harmony.jinja
     stop_strings: ["<|return|>"]
+    benchmark_runtime:
+      structured_output: false
+      streaming: true
+      max_tokens: 4096
+      max_thinking_tokens: 4096
   magistral_reasoning:
     description: Magistral [THINK]-Format (Reasoning + Coding)
     role: You are Magistral, an AI assistant.
