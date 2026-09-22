@@ -6,6 +6,14 @@ Hinweise:
 - Stand: 06.08.2026 — umgezogen aus §20 der `doc-git/Architecture, Flow & ChangeLog_en.md` (dort nur noch Verweis).
 - Commit-Hashes beziehen sich auf `main`.
 
+## Direkter llama.cpp-Backendstand als Zwischencommit (22.09.2026)
+
+| Date | Change |
+| ---- | ------ |
+| 22.09. | `src/providers/llama_cpp_provider.py`, `src/model_manager.py`, `src/run_benchmarks.py`, `src/providers/` | **commit `f5d37523`:** Zwischenstand der direkten llama.cpp-Migration mit CUDA-Serverpfad, Provider-Lifecycle, GGUF-Auflösung, Registry-Runtimewerten, Reasoning-Format und Capability-Grundlage gesichert. |
+| 22.09. | `src/registry_tool.py`, `doc-git/model_registry.yaml`, `PLANUNG.md` | **registry:** Registry-/Preset-Export, GLM-/Sampling-Policy und Konfigurationshierarchie in den gesicherten Stand aufgenommen. |
+| 22.09. | `tests/`, `.githooks/` | **verification:** Pre-Commit-Hook erfolgreich; Registry-Validierung ohne blockierende Probleme und 101 fokussierte Registry-Tests bestanden. Siehe Compaction 22.09.2026 / 12:00. |
+
 ## Konfigurationshierarchie und Sampling-Alias-Erkennung (22.09.2026)
 
 | Date | Change |

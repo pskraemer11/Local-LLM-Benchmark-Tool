@@ -1312,3 +1312,40 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 - `doc-git/model_registry.yaml`: bestätigte GLM-4.7-Basispolicy.
 - `src/registry_tool.py`: llama.cpp-Preset-Export und idempotentes Merge.
 - `PLANUNG.md`, `CHANGELOG.md`: Konfigurationshierarchie und Verifikation.
+
+=============== Compaction 22.09.2026 / 12:00 / intermediate llama.cpp migration commit ================
+## Objective
+- (Current) Die direkte llama.cpp-Migration nach dem Zwischencommit mit den
+  Provider-/Client-, Parametervertrags- und Verifikationspunkten fortführen.
+- (Completed) Den bisherigen Registry-, Blueprint-, Provider-, Runner-, Test-
+  und Dokumentationsstand als Commit `f5d37523` gesichert.
+
+## Important Details
+- **Produktionsbackend:** Ausschließlich `C:\Program Files\llama.cpp\llama-server.exe`;
+  die gelöschte WindowsApps-Installation ist kein weiterer Prüfpfad.
+- **Architektur:** `model_registry.yaml` bleibt fachliche Quelle; `config.ini`,
+  Preset und Argumentmanifest sind abgeleitete bzw. allgemeine llama.cpp-
+  Laufzeitkonfiguration.
+- **Nächster Codeblock:** Globale `API_BASE`-Kompatibilität aus den normalen
+  Runnerpfaden zurückdrängen, expliziten Provider-/Client-Kontext und
+  capability-gesteuerte Parallelität für alle Pipelines durchsetzen.
+
+## Work State
+### Completed / Active / Blocked
+- Completed: Zwischencommit mit bestandenem Pre-Commit-Hook, Registry-Validierung
+  ohne blockierende Probleme und 101 fokussierten Registry-Tests.
+- Active: Parametervertrag, Argumentmanifest und vollständige Providergrenze.
+- Deferred: SampleSize-5-Gesamtlauf bis zur Migration; LM-Studio-Vergleich als
+  separater Kompatibilitätstest.
+
+## Next Move
+1. Provider-/Client-Kontext und Capability-Grenze in Runner und Pipelines
+   vervollständigen.
+2. Registry-Runtime in validiertes llama.cpp-Argumentmanifest übersetzen.
+3. Unit-, Contract- und echte CUDA-Smoke-Tests für die vier Pipelines ausführen.
+
+## Relevant Files
+- `src/run_benchmarks.py`, `src/model_manager.py`, `src/providers/base.py`: Providergrenze.
+- `src/providers/llama_cpp_provider.py`: direkter Server-Lifecycle und Argumente.
+- `src/registry_tool.py`, `src/model_registry.py`: Runtime-Export und Registryquelle.
+- `PLANUNG.md`: Phasen A bis E und offene Abnahmepunkte.
