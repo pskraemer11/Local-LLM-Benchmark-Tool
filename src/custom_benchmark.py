@@ -198,11 +198,10 @@ def _can_use_structured_output(model_identifier: str | None) -> bool:
 
     Disabled when structured output is globally off (--no-structured-output),
     when thinking mode is enabled, or for Mamba architectures which reject
-    constrained decoding. GLM-4.7 is an explicit exception to the general
-    reasoning-model rule: its native template supports forced thinking and
-    JSON-schema output, while LM Studio separates ``reasoning_content`` from
-    the structured final ``content``. Other registry-marked reasoning models
-    remain disabled. Also disabled for Codestral-22B whose grammar
+    constrained decoding. GLM-4.7 remains capable of an explicitly requested
+    JSON response, but capability is not a default policy: its blueprint does
+    not enable Structured Output implicitly. Other registry-marked reasoning
+    models remain disabled. Also disabled for Codestral-22B whose grammar
     generation fails server-side ("Failed to initialize samplers:
     Unexpected empty grammar stack after accepting piece", Server-Log
     03.08.2026, Code-Review_2026-08-03.md F5). Falls back to regex-based
@@ -211,9 +210,9 @@ def _can_use_structured_output(model_identifier: str | None) -> bool:
     if not HAS_STRUCTURED_OUTPUT:
         return False
     is_glm_47 = bool(model_identifier and "glm-4.7" in model_identifier.lower())
-    # GLM-4.7's blueprint explicitly enables structured output even when the
-    # launcher uses --thinking. Its native template separates the reasoning
-    # channel from the final JSON content.
+    # GLM-4.7 may use Structured Output when a caller explicitly requests it.
+    # This helper answers capability only; it must not turn a missing runtime
+    # policy into a request-level response_format.
     if IS_THINKING_MODE and not is_glm_47:
         return False
     if model_identifier and _model_supports_reasoning(model_identifier) is True and not is_glm_47:
@@ -231,9 +230,9 @@ def _structured_output_format(structured_policy: Any) -> dict[str, Any] | None:
     LM Studio accepts the project's strict ``json_schema`` contract.  The
     direct llama.cpp server currently has a fragile grammar path for that
     schema (notably with Mistral-family templates), while its generic JSON
-    mode is stable.  Therefore llama.cpp uses ``json_object`` only for an
-    explicit model policy such as GLM-4.7; an unspecified policy disables
-    constrained decoding instead of silently enabling it for every model.
+    mode is stable. Therefore llama.cpp uses ``json_object`` only for an
+    explicit model policy such as GLM-4.7; LM Studio's established fallback
+    remains available for non-GLM models.
     """
     if not HAS_STRUCTURED_OUTPUT or structured_policy is False:
         return None
@@ -1733,9 +1732,10 @@ def run_task(task: dict[str, Any], task_type: str, model_identifier: str | None 
     no_system_msg = model_config.get("no_system_msg", False)
     # GLM-4.7's native DeepSeek2 template already separates forced thinking
     # from the final channel. Adding the generic thinking suffix here makes
-    # that model repeat the prompt or emit reasoning only; JSON-schema output
-    # supplies the code-only contract instead. GLM-4.6V (glm4 architecture)
-    # does not match this family and keeps the existing prompt policy.
+    # that model repeat the prompt or emit reasoning only. Structured Output,
+    # when needed, is supplied explicitly at request level. GLM-4.6V (glm4
+    # architecture) does not match this family and keeps the existing prompt
+    # policy.
     code_only = bool(model_config.get("enable_thinking")) and structured_policy != "native_channels"
     if isinstance(runtime, dict) and runtime.get("prompt_suffix") == "none":
         code_only = False
@@ -1847,13 +1847,13 @@ def _call_and_evaluate(full_prompt: str, generation_parameters: dict[str, Any], 
     into a complete TaskResult dict, or an error result when generation
     returned nothing.
     """
+    is_glm_47 = _is_glm_47_model(model_identifier)
     structured = _can_use_structured_output(model_identifier)
     if isinstance(structured_policy, bool):
         structured = structured_policy and HAS_STRUCTURED_OUTPUT
-    elif get_provider_name() == "llama_cpp":
-        # Structured output is opt-in for direct llama.cpp.  Generic models
-        # must not enter its schema grammar path accidentally; explicit
-        # profiles (currently GLM-4.7) are handled below with json_object.
+    elif get_provider_name() == "llama_cpp" or is_glm_47:
+        # Direct llama.cpp and GLM-4.7 require explicit request-level opt-in.
+        # Other LM Studio models retain the established strict-schema fallback.
         structured = False
     if get_provider_name() == "llama_cpp" and os.environ.get(
         "LLAMA_CPP_REASONING_FORMAT", "auto"
@@ -2438,7 +2438,7 @@ def _run_model_loop(models: list[dict[str, Any]], benchmarks: list[dict[str, Any
                 res, avg_s, avg_l, avg_t, cs = benchmark_model(
                     model_info, tasks, tt, bench["name"], monitor,
                     is_quiet_mode=non_interactive,
-                    num_parallel=4 if sample_size >= 10 else 1,
+                    num_parallel=1 if sample_size <= 5 else 4,
                 )
             except Exception as e:
                 error(f"Benchmark {bench['name']} completely failed: {e}")

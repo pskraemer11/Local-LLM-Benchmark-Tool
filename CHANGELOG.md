@@ -6,6 +6,42 @@ Hinweise:
 - Stand: 06.08.2026 — umgezogen aus §20 der `doc-git/Architecture, Flow & ChangeLog_en.md` (dort nur noch Verweis).
 - Commit-Hashes beziehen sich auf `main`.
 
+## Lokaler Commit-Checkpoint (22.09.2026)
+
+| Date | Change |
+| ---- | ------ |
+| 22.09. | `COMPACTIONS.md`, `CHANGELOG.md` | **WORKFLOW:** Compaction zum aktuellen llama.cpp-/Registry-/Qualitätsarbeitsstand ergänzt. Siehe „Compaction 22.09.2026 / Commit checkpoint“; dieser Checkpoint wird lokal committet, ohne Push. |
+
+## Validierungsregeln an Registry-Feldhoheit angepasst (22.09.2026)
+
+| Date | Change |
+| ---- | ------ |
+| 22.09. | `src/registry_tool.py`, `tests/test_registry_tool.py` | **HELP/TEST:** Workflow-Befehle und Datenquellen haben feste Spaltenausrichtung; die unnötige Sample-Size-Abkürzung entfällt. `--refresh-sampling` weist auf Websuche und mögliche längere Dauer hin. |
+| 22.09. | `src/registry_tool.py`, `tests/test_registry_tool.py`, `doc-git/model_registry.yaml` | **DOC/FIX:** Sampling-Hilfe beschreibt jetzt Kategorien, Evidenz, Status, Refresh-Befehle und die Grenze zu Benchmark-Läufen. Gemma APEX verweist auf das tatsächliche GGUF-Hub-Repo und das APEX-Projekt. Die dortigen 12,2-GB-Mini-Angaben werden nicht auf das lokale I-Mini übertragen; die Gemma-Karte nennt I-Mini mit 13 GB. |
+| 22.09. | `src/assemble_blueprint.py`, `src/registry_tool.py`, `tests/test_assemble_blueprint.py`, `tests/test_registry_tool.py`, `doc-git/model_registry.yaml` | **FIX/TEST:** Config-Matching erkennt `q2_g64` und `MINI`; Prism wird wieder korrekt zugeordnet. Millie ohne belastbare Quantisierung ist `@?`, Gemma APEX ist `@mini`. `sync-templates` lief fehlerfrei (0 Änderungen). Reeller LM-Studio-Load von Gemma APEX I Mini bei Kontext 16.384 erfolgreich (13,40 s; 12,54 GiB laut LMS; 13.630 MiB GPU belegt). Den vom Nutzer live bestätigten Wert `numExperts=36` per `sync-from-configs --write-experts` übernommen; `max_experts: 128` bleibt die Architekturgrenze. `validate --ci`: 0 Blocker, 0 Hinweise. |
+| 22.09. | `src/registry_tool.py`, `tests/test_registry_tool.py` | **FIX/TEST:** LM-Studio-Kontextabweichungen und fehlende lokale Configs bleiben sichtbar, blockieren aber weder die Registry-Validierung noch den direkten llama.cpp-Pfad. Fehlende Registry-Laufzeitwerte wie MoE-`experts` bleiben blockierend. `pipeline full` verwendet dieselbe Abgrenzung für seinen Drift-Exit und ergänzt fehlende Prompt-Templates. |
+| 22.09. | `src/registry_tool.py`, `tests/test_registry_tool.py` | **HELP:** `quarantine-missing [--dry-run]` dokumentiert Vorschau und Ausführung: fehlende GGUF-Modelle werden nicht gelöscht, ihre Configs verschoben und Registry-Einträge samt YAML-Backup entfernt; `pipeline full` führt nur die Vorschau aus. |
+| 22.09. | `README.md`, `doc-git/Architecture, Flow & ChangeLog_en.md` | **DOC/POLICY:** Registry-Kontext ist Benchmark-SSOT; LMS-Konfigurationen sind lokale Runtime-Artefakte. `pipeline full` synchronisiert nur fehlende/leere `promptTemplate`-Felder und lässt System-Prompt-Assembly im Preview-Modus. |
+
+## Aktueller llama.cpp-Migrationsstatus und Millie-mmproj-Filter (22.09.2026)
+
+| Date | Change |
+| ---- | ------ |
+| 22.09. | `src/benchmark_config.py`, `src/registry_tool.py`, `src/providers/lmstudio_provider.py`, `tests/test_registry_tool.py` | **FIX/TEST:** LM-Studio-Inventare prüfen Auxiliary-Dateien wie `mmproj` über alle verfügbaren Identitätsfelder. Der Millie-Projektor wird nicht mehr als eigenständiges LLM behandelt; unbekannte Quantisierung wird mit `@?` als Platzhalter gematcht. |
+| 22.09. | `doc-git/model_registry.yaml`, `README.md`, `doc-git/Architecture, Flow & ChangeLog_en.md` | **DOC/POLICY:** Millie-Hauptmodell, `experts: 64`, `max_experts: 256` und LM-Studios erforderliches `mmproj-`-Namenspräfix dokumentiert. Siehe Compaction 22.09.2026 / 18:58. |
+| 22.09. | `src/registry_tool.py`, `tests/test_registry_tool.py` | **FIX/TEST:** `export-llama-preset` überträgt Registry-Expertenwerte mit dem aus `architecture_family` abgeleiteten `override-kv`-Schlüssel, zum Beispiel `gpt-oss.expert_used_count=int:32`. Router-Preset-Smoke mit 71 Modellen und tatsächlichem GPT-OSS-Ladevorgang erfolgreich. |
+| 22.09. | `PLANUNG.md`, `COMPACTIONS.md` | **STATUS:** Offene Abnahmepunkte bleiben LM-Studio-/llama.cpp-Kompatibilität, GLM-Streaming, Fehler-/Warnungsanalyse, fachliche Qualitätsbaseline und der spätere direkte SampleSize-5-Gesamtlauf. |
+
+## GPT-OSS Reasoning-Felder und LM Studio 0.3.23-Kompatibilität (22.09.2026)
+
+| Date | Change |
+| ---- | ------ |
+| 22.09. | src/assemble_blueprint.py, src/registry_tool.py, src/model_registry.py, src/providers/lmstudio_provider.py, src/providers/llama_cpp_args.py | **MoE runtime:** LM Studio numExperts is parsed and can be imported with sync-from-configs --write-experts into Registry.experts. GGUF expert_count is preserved as Registry.max_experts. LM Studio receives num_experts through its native load API; direct llama.cpp uses architecture.expert_used_count via --override-kv. |
+| 22.09. | tests/ | **verification:** Added parser, registry-sync, provider-payload, and direct llama.cpp argument coverage for selected runtime expert counts and immutable maximums. |
+| 22.09. | `src/custom_benchmark.py`, `src/run_benchmarks.py`, `tests/test_custom_benchmark.py`, `tests/test_run_benchmarks.py` | **compatibility:** GPT-OSS reasoning is read from LM Studio's current `message.reasoning` / `delta.reasoning` fields with `reasoning_content` retained as a compatibility fallback. The LM-Eval path forwards `max_thinking_tokens` but does not send the unreliable LM Studio request-level `reasoning_effort` field. |
+| 22.09. | `doc-git/Model Specific Hints/GPT-OSS-20b_Harmony-Chat-Format, Jinja-Template-Injection_en.md`, `doc-git/thinking-config_en.md` | **docs:** The direct llama.cpp `--reasoning-effort` control is separated from the numerical reasoning budget and from LM Studio's GUI/system-prompt controls. `medium` remains the reproducible baseline; `high` is a separate quality/runtime profile. |
+| 22.09. | `doc-git/model_registry.yaml`, `src/providers/llama_cpp_args.py`, `src/model_registry.py` | **llama.cpp:** GPT-OSS-20B now declares `llama_cpp.reasoning_effort: medium`; the provider starts the CUDA server with the explicit `--reasoning-effort medium` argument. |
+
 ## Direkter llama.cpp-Backendstand als Zwischencommit (22.09.2026)
 
 | Date | Change |
@@ -100,6 +136,7 @@ Hinweise:
 | 21.09. | `src/assemble_blueprint.py`, `tests/test_assemble_blueprint.py`, `README.md`, `doc-git/Architecture, Flow & ChangeLog_en.md` | Validate und aktive Config-Zuordnung ignorieren JSON-Dateien in bestehenden `_quarantine_*`-Verzeichnissen. Siehe Compaction 21.09.2026 / 01:33.                                                                                                       |
 
 | 21.09. | `src/model_identity.py`, `src/benchmark_config.py`, `src/registry_tool.py`, `src/consolidate_results.py`, `src/local_model_resolver.py`, `src/providers/`, `tests/test_model_identity.py`, `tests/test_benchmark_config.py`, `tests/test_model_manager.py` | Blacklist-Prüfungen betrachten nur noch den Modell-Basisnamen; Publisher wie `peculiar-ragdoll` lösen dadurch keine RAG-Sperre mehr aus. Die kanonische Tripel-ID `publisher/model@quant` wird zentral mit `build_model_identity()` erzeugt und mit `decompose_model_identity()` in Publisher, Modellbasis und Quantisierung zerlegt. |
+| 22.09. | `src/benchmark_config.py`, `src/registry_tool.py`, `src/providers/lmstudio_provider.py`, `README.md`, `doc-git/Architecture, Flow & ChangeLog_en.md` | Auxiliary-Modelle werden im LM-Studio-Inventar anhand aller verfügbaren Identitätsfelder gefiltert. Die Doku hält fest, dass Vision-Projektoren mit dem Präfix `mmproj-` benannt werden müssen; der Projektor bleibt vom eigentlichen LLM-Benchmark ausgeschlossen. |
 
 ## Sampling-Dokumentation und Blueprint-Abgleich aktualisiert (20.09.2026)
 
@@ -591,3 +628,20 @@ Die Hooks erzeugen CHANGELOG-Eintraege nicht automatisch; dieser Eintrag dokumen
 | 21.09. | `src/assemble_blueprint.py`                                 | **DOC:** `--help` vollständig ins Englische übersetzt und Preview-/Schreibgrenze dokumentiert.         |
 | 21.09. | `src/registry_tool.py`                                      | **DOC:** Strukturierte Registry-Hilfe vollständig ins Englische übersetzt, inklusive SS/UKV-Erklärung. |
 | 21.09. | `tests/test_assemble_blueprint.py`, `tests/test_registry_tool.py` | **TEST:** Hilfe-Regressionen auf die englischen Formulierungen aktualisiert. Siehe Compaction `21.09.2026 / 12:05`. |
+
+## Direct llama.cpp Provider Boundary and Argument Manifest (22.09.2026)
+| Date   | File                                                                                                  | Change                                                                                                                                                                             |
+| ------ | ----------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 22.09. | `src/providers/base.py`, `src/model_manager.py`, `src/run_benchmarks.py`                              | **ARCHITECTURE:** Explicit `ProviderContext` and capability-aware runner propagation added; LM Studio legacy seams remain compatible while llama.cpp owns a stable direct lifecycle. |
+| 22.09. | `src/providers/llama_cpp_args.py`, `src/providers/llama_cpp_provider.py`                              | **BACKEND:** Shared Registry-to-llama.cpp argument translation for context, KV cache, batching, reasoning, Jinja, GPU layers, Flash Attention, and parallelism.                                   |
+| 22.09. | `src/registry_tool.py`, `tests/test_registry_tool.py`                                                 | **EXPORT:** Added report-only `export-llama-args` with concrete GGUF paths, start/request arguments, Registry hash, and server metadata.                                               |
+| 22.09. | `PLANUNG.md`, `README.md`, `doc-git/Architecture, Flow & ChangeLog_en.md`, `doc-git/Model Specific Hints/GLM 4.5 - 4.7_Structured Output_en.md` | **DOC:** Migration points 1.A-C, CUDA production path, export manifest, and WindowsApps exclusion synchronized. |
+| 22.09. | `tests/` and `src/`                                                                                   | **VERIFY:** 305 focused tests, Python 3.12 compilation, Ruff, Registry CI validation, and `llama-server.exe --version/--help` checks passed.                                          |
+
+## GLM Structured-Output Ownership (22.09.2026)
+| Date   | File                                                                                              | Change                                                                                                                                                                      |
+| ------ | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 22.09. | `src/assemble_blueprint.py`, `doc-git/blueprint_definitions.yaml`                                 | **FIX:** Remove the blanket GLM-4.7 Structured-Output runtime flag; the blueprint keeps the non-streaming policy but leaves JSON response formatting opt-in.                  |
+| 22.09. | `src/registry_tool.py`                                                                            | **FIX:** `patch-glm-configs` documents and enforces ownership boundaries: it repairs reasoning fields but never creates or removes the user-owned LM Studio Structured-Output field. |
+| 22.09. | `src/custom_benchmark.py`                                                                         | **FIX:** A missing GLM Structured-Output policy no longer produces an implicit response format; explicit requests remain provider-specific and other LM Studio defaults stay compatible. |
+| 22.09. | `tests/test_assemble_blueprint.py`, `tests/test_prio2.py`, `tests/test_registry_tool.py`, GLM hint | **TEST/DOC:** Cover opt-in behavior and document the corrected GLM/LM Studio policy.                                                                                        |

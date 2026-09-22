@@ -64,7 +64,6 @@ blueprints:
       startString: " thinking"
       endString: " response"
     benchmark_runtime:
-      structured_output: true
       streaming: false
       prompt_suffix: none
       max_tokens: 8192

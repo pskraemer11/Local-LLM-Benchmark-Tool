@@ -3,11 +3,12 @@
 
 import argparse
 import json
+from typing import Any
 
 from gguf import GGUFReader
 
 
-def extract_all_gguf_metadata(file_path: str, output_json: str | None = None) -> dict:
+def extract_all_gguf_metadata(file_path: str, output_json: str | None = None) -> dict[str, Any]:
     """
     Extrahiert ALLE Metadaten aus einer GGUF-Datei, einschließlich MoE-spezifischer Informationen.
 
@@ -17,10 +18,12 @@ def extract_all_gguf_metadata(file_path: str, output_json: str | None = None) ->
     """
     try:
         # GGUF-Datei öffnen
-        gguf_reader = GGUFReader(file_path)
+        # python-gguf currently exposes these attributes dynamically and does
+        # not ship complete type stubs.  Keep the runtime boundary explicit.
+        gguf_reader: Any = GGUFReader(file_path)
 
         # Metadaten extrahieren
-        metadata = {
+        metadata: dict[str, Any] = {
             "general": {
                 "architecture": gguf_reader.metadata.get("general.architecture"),
                 "quantization": gguf_reader.metadata.get("quantization"),
@@ -43,7 +46,7 @@ def extract_all_gguf_metadata(file_path: str, output_json: str | None = None) ->
 
         # Alle Tensoren extrahieren
         for tensor in gguf_reader.tensors:
-            tensor_info = {
+            tensor_info: dict[str, Any] = {
                 "name": tensor.name,
                 "shape": tensor.shape,
                 "type": tensor.type,
@@ -70,9 +73,11 @@ def extract_all_gguf_metadata(file_path: str, output_json: str | None = None) ->
             with open(output_json, "w", encoding="utf-8") as f:
                 json.dump(metadata, f, indent=4, ensure_ascii=False)
             print(f"\nMetadaten wurden in '{output_json}' gespeichert.")
+        return metadata
 
     except Exception as e:
         print(f"Fehler beim Auslesen der GGUF-Datei: {e}")
+        return {}
 
 if __name__ == "__main__":
     # Argument-Parser für die Kommandozeile

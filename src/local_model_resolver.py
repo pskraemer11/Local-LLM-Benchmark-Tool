@@ -77,7 +77,7 @@ class LocalModelResolver:
 
     @staticmethod
     def _blacklisted(model_name: str) -> bool:
-        return is_blacklisted_model_name(model_name)
+        return bool(is_blacklisted_model_name(model_name))
 
     def _model_base_id(self, path: Path) -> str:
         relative = path
@@ -135,14 +135,14 @@ class LocalModelResolver:
             # let a flexible base match silently change the local quant.
             probe = f"{base_id}@{quant.lower()}"
             matched = match_registry_key(probe, keys)
-            if matched is not None and LocalModelResolver._registry_quant(matched) in {
+            if isinstance(matched, str) and LocalModelResolver._registry_quant(matched) in {
                 normalized_quant,
                 "mixed",
             }:
                 return matched
             return None
         matched = match_registry_key(base_id, keys)
-        if matched is not None:
+        if isinstance(matched, str):
             return matched
         return None
 

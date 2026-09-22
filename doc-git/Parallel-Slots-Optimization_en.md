@@ -123,7 +123,7 @@ server log 19:38-19:41: slot 0=12, slot 1=12, slot 2=8, slot 3=6 print_timing ev
 ## Automatic Configuration (05.08.2026, seit 13.08.: nur noch UKV)
 
 `_compute_ukv()` in `registry_tool.py` (priority-based, VRAM budget 15.3 GB):
-`num_parallel` ist seit 13.08. **kein Registry-Feld mehr** — feste Policy (SS>=10 → 4, sonst 1).
+`num_parallel` ist **kein Registry-Feld** — feste Policy (SS<=5 → 1, sonst 4).
 
 | Prio | useUnifiedKvCache | Reason                                 |
 | ---- | ----------------- | -------------------------------------- |

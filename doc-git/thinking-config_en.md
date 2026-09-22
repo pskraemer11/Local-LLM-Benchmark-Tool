@@ -126,9 +126,17 @@ Fixed since 19.07. by top-level placement; since 04.08. Qwen3.6 intentionally ru
 
 **SINCE 02.08. (v13.0.10):** Central source in `benchmark_config.py`: `GPTOSS_REASONING_EFFORT = "medium"`, `GPTOSS_REASONING_BUDGET = 4096`.
 
-They control **both** levels synchronously: 
+For the LM Studio backend they control **both** levels synchronously:
 (1) LM Studio engine config (`registry_tool.py patch-reasoning-effort` writes `reasoningEffort`/`budgetTokens`, overridable via `--effort/--budget`) and 
-(2) the system prompt of the `gptoss_reasoning` blueprint (`assemble_blueprint.py`, "Reasoning: "). 
+(2) the system prompt of the `gptoss_reasoning` blueprint (`assemble_blueprint.py`, "Reasoning: ").
+
+The direct CUDA llama.cpp backend is separate: its native
+`llama-server.exe --reasoning-effort LEVEL` argument is the authoritative
+runtime control. It should be represented as a provider-specific
+`llama_cpp.reasoning_effort` Registry override and must not be sent as a
+generic OpenAI-compatible request field. `max_thinking_tokens` or
+`reasoning_budget` remains a numerical token cap and is not interchangeable
+with the qualitative effort level.
 
 Source reference below remains valid.
 

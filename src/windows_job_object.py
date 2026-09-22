@@ -141,7 +141,10 @@ class WindowsJobObject:
         """Assign a suspended Popen child before it can execute worker code."""
         if not self._enabled:
             return
-        if not _kernel32.AssignProcessToJobObject(self._handle, process._handle):
+        process_handle = getattr(process, "_handle", None)
+        if not isinstance(process_handle, int):
+            raise WindowsJobObjectError("Popen process handle is unavailable")
+        if not _kernel32.AssignProcessToJobObject(self._handle, process_handle):
             raise WindowsJobObjectError(self._last_error("AssignProcessToJobObject"))
 
     def resume(self, process: subprocess.Popen[bytes]) -> None:

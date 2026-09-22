@@ -991,12 +991,14 @@ The local LM Studio OpenAI-compatible endpoint was tested directly on
 'response_format.type' must be 'json_schema' or 'text'
 ```
 
-Therefore the current LM Studio benchmark path uses the supported strict
-`json_schema` request shape. The GUI's structured-output field is preserved as
-runtime UI state by `registry_tool.py`; it is not used as the benchmark
-request's source of truth. If a future LM Studio version accepts
-`json_object`, this must be verified by an API smoke test before changing the
-runner.
+For GLM, the benchmark runner treats Structured Output as an explicit
+request-level option. The default GLM path sends no `response_format`, so
+disabling Structured Output in the LM Studio GUI remains effective for
+interactive use and for ordinary GLM benchmark requests. A benchmark that
+genuinely requires JSON must opt in explicitly and use the provider's supported
+request shape. The GUI field is preserved as user-owned runtime state by
+`registry_tool.py`; neither that command nor `assemble_blueprint.py` enables or
+removes it. Existing fallback behavior for other LM Studio models is unchanged.
 
 The local observation of an empty final GLM response therefore remains a
 deviation from the documented LM Studio response contract, not an argument to
@@ -1043,14 +1045,15 @@ Failed to initialize samplers: Unexpected empty grammar stack after accepting pi
 
 The direct provider now applies this policy:
 
-* unspecified Structured Output is disabled for llama.cpp; normal models use
-  ordinary text responses;
+* unspecified Structured Output is disabled for GLM-4.7; normal non-GLM
+  LM-Studio models retain their established provider fallback;
 * an explicit structured-output model profile uses the simpler
   `response_format={"type":"json_object"}` request shape;
 * `--reasoning-format none` disables constrained JSON as well, because GLM's
   thoughts remain in `message.content` and would be forced through the JSON
   grammar;
-* LM Studio keeps its separate `json_schema` contract.
+* LM Studio keeps its separate `json_schema` contract when Structured Output is
+  explicitly requested.
 
 For Unsloth GLM-4.7 Flash Q3_K_S, the post-fix non-streaming smoke completed
 without grammar or sampler errors for `auto`, `none`, `deepseek`, and
@@ -1109,6 +1112,12 @@ reasoning format, and benchmark sampling evidence. The preset is only a
 derived llama.cpp runtime artifact; it must not be edited as a replacement for
 the Registry.
 
+The direct-run audit manifest can be generated with
+`registry_tool.py export-llama-args`. It records the concrete GLM GGUF path,
+the effective server arguments, request defaults, Registry hash, and the
+llama.cpp server build. It is useful for comparing GLM-4.7 `deepseek2`
+variants without turning the manifest into another editable policy source.
+
 For GLM, the architecture boundary is mandatory:
 
 | Family                       | GGUF architecture | Project policy                                                                              |
@@ -1120,9 +1129,12 @@ The three GLM-4.7 `deepseek2` Registry entries currently use
 `reasoning_format: deepseek`, which keeps the thought trace in
 `message.reasoning_content` and leaves the final answer in the normal content
 channel. `auto`, `none`, `deepseek`, and `deepseek-legacy` remain explicit
-diagnostic variants, not four interchangeable defaults. Structured output is
-only enabled where the model profile and response path have been tested; a
-generic grammar must not be forced through a reasoning stream.
+diagnostic variants, not four interchangeable defaults. Structured Output is
+not enabled by the GLM blueprint: `assemble_blueprint.py` leaves
+`benchmark_runtime.structured_output` absent, and `registry_tool.py` preserves
+any existing LM Studio GUI field without creating or deleting it. A caller may
+still request Structured Output explicitly after a provider-specific smoke
+test; a generic grammar must not be forced through a reasoning stream.
 
 ### GLM sampling policy
 
@@ -1171,5 +1183,75 @@ under `AppData\Local\Llama\logs` is unrelated to the automatic llama.cpp
 `config.ini` path. This distinction matters when reproducing a GLM issue:
 record the concrete GGUF path, Registry key, preset/config layers, CLI
 overrides, API request body, and server log together.
+
+## LM Studio compatibility smoke test (2026-09-22)
+
+The current LM Studio configuration was retested with the real local endpoint
+before changing the benchmark code. The tested model was
+`unsloth/GLM-4.7-Flash-GGUF/GLM-4.7-Flash-Q3_K_S.gguf`, identified by LM Studio
+as `glm-4.7-flash`, with context length 32768, one parallel slot, full GPU
+offload, `temperature: 0.7`, `top_p: 1.0`, and `max_tokens: 256` for the smoke
+requests. The LM Studio GUI field `llm.prediction.structured` is currently
+`type: none`; it was not changed by this test.
+
+All three requests returned HTTP 200:
+
+* non-streaming without `response_format`: final content `LMS_GLM_OK`, with
+  reasoning separated into `message.reasoning_content`;
+* streaming without `response_format`: the reconstructed final content was
+  `LMS_GLM_STREAM_OK`, and reasoning arrived separately in the stream;
+* non-streaming with an explicit LM Studio-compatible strict `json_schema`:
+  the final content was valid JSON containing `LMS_GLM_JSON_OK`.
+
+The corresponding request/response artifacts are in the ignored directory
+`ergebnisse/smoke-20260922`. The server evidence is in
+`C:\Users\pskra\.lmstudio\server-logs\2026-09\2026-09-22.1.log`. Older
+entries in that rotated log contain failures for the unsupported
+`response_format: {"type":"json_object"}` shape. The new smoke requests did
+not reproduce those errors. Therefore the LM Studio benchmark path must keep
+`json_schema` and `json_object` distinct; the latter is the Z.AI/provider form,
+not the accepted LM Studio local form.
+
+## Meaning and handling of the GLM tokenizer warnings
+
+The GLM load log repeatedly reports:
+
+```text
+special_eot_id is not in special_eog_ids - the tokenizer config may be incorrect
+special_eom_id is not in special_eog_ids - the tokenizer config may be incorrect
+```
+
+`eot` and `eom` are special end-of-turn/end-of-message control-token IDs. The
+`special_eog_ids` set is the set that llama.cpp currently treats as
+end-of-generation tokens. The warning means that the GGUF declares the former
+IDs but does not include them in the latter set. It is metadata validation, not
+a tokenizer vocabulary or CUDA failure. It can become observable if the model
+uses one of those tokens to end a response: the generation may then continue
+until another stop condition or the token budget, may stop at a different
+marker, or may expose an incomplete final answer.
+
+The warning is not currently proven to reduce the benchmark score. In the
+2026-09-22 LM Studio smoke, both streamed and non-streamed responses stopped
+normally and returned the expected final content. It remains a benchmark risk
+for longer reasoning traces because an incorrect end-of-generation set can
+consume the response budget or distort final-content extraction. Every GLM
+benchmark diagnostic should therefore record `finish_reason`, final content,
+reasoning content, generated-token usage, and whether an explicit stop string
+was reached.
+
+The safe remediation order is:
+
+1. prefer a newer/corrected GGUF conversion from the model publisher or a
+   newer llama.cpp/LM Studio build that handles the model metadata correctly;
+2. test the same GGUF with the current direct CUDA `llama-server.exe`, including
+   explicit `--reasoning-format` variants and stop behavior;
+3. keep explicit template stop strings and a separate reasoning/output budget
+   in the benchmark while the warning remains;
+4. do not hand-edit GGUF metadata or assume that `--reasoning-format` repairs
+   tokenizer metadata. A textual stop option can bound generation, but it does
+   not correct the token-ID set itself.
+
+The warning should be treated as a compatibility observation and correlated
+with actual stop behavior, not as an automatic reason to discard the model.
 
 

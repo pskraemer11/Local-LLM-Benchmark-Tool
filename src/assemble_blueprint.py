@@ -99,7 +99,7 @@ _VARIANT_SUFFIXES = (
 
 
 _CONFIG_QUANT_RE = re.compile(
-    r"(?<![a-z0-9])(?:iq\d+(?:[_-](?:xxs|xs|s|m|l|nl|0|1|2))?(?:[_-]i)?|q\d+(?:[_-](?:k(?:[_-](?:s|m|l))?|s|m|l|0|1|2))?(?:[_-]i)?|mxfp4|nvfp4|fp16|f16)(?![a-z0-9])",
+    r"(?<![a-z0-9])(?:iq\d+(?:[_-](?:xxs|xs|s|m|l|nl|0|1|2))?(?:[_-]i)?|q\d+(?:[_-](?:k(?:[_-](?:s|m|l))?|g\d+|s|m|l|0|1|2))?(?:[_-]i)?|mxfp4|nvfp4|fp16|f16|mini)(?![a-z0-9])",
     re.IGNORECASE,
 )
 
@@ -137,8 +137,8 @@ def _registry_quant(registry_key: str) -> str | None:
 
 def find_config_for_registry_key(
     registry_key: str,
-    configs: list[dict],
-) -> dict | None:
+    configs: list[dict[str, Any]],
+) -> dict[str, Any] | None:
     """Find the best matching LM Studio config for a registry key.
 
     Multi-level matching:
@@ -153,8 +153,8 @@ def find_config_for_registry_key(
 
 def find_all_configs_for_registry_key(
     registry_key: str,
-    configs: list[dict],
-) -> list[dict]:
+    configs: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     """Like find_config_for_registry_key but returns ALL matching configs."""
     return _find_all_configs_for_registry_key(registry_key, configs)
 
@@ -187,15 +187,15 @@ def _config_quant_match_variants(value: str) -> set[str]:
 
 def _find_all_configs_for_registry_key(
     registry_key: str,
-    configs: list[dict],
-) -> list[dict]:
+    configs: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     """Internal: find all matching configs for a registry key (used by both single and multi)."""
     rn = normalize_model_name(registry_key)
     rn_broad = normalize_for_config(registry_key)
 
-    cfg_exact: dict[str, list[dict]] = {}
-    cfg_broad: dict[str, list[dict]] = {}
-    cfg_raw: list[dict] = []
+    cfg_exact: dict[str, list[dict[str, Any]]] = {}
+    cfg_broad: dict[str, list[dict[str, Any]]] = {}
+    cfg_raw: list[tuple[str, str, dict[str, Any]]] = []
     registry_publisher = _registry_publisher(registry_key)
     registry_quant = _registry_quant(registry_key)
     for cfg in configs:
@@ -228,7 +228,7 @@ def _find_all_configs_for_registry_key(
         return cfg_broad[rn_broad]
 
     # Level 3: registry key is prefix of config name
-    matched: list[dict] = []
+    matched: list[dict[str, Any]] = []
     for cn, _, cfg in cfg_raw:
         if cn.startswith(rn + "-"):
             matched.append(cfg)
@@ -328,8 +328,8 @@ def classify_reasoning(
                     # Default aus der Map: Qwen3.6 (qwen35/qwen35moe) → thinking,
                     # Qwen3 (qwen3/qwen3moe) → instruct.
                     # Exception: "qwen3-30b-a3b-thinking-2507" → thinking (Name enthält "thinking")
-                    return reasoning_type
-                return reasoning_type
+                    return str(reasoning_type)
+                return str(reasoning_type)
 
     for kw in NON_REASONING_MODELS:
         if kw in name_lower:
@@ -442,9 +442,8 @@ def select_blueprint(reasoning: str, capabilities: str, arch: str = "", model_na
         return "gemma_assistant"
 
     # GLM-4.7 Flash/REAP is a separate DeepSeek2-based forced-thinking
-    # family. It needs request-level structured output and a non-streaming
-    # response path; keep those runtime conditions out of the generic
-    # reasoning blueprint.
+    # family. It needs a non-streaming response path; Structured Output is
+    # deliberately request-level and is not enabled by this blueprint.
     if "glm-4.7" in name_lower or "deepseek2" in arch_lower:
         return "glm_reasoning_coding"
 
@@ -499,12 +498,12 @@ def select_blueprint(reasoning: str, capabilities: str, arch: str = "", model_na
     return "default_chat"
 
 
-def has_custom_template(entry: dict) -> bool:
+def has_custom_template(entry: dict[str, Any]) -> bool:
     """Check if model has a custom jinja template (legacy registry-field path)."""
     return "template" in entry and entry["template"]
 
 
-def resolve_template_name(bp_def: dict | None, model_name: str = "") -> str | None:
+def resolve_template_name(bp_def: dict[str, Any] | None, model_name: str = "") -> str | None:
     """Resolve jinja template filename from a blueprint definition (SSOT).
 
     Priority:
@@ -612,12 +611,12 @@ def format_capabilities(caps: Any) -> str:
             "audio": "audio processing",
             "agentic": "agentic tool use",
         }
-        human = [labels.get(c, c) for c in caps]
+        human = [str(labels.get(c, c)) for c in caps]
         return ", ".join(human)
     return str(caps)
 
 
-def render_role(entry: dict, model_name: str, role_template: str | None, static_role: str) -> str:
+def render_role(entry: dict[str, Any], model_name: str, role_template: str | None, static_role: str) -> str:
     """Render a role template with model-specific variables, falling back to static role."""
     if not role_template:
         return static_role
@@ -675,7 +674,7 @@ def _harmonify_prompt(prompt: str) -> str:
     return result.strip()
 
 
-def truncation_from_context(ctx_len: int) -> str:
+def truncation_from_context(ctx_len: int | None) -> str:
     """Determine truncation level from context length."""
     if ctx_len is None or ctx_len == 0:
         return "full"
@@ -686,11 +685,11 @@ def truncation_from_context(ctx_len: int) -> str:
     return "minimal"
 
 
-_LMS_CONFIGS_CACHE: dict[str, tuple[float, list]] = {}
+_LMS_CONFIGS_CACHE: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 _LMS_CONFIGS_TTL_S = 5.0  # Re-scan file system at most every 5 seconds
 
 
-def read_lms_configs(config_root: Path) -> list:
+def read_lms_configs(config_root: Path) -> list[dict[str, Any]]:
     """Read all LM Studio JSON config files, return a list of config dicts.
 
     Code-Review 2026-07-18 §4.2: results are cached for 5 seconds per
@@ -703,10 +702,10 @@ def read_lms_configs(config_root: Path) -> list:
     now = _time.time()
     cached = _LMS_CONFIGS_CACHE.get(key)
     if cached is not None:
-        ts, models = cached
+        ts, cached_models = cached
         if now - ts < _LMS_CONFIGS_TTL_S:
-            return models
-    models = []
+            return cached_models
+    models: list[dict[str, Any]] = []
     if not config_root.exists():
         print(f"[WARN] Config root not found: {config_root}")
         _LMS_CONFIGS_CACHE[key] = (now, models)
@@ -761,6 +760,7 @@ def read_lms_configs(config_root: Path) -> list:
                     ctx_length = None
                     offload = None
                     num_parallel = None
+                    num_experts = None
                     use_unified_kv = None
                     k_cache = None
                     v_cache = None
@@ -773,6 +773,18 @@ def read_lms_configs(config_root: Path) -> list:
                             offload = value
                         elif k == "llm.load.numParallelSessions":
                             num_parallel = value
+                        elif k == "llm.load.numExperts":
+                            # This is LM Studio's selected runtime value.
+                            # The immutable GGUF maximum is stored separately
+                            # as Registry.max_experts.
+                            if isinstance(value, bool):
+                                num_experts = None
+                            else:
+                                try:
+                                    parsed = int(value)
+                                except (TypeError, ValueError):
+                                    parsed = 0
+                                num_experts = parsed if parsed > 0 else None
                         elif k == "llm.load.useUnifiedKvCache":
                             v = value
                             if isinstance(v, bool):
@@ -799,6 +811,7 @@ def read_lms_configs(config_root: Path) -> list:
                             "context_length": ctx_length,
                             "offload": offload,
                             "num_parallel": num_parallel,
+                            "num_experts": num_experts,
                             "use_unified_kv": use_unified_kv,
                             "k_cache": k_cache,
                             "v_cache": v_cache,
@@ -895,8 +908,8 @@ def classify_registry() -> None:
     print(f"[OK] Updated {updated_count} models in {REGISTRY_PATH}")
 
     # Write summary
-    reasoning_counts = {}
-    blueprint_counts = {}
+    reasoning_counts: dict[str, int] = {}
+    blueprint_counts: dict[str, int] = {}
     for entry in registry.values():
         if isinstance(entry, dict):
             r = entry.get("reasoning", "?")
@@ -952,7 +965,6 @@ def create_blueprint_definitions() -> None:
             "modules": ["coding_principles", "safety_block", "output_style_technical"],
             "reasoning_parsing": {"enabled": True, "startString": " thinking", "endString": " response"},
             "benchmark_runtime": {
-                "structured_output": True,
                 "streaming": False,
                 "prompt_suffix": "none",
                 "max_tokens": 8192,
@@ -1305,7 +1317,7 @@ def validate_prompts() -> None:
         checked += 1
 
         # 1. Check XML-like tags are balanced
-        open_tags = []
+        open_tags: list[str] = []
         for m in re.finditer(r"</?(\w+)>", prompt):
             tag = m.group(1)
             if prompt[m.start() : m.start() + 2] == "</":

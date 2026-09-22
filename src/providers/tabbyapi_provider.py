@@ -73,9 +73,10 @@ class TabbyAPIProvider(HttpProvider):
         if not payload:
             return None
         model_id = payload.get("id") or payload.get("model_name") or payload.get("name")
-        if not model_id:
+        if not isinstance(model_id, str) or not model_id:
             return None
-        parameters = payload.get("parameters") if isinstance(payload.get("parameters"), dict) else {}
+        raw_parameters = payload.get("parameters")
+        parameters: dict[str, Any] = raw_parameters if isinstance(raw_parameters, dict) else {}
         return {
             "identifier": model_id,
             "model_identifier": model_id,

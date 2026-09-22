@@ -82,7 +82,11 @@ def test_model_registry_derives_provider_specific_runtime(tmp_path: Path) -> Non
             "useUnifiedKvCache": True,
             "template_policy": "explicit_file",
             "template": "gpt-oss-20b-template_unsloth.jinja",
+            "architecture_family": "gpt-oss",
+            "experts": 32,
+            "max_experts": 32,
             "reasoning_format": "deepseek",
+            "llama_cpp": {"reasoning_effort": "medium"},
         }
     }
     model_registry = ModelRegistry(lambda: registry, template_root=tmp_path)
@@ -105,9 +109,15 @@ def test_model_registry_derives_provider_specific_runtime(tmp_path: Path) -> Non
     assert llama_runtime["cache_type_k"] == "f16"
     assert llama_runtime["kv_unified"] is True
     assert llama_runtime["reasoning_format"] == "deepseek"
+    assert llama_runtime["reasoning_effort"] == "medium"
+    assert llama_runtime["num_experts"] == 32
+    assert llama_runtime["expert_override_key"] == "gpt-oss.expert_used_count"
     assert llama_runtime["chat_template_file"] == str(
         tmp_path / "gpt-oss-20b-template_unsloth.jinja"
     )
+    assert model_registry.provider_runtime(
+        "unsloth/gpt-oss-20b-GGUF@q8_0", "lmstudio"
+    )["num_experts"] == 32
 
 
 def test_model_registry_quant_list_falls_back_safely(tmp_path: Path) -> None:

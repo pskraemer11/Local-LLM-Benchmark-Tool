@@ -1,14 +1,18 @@
 # Local LLM Benchmark Suite
 
-This repository measures how language models behave on a local Windows
-machine. It is designed for realistic constraints such as limited VRAM,
-quantized GGUF files, a local LM Studio server, a direct llama.cpp server,
-and several OpenAI-compatible providers.
+This repository measures how large language models (LLMs) perform on a local Windows machine with limited resources.
+It is designed to calculate realistic benchmark scores using genuinely limited local resources, such as limited VRAM,
+heavily quantized GGUF files, and a quantized KV cache.
+The benchmarks run using the local LM Studio server (a frontend for managing and testing model parameters).
+LM Studio can also be launched in headerless mode with a daemon (llmster.exe) running in the background and a CLI version.
+Alternatively, a llama.cpp server with a more recent CUDA version or an OpenAI-compatible interface can be used.
 
 The project has two user-facing entry points:
 
-1. src/registry_tool.py prepares and validates the model registry.
-2. src/run_benchmarks.py loads models and runs the benchmarks.
+1. src/registry_tool.py prepares and validates model registration with all required runtime parameters.
+2. src/run_benchmarks.py selects models and benchmarks interactively or via the CLI, then loads the models and executes the benchmark runs.
+
+Translated with DeepL.com (free version)
 
 Everything else supports one of these two workflows: model discovery,
 prompt assembly, provider access, result writing, or result consolidation.
@@ -270,6 +274,17 @@ sections as the primary maintenance path. The current llama.cpp build rejects
 that option is therefore kept out of the generated `[*]` section until the
 preset parser supports it.
 
+For an auditable direct-server run, export the concrete per-model argument
+manifest separately:
+
+~~~powershell
+py -3.12 .\src\registry_tool.py export-llama-args "ergebnisse\llama-cpp-generated\args-manifest.json"
+~~~
+
+The JSON records the resolved GGUF path, start arguments, request defaults,
+Registry SHA-256, and the detected `llama-server.exe` version. It is a
+report-only artifact; `model_registry.yaml` remains authoritative.
+
 The separate GUI log directory
 `C:\Users\<user>\AppData\Local\Llama\logs` is not the automatic llama.cpp
 `config.ini` location. Server logs used for benchmark diagnostics are
@@ -339,6 +354,21 @@ checks their Registry identities. The broader `--write` mode remains
 available when all supported config-derived fields should be imported
 intentionally.
 
+For MoE models, the tested LM Studio runtime expert count is imported
+separately and deliberately:
+
+~~~powershell
+py -3.12 .\src\registry_tool.py sync-from-configs --write-experts
+~~~
+
+This copies the LM Studio load field llm.load.numExperts to the Registry
+field experts. experts is the selected runtime value used for benchmark
+loading; max_experts is the immutable architectural maximum read from GGUF.
+The latter is never used as an automatic VRAM fallback. LM Studio receives
+experts as num_experts through its native load API. The direct llama.cpp
+provider translates it to the architecture-specific
+--override-kv <architecture>.expert_used_count=int:<N> argument.
+
 #### pipeline sync
 
 ~~~powershell
@@ -358,6 +388,15 @@ model_registry.yaml. It still does not write LM Studio config JSONs.
 Unlike pipeline full, it does not run prompt preview, prompt validation,
 or the blocking drift exit check.
 
+Validation distinguishes Registry/backend blockers from LM Studio-local
+observations. The Registry owns benchmark `context_length`; a different LM
+Studio `contextLength` is reported as an advisory and does not change the
+benchmark value or block direct llama.cpp runs. Missing LM Studio configs and
+missing `promptTemplate` values are also advisories because they affect LM
+Studio compatibility rather than Registry readiness. Registry-owned runtime
+requirements, including a selected MoE `experts` value, remain blocking when
+missing or invalid.
+
 #### pipeline full
 
 ~~~powershell
@@ -373,8 +412,13 @@ This runs pipeline sync and then adds:
 - Registry field-ownership and GGUF drift validation.
 
 It may update model_registry.yaml through the sync and classification
-stages, but it does not write LM Studio config JSONs. It returns exit code 1
-when blocking ownership drift remains.
+stages. It also fills only missing or empty LM Studio `promptTemplate` fields.
+It returns exit code 1 when blocking Registry/runtime ownership issues remain.
+
+`pipeline full` runs `sync-templates` before prompt preview. This step fills
+only missing or empty `promptTemplate` fields in matching LM Studio configs;
+existing template values are preserved. System-prompt assembly remains
+preview-only, and the separate GLM config patch is not run.
 
 Use this only to keep the report/exit status while continuing after a known
 drift:
@@ -414,6 +458,13 @@ Registry. Shared filters exclude, among others:
 - RAG-only or feature-extraction models;
 - MTP drafter companion files, DFlash decoder/draft files, and iMatrix
   support files.
+
+For LM Studio vision models, the projector companion should follow LM
+Studio's filename convention and start with `mmproj-` (for example
+`mmproj-Millie-35B-A3B.gguf`). Without that prefix LM Studio may list the
+projector as a separate model instead of associating it with the main GGUF.
+The benchmark filters treat every `mmproj` file as auxiliary; only the main
+language-model GGUF is a benchmark target.
 
 OCR and embedding models are intentionally excluded because this repository
 does not yet contain local benchmark tests for them.

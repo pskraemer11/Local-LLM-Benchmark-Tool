@@ -23,6 +23,7 @@ import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import BoundedSemaphore
+from typing import Any
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
@@ -69,12 +70,19 @@ def _bounded_read(response: object, limit: int) -> bytes:
             if str(exc) == "upstream response exceeds configured limit":
                 raise
             raise ValueError("invalid upstream Content-Length") from exc
-    body = response.read(limit + 1)  # type: ignore[attr-defined]
+    read = getattr(response, "read", None)
+    if not callable(read):
+        raise TypeError("upstream response has no readable body")
+    body = read(limit + 1)
+    if not isinstance(body, bytes):
+        raise TypeError("upstream response body is not bytes")
     if len(body) > limit:
         raise ValueError("upstream response exceeds configured limit")
     return body
 
-def _proxy_upstream(upstream: str, path: str, headers: dict, body: bytes | None = None) -> tuple[int, dict, bytes]:
+def _proxy_upstream(
+    upstream: str, path: str, headers: dict[str, str], body: bytes | None = None
+) -> tuple[int, dict[str, str], bytes]:
     """Forward a request to the upstream server and return (status, response_headers, body)."""
     url = _upstream_url(upstream, path)
     method = "POST" if body is not None else "GET"
@@ -113,7 +121,9 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
         super().__init__(server_address, handler_class)
         self._admission = BoundedSemaphore(MAX_CONCURRENT_REQUESTS)
 
-    def process_request(self, request: socket.socket, client_address: tuple[str, int]) -> None:
+    def process_request(  # type: ignore[override]
+        self, request: socket.socket, client_address: tuple[str, int]
+    ) -> None:
         if not self._admission.acquire(blocking=False):
             request.close()
             return
@@ -123,7 +133,9 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
             self._admission.release()
             raise
 
-    def process_request_thread(self, request: socket.socket, client_address: tuple[str, int]) -> None:
+    def process_request_thread(  # type: ignore[override]
+        self, request: socket.socket, client_address: tuple[str, int]
+    ) -> None:
         try:
             super().process_request_thread(request, client_address)
         finally:
@@ -203,7 +215,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         else:
             self._handle_non_streaming(openai_body)
 
-    def _handle_non_streaming(self, openai_body: dict) -> None:
+    def _handle_non_streaming(self, openai_body: dict[str, Any]) -> None:
         """Forward request and return response directly."""
         request_data = json.dumps(openai_body).encode("utf-8")
         status, resp_headers, resp_body = _proxy_upstream(
@@ -212,7 +224,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         )
         self._send_response(status, resp_headers, resp_body)
 
-    def _handle_streaming(self, openai_body: dict) -> None:
+    def _handle_streaming(self, openai_body: dict[str, Any]) -> None:
         """Forward streaming request and pass through SSE events."""
         request_data = json.dumps(openai_body).encode("utf-8")
         req = Request(
@@ -278,11 +290,11 @@ class ProxyHandler(BaseHTTPRequestHandler):
             except OSError:
                 pass
 
-    def _send_json(self, status: int, data: dict) -> None:
+    def _send_json(self, status: int, data: dict[str, Any]) -> None:
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
         self._send_response(status, {"Content-Type": "application/json"}, body)
 
-    def _send_response(self, status: int, headers: dict, body: bytes) -> None:
+    def _send_response(self, status: int, headers: dict[str, str], body: bytes) -> None:
         if len(body) > MAX_RESPONSE_BYTES:
             status = 502
             body = b'{"error":"response exceeds configured limit"}'

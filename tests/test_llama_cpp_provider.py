@@ -47,8 +47,11 @@ def test_provider_resolves_local_registry_model_and_builds_cuda_server_command(t
             "k_cache": "q8_0",
             "v_cache": "q4_nl",
             "useUnifiedKvCache": True,
+            "architecture_family": "gpt-oss",
+            "experts": 32,
             "reasoning_format": "deepseek",
             "reasoning_budget": 4096,
+            "reasoning_effort": "medium",
         }
     }
     controller = FakeController()
@@ -62,8 +65,11 @@ def test_provider_resolves_local_registry_model_and_builds_cuda_server_command(t
             "cache_type_k": "q8_0",
             "cache_type_v": "iq4_nl",
             "kv_unified": True,
+            "num_experts": 32,
+            "expert_override_key": "gpt-oss.expert_used_count",
             "reasoning_format": "deepseek",
             "reasoning_budget": 4096,
+            "reasoning_effort": "medium",
         },
         controller=controller,
     )
@@ -83,6 +89,8 @@ def test_provider_resolves_local_registry_model_and_builds_cuda_server_command(t
     assert command[command.index("--cache-type-v") + 1] == "iq4_nl"
     assert command[command.index("--reasoning-format") + 1] == "deepseek"
     assert command[command.index("--reasoning-budget") + 1] == "4096"
+    assert command[command.index("--reasoning-effort") + 1] == "medium"
+    assert command[command.index("--override-kv") + 1] == "gpt-oss.expert_used_count=int:32"
     assert "--jinja" in command
     assert provider.unload_all() is True
     assert controller.stopped is True

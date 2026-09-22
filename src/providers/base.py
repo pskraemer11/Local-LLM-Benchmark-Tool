@@ -71,6 +71,24 @@ class Provider(InferenceClient, ModelManager, Protocol):
     """Combined provider contract consumed by the model-manager facade."""
 
 
+@dataclass(frozen=True)
+class ProviderContext:
+    """Explicit provider/client context shared by the launcher pipelines."""
+
+    name: str
+    client: Provider
+
+    @property
+    def base_url(self) -> str:
+        """Return the inference endpoint owned by this context."""
+        return self.client.base_url
+
+    @property
+    def capabilities(self) -> ProviderCapabilities:
+        """Return the capabilities of the selected provider instance."""
+        return self.client.capabilities
+
+
 class HttpProvider:
     """Small Windows-compatible JSON-over-HTTP base for local providers."""
 

@@ -514,6 +514,34 @@ class TestFindConfigForRegistryKey:
         )
         assert match == configs[0]
 
+    def test_q2_g64_quant_matches_config(self):
+        configs = [
+            {
+                "publisher": "prism-ml",
+                "dir_name": "Ternary-Bonsai-27B-gguf",
+                "file_name": "Ternary-Bonsai-27B-Q2_g64.gguf.json",
+                "json_path": Path("bonsai-q2-g64.json"),
+            }
+        ]
+
+        match = find_config_for_registry_key("prism-ml/ternary-bonsai-27b@q2_g64", configs)
+
+        assert match == configs[0]
+
+    def test_mini_quant_matches_config(self):
+        configs = [
+            {
+                "publisher": "mudler",
+                "dir_name": "gemma-4-26B-A4B-it-APEX-GGUF",
+                "file_name": "gemma-4-26B-APEX-I-Mini.gguf.json",
+                "json_path": Path("gemma-mini.json"),
+            }
+        ]
+
+        match = find_config_for_registry_key("mudler/gemma-4-26b-a4b-it-apex@mini", configs)
+
+        assert match == configs[0]
+
     def test_bf16_format_marker_is_not_model_identity(self):
         configs = [
             {
@@ -664,12 +692,12 @@ class TestBlueprintFeatures:
         glm47 = ab.blueprint_features("glm_reasoning_coding", "glm-4.7-flash")
         glm46v = ab.blueprint_features("glm4v_reasoning", "glm-4.6v-flash")
         assert glm47["benchmark_runtime"] == {
-            "structured_output": True,
             "streaming": False,
             "prompt_suffix": "none",
             "max_tokens": 8192,
             "reasoning_budget_tokens": 4096,
         }
+        assert "structured_output" not in glm47["benchmark_runtime"]
         assert "benchmark_runtime" not in glm46v
         assert select_blueprint("thinking", "coding, text", arch="deepseek2", model_name="glm-4.7-flash") == "glm_reasoning_coding"
         assert select_blueprint("thinking", "vision, text", arch="glm4", model_name="glm-4.6v-flash") == "glm4v_reasoning"

@@ -1349,3 +1349,186 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 - `src/providers/llama_cpp_provider.py`: direkter Server-Lifecycle und Argumente.
 - `src/registry_tool.py`, `src/model_registry.py`: Runtime-Export und Registryquelle.
 - `PLANUNG.md`: Phasen A bis E und offene Abnahmepunkte.
+
+=============== Compaction 22.09.2026 / 15:08 / Parallelitaet und llama.cpp Web-UI ================
+## Objective
+- (Current) Die direkte llama.cpp-Migration fachlich weiter schaerfen und die
+  Parallelitaetsregel sowie die Rolle der integrierten Web-UI klaeren.
+- (Completed) Unterschied zwischen Runner-Parallelitaet, llama-server-Slots,
+  llama-cli und llama-server dokumentiert und die llama.cpp-Web-UI im Kontext
+  des Benchmark-Projekts bewertet.
+
+## Important Details
+- **Parallelitaet:** Die Projektregel soll `SampleSize <= 5 -> num_parallel=1`
+  und `SampleSize > 5 -> num_parallel=4` lauten. Der aktuelle Code verwendet
+  noch `>= 10` als Schwelle und der llama.cpp-Provider meldet standardmaessig
+  `max_parallel=1`; beides weicht von der beabsichtigten Policy ab.
+- **Begriffe:** Runner-`num_parallel` steuert gleichzeitige Benchmark-Anfragen;
+  llama.cpp-`--parallel` stellt Server-/KV-Cache-Slots bereit. Diese Werte sind
+  verwandt, aber nicht identisch.
+- **Web-UI:** PR #14839 ist in llama.cpp integriert. Die lokale Binary bietet
+  UI-/WebUI-Optionen. Die UI ist ein geeignetes optionales Frontend fuer
+  interaktive Modell- und API-Smoke-Tests, ersetzt aber weder Registry,
+  `registry_tool.py`, `assemble_blueprint.py` noch die modellbezogenen GLM-,
+  GPT-OSS- und Gemma-Regeln.
+- **Benchmarkgrenze:** Automatisierte Laeufe sollen weiterhin mit expliziten
+  Argumenten und moeglichst `--no-webui` erfolgen; Tools/MCP und Router-
+  Automatik bleiben fuer reproduzierbare Laeufe deaktiviert.
+
+## Work State
+### Completed / Active / Blocked
+- Completed: Migration points 1.A-C, 305 fokussierte Tests, Ruff-, Compile-,
+  Registry- und llama-server-Hilfepruefungen.
+- Active: Korrektur der Parallelitaets-Policy und Abgleich von Runner-
+  Parallelitaet mit llama.cpp-Server-Slots.
+- No code changes in this compaction turn; die aktuellen Migrationaenderungen
+  befinden sich weiterhin uncommitted im Worktree.
+
+## Next Move
+1. `num_parallel` auf `<=5 -> 1`, sonst `4` korrigieren und die llama.cpp-
+   Capability standardmaessig fuer vier Client-Anfragen freigeben.
+2. Tests fuer SampleSizes 1, 5, 6 und groessere Laeufe sowie Provider-
+   Begrenzungen ergaenzen; `--parallel`-Slotverhalten getrennt pruefen.
+3. Optionalen llama.cpp-WebUI-Smoke-Test dokumentieren, ohne die UI in den
+   automatisierten Benchmarkpfad zu verschieben.
+
+## Relevant Files
+- `src/run_benchmarks.py`: aktuelle Runner-Schwelle und Capability-Begrenzung.
+- `src/providers/llama_cpp_provider.py`: aktuelle llama.cpp-Capability und
+  Lifecycle-Grenze.
+- `src/providers/llama_cpp_args.py`: explizites llama.cpp-`--parallel`.
+- `tools/server/README.md`, `tools/server/README-dev.md`, `tools/ui/README.md`:
+  upstreambezogene Einordnung der Server-/UI-Funktionen.
+
+=============== Compaction 22.09.2026 / 13:00 / llama.cpp migration points 1.A-C ================
+## Objective
+- (Completed) Die Provider-/Runner-Grenze für den direkten llama.cpp-Pfad mit
+  einem expliziten `ProviderContext` und Capability-basierter Parallelität
+  vervollständigen.
+- (Completed) Die Registry-Runtime zentral in llama.cpp-Startargumente und
+  Request-Defaults übersetzen.
+- (Completed) Die erledigten Architektur- und Exportpunkte in Planung, README,
+  Architektur- und GLM-Dokumentation festhalten.
+
+## Important Details
+- Produktives Backend bleibt ausschließlich
+  `C:\Program Files\llama.cpp\llama-server.exe`; die WindowsApps-Installation
+  ist gelöscht und kein Fallback.
+- `model_registry.yaml` bleibt die fachliche Quelle. `config.ini`, Router-
+  `preset.ini` und `export-llama-args`-Manifest sind allgemeine bzw. abgeleitete
+  llama.cpp-Laufzeitartefakte.
+- Das Manifest enthält lokale GGUF-Auflösung, konkrete Startargumente,
+  Sampling-/Reasoning-Defaults, Registry-SHA-256 und Servermetadaten.
+- Der LM-Studio-Legacy-Pfad erhält frische Provider-Instanzen, damit die
+  bestehenden REST-/Subprocess-Test-Seams funktionieren; der direkte Provider
+  nutzt für seinen Lifecycle den stabilen Kontext-Client.
+
+## Verification
+- `py -3.12 -m pytest ...`: 305 fokussierte Tests bestanden.
+- `py -3.12 -m ruff check` für alle geänderten Produktionsdateien: sauber.
+- `py -3.12 src/registry_tool.py validate --ci`: 0 blockierende Probleme, 0 Hinweise.
+- `llama-server.exe --version`: Build 11081, Commit `161755f29`; die Binary
+  meldet `C:\Users\pskra\AppData\Roaming\llama.cpp\config.ini`.
+- `llama-server.exe --help`: alle vom Argumentvertrag verwendeten Optionen
+  wurden in der produktiven Binary gefunden.
+
+## Work State
+- Completed: Migration points 1.A-C at code/contract level.
+- Deferred: fachlicher SampleSize-5-Gesamtlauf, LM-Studio/llama.cpp-
+  Kompatibilitätsvergleich und separate Streaming-/Qualitätsbewertung.
+
+=============== Compaction 22.09.2026 / 18:58 / Aktueller Migrationsstatus ================
+## Objective
+- (Current) Die direkte llama.cpp-Migration bis zur fachlichen Abnahme und zum
+  reproduzierbaren SampleSize-5-Gesamtlauf weiterführen.
+- (Completed) Den direkten Provider, Argument-/Preset-Export, GLM-
+  Nicht-Streaming-Vergleich und sequenziellen Mehrmodell-Smoke verifiziert.
+- (Completed) Millie als MoE-Hauptmodell mit separatem `mmproj`-Projektor
+  korrekt in Inventarfilter und Registry eingeordnet.
+
+## Important Details
+- **Backend:** Produktiv bleibt ausschließlich
+  `C:\Program Files\llama.cpp\llama-server.exe`; LM Studio dient nur zum
+  Parameter-/VRAM-Tuning, Unsloth ist kein produktiver Lifecycle-Pfad.
+- **Millie:** LM Studio benötigt für den Projektor die Namenskonvention
+  `mmproj-...`. Der Projektor wird über alle Inventarfelder herausgefiltert;
+  der Registry-Key des Hauptmodells ist `llmsforall/millie-35b-a3b-11gb@?`,
+  mit `experts: 64` und `max_experts: 256`.
+- **Registry:** `experts` ist der getestete Laufzeitwert, `max_experts` die
+  unveränderliche GGUF-Obergrenze. `@?` ist ein zulässiger Platzhalter, wenn
+  keine Quantisierung aus LM Studio/GGUF bestimmt werden kann.
+- **Planungsabgleich:** Die Migration ist technisch weit fortgeschritten,
+  aber `PLANUNG.md` enthält noch widersprüchliche Statusmarkierungen und den
+  veralteten Kopfstatus `28.08.2026`.
+
+## Work State
+### Completed / Active / Blocked
+- Completed: 233 fokussierte Tests, Ruff für die geänderten Produktionsdateien
+  und `git diff --check` bestanden.
+- Active: LM-Studio-/llama.cpp-Kompatibilitätsvergleich, GLM-Streaming-A/B,
+  getrennte Fehler-/Warnungsanalyse und fachliche Qualitätsauswertung.
+- Deferred: pausierter LM-Studio-SampleSize-5-Lauf; erst nach Backendabnahme
+  den vollständigen direkten llama.cpp-Lauf starten.
+- Open Registry: `mudler/gemma-4-26b-a4b-it-apex` benötigt einen getesteten
+  Runtime-Expertwert und einen belastbaren Quantisierungssuffix.
+
+## Next Move
+1. `PLANUNG.md` mit dem tatsächlichen Status synchronisieren und die offenen
+   Abnahmekriterien eindeutig markieren.
+2. LM-Studio-/llama.cpp-Kompatibilität sowie GLM-Streaming reproduzierbar
+   testen und Logs nach Ursache klassifizieren.
+3. Task-Manifeste/Worker-Vergleichsläufe abschließen, danach den direkten
+   SampleSize-5-Gesamtlauf und die Qualitätsbaseline dokumentieren.
+
+## Relevant Files
+- `PLANUNG.md`: Phasen, Abnahmekriterien und noch zu bereinigende Statusmarkierungen.
+- `src/providers/llama_cpp_provider.py`, `src/run_benchmarks.py`: direkter Backendpfad.
+- `src/benchmark_config.py`, `src/registry_tool.py`: Auxiliary-Filter und Registry-Import.
+- `doc-git/model_registry.yaml`: Millie-Identität und MoE-Runtimewerte.
+- `README.md`, `doc-git/Architecture, Flow & ChangeLog_en.md`: Backend- und Workflow-Doku.
+
+============== Compaction 22.09.2026 / Commit checkpoint ==============
+## Objective
+- Den bis hierher angefallenen llama.cpp-Backend-, Registry-, Qualitätsauswertungs-
+  und Dokumentationsstand sichern und lokal committen; kein Push.
+
+## Important Details
+- HEAD enthält bereits die Checkpoints `3eb964c4` (llama.cpp-Migration) und
+  `f5d37523` (Backend-Grundlage). Die nachfolgenden Änderungen bauen fachlich
+  auf diesem Projektstrang auf und umfassen Provider-/Runner-Anpassungen,
+  Argumentauflösung, Registry- und Sampling-Regeln, Kompatibilitäts- und
+  Qualitätswerkzeuge sowie zugehörige Tests und Dokumentation.
+- Die jüngsten Registry-Korrekturen sind erledigt: Quant-Matching für
+  `q2_g64`/`mini`, `@?` für nicht sicher quantisierte Millie, `@mini` für Gemma
+  APEX, Import des live bestätigten `experts: 36` und erfolgreicher
+  `validate --ci`-Lauf ohne Blocker oder Hinweise.
+- Die aktuelle Help-Redaktion richtet die Erläuterungsspalten aus, entfernt die
+  Sample-Size-Abkürzung und kennzeichnet `--refresh-sampling` als Websuche, die
+  länger dauern kann.
+- Vor Commit sind Compaction und CHANGELOG gemeinsam zu versionieren. Der
+  Pre-Commit-Hook ist verpflichtend; ein Push ist ausdrücklich nicht Teil des
+  Auftrags.
+
+## Work State
+### Completed / Active / Blocked
+- Completed: fokussierte Tests für Registry-Help, Ruff für `registry_tool.py`,
+  Python-Compile und Diff-Whitespace-Prüfung bestanden.
+- Active: Änderungen aus dem laufenden Projektstrang sind ungestaged; die
+  Änderungen umfassen 44 vorhandene oder neue Pfade und werden vor Commit als
+  Gesamt-Diff geprüft.
+- Deferred: kein Push; der pausierte SampleSize-5-Gesamtlauf bleibt pausiert.
+
+## Next Move
+1. Den vollständigen Diff und den Commit-Umfang prüfen, dann alle zum aktuellen
+   Projektcheckpoint gehörenden Änderungen gezielt stagen.
+2. `.githooks/pre_commit.ps1` und den normalen Commit-Hook erfolgreich
+   ausführen; Commit erstellen, ohne Push.
+3. Anschließend den neuen Commit-Hash und etwaige verbleibende Änderungen
+   berichten.
+
+## Relevant Files
+- `CHANGELOG.md`: Kurzprotokoll der konkreten Änderungen; verweist auf diesen
+  Compaction-Checkpoint.
+- `PLANUNG.md`: aktueller Migrations- und Abnahmestatus.
+- `src/`, `tests/`, `doc-git/`: zusammengehöriger Implementierungs-, Test- und
+  Dokumentationsstand des aktuellen Checkpoints.

@@ -148,8 +148,11 @@ def main() -> int:
 
     # Generated code gets a bounded stdout/stderr sink; only this final marker
     # is written to the parent process's real stdout.
-    sys.__stdout__.write("__SANDBOX__" + json.dumps(result, ensure_ascii=False, separators=(",", ":")))
-    sys.__stdout__.flush()
+    real_stdout = sys.__stdout__
+    if real_stdout is None:
+        return 1
+    real_stdout.write("__SANDBOX__" + json.dumps(result, ensure_ascii=False, separators=(",", ":")))
+    real_stdout.flush()
     return 0 if result["ok"] else 1
 
 

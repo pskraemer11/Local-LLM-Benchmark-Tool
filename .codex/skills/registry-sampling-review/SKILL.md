@@ -15,7 +15,7 @@ It is a manual escalation path, not part of a benchmark run.
 - Treat `doc-git/model_registry.yaml` as the Registry source of truth, but do
   not edit it directly.
 - Do not inspect or modify LM Studio JSON configuration files for this task.
-- OCR and embedding models are outside the Registry benchmark scope.
+- OCR, MTP-drafter and embedding models are outside the Registry benchmark scope.
 - Never infer a value from a model family, quantization name, or another model.
 - Do not silently resolve contradictory sources. Present the conflict and stop
   for a user decision.
@@ -27,13 +27,15 @@ It is a manual escalation path, not part of a benchmark run.
 2. Search in this order: the exact Hugging Face model card, Hugging Face
    `base_model` metadata and linked base cards, official links in the card,
    and the manufacturer's model/inference documentation. Follow only HTTPS
-   links and prefer primary sources.
+   links and prefer primary sources, including the manufactorer and publisher.
 3. Capture an exact excerpt and URL for every accepted field. Distinguish
-   `thinking`, `non-thinking`/`instruct`, and general profiles. A profile must
-   contain at least an explicit `temperature` and `top_p` pair.
+   `thinking`/`reasoning` versus `non-thinking`/`instruct`, and other general
+   or specialised coding/math profiles. A profile must contain at least an
+   explicit `temperature` and `top_p` pair, as well as `context_length`,
+   `k_cache` and `v_cache` quantization.
 4. Check the Registry bounds: temperature 0..2, top_p 0..1, top_k 0..1000
    integer, and min_p 0..1. Reject values outside those ranges.
-5. Show the proposed sampling block, source URLs, excerpts, and any remaining
+5. Show the proposed sampling block, source URLs, experts, and any remaining
    ambiguity to the user before writing.
 6. After approval, call `src.registry_tool.apply_sampling_review(...)` from a
    Python process. This is the only write path; it validates the block, stores

@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
 
 import custom_benchmark as cb
 from custom_benchmark import (
+    _extract_reasoning_delta,
     _is_bare_statement,
     _patch_matplotlib_compat,
     _repair_indentation,
@@ -49,6 +50,16 @@ class TestMonitorNvmlBinding:
 
         assert monitor._is_nvml_ok is True
         assert monitor._read_gpu() == (55, 2.0)
+
+
+class TestLmStudioGptOssReasoningFields:
+    """LM Studio 0.3.23 keeps GPT-OSS reasoning out of final content."""
+
+    def test_streaming_uses_gpt_oss_reasoning_field(self):
+        assert _extract_reasoning_delta({"reasoning": "analysis"}) == "analysis"
+
+    def test_streaming_keeps_deepseek_compatibility(self):
+        assert _extract_reasoning_delta({"reasoning_content": "thinking"}) == "thinking"
 
 
 # ======================================================================

@@ -36,7 +36,8 @@ model_key@quant:
          enabled: false
          temperature: 0.6
          top_p: 0.95
-   experts: ...      # falls MoE-Modell
+   experts: ...      # getesteter LM-Studio-Laufzeitwert (falls MoE-Modell)
+   max_experts: ...  # unveränderliche GGUF-Architektur-Obergrenze
    quant: ...
    notes: 'Experts: 64 (Text) + 64 (Vision), activ: 2x6 (+2 shared)'
    k_cache: q8_0
@@ -66,6 +67,10 @@ model_key@quant:
 - `min_p >= 0`
 - `enable_thinking` ist bool
 - `thinking.enabled` ist bool, `thinking.temperature/top_p` analog
+- `experts` is the selected runtime expert count and must come from a
+  live-tested backend configuration; it is not inferred from the GGUF maximum.
+- `max_experts` is read from GGUF metadata and must not be reduced to the
+  selected runtime value.
 
 ### Backward-Compatibility
 

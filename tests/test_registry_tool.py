@@ -11,6 +11,7 @@ Targets:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
@@ -44,12 +45,46 @@ def test_help_describes_pipeline_modes() -> None:
     assert "May write" in help_text
     assert "model_registry.yaml; does not write config JSONs." in help_text
     assert "`--ignore-drift` keeps it report-only." in help_text
-    assert "Sample Size (SS)" in help_text
+    assert "Sample Size <= 5" in help_text
+    assert "Sample Size (SS)" not in help_text
     assert "Unified KV-cache (UKV)" in help_text
     assert "Fill only missing or zero context_length values" in help_text
-    assert "`pipeline full` runs prompt assembly as a preview only" in help_text
+    assert "`pipeline full` runs prompt assembly as a preview" in help_text
+    assert "adds only missing" in help_text
     assert "assemble_blueprint.py assemble" in help_text
     assert "export-llama-preset" in help_text
+    assert "export-llama-args" in help_text
+    assert "quarantine-missing [--dry-run]" in help_text
+    assert "entries are removed" in help_text
+    assert "pipeline full` runs preview mode only" in help_text
+    assert "SAMPLING RESEARCH AND MODEL FILTERS" in help_text
+    assert "`coding`, `knowledge`, `agentic`, and `math`" in help_text
+    assert "registry_tool.py sync --refresh-sampling" in help_text
+    assert "pipeline sync --refresh-sampling" in help_text
+    assert "Benchmark runs never" in help_text
+    assert "Run a web search for all benchmarkable candidates." in help_text
+    assert "may take several" in help_text
+
+    workflow_lines = [
+        line
+        for line in help_text.splitlines()
+        if line.startswith(("  1)", "  2)", "  3)", "  4)", "  5)"))
+    ]
+    assert len(workflow_lines) == 5
+    assert len({line.index("py -3.12") for line in workflow_lines}) == 1
+
+    ownership_rows = (
+        ("  Registry policy", "doc-git"),
+        ("  Technical facts", "GGUF files"),
+        ("  Prompt policy", "doc-git"),
+        ("  Runtime artifacts", "LM Studio JSON"),
+        ("  Results", "ergebnisse"),
+    )
+    ownership_columns = {
+        next(line for line in help_text.splitlines() if line.startswith(label)).index(marker)
+        for label, marker in ownership_rows
+    }
+    assert len(ownership_columns) == 1
 
 
 def test_fix_ctx_only_fills_missing_or_zero_values(monkeypatch) -> None:
@@ -85,6 +120,9 @@ def test_build_llama_preset_uses_local_gguf_and_provider_runtime(tmp_path: Path,
             "useUnifiedKvCache": True,
             "reasoning_format": "deepseek",
             "batch_size": 512,
+            "architecture_family": "gpt-oss",
+            "experts": 32,
+            "max_experts": 32,
         },
         "publisher/missing@q4_k_m": {},
     }
@@ -97,7 +135,25 @@ def test_build_llama_preset_uses_local_gguf_and_provider_runtime(tmp_path: Path,
     assert "cache-type-k = q8_0" in content
     assert "kv-unified = true" in content
     assert "reasoning-format = deepseek" in content
+    assert "override-kv = gpt-oss.expert_used_count=int:32" in content
     assert skipped == ["publisher/missing@q4_k_m"]
+
+
+def test_build_llama_preset_does_not_guess_expert_override_key(
+    tmp_path: Path, monkeypatch
+) -> None:
+    models_root = tmp_path / "models"
+    gguf = models_root / "publisher" / "model" / "model-q4_k_m.gguf"
+    gguf.parent.mkdir(parents=True)
+    gguf.write_bytes(b"fixture")
+    monkeypatch.setattr(rt, "MODELS_CACHE", models_root)
+    registry = {"publisher/model@q4_k_m": {"experts": 24}}
+
+    content, skipped = rt.build_llama_preset(registry)
+
+    assert "[publisher/model@q4_k_m]" in content
+    assert "override-kv" not in content
+    assert skipped == []
 
 
 def test_merge_llama_preset_preserves_custom_sections_and_is_idempotent() -> None:
@@ -122,6 +178,52 @@ ctx-size = 32768
     assert merged.count("[publisher/model@q4_k_m]") == 1
     assert merged_again.count("[publisher/model@q4_k_m]") == 1
     assert merged_again.count("[gpt-oss-20b]") == 1
+
+
+def test_build_llama_argument_manifest_contains_runtime_and_provenance(
+    tmp_path: Path, monkeypatch
+) -> None:
+    models_root = tmp_path / "models"
+    gguf = models_root / "publisher" / "model" / "model-q4_k_m.gguf"
+    gguf.parent.mkdir(parents=True)
+    gguf.write_bytes(b"fixture")
+    registry_path = tmp_path / "model_registry.yaml"
+    registry_path.write_bytes(b"publisher/model@q4_k_m:\n  context_length: 32768\n")
+    monkeypatch.setattr(rt, "MODELS_CACHE", models_root)
+    monkeypatch.setattr(rt, "REGISTRY_PATH", registry_path)
+    registry = {
+        "publisher/model@q4_k_m": {
+            "context_length": 32768,
+            "k_cache": "q8_0",
+            "v_cache": "q8_0",
+            "useUnifiedKvCache": True,
+            "reasoning_format": "deepseek",
+            "reasoning_budget": 8192,
+            "sampling": {"temperature": 0.7, "top_p": 1.0},
+        },
+        "publisher/missing@q4_k_m": {},
+    }
+
+    manifest, skipped = rt.build_llama_argument_manifest(
+        registry,
+        executable=tmp_path / "llama-server.exe",
+        api_base="http://127.0.0.1:9931/v1",
+    )
+
+    assert manifest["schema_version"] == 1
+    expected_hash = hashlib.sha256(registry_path.read_bytes()).hexdigest()
+    assert manifest["registry_sha256"] == expected_hash
+    assert manifest["api_base"] == "http://127.0.0.1:9931/v1"
+    assert manifest["server"]["path"].endswith("llama-server.exe")
+    assert skipped == ["publisher/missing@q4_k_m"]
+    assert len(manifest["models"]) == 1
+    model = manifest["models"][0]
+    assert model["registry_key"] == "publisher/model@q4_k_m"
+    assert model["model_path"] == str(gguf)
+    assert "--model" in model["start_args"]
+    assert "--ctx-size" in model["start_args"]
+    assert model["request_defaults"]["sampling"]["temperature"] == 0.7
+    assert model["request_defaults"]["reasoning_format"] == "deepseek"
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -295,6 +397,27 @@ class TestGuiConfigRegistrySync:
         assert entry["v_cache"] == "q8_0"
         save_registry.assert_called_once_with(registry)
 
+    def test_write_experts_mode_imports_only_tested_runtime_value(self, tmp_path):
+        registry, registry_path, configs = self._registry_and_configs(tmp_path)
+        registry["publisher/model@q4_k_m"]["experts"] = 16
+        configs[0]["num_experts"] = 24
+        with (
+            patch.object(rt, "REGISTRY_PATH", registry_path),
+            patch.object(rt, "load_registry", return_value=registry),
+            patch.object(rt, "read_lms_configs", return_value=configs),
+            patch.object(rt, "save_registry") as save_registry,
+        ):
+            rt.cmd_sync_from_configs(write_experts=True)
+
+        entry = registry["publisher/model@q4_k_m"]
+        assert entry["experts"] == 24
+        assert entry["context_length"] == 16384
+        assert entry["offload"] == 1.0
+        assert entry["useUnifiedKvCache"] is False
+        assert entry["k_cache"] == "q8_0"
+        assert entry["v_cache"] == "q8_0"
+        save_registry.assert_called_once_with(registry)
+
     def test_report_mode_detects_kv_quantization_drift(self, tmp_path, capsys):
         registry, registry_path, configs = self._registry_and_configs(tmp_path)
         with (
@@ -327,6 +450,10 @@ class TestGuiConfigRegistrySync:
                                 "key": "llm.load.llama.vCacheQuantizationType",
                                 "value": {"checked": True, "value": "q8_0"},
                             },
+                            {
+                                "key": "llm.load.numExperts",
+                                "value": 24,
+                            },
                         ]
                     }
                 }
@@ -339,6 +466,7 @@ class TestGuiConfigRegistrySync:
 
         assert configs[0]["k_cache"] == "q5_1"
         assert configs[0]["v_cache"] == "q8_0"
+        assert configs[0]["num_experts"] == 24
 
 
 class TestKVBytesTable:
@@ -661,7 +789,7 @@ class TestCmdSuggestIntegration:
 
 class TestFixNp:
     """cmd_fix_np — seit 13.08. deprecated: np ist feste Benchmark-Policy
-    (SS>=10 → 4, sonst 1) und kein Registry-Feld mehr. Der Stub informiert
+    (SS<=5 → 1, sonst 4) und kein Registry-Feld mehr. Der Stub informiert
     nur und schreibt NICHT.
     """
 
@@ -1020,6 +1148,26 @@ class TestIsSupportFile:
         assert not rt._is_support_file("unsloth/gemma-4-12B-it-qat-GGUF/model.gguf", architecture="gemma4")
         assert not rt._is_support_file("unsloth/qwen3.6-27b-mtp/model.gguf", architecture="qwen35")
 
+    def test_mmproj_model_record_is_detected_without_path(self):
+        # LM Studio may expose only modelKey/displayName for an inventory row.
+        assert rt.is_support_model_record(
+            {
+                "modelKey": "llmsforall/millie-35b-a3b-mmproj.gguf",
+                "displayName": "Millie 35B A3B Mmproj",
+                "architecture": "clip",
+            }
+        )
+
+    def test_main_millie_record_is_not_detected_as_support_file(self):
+        assert not rt.is_support_model_record(
+            {
+                "modelKey": "millie-35b-a3b-11gb",
+                "path": "llmsforall/Millie-35B-A3B-11GB/Millie-35B-A3B-11GB.gguf",
+                "displayName": "Millie 35B A3B 11GB",
+                "architecture": "qwen35moe",
+            }
+        )
+
 
 class TestCmdAddSkipsSupportFiles:
     """cmd_add(): MTP-Drafter und mmproj werden nicht in die Registry aufgenommen."""
@@ -1144,6 +1292,30 @@ def test_registry_matching_accepts_lms_punctuation_and_quant_metadata(monkeypatc
     ]
 
     assert rt._missing_registry_keys(lms) == ["byteshape/qwen3-6-35b-a3b@q3_k_s"]
+
+
+def test_unknown_quant_placeholder_matches_lms_base_record():
+    model = {
+        "type": "llm",
+        "modelKey": "millie-35b-a3b-11gb",
+        "publisher": "llmsforall",
+        "path": "llmsforall/Millie-35B-A3B-11GB/Millie-35B-A3B-11GB.gguf",
+    }
+    key = "llmsforall/millie-35b-a3b-11gb@?"
+
+    assert rt._lms_matches_registry_key(model, key)
+    assert rt._lms_record_for_registry_key(key, [model]) == model
+
+
+@pytest.mark.parametrize(
+    ("filename", "expected"),
+    [
+        ("Ternary-Bonsai-27B-Q2_g64.gguf", "Q2_G64"),
+        ("gemma-4-26B-APEX-I-Mini.gguf", "MINI"),
+    ],
+)
+def test_gguf_quant_parser_recognizes_special_quant_names(filename, expected):
+    assert rt._gguf_quant_from_header(filename) == expected
 
 
 def test_sync_from_configs_keeps_provider_and_quant_variants_separate(tmp_path, monkeypatch, capsys):
@@ -1328,6 +1500,7 @@ class TestCmdSyncFromGguf:
             "hidden_dim": 5120,
             "max_context_length": 131072,
             "reasoning": "thinking",
+            "max_experts": 1,
         }
 
     def test_models_without_gguf_match_untouched(self, tmp_path):
@@ -1370,9 +1543,10 @@ class TestPipelineDriftExitCode:
             return rt.cmd_pipeline("full", ignore_drift=ignore_drift)
 
     def test_drift_checks_constant(self):
-        assert "config_context_drift" in rt._DRIFT_CHECKS
-        # config_np_ukv_drift removed (11.08.2026): Registry is SSOT, configs irrelevant
-        assert "config_context_too_small" in rt._DRIFT_CHECKS
+        assert "config_context_drift" not in rt._DRIFT_CHECKS
+        assert "config_context_too_small" not in rt._DRIFT_CHECKS
+        assert "config_experts_drift" in rt._DRIFT_CHECKS
+        assert "runtime_experts_missing" in rt._DRIFT_CHECKS
         assert "gguf_header_drift" in rt._DRIFT_CHECKS
 
     def test_no_drift_exits_0(self):
@@ -1380,17 +1554,24 @@ class TestPipelineDriftExitCode:
 
     def test_open_drift_exits_1(self):
         with pytest.raises(SystemExit) as exc:
-            self._run_pipeline({"config_context_drift": ["unsloth/x: ctx=1 != 2"]})
+            self._run_pipeline({"runtime_experts_missing": ["unsloth/x: experts missing"]})
         assert exc.value.code == 1
 
     def test_ignore_drift_exits_0(self):
-        assert self._run_pipeline({"config_context_drift": ["unsloth/x: ctx=1 != 2"]}, ignore_drift=True) is None
+        assert self._run_pipeline({"runtime_experts_missing": ["unsloth/x: experts missing"]}, ignore_drift=True) is None
+
+    def test_lm_studio_context_drift_does_not_block_pipeline(self):
+        errors = {
+            "config_context_drift": ["unsloth/x: LMS context differs from Registry"],
+            "config_context_too_small": ["unsloth/x: LMS context exceeds native limit"],
+        }
+        assert self._run_pipeline(errors) is None
 
     def test_non_drift_errors_do_not_exit(self):
         # template_missing_file etc. sind keine Melde-Konflikte -> kein Exit
         assert self._run_pipeline({"template_missing_file": ["unsloth/x: fehlt"]}) is None
 
-    def test_full_is_read_only_for_lms_configs(self):
+    def test_full_syncs_missing_templates_but_keeps_system_prompt_preview_only(self):
         calls = []
 
         def record_quarantine(*, dry_run=False):
@@ -1400,12 +1581,16 @@ class TestPipelineDriftExitCode:
         def record_assemble(*, preview_only=False):
             calls.append(("assemble", preview_only))
 
+        def record_templates():
+            calls.append(("templates",))
+
         with (
             patch.object(rt, "_run_lms_ls", return_value=[]),
             patch.object(rt, "cmd_compare"),
             patch.object(rt, "cmd_quarantine_missing", side_effect=record_quarantine),
             patch.object(rt, "cmd_sync"),
             patch.object(rt, "classify_registry"),
+            patch.object(rt, "cmd_sync_templates", side_effect=record_templates),
             patch.object(rt, "assemble_prompts", side_effect=record_assemble),
             patch.object(rt, "cmd_patch_glm_configs", side_effect=AssertionError("config patch must not run")),
             patch.object(rt, "validate_prompts"),
@@ -1413,7 +1598,26 @@ class TestPipelineDriftExitCode:
         ):
             assert rt.cmd_pipeline("full") is None
 
-        assert calls == [("quarantine", True), ("assemble", True)]
+        assert calls == [("quarantine", True), ("templates",), ("assemble", True)]
+
+
+def test_lm_studio_local_findings_are_advisory_for_backend_validation() -> None:
+    errors = {
+        "template_missing_config": ["model: promptTemplate missing"],
+        "registry_no_config": ["model: no LM Studio config"],
+        "config_context_drift": ["model: local context differs"],
+        "config_context_too_small": ["model: local context exceeds native maximum"],
+        "config_np_ukv_drift": ["model: local UKV differs"],
+        "runtime_experts_missing": ["model: runtime experts missing"],
+        "missing_quant": ["model: quant identity missing"],
+    }
+
+    blockers = rt._blocking_validation_errors(errors)
+
+    assert blockers == {
+        "runtime_experts_missing": ["model: runtime experts missing"],
+        "missing_quant": ["model: quant identity missing"],
+    }
 
 
 def test_assemble_adds_system_prompt_without_touching_load_fields(tmp_path, monkeypatch):
@@ -1581,6 +1785,19 @@ class TestGlmPatchConfig:
         data = json.loads(p.read_text(encoding="utf-8"))
         keys = [f["key"] for f in data["operation"]["fields"]]
         assert "llm.prediction.structured" in keys
+
+    def test_does_not_add_gui_structured_field(self, tmp_path: Path) -> None:
+        config = self._config(enabled=False)
+        config["operation"]["fields"] = [
+            field for field in config["operation"]["fields"]
+            if field["key"] != "llm.prediction.structured"
+        ]
+        p = self._write(tmp_path, config)
+        with patch.object(rt, "_pre_backup_path", return_value=str(tmp_path / "backup.json")):
+            rt.glm_patch_config(str(p))
+        data = json.loads(p.read_text(encoding="utf-8"))
+        keys = [f["key"] for f in data["operation"]["fields"]]
+        assert "llm.prediction.structured" not in keys
 
     def test_dry_run_writes_nothing(self, tmp_path: Path) -> None:
         p = self._write(tmp_path, self._config(enabled=False))

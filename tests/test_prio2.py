@@ -375,11 +375,28 @@ class TestCanUseStructuredOutput:
 class TestProviderStructuredOutputFormat:
     """Direct llama.cpp uses opt-in JSON mode instead of JSON-schema grammar."""
 
-    def test_lmstudio_keeps_strict_schema(self):
+    def test_lmstudio_keeps_strict_schema_for_legacy_default(self):
         from custom_benchmark import STRUCTURED_OUTPUT_SCHEMA, _structured_output_format
 
         with patch("custom_benchmark.get_provider_name", return_value="lmstudio"):
             assert _structured_output_format(None) == STRUCTURED_OUTPUT_SCHEMA
+
+    def test_glm_does_not_use_legacy_default_without_policy(self):
+        from custom_benchmark import _call_and_evaluate
+
+        captured = {}
+
+        def fake_generate(config):
+            captured["response_format"] = config.response_format
+            return None, 0.0, 0, 0, 0.0, 0, False, None, None
+
+        with (
+            patch("custom_benchmark.get_provider_name", return_value="lmstudio"),
+            patch("custom_benchmark.generate_answer", side_effect=fake_generate),
+        ):
+            _call_and_evaluate("prompt", {}, "unsloth/glm-4.7-flash@q3_k_s", "", [], "", "")
+
+        assert captured["response_format"] is None
 
     def test_llama_cpp_disables_unspecified_policy(self):
         from custom_benchmark import _structured_output_format

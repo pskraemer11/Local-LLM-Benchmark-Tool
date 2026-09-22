@@ -63,7 +63,7 @@ class ResolvedRegistryEntry:
 
     @staticmethod
     def _positive_int(value: Any) -> int | None:
-        if isinstance(value, int) and value > 0:
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
             return value
         return None
 
@@ -133,6 +133,12 @@ class ResolvedRegistryEntry:
         parallel = self.entry.get("parallel")
         if isinstance(parallel, int) and parallel > 0:
             runtime["parallel"] = parallel
+        runtime_experts = self._positive_int(self.entry.get("experts"))
+        if runtime_experts is not None:
+            runtime["num_experts"] = runtime_experts
+        max_experts = self._positive_int(self.entry.get("max_experts"))
+        if max_experts is not None:
+            runtime["max_experts"] = max_experts
         issues = self.technical_boundary_issues()
         if issues:
             runtime["technical_boundary_issues"] = issues
@@ -162,6 +168,14 @@ class ResolvedRegistryEntry:
             overrides.update({key: value for key, value in explicit.items() if value is not None})
             return overrides
 
+        if provider in {"lmstudio", "lm_studio"}:
+            overrides = {}
+            runtime_experts = runtime.get("num_experts")
+            if isinstance(runtime_experts, int) and runtime_experts > 0:
+                overrides["num_experts"] = runtime_experts
+            overrides.update({key: value for key, value in explicit.items() if value is not None})
+            return overrides
+
         if provider in {"unsloth_server", "llama_cpp"}:
             overrides = {}
             context_length = runtime.get("context_length")
@@ -185,6 +199,18 @@ class ResolvedRegistryEntry:
             # provider-specific: they are not part of the LM Studio JSON
             # contract and must never be inferred from a GUI artifact.
             if provider == "llama_cpp":
+                runtime_experts = runtime.get("num_experts")
+                architecture_family = self.entry.get("architecture_family")
+                if (
+                    isinstance(runtime_experts, int)
+                    and not isinstance(runtime_experts, bool)
+                    and runtime_experts > 0
+                ):
+                    overrides["num_experts"] = runtime_experts
+                    if isinstance(architecture_family, str) and architecture_family.strip():
+                        overrides["expert_override_key"] = (
+                            f"{architecture_family.strip()}.expert_used_count"
+                        )
                 for field in (
                     "reasoning_format",
                     "reasoning",

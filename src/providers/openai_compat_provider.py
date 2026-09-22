@@ -61,9 +61,10 @@ class OpenAICompatProvider(HttpProvider):
         models: list[dict[str, Any]] = []
         for item in raw_models:
             if isinstance(item, str):
-                model_id = item
+                model_id: str | None = item
             elif isinstance(item, dict):
-                model_id = item.get("id") or item.get("model") or item.get("name")
+                candidate = item.get("id") or item.get("model") or item.get("name")
+                model_id = candidate if isinstance(candidate, str) else None
             else:
                 model_id = None
             if not model_id:

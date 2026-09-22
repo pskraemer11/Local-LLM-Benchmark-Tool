@@ -24,7 +24,7 @@ CONFIG_ROOT = Path.home() / ".lmstudio" / ".internal" / "user-concrete-model-def
 
 # ── Extended config reader ───────────────────────────────────────────
 
-def _read_config_value(fields: list, key: str) -> Any:
+def _read_config_value(fields: list[dict[str, Any]], key: str) -> Any:
     """Extract a scalar or {'checked': bool, 'value': ...} from a load/operation field list."""
     for f in fields:
         if f.get("key") == key:
@@ -35,9 +35,9 @@ def _read_config_value(fields: list, key: str) -> Any:
     return None
 
 
-def read_full_configs(config_root: Path) -> list[dict]:
+def read_full_configs(config_root: Path) -> list[dict[str, Any]]:
     """Like read_lms_configs but also reads KV cache, offload, num_parallel, UKV."""
-    models = []
+    models: list[dict[str, Any]] = []
     if not config_root.exists():
         print(f"[WARN] Config root not found: {config_root}")
         return models
@@ -107,7 +107,7 @@ def _kv_bytes(k_type: str | None, v_type: str | None) -> float:
     return k + v
 
 
-def _is_moe(arch: str, entry: dict) -> str:
+def _is_moe(arch: str, entry: dict[str, Any]) -> str:
     """Determine if model is MoE. Check registry MoE hints first, fall back to arch."""
     # Direct registry fields are most reliable
     ne = entry.get("n_experts")
@@ -143,7 +143,7 @@ def _parse_nl_hd_from_arch(arch: str | None) -> tuple[int | None, int | None]:
     return None, None
 
 
-def _model_size_gb(entry: dict) -> float:
+def _model_size_gb(entry: dict[str, Any]) -> float:
     """Get model size in GB from file_size_bytes or offload heuristic."""
     fb = entry.get("file_size_bytes")
     if fb and isinstance(fb, (int, float)) and fb > 0:
@@ -182,7 +182,7 @@ def main() -> None:
 
     # Build reverse lookup: normalized config dir_name -> configs
     from registry_tool import normalize_model_name
-    config_lookup: dict[str, list[dict]] = {}
+    config_lookup: dict[str, list[dict[str, Any]]] = {}
     for cfg in configs:
         key = normalize_model_name(cfg["dir_name"])
         config_lookup.setdefault(key, []).append(cfg)
@@ -191,7 +191,7 @@ def main() -> None:
             key2 = normalize_model_name(f"{pub}-{cfg['dir_name']}")
             config_lookup.setdefault(key2, []).append(cfg)
 
-    rows = []
+    rows: list[dict[str, Any]] = []
     skipped_excluded = 0
     skipped_filter = 0
     skipped_no_match = 0
@@ -216,7 +216,7 @@ def main() -> None:
         nl = entry.get("n_layers")
         hd = entry.get("hidden_dim")
 
-        # np ist seit 13.08. feste Benchmark-Policy (SS>=10 → 4, sonst 1), kein
+        # np ist eine feste Benchmark-Policy (SS<=5 → 1, sonst 4), kein
         # Registry-Feld mehr. Für die KV-Schätzung wird der Standard angenommen.
         np_reg = 4
         k_reg = str(entry.get("k_cache", "q8_0")) if entry.get("k_cache") else "q8_0"

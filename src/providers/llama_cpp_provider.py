@@ -21,19 +21,12 @@ from local_model_resolver import LocalModelResolver, ModelResolutionError
 from utils.terminal import warn
 
 from .base import HttpProvider, ProviderCapabilities
+from .llama_cpp_args import build_server_command
 
 RuntimeLoader = Callable[[str], Mapping[str, Any] | None]
 ProcessFactory = Callable[..., Any]
 
 _DEFAULT_EXECUTABLE = Path(r"C:\Program Files\llama.cpp\llama-server.exe")
-_DEFAULT_SERVER_PARALLEL = 1
-_SUPPORTED_CACHE_TYPES = frozenset(
-    {"f32", "f16", "bf16", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_0", "q5_1"}
-)
-_CACHE_TYPE_ALIASES = {"fp16": "f16", "float16": "f16", "q4_nl": "iq4_nl"}
-_REASONING_FORMATS = frozenset({"auto", "none", "deepseek", "deepseek-legacy"})
-
-
 class _ServerController:
     """Own exactly one llama-server process for one API base URL."""
 
@@ -113,7 +106,7 @@ class LlamaCppProvider(HttpProvider):
         can_report_current_model=True,
         supports_chat_completions=True,
         supports_completions=True,
-        max_parallel=1,
+        max_parallel=4,
     )
 
     def __init__(
@@ -149,7 +142,7 @@ class LlamaCppProvider(HttpProvider):
                     max_parallel=max(1, int(max_parallel)),
                 )
             except ValueError:
-                warn(f"Ungültiges LLAMA_CPP_MAX_PARALLEL={max_parallel!r}; verwende 1.")
+                    warn(f"Ungültiges LLAMA_CPP_MAX_PARALLEL={max_parallel!r}; verwende 4.")
 
     def list_models(
         self,
@@ -200,83 +193,16 @@ class LlamaCppProvider(HttpProvider):
             return False
         return isinstance(self.request_json("/models", timeout=1), dict)
 
-    @staticmethod
-    def _normalize_cache_type(value: Any) -> str | None:
-        if not isinstance(value, str):
-            return None
-        normalized = value.strip().casefold().replace("-", "_")
-        normalized = _CACHE_TYPE_ALIASES.get(normalized, normalized)
-        return normalized if normalized in _SUPPORTED_CACHE_TYPES else None
-
-    def _runtime_args(self, model_identifier: str) -> list[str]:
-        runtime = dict(self._runtime_loader(model_identifier) or {}) if self._runtime_loader else {}
-        args: list[str] = []
-        context_length = runtime.get("context_length")
-        if isinstance(context_length, int) and context_length > 0:
-            args.extend(["--ctx-size", str(context_length)])
-        parallel = (
-            os.environ.get("LLAMA_CPP_PARALLEL")
-            or runtime.get("parallel")
-            or os.environ.get("LLAMA_CPP_MAX_PARALLEL")
-        )
-        args.extend(["--parallel", str(int(parallel or _DEFAULT_SERVER_PARALLEL))])
-        for key, option in (("cache_type_k", "--cache-type-k"), ("cache_type_v", "--cache-type-v")):
-            value = self._normalize_cache_type(runtime.get(key))
-            if value is not None:
-                args.extend([option, value])
-        unified_kv = runtime.get("kv_unified", True)
-        args.append("--kv-unified" if unified_kv else "--no-kv-unified")
-
-        option_map = (
-            ("batch_size", "--batch-size", int),
-            ("ubatch_size", "--ubatch-size", int),
-            ("reasoning_budget", "--reasoning-budget", int),
-        )
-        for key, option, converter in option_map:
-            value = runtime.get(key)
-            if isinstance(value, (int, str)) and str(value).strip():
-                try:
-                    args.extend([option, str(converter(value))])
-                except (TypeError, ValueError):
-                    warn(f"Ungültiger llama.cpp-Wert {key}={value!r}; ignoriere ihn.")
-        for key, option in (
-            ("gpu_layers", "--gpu-layers"),
-            ("reasoning_effort", "--reasoning-effort"),
-            ("chat_template_file", "--chat-template-file"),
-        ):
-            value = runtime.get(key)
-            if isinstance(value, str) and value.strip():
-                args.extend([option, value.strip()])
-        reasoning_format = str(runtime.get("reasoning_format") or os.environ.get(
-            "LLAMA_CPP_REASONING_FORMAT", "auto"
-        )).strip().lower()
-        if reasoning_format not in _REASONING_FORMATS:
-            warn(f"Ungültiges --reasoning-format {reasoning_format!r}; verwende 'auto'.")
-            reasoning_format = "auto"
-        args.extend(["--reasoning-format", reasoning_format])
-        flash_attn = str(runtime.get("flash_attn") or os.environ.get("LLAMA_CPP_FLASH_ATTN", "on"))
-        args.extend(["--flash-attn", flash_attn])
-        if runtime.get("cont_batching", True):
-            args.append("--cont-batching")
-        else:
-            args.append("--no-cont-batching")
-        if runtime.get("jinja", True):
-            args.append("--jinja")
-        else:
-            args.append("--no-jinja")
-        return args
-
     def _command(self, model_identifier: str, model_path: Path) -> list[str]:
-        return [
-            str(self._executable),
-            "--model", str(model_path),
-            "--offline",
-            "--host", "127.0.0.1",
-            "--port", self._server_port(),
-            "--alias", model_identifier,
-            "--no-webui",
-            *self._runtime_args(model_identifier),
-        ]
+        runtime = dict(self._runtime_loader(model_identifier) or {}) if self._runtime_loader else {}
+        return build_server_command(
+            self._executable,
+            model_path,
+            model_identifier,
+            self._server_port(),
+            runtime,
+            warning=warn,
+        )
 
     def _log_path(self, model_identifier: str) -> Path:
         log_dir = Path(os.environ.get(

@@ -5,19 +5,20 @@ from __future__ import annotations
 import json
 import subprocess
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
-from benchmark_config import is_blacklisted_model_name, is_support_file
+from benchmark_config import is_blacklisted_model_name, is_support_model_record
 from utils.terminal import error, info, ok, warn
 
 from .base import HttpProvider, ProviderCapabilities
 
-RestRequest = Callable[..., dict | None]
+RestRequest = Callable[..., dict[str, Any] | None]
 SubprocessRun = Callable[..., Any]
 RegistryOverrides = Callable[[], dict[str, str]]
-RegistryLoader = Callable[[], dict]
+RegistryLoader = Callable[[], dict[str, Any]]
+RuntimeLoader = Callable[[str], Mapping[str, Any] | None]
 
 
 class LMStudioProvider(HttpProvider):
@@ -43,6 +44,7 @@ class LMStudioProvider(HttpProvider):
         ensure_server: Callable[[], bool] | None = None,
         registry_overrides: RegistryOverrides | None = None,
         registry_loader: RegistryLoader | None = None,
+        runtime_loader: RuntimeLoader | None = None,
         time_fn: Callable[[], float] | None = None,
         sleep_fn: Callable[[float], None] | None = None,
         subprocess_run: SubprocessRun | None = None,
@@ -54,6 +56,7 @@ class LMStudioProvider(HttpProvider):
         self._ensure_server_callback = ensure_server
         self._registry_overrides = registry_overrides
         self._registry_loader = registry_loader
+        self._runtime_loader = runtime_loader
         self._time = time_fn or time.time
         self._sleep = sleep_fn or time.sleep
         self._subprocess_run = subprocess_run or subprocess.run
@@ -83,7 +86,7 @@ class LMStudioProvider(HttpProvider):
         method: str = "GET",
         payload: dict[str, Any] | None = None,
         timeout: int = 120,
-    ) -> dict | None:
+    ) -> dict[str, Any] | None:
         if self._rest_request is not None:
             return self._rest_request(endpoint, method=method, data=payload, timeout=timeout)
         original_url = self.base_url
@@ -110,10 +113,7 @@ class LMStudioProvider(HttpProvider):
             if not isinstance(item, dict):
                 continue
             base_key = item.get("modelKey", "")
-            if not base_key or is_support_file(
-                item.get("path", "") or item.get("indexedModelIdentifier", ""),
-                item.get("architecture", ""),
-            ):
+            if not base_key or is_support_model_record(item):
                 continue
             quant = item.get("quantization", {}) or {}
             quant_name = quant.get("name", "") if isinstance(quant, dict) else ""
@@ -129,7 +129,8 @@ class LMStudioProvider(HttpProvider):
                     stem = filename[:-5]
                     if "-" in stem:
                         quant_name = stem.rsplit("-", 1)[-1]
-            display = item.get("displayName", base_key)
+            raw_display = item.get("displayName", base_key)
+            display = raw_display if isinstance(raw_display, str) else str(base_key)
             if quant_name:
                 if "@" in display:
                     display = display.split("@", 1)[0]
@@ -249,6 +250,13 @@ class LMStudioProvider(HttpProvider):
         payload: dict[str, Any] = {"model": model_identifier, "echo_load_config": True}
         if gpu_offload is not None:
             payload["gpu_offload"] = gpu_offload
+        if self._runtime_loader is not None:
+            runtime = self._runtime_loader(model_identifier) or {}
+            num_experts = runtime.get("num_experts")
+            if isinstance(num_experts, int) and not isinstance(num_experts, bool) and num_experts > 0:
+                # This is the selected runtime value, not the immutable
+                # GGUF architectural maximum.
+                payload["num_experts"] = num_experts
         for attempt in range(2):
             result = self._native_request("/api/v1/models/load", method="POST", payload=payload, timeout=180)
             if result is not None and result.get("status") == "loaded":

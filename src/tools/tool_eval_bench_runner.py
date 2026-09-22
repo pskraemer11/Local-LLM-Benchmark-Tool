@@ -38,7 +38,7 @@ async def _patched_chat_completion(self: Any, **kwargs: Any) -> Any:
     return await _ORIGINAL_CHAT_COMPLETION(self, **kwargs)
 
 
-openai_compat.OpenAICompatibleAdapter.chat_completion = _patched_chat_completion
+openai_compat.OpenAICompatibleAdapter.chat_completion = _patched_chat_completion  # type: ignore[method-assign]
 
 from tool_eval_bench.cli.bench import main
 

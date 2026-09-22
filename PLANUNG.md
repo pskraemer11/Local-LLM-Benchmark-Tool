@@ -1,6 +1,32 @@
-# Planung: pragmatische, score-kompatible Prozessisolation
+# Planung: Prozessisolation, direkte llama.cpp-Migration und Benchmark-Abnahme
 
-Status: 2026-08-28. Prioritaet: Score-Kompatibilitaet vor zusaetzlicher Sicherheitskomplexitaet.
+Status: 2026-09-22. Prioritaet: reproduzierbare Backend-Abnahme und Score-Kompatibilitaet.
+
+## Aktueller Gesamtstatus
+
+Die direkte llama.cpp-Integration ist technisch weitgehend umgesetzt und mit
+lokalen Server-Smokes, vier Pipeline-Smokes und einem sequenziellen
+Mehrmodelllauf geprüft. Die fachliche Abnahme ist noch nicht abgeschlossen.
+Insbesondere stehen der LM-Studio-/llama.cpp-Kompatibilitaetsvergleich, der
+separate GLM-Streamingvergleich, die Qualitaetsauswertung und die offenen
+Worker-/Manifest-Vergleiche noch aus.
+
+- `[x]` Produktives lokales Backend: `C:\Program Files\llama.cpp\llama-server.exe`.
+- `[x]` Registry als fachliche Quelle; `config.ini` und `preset.ini` als
+  Runtime-/Exportebenen getrennt.
+- `[x]` Direkter Provider- und Runnerpfad einschliesslich Lifecycle und
+  `SampleSize`-abhaengiger Parallelitaetsregel.
+- `[~]` Kompatibilitaet, Modell-Templates, Warnungen und fachliche Scores sind
+  noch nicht vollstaendig abgenommen.
+- `[~]` Der fruehere LM-Studio-SampleSize-5-Lauf ist gesichert bzw. pausiert;
+  er wird erst nach der direkten Backend-Abnahme fortgesetzt oder neu geplant.
+- `[ ]` Aktueller blockierender Registry-Check: Bei
+  `mudler/gemma-4-26b-a4b-it-apex` fehlen weiterhin der getestete
+  `experts`-Laufzeitwert und die Quantisierung.
+
+In dieser Datei bedeutet `[x]` abgeschlossen, `[~]` teilweise erledigt,
+bewusst zurueckgestellt oder noch mit einer offenen Teilabnahme und `[ ]`
+offen.
 
 ## Leitentscheidung
 
@@ -106,13 +132,22 @@ Agentic-Benchmarks bleiben vorerst bei den vorhandenen Inspect-AI-Tools und dem 
 
 - [ ] Qwen3.8-Unsloth-Empfehlungen und neue Modelle in Blueprint/Assembly integrieren. Qwen3.6-Kompatibilitaet und die kanonische Identitaet `publisher/model@quant` erhalten.
 - [x] Konfigurierbaren GGUF-Modellroot mit primaerer neuer Quelle und kompatiblem altem Fallback umsetzen; Junction-Unterstuetzung bleibt erhalten.
+- [x] Die llama.cpp-HF-Cache-Struktur mit `snapshots\\<revision>\\*.gguf`
+  aufloesen; die GUI-Sichtbarkeit ist fuer den Benchmarkpfad nicht
+  erforderlich.
+- [x] Den Millie-Vision-Projektor mit `mmproj-`-Namenskonvention aus der
+  LLM-Inventur und Registry-Zuordnung herausfiltern; der Hauptlauf bleibt ein
+  `qwen35moe`-Modell mit getrennt dokumentiertem Projektor.
 - [~] Qwen-Nachlauf und Top-Candidates-Neuauflage mit aktuellem Setup, vollstaendiger Modellabdeckung und korrekter Konsolidierung abschliessen.
+- [ ] Den fehlenden getesteten Laufzeitwert `experts` und die Quantisierung fuer
+  `mudler/gemma-4-26b-a4b-it-apex` aus einem realen LM-Studio-Test nachtragen;
+  bis dahin darf `validate --ci` diesen Eintrag nicht als gueltig melden.
 
 ### Provider-Architektur und Backend-Migration
 
 #### Neue Backend-Migrationsplanung: direkter llama.cpp-Runner
 
-Status: 2026-09-21. Ziel: Das produktive Benchmark-Backend wird der direkt
+Status: 2026-09-22. Ziel: Das produktive Benchmark-Backend wird der direkt
 gestartete llama.cpp-Server. LM Studio bleibt ein experimentelles Werkzeug fuer
 Parameter-, VRAM- und Kompatibilitaetstests. Unsloth Studio/API ist kein
 Bestandteil des produktiven Benchmarkpfads.
@@ -192,7 +227,7 @@ Am 21.09.2026 wurden drei `llama.exe`-Fundstellen aufgelöst:
 | Pfad | Status | Nachweis/Rolle |
 | --- | --- | --- |
 | `C:\Program Files\llama.cpp` | bevorzugter Produktionspfad | Build 10964; enthält `ggml-cuda.dll`, `llama-server.exe`, `llama-cli.exe` und Hilfsprogramme. |
-| `C:\Users\pskra\AppData\Local\Microsoft\WindowsApps\llama.exe` | vorerst nicht freigegeben | gebündelte llama-GUI/CLI, Build 11046; Rolle, Backend und Lifecycle werden separat geprüft. Nicht als impliziter Produktionspfad verwenden. |
+| `C:\Users\pskra\AppData\Local\Microsoft\WindowsApps\llama.exe` | entfernt | Vom Benutzer gelöscht; nicht Bestandteil der Migration und nicht als Produktionspfad vorgesehen. |
 | `C:\Users\pskra\AppData\Local\Microsoft\WinGet\Packages\ggml.llamacpp_Microsoft.Winget.Source_8wekyb3d8bbwe` | entfernt | WinGet-Paket `ggml.llamacpp`, Installer `llama-b11046-bin-win-vulkan-x64.zip`, enthielt `ggml-vulkan.dll`. |
 
 Die Vulkan-Variante wurde über den zuständigen Paketmanager entfernt:
@@ -201,10 +236,8 @@ Die Vulkan-Variante wurde über den zuständigen Paketmanager entfernt:
 winget uninstall --id ggml.llamacpp --exact --silent
 ```
 
-`where.exe llama.exe` zeigt danach nur noch die WindowsApps-Datei und die
-Program-Files-Installation. Die Benchmarksoftware darf dennoch nicht auf eine
-PATH-Reihenfolge vertrauen, sondern verwendet den expliziten Pfad
-`LLAMA_CPP_SERVER_EXE` beziehungsweise die Provider-Konfiguration.
+Die Benchmarksoftware verwendet keine PATH-Reihenfolge, sondern den expliziten
+Pfad `LLAMA_CPP_SERVER_EXE` beziehungsweise die Provider-Konfiguration.
 
 Technisch ist Vulkan nicht grundsätzlich unfähig, eine NVIDIA-GPU zu nutzen;
 es verwendet jedoch nicht den CUDA-Backendpfad, der für dieses Projekt als
@@ -212,11 +245,8 @@ Referenz und für die gewünschte NVIDIA-Optimierung maßgeblich ist. Deshalb
 bleibt der CUDA-Build unter `C:\Program Files\llama.cpp` die verbindliche
 Produktionsinstallation.
 
-Die WindowsApps-Installation wird erst freigegeben, wenn ein separater Test
-belegt, dass sie einen expliziten lokalen GGUF-Pfad, das gewünschte Backend,
-konfigurierbare Logs sowie einen deterministischen Start-/Stop-Lifecycle
-unterstützt. Bis dahin wird sie nicht gelöscht, aber auch nicht automatisch
-verwendet.
+Die frühere WindowsApps-Installation wurde aus dem System entfernt. Ihre
+unklare GUI-/Router-Rolle bleibt damit bewusst außerhalb der Migration.
 
 ##### GGUF-Ablagen und GUI-Erkennung
 
@@ -247,66 +277,87 @@ Benchmarkpfads.
 
 **Phase A – Bestand und Registry stabilisieren**
 
-1. Alle noch offenen LM-Studio-Ergebnisse, Backups und Serverlogs inventarisieren.
-2. Den abgebrochenen SampleSize-5-Lauf ab GLM beziehungsweise ab dem ersten
-   fehlenden Modell gezielt fortsetzen, nicht bereits gesicherte Modelle blind
-   wiederholen.
-3. GLM-4.7-Flash und REAP mit einem SampleSize-1-Rohantworttest abschließen.
-4. Für alle verwendeten Code-Benchmarks ein Task-Manifest erzeugen und die
+1. [~] Alle bisher gelaufenen LM-Studio-Ergebnisse, Backups und Serverlogs
+   gesichert und inventarisiert halten; die fachliche Auswertung der
+   gesicherten Resultate ist noch offen.
+2. [~] Den abgebrochenen SampleSize-5-Lauf bewusst pausiert lassen. Nach der
+   direkten Backend-Abnahme nur die noch nicht gelaufenen Modelle gezielt mit
+   llama.cpp fortsetzen oder einen vollständig dokumentierten neuen Lauf
+   starten; bereits gesicherte Modelle nicht blind wiederholen.
+3. [~] GLM-4.7-Flash wurde im direkten, nicht gestreamten API-Pfad mit den
+   Reasoning-Formaten geprüft. Der LM-Studio-Vergleich, die REAP-Abgrenzung
+   und der separate Streamingtest bleiben Teil der offenen Abnahme.
+4. [ ] Für alle verwendeten Code-Benchmarks ein Task-Manifest erzeugen und die
    Worker-Kompatibilität mit identischen Aufgaben prüfen.
-5. `registry_tool.py validate --ci`, Blueprint-Validierung und fokussierte
-   Tests als Baseline protokollieren.
+5. [~] Fokussierte Registry-, Provider- und Runner-Tests sind als technische
+   Baseline dokumentiert. `registry_tool.py validate --ci` bleibt wegen des
+   oben genannten Gemma-Eintrags offen; Blueprint- und Gesamtvalidierung
+   müssen nach der Datenkorrektur erneut protokolliert werden.
 
 **Phase B – llama.cpp-Parametervertrag definieren**
 
-1. Eine explizite Zuordnung Registryfeld → llama.cpp-Argument festlegen.
-2. Für jedes Feld definieren, ob es statisch pro Modell, pro Serverstart oder
+1. [x] Eine explizite Zuordnung Registryfeld → llama.cpp-Argument festlegen.
+2. [x] Für jedes Feld definieren, ob es statisch pro Modell, pro Serverstart oder
    pro API-Request gilt.
-3. Nicht abbildbare Werte nicht stillschweigend verwerfen, sondern als
+3. [x] Nicht abbildbare Werte nicht stillschweigend verwerfen, sondern als
    Warnung oder blockierenden Exportfehler ausweisen.
-4. `--reasoning-format` für GLM, GPT-OSS und weitere Reasoning-Familien als
-   Providerprofil testen; LM-Studio-Parserwerte nicht automatisch kopieren.
-5. JSON-Schema/Grammar, Jinja-Aktivierung, Stop-Verhalten und multimodale
-   Eingaben als eigene Capability-Gates behandeln.
+4. [~] `--reasoning-format` für GLM, GPT-OSS und weitere Reasoning-Familien als
+   Providerprofil testen; die nicht gestreamten GLM-Varianten sind geprüft,
+   der Streamingvergleich und die abschliessende Profilentscheidung bleiben
+   offen. LM-Studio-Parserwerte werden nicht automatisch kopiert.
+5. [~] JSON-Schema/Grammar, Jinja-Aktivierung, Stop-Verhalten und
+   multimodale Eingaben als eigene Capability-Gates behandeln. Die relevanten
+   Pfade sind getrennt, aber die Modellfamilien- und Streamingabnahme ist noch
+   nicht vollständig.
 
 **Phase C – Export statt Doppelpflege**
 
 1. [x] `registry_tool.py` um einen report-only Export für llama.cpp erweitern.
-2. Ein Argumentmanifest mit Modellpfad, Build-Anforderung, Startargumenten,
+2. [x] Ein Argumentmanifest mit Modellpfad, Build-Anforderung, Startargumenten,
    Request-Defaults und Registry-Schlüssel erzeugen.
 3. [x] Ein `preset.ini` für den llama.cpp-Router erzeugen; dieses gilt
    als generiertes Artefakt und nicht als zweite editierbare Quelle. Der
    Aufruf ist `py -3.12 src/registry_tool.py export-llama-preset [PATH]`.
-4. Exportierte Artefakte mit Registry-Hash, llama.cpp-Version und Zeitstempel
+4. [x] Exportierte Artefakte mit Registry-Hash, llama.cpp-Version und Zeitstempel
    versehen.
-5. Golden-File-Tests für mindestens GLM-4.7, GPT-OSS, Gemma und ein normales
-   Instruct-Modell hinzufügen.
+5. [~] Export-Tests für GLM-4.7, GPT-OSS, Gemma und ein normales Instruct-
+   Modell sind vorhanden; explizite Golden-Files für alle vier Modellfamilien
+   bleiben als reproduzierbare Exportregression offen.
 
 **Phase D – Direkten Provider implementieren**
 
-1. `src/providers/llama_cpp_provider.py` für Start, Readiness, Modelle,
+1. [x] `src/providers/llama_cpp_provider.py` für Start, Readiness, Modelle,
    Current-Model und Stop anlegen.
-2. Fremde Serverprozesse nur beenden, wenn ihre PID und Startparameter dem
+2. [x] Fremde Serverprozesse nur beenden, wenn ihre PID und Startparameter dem
    eigenen Providerlauf zugeordnet werden können.
-3. `run_benchmarks.py` erhält einen expliziten Provider-/Client-Kontext.
-4. Custom, EvalPlus, LM-Eval und Agentic verwenden dieselbe Providergrenze,
+3. [x] `run_benchmarks.py` erhält einen expliziten Provider-/Client-Kontext.
+4. [x] Custom, EvalPlus, LM-Eval und Agentic verwenden dieselbe Providergrenze,
    soweit ihre API-Capabilities dies erlauben.
-5. Globale URL- und Parallelitätsannahmen aus `run_benchmarks.py` entfernen.
+5. [x] Globale URL- und Parallelitätsannahmen aus `run_benchmarks.py` entfernen;
+   die Legacy-Symbole bleiben nur als rückwärtskompatible Test-/Integrations-
+   Fassade bestehen.
 
 **Phase E – Verifikation und Rollout**
 
 1. [x] Mit `llama-bench.exe` Laden, VRAM-Fit und Token-Erzeugung vorprüfen.
 2. [x] Einen Server-Smoke mit einem lokalen GGUF und archiviertem stdout/stderr/
    Serverlog ausführen.
-3. [x] Für GLM die Reasoning-Formate `auto`, `none`, `deepseek` und
+3. [~] Für GLM die Reasoning-Formate `auto`, `none`, `deepseek` und
    `deepseek-legacy` im nicht gestreamten direkten API-Pfad vergleichen.
-   Der Streaming-Vergleich bleibt als separater Test offen, weil der
-   Benchmarkpfad für GLM bewusst nicht streamt.
+   Der separate Streaming-Vergleich bleibt offen, weil der Benchmarkpfad für
+   GLM bewusst nicht streamt.
 4. [x] Pro Pipeline einen SampleSize-1-Lauf ausführen.
 5. [x] Einen sequenziellen Mehrmodelllauf mit Modellauswahl, Seed, Sampling,
    Kontext, Version, GGUF-Pfad und Logs archivieren.
-6. Erst nach bestandener Verifikation den SampleSize-5- beziehungsweise
-   vollständigen Modelllauf auf llama.cpp umstellen.
+6. [ ] Einen systematischen LM-Studio-/llama.cpp-Kompatibilitätsvergleich mit
+   identischem Modell, Template, Sampling und Request durchführen und
+   Unterschiede bei Stop, Reasoning, Structured Output und Tokenisierung
+   getrennt ausweisen.
+7. [ ] Die Warnungen und Fehler getrennt nach Launcher, Pipeline,
+   llama.cpp-Server, Modellarchitektur und Chat-Template klassifizieren und
+   eine Entscheidung zu verbleibenden Tokenizerwarnungen dokumentieren.
+8. [ ] Erst nach bestandener technischer und fachlicher Verifikation den
+   direkten SampleSize-5- beziehungsweise vollständigen Modelllauf starten.
 
 **Abnahmekriterien**
 
@@ -321,11 +372,16 @@ Benchmarkpfads.
   zuordenbare Reasoning-Metadaten.
 - Alle vier Benchmark-Pipelines bestehen den SampleSize-1-Smoke.
 
+Die technischen Kriterien sind damit weitgehend erfüllt. Die fachliche
+Abnahme bleibt offen, solange der LM-Studio-Vergleich, der GLM-Streamingtest,
+die Warnungsanalyse, die Worker-/Manifest-Vergleiche und eine mehrmodellige
+Qualitätsauswertung fehlen.
+
 Die derzeit geprüfte llama.cpp-Installation ist:
 
 ```text
 C:\Program Files\llama.cpp\llama-server.exe
-Version: 0.4.1-dev, build 10964, commit b29c606e2
+Version: 0.4.1-dev, build 11081, commit 161755f29
 ```
 
 Der Pfad muss über `LLAMA_CPP_SERVER_EXE` überschreibbar sein. Der Standard-
@@ -362,54 +418,23 @@ Wert muss konfigurierbar bleiben.
   `unsloth/glm-4.7-flash@q3_k_s`. `llama.exe server` ist dafür nicht der
   freigegebene Produktionspfad; der direkte Provider verwendet ausdrücklich
   `llama-server.exe`.
+- Die llama.cpp-HF-Cache-Prüfung wurde um Projektoren erweitert: Dateien und
+  Einträge mit `mmproj` in Pfad, Dateiname oder Modell-ID werden als
+  multimodale Hilfsartefakte behandelt. Für Millie ist der Hauptschlüssel
+  `llmsforall/millie-35b-a3b-11gb@?` mit `experts: 64` und `max_experts: 256`
+  dokumentiert; der Projektor bleibt separat.
+- Der aktuelle fokussierte Testlauf umfasst 233 bestandene Tests. Ruff und
+  Syntaxprüfungen der betroffenen Produktionspfade sind sauber. Der
+  verbleibende `validate --ci`-Fehler betrifft ausschließlich den noch nicht
+  dokumentierten Gemma-Expertenwert und die fehlende Quantisierung.
 
-##### Zusätzliche llama.cpp-GUI-Installation: Kandidat, noch nicht freigegeben
+##### Ausgeschlossene WindowsApps-Installation
 
-Auf dem System existiert außerdem eine von LM Studio und Unsloth unabhängige
-Installation unter:
-
-```text
-C:\Users\pskra\AppData\Local\Microsoft\WindowsApps\llama.exe
-```
-
-Das ist kein Verzeichnis mit einem vollständigen Satz einzelner Hilfsprogramme,
-sondern eine gebündelte llama.cpp-CLI. `llama.exe` stellt unter anderem
-`serve`, `cli`, `download`, `bench`, `batched-bench`, `fit-params`, `quantize`
-und `update` bereit. Die zugehörige Desktop-Anwendung ist ein separates
-`LlamaApp.exe`-Paket. Die lokal festgestellte CLI-Version ist:
-
-```text
-Version: 0.4.0-dev, build 10909, commit a2878d30d
-```
-
-Die GUI läuft aktuell mit einem lokalen Server auf `127.0.0.1:9931`; der
-Health-Endpunkt antwortet, die Modellliste war bei der Prüfung jedoch leer.
-Die Screenshots zeigen als GUI-Modellcache `D:\LLM-Modelle\models` und eine
-automatische Entladung nach einer Stunde. Das bestätigt weder, dass jeder
-Benchmark mit einem explizit übergebenen lokalen GGUF gestartet wird, noch,
-dass der GUI-Lifecycle für sequenzielle Modelltests geeignet ist.
-
-Die `serve`-CLI akzeptiert sowohl einen lokalen `--model`-Pfad als auch
-Hugging-Face-Optionen wie `--hf-repo`; außerdem existieren Router-Optionen wie
-`--models-dir`, `--models-max` und `--models-autoload`. Daher muss vor einer
-Verwendung der GUI-Installation geklärt und getestet werden:
-
-1. ob ein lokaler GGUF-Pfad ohne Download, automatische Modellwahl oder
-   versteckten Cache verwendet werden kann;
-2. ob ein Hugging-Face-Repo ausschließlich zu einem passenden GGUF aufgelöst
-   wird oder ob ein nicht unterstütztes Format, etwa SafeTensors, in den
-   Workflow gelangen kann;
-3. ob Cache, Modellpfad und Logs vollständig auf die gewünschten Verzeichnisse
-   festgelegt werden können;
-4. ob Start, Readiness, Modellwechsel und Stop pro Modell deterministisch über
-   CLI/API steuerbar sind; und
-5. ob die GUI-eigene Idle-Entladung und ein möglicher Router-Cache mit der
-   Benchmark-Isolation vereinbar sind.
-
-Bis diese Punkte mit einem kleinen lokalen GGUF-Smoke und einem sequenziellen
-Mehrmodelltest belegt sind, bleibt `C:\Program Files\llama.cpp\llama-server.exe`
-der bevorzugte Produktionspfad. Die WindowsApps-Installation ist eine
-separat zu evaluierende Alternative, nicht automatisch ein Ersatz dafür.
+Die frühere `C:\Users\pskra\AppData\Local\Microsoft\WindowsApps\llama.exe`
+war eine separate GUI-/Router-Installation mit ungeklärter Modell- und
+Lifecycle-Verantwortung. Sie wurde vor Beginn dieser Migration gelöscht und
+ist damit kein Backend, kein Fallback und kein Testziel. Produktiv bleibt
+ausschließlich `C:\Program Files\llama.cpp\llama-server.exe`.
 
 ##### Verantwortungsgrenzen und Datenhoheit
 
@@ -456,12 +481,10 @@ gezielt erneut validiert werden.
 
    - [x] Die unabhängige Binary unter `C:\Program Files\llama.cpp` und ihre
      CUDA-Erkennung mit `--version` und `--help` prüfen.
-   - [ ] Die WindowsApps-CLI `llama.exe serve` gegen einen expliziten lokalen
-     GGUF-Pfad, den Port 9931, den eigenen Logpfad und den Stop-Lifecycle
-     prüfen; Hugging-Face- und Router-Pfade bleiben bis zum Nachweis außerhalb
-     des produktiven Benchmarkpfads.
-   - [ ] Version, Build, Commit, Modellpfad, Cachepfad, Port und Logpfad für
-     beide llama.cpp-Varianten in einem reproduzierbaren Backend-Smoke erfassen.
+   - [x] Die WindowsApps-CLI wurde aus dem Scope entfernt; ein Test gegen
+     Hugging-Face-/Router-Pfade ist nicht Teil der Migration.
+   - [x] Version, Build, Commit, Modellpfad, Port und Logpfad des verbindlichen
+     CUDA-Backends werden für jeden direkten Lauf reproduzierbar erfasst.
    - [x] `src/providers/llama_cpp_provider.py` als klar benannten Provider
      anlegen; `unsloth_server_provider.py` nicht als neue Zielarchitektur
      weiterführen, sondern nur für Kompatibilität oder Migration erhalten.
@@ -478,45 +501,53 @@ gezielt erneut validiert werden.
    - [x] `k_cache` und `v_cache` auf `--cache-type-k` und `--cache-type-v`
      abbilden; `useUnifiedKvCache` nur übernehmen, wenn die aktuelle Binary
      die dafür vorgesehene llama.cpp-Option unterstützt.
-   - [ ] Registry-Sampling und Reasoning-Policy in Request- bzw. Template-
+   - [x] Registry-Sampling und Reasoning-Policy in Request- bzw. Template-
      Parameter überführen; keine zufälligen GUI-Defaults des Servers verwenden.
-   - [x] Für direkte llama.cpp-Aufrufe `--reasoning-format` als explizite
-     Provider-Option modellieren. Die Varianten `none`, `deepseek` und
-     `deepseek-legacy` müssen für GLM-4.7 mit Streaming und Nicht-Streaming
-     verglichen werden; die Auswahl darf nicht stillschweigend aus dem
-     LM-Studio-Reasoning-Parser übernommen werden.
+   - [~] Für direkte llama.cpp-Aufrufe `--reasoning-format` als explizite
+     Provider-Option modellieren. `none`, `deepseek` und `deepseek-legacy`
+     sind für GLM-4.7 im Nicht-Streamingpfad verglichen; der separate
+     Streamingvergleich und die abschliessende Auswahl bleiben offen. Die
+     Auswahl darf nicht stillschweigend aus dem LM-Studio-Reasoning-Parser
+     übernommen werden.
    - [x] Prüfen, ob `llama-server.exe` dieselbe Reasoning-Format-Option wie
      `llama-cli.exe` anbietet und wie sie in der OpenAI-kompatiblen API die
      Felder `message.content` und `message.reasoning_content` beeinflusst.
-   - [ ] Provider-Optionen wie GPU-Layer, Flash Attention, Jinja, Parallelität,
-     Batch- und Offload-Regeln als expliziten Vertrag testen und nicht aus
-     bloßen Modellnamen ableiten.
+   - [x] Provider-Optionen wie GPU-Layer, Flash Attention, Jinja, Parallelität,
+     Batch- und Offload-Regeln als expliziten Vertrag abbilden und durch den
+     `llama-server.exe --help`-Vertrag prüfen; sie werden nicht aus bloßen
+     Modellnamen abgeleitet.
 
 3. **Runner auf expliziten Provider-/Client-Kontext umstellen**
 
-   - [ ] `run_benchmarks.py` erhält einen konkreten Client-Kontext statt einer
+   - [x] `run_benchmarks.py` erhält einen konkreten Client-Kontext statt einer
      global importierten `API_BASE`.
-   - [ ] Alle Pipelines (Custom, EvalPlus, LM-Eval und Agentic) beziehen ihre
+   - [x] Alle Pipelines (Custom, EvalPlus, LM-Eval und Agentic) beziehen ihre
      Base-URL und Authentifizierung aus diesem Kontext.
-   - [ ] `model_manager.py` bleibt Factory und Kompatibilitätsfassade, ist aber
+   - [x] `model_manager.py` bleibt Factory und Kompatibilitätsfassade, ist aber
      nicht mehr die versteckte Quelle für providerabhängige URL-Annahmen.
-   - [ ] Chat- und Text-Completions bleiben capability-gesteuert; ein Provider
+   - [x] Chat- und Text-Completions bleiben capability-gesteuert; ein Provider
      darf nicht stillschweigend so behandelt werden, als unterstütze er beide.
-   - [ ] `num_parallel` wird durch Provider-Capabilities und optional einen
-     Registry-Wert begrenzt. `SampleSize` bestimmt nur noch die gewünschte
-     Arbeitsmenge, nicht allein die zulässige Parallelität.
+   - [x] `num_parallel` wird durch Provider-Capabilities und optional einen
+     Registry-Wert begrenzt. Die aktuelle Policy wünscht bei
+     `SampleSize <= 5` genau 1 und sonst 4 parallele Anfragen; die
+     Provider-Capability darf diesen Wert weiter reduzieren.
 
 4. **Registry- und LM-Studio-Workflow entkoppeln**
 
    - [x] Modellauflistung und GGUF-Auflösung für den direkten Provider über den
      gemeinsamen `LocalModelResolver` führen; die Benchmarkauswahl darf nicht
      von einer aktuellen LM-Studio-Serverliste abhängen.
-   - [ ] `registry_tool.py` so erweitern oder präzisieren, dass der Import von
-     LM-Studio-Testwerten für `context_length`, K-/V-Quantisierung und UKV
-     explizit, nachvollziehbar und feldweise kontrolliert erfolgt.
-   - [ ] Providerneutrale Registry-Felder von reinem LM-Studio-Runtimezustand
-     trennen. Nicht jeder GUI-Wert darf als llama.cpp-Policy gespeichert werden.
-   - [ ] Hilfe und Dokumentation auf den neuen Ablauf umstellen: LM Studio
+   - [~] `registry_tool.py` so erweitern oder präzisieren, dass der Import von
+     LM-Studio-Testwerten für `context_length`, K-/V-Quantisierung, UKV und
+     MoE-`experts` explizit, nachvollziehbar und feldweise kontrolliert
+     erfolgt. Kontext- und Expertenwerte können bereits gezielt importiert
+     werden; die Gesamtprüfung der Feldhoheit und der noch offenen Gemma-Daten
+     steht aus.
+   - [~] Providerneutrale Registry-Felder von reinem LM-Studio-Runtimezustand
+     trennen. Die Grundgrenze ist dokumentiert, die vollständige Feldmatrix
+     für llama.cpp, LM Studio und künftige Provider bleibt zu prüfen. Nicht
+     jeder GUI-Wert darf als llama.cpp-Policy gespeichert werden.
+   - [x] Hilfe und Dokumentation auf den neuen Ablauf umstellen: LM Studio
      optimiert, `registry_tool.py` schreibt nach Review, llama.cpp benchmarked.
 
 5. **Verifikation und Vergleichbarkeit**
@@ -533,15 +564,17 @@ gezielt erneut validiert werden.
      Lifecycle-/API-Smoke, kein Qualitätsbaseline.
    - [ ] Einen LM-Studio/llama.cpp-Vergleich nur als Backend-Kompatibilitäts-
      test durchführen; Unterschiede bei Template, Stop-Parsing, Reasoning,
-     Tokenisierung und Serverversion separat ausweisen.
-   - [ ] Für GLM-4.7 einen A/B-Test mit `--reasoning-format auto`,
+     Structured Output, Tokenisierung und Serverversion separat ausweisen.
+   - [~] Für GLM-4.7 einen nicht gestreamten A/B-Test mit `--reasoning-format auto`,
      `deepseek`, `deepseek-legacy` und `none` durchführen und jeweils
-     Streaming, finales JSON bzw. Code sowie Reasoning-Metadaten prüfen.
-   - [ ] Danach den eigentlichen Modelllauf sequenziell über `llama-server.exe`
+     finales JSON bzw. Code sowie Reasoning-Metadaten prüfen; dieser Teil ist
+     abgeschlossen, ein separater Streaming-Test bleibt bewusst offen.
+   - [x] Danach den technischen Mehrmodelllauf sequenziell über `llama-server.exe`
      ausführen. Für jedes Modell werden Startargumente, Serverversion, GGUF-
      Pfad, Registry-Schlüssel, stdout, stderr und Serverlog archiviert.
    - [ ] Fehler und Warnungen getrennt nach Launcher, Pipeline, llama.cpp-
-     Server, Modellarchitektur und Chat-Template analysieren.
+     Server, Modellarchitektur und Chat-Template analysieren; dabei die
+     `special_eot_id`-/`special_eom_id`-Warnungen fachlich einordnen.
 
 6. **Abnahme und laufende Pflege**
 
@@ -549,7 +582,7 @@ gezielt erneut validiert werden.
      bzw. HTTP-Testdoppelung ohne echte VRAM-Last ausführen.
    - [x] Einen echten lokalen Server-Smoke mit der installierten Binary und
      einem lokalen GGUF durchführen. Der vollständige Einmodell-Pipeline-Smoke
-     ist ebenfalls abgeschlossen; der sequenzielle Mehrmodelllauf bleibt offen.
+     und der technische sequenzielle Mehrmodelllauf sind abgeschlossen.
    - [ ] Nach jedem llama.cpp-Update `--version`, `--help`, `llama-bench`,
      einen Modell-Smoke und die Registry-/Template-Tests wiederholen.
    - [x] Die Zielarchitektur in `doc-git/Architecture, Flow & ChangeLog_en.md`
@@ -575,10 +608,20 @@ gezielt erneut validiert werden.
 ### Benchmark- und Qualitaetsverifikation
 
 - [ ] Task-Manifeste fuer die tatsaechlich verwendeten Code-Benchmark-Datensaetze erzeugen und auffaellige Aufgaben vor dem naechsten Referenzlauf bewerten.
-- [ ] SampleSize-1-Smoke der Workerpfade ausfuehren.
+- [ ] SampleSize-1-Smoke der Workerpfade ausfuehren; der bereits erfolgreiche
+  direkte llama.cpp-Pipeline-Smoke ersetzt diese Worker-Abnahme nicht.
 - [ ] Gepaarte Kompatibilitaetslaeufe vor/nach der Import-Blockaden-Entfernung mit identischem Manifest ausfuehren.
 - [ ] Manifest- und Worker-Funktionen mit Ruff, Python-3.12-Syntaxcheck und fokussierten Pytest-Tests verifizieren.
-- [ ] Nach Abschluss die Ergebnisse und die Entscheidung zur Score-Neutralitaet in `ergebnisse/` dokumentieren.
+- [ ] Die fachliche Qualitaet ueber mehrere geeignete Modelle und die
+  Kategorien Coding, Math und Agentic mit festgelegten Sampling- und
+  Reasoningprofilen auswerten; technische Smoke-Scores nicht als
+  Qualitaetsbaseline verwenden.
+- [ ] Den strengen mypy-Bestand systematisch bereinigen. Die zuletzt bekannte
+  Groesse lag bei 105 Meldungen; vor dem Abbau den aktuellen Scope neu
+  erfassen und die Fehler in fokussierten Gruppen beheben.
+- [ ] Nach Abschluss die Ergebnisse, die Entscheidung zur Score-Neutralitaet
+  und die Abgrenzung zum pausierten SampleSize-5-Lauf in `ergebnisse/`
+  dokumentieren.
 
 ### Abgeschlossener Plan: konfigurierbarer GGUF-Modellroot
 
@@ -608,8 +651,12 @@ und Integrationsaenderung erneut ausgefuehrt.
 
 ```powershell
 py -3.12 -m pytest tests\test_task_manifest.py tests\test_sandbox_worker.py tests\test_custom_benchmark_io.py -q --basetemp=.pytest-temp
-ruff check src\task_manifest.py src\prepare_task_manifests.py src\sandbox_worker.py tests\test_task_manifest.py tests\test_sandbox_worker.py
+py -3.12 -m ruff check src\task_manifest.py src\prepare_task_manifests.py src\sandbox_worker.py tests\test_task_manifest.py tests\test_sandbox_worker.py
 py -3.12 -m py_compile src\task_manifest.py src\prepare_task_manifests.py src\sandbox_worker.py
+py -3.12 src\registry_tool.py validate --ci
 ```
 
-Anschliessend folgt ein SampleSize-1-Smoke mit laufendem LM-Studio-Server. Erst danach wird ein groesserer gepaarter Benchmark-Lauf gestartet.
+Bei Backendänderungen folgt ein SampleSize-1-Smoke mit dem produktiven
+`llama-server.exe`; LM Studio wird nur für den separaten
+Kompatibilitätsvergleich gestartet. Der grössere direkte SampleSize-5-Lauf
+bleibt bis zur fachlichen Abnahme pausiert.

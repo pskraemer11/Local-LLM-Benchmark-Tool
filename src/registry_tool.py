@@ -11,33 +11,33 @@ checks prompt and runtime drift.
 
 After downloading a model or changing the local model inventory:
 
-  1) Show the current state:		py -3.12 .\src\registry_tool.py pipeline status
+  1) Show the current state:              py -3.12 .\src\registry_tool.py pipeline status
 
-  2) Synchronize the registry:	py -3.12 .\src\registry_tool.py pipeline sync
+  2) Synchronize the registry:            py -3.12 .\src\registry_tool.py pipeline sync
 
-  3) Check prompts and drift:	py -3.12 .\src\registry_tool.py pipeline full
+  3) Check prompts and drift:             py -3.12 .\src\registry_tool.py pipeline full
 
-  4) Write prompt assembly:	py -3.12 .\src\assemble_blueprint.py assemble
+  4) Write prompt assembly:               py -3.12 .\src\assemble_blueprint.py assemble
 
-  5) Start benchmarks:		py -3.12 .\src\run_benchmarks.py --help
+  5) Start benchmarks:                    py -3.12 .\src\run_benchmarks.py --help
 
-`pipeline full` runs prompt assembly as a preview only and does not write LM
-Studio JSON configurations. To write the configurations, run
-`assemble_blueprint.py assemble` directly or use the corresponding explicit
-write path.
+`pipeline full` runs prompt assembly as a preview and adds only missing
+`promptTemplate` fields to matching LM Studio JSON configurations. It does not
+write assembled system prompts. To write those, run `assemble_blueprint.py
+assemble` directly or use the corresponding explicit write path.
 
 2. DATA OWNERSHIP AND WRITE BOUNDARIES
 
-  Registry policy		doc-git\model_registry.yaml — benchmark and provider-neutral model metadata.
-  Technical facts		GGUF files and headers — architecture, quantization, and native limits.
-  Prompt policy			doc-git\blueprint_definitions.yaml — blueprints, roles, and prompt modules.
-  Runtime artifacts	LM Studio JSON configurations
-			Local backend settings; normal sync and `pipeline full` do not silently overwrite them.
-  Results			ergebnisse\ — CSVs, telemetry, and summaries.
+  Registry policy              doc-git\model_registry.yaml — benchmark and provider-neutral model metadata.
+  Technical facts              GGUF files and headers — architecture, quantization, and native limits.
+  Prompt policy                doc-git\blueprint_definitions.yaml — blueprints, roles, and prompt modules.
+  Runtime artifacts            LM Studio JSON configurations;
+                               local backend settings; `pipeline full` fills only missing promptTemplate fields.
+  Results                      ergebnisse\ — CSVs, telemetry, and summaries.
 
 The Registry is the source of truth for benchmark policy, especially
 `useUnifiedKvCache` and `context_length`. The fixed `num_parallel` policy uses
-Sample Size (SS): SS >= 10 selects four slots; smaller runs select one slot.
+one slot for Sample Size <= 5; larger runs use four slots.
 Unified KV-cache (UKV) and local runtime configurations remain separate
 responsibility areas.
 
@@ -55,14 +55,22 @@ responsibility areas.
 
   pipeline full
       `pipeline sync` plus quarantine dry run, blueprint/reasoning
-      classification, prompt preview, prompt validation, and Registry drift
-      validation. Open blocking ownership drift returns exit code 1.
+      classification, missing LM Studio prompt-template synchronization,
+      prompt preview, prompt validation, and Registry drift validation.
+      Open blocking ownership drift returns exit code 1.
       `--ignore-drift` changes only the exit code; it does not repair drift.
       `--ignore-drift` keeps it report-only.
 
+  quarantine-missing [--dry-run]
+      Quarantine configs for Registry models whose GGUF files are gone.
+      `--dry-run` previews the move. Without it, matching configs move into
+      the LM Studio `_quarantine_missing_<timestamp>` folder, the Registry
+      entries are removed, and a YAML backup is written. GGUFs still found
+      on disk are only reported. `pipeline full` runs preview mode only.
+
   --refresh-sampling
-      Re-run sampling research for all benchmarkable candidates. Without this
-      option, terminal research statuses are skipped.
+      Run a web search for all benchmarkable candidates. This may take several
+      minutes. Without this option, terminal research statuses are skipped.
 
 4. REGISTRY AND DIAGNOSTIC COMMANDS
 
@@ -86,9 +94,14 @@ responsibility areas.
                 Fill reasoning mode from GGUF chat templates.
   fmt           Format the Registry YAML.
   migrate-keys  Convert Registry keys without a publisher.
-  sync-from-configs [--write|--write-context]
+  quarantine-missing [--dry-run]
+                Preview or perform quarantine of configs for missing GGUFs;
+                also removes stale Registry entries and backs them up.
+  sync-from-configs [--write|--write-context|--write-experts]
                 Compare config values. Read-only by default.
                 --write-context imports only contextLength into context_length;
+                --write-experts imports only the tested LM Studio numExperts
+                runtime value into Registry.experts;
                 --write deliberately imports all supported config fields.
   sync-templates
                 Write missing promptTemplate values from Registry templates
@@ -101,6 +114,10 @@ responsibility areas.
                 files and Registry runtime settings. It never writes the
                 Registry or LM Studio JSON configurations.
                 Use --merge-existing to preserve and extend an existing INI.
+  export-llama-args [PATH]
+                Generate a JSON manifest with concrete llama.cpp start
+                arguments, model paths, request defaults, Registry hash,
+                and server version. It never writes Registry/config JSONs.
   patch-reasoning-effort [--dry-run] [--wait-for-lock] [--effort] [--budget]
                 Add gpt-oss reasoning fields to LM Studio configs.
   patch-glm-configs [--dry-run]
@@ -109,17 +126,32 @@ responsibility areas.
                 Remove a Registry entry. File/config deletion requires both
                 --delete-files and --yes; verify target and scope first.
 
-These runtime commands deliberately modify local JSONs and should be used only
-after a preview or targeted review.
+The explicit patch commands modify local JSONs. `pipeline full` also fills
+only missing promptTemplate fields; it preserves populated template values.
 
-5. SAMPLING ONBOARDING AND MODEL FILTERS
+5. SAMPLING RESEARCH AND MODEL FILTERS
 
-New models can be researched once through Hugging Face model cards,
-base-model metadata, and bounded official documentation paths. The Registry
-stores status, sources, and evidence in the `sampling` block. Possible status
-values are `confirmed`, `unresolved`, `conflict`, and `not_found`. Benchmark
-runs do not perform web searches; they read only local Registry values and
-use category defaults when evidence is missing.
+Sampling policy is stored per Registry model in four benchmark categories:
+`coding`, `knowledge`, `agentic`, and `math`; an optional `thinking` profile
+is separate. A category may contain `temperature`, `top_p`, `top_k`, and
+`min_p`, plus `evidence_kind` (`direct` or `derived`) and `derived_from`.
+Research status, timestamp, and deduplicated source URLs are stored once in
+the same `sampling` block. Status values: `confirmed`, `unresolved`,
+`conflict`, and `not_found`.
+
+Automatic research runs when new benchmarkable models are added and during
+`sync` for missing sampling blocks. To explicitly retry terminal results or
+refresh every benchmarkable candidate, use:
+
+  py -3.12 .\src\registry_tool.py sync --refresh-sampling
+  py -3.12 .\src\registry_tool.py pipeline sync --refresh-sampling
+
+Without `--refresh-sampling`, terminal statuses are skipped. Refreshing uses a
+web search and can take several minutes. Review unresolved or conflicting
+evidence manually through the `registry-sampling-review` skill;
+do not guess or silently replace contradictory values. Benchmark runs never
+search the web: they consume local Registry values and use category defaults
+when evidence is missing.
 
 Only models with local benchmark pipelines belong in the Registry. Embedding,
 OCR, vision, audio, and RAG-only models, as well as MTP, DFlash, mmproj, and
@@ -161,6 +193,7 @@ assembly remains an explicit step in `assemble_blueprint.py`.
 from __future__ import annotations
 
 import concurrent.futures
+import hashlib
 import json
 import os
 import re
@@ -172,6 +205,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -201,6 +235,7 @@ y.indent(mapping=2, sequence=4, offset=2)
 # ── assemble_blueprint helpers ─────────────────────────────────────
 from assemble_blueprint import (
     _ARCH_REASONING_MAP,
+    _registry_quant,
     assemble_prompts,
     blueprint_features,
     classify_registry,
@@ -219,6 +254,7 @@ from benchmark_config import (
     is_mtp_drafter,
     is_registry_candidate,
     is_support_file,
+    is_support_model_record,
 )
 from benchmark_config import (
     MIN_CONTEXT_LENGTH as _MIN_CONTEXT_LENGTH,
@@ -232,6 +268,7 @@ from benchmark_config import (
 from model_identity import build_model_identity, decompose_model_identity, normalize_variants
 from model_paths import configured_gguf_roots
 from model_registry import ModelRegistry
+from providers.llama_cpp_args import build_server_command
 from sampling_research import (
     RESEARCH_STATUSES,
     compact_sampling_block,
@@ -485,7 +522,7 @@ def cmd_fmt() -> None:
 # ── fill-ctx command ───────────────────────────────────────────────
 
 
-# Feste Benchmark-Policy seit 13.08.: np=4 bei SampleSize >= 10, sonst 1.
+# Feste Benchmark-Policy: np=1 bei SampleSize <= 5, sonst 4.
 # Die Kontextberechnung rechnet mit der Standard-Benchmark-Konfiguration (np=4).
 _NP_POLICY = 4
 
@@ -732,6 +769,22 @@ def build_llama_preset(
             value = runtime.get(source_key)
             if value is not None and _preset_value(value):
                 lines.append(f"{preset_key} = {_preset_value(value)}")
+        # ``experts`` is a Registry runtime value, while the llama.cpp
+        # metadata key depends on the model architecture.  ModelRegistry
+        # derives the architecture-specific key from ``architecture_family``;
+        # never guess a key when that information is missing.
+        expert_count = runtime.get("num_experts")
+        expert_key = runtime.get("expert_override_key")
+        if (
+            isinstance(expert_count, int)
+            and not isinstance(expert_count, bool)
+            and expert_count > 0
+            and isinstance(expert_key, str)
+            and expert_key.strip()
+        ):
+            lines.append(
+                f"override-kv = {expert_key.strip()}=int:{expert_count}"
+            )
         lines.append("")
     return "\n".join(lines).rstrip() + "\n", skipped
 
@@ -821,6 +874,118 @@ def cmd_export_llama_preset(
     return 0
 
 
+def _llama_server_metadata(executable: Path) -> dict[str, Any]:
+    """Read the selected llama-server version without starting a server."""
+    metadata: dict[str, Any] = {"path": str(executable), "version": None}
+    if not executable.is_file():
+        return metadata
+    try:
+        result = subprocess.run(
+            [str(executable), "--version"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=15,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError, TimeoutError):
+        return metadata
+    version = (result.stdout or result.stderr or "").strip()
+    if version:
+        metadata["version"] = version[:2000]
+    return metadata
+
+
+def build_llama_argument_manifest(
+    registry: dict[str, Any],
+    executable: str | Path | None = None,
+    api_base: str | None = None,
+) -> tuple[dict[str, Any], list[str]]:
+    """Build a reproducible direct llama.cpp argument manifest."""
+    runtime_registry = ModelRegistry(registry_loader=lambda: registry)
+    selected_executable = Path(
+        executable
+        or os.environ.get("LLAMA_CPP_SERVER_EXE")
+        or r"C:\Program Files\llama.cpp\llama-server.exe"
+    )
+    base = api_base or os.environ.get("LLAMA_CPP_API_BASE", "http://127.0.0.1:8080/v1")
+    parsed_base = urlsplit(base)
+    port = parsed_base.port or 8080
+    warnings: list[str] = []
+    models: list[dict[str, Any]] = []
+    skipped: list[str] = []
+
+    for key in sorted(registry, key=str.casefold):
+        entry = registry.get(key)
+        if not isinstance(entry, dict):
+            continue
+        model_path = _resolve_model_path_multi(key)
+        if not model_path:
+            skipped.append(key)
+            continue
+        benchmark_runtime = runtime_registry.benchmark_runtime(key)
+        runtime = runtime_registry.provider_runtime(key, "llama_cpp")
+        command = build_server_command(
+            selected_executable,
+            model_path,
+            key,
+            port,
+            runtime,
+            warning=warnings.append,
+        )
+        request_defaults: dict[str, Any] = {}
+        sampling = benchmark_runtime.get("sampling")
+        if isinstance(sampling, dict):
+            request_defaults["sampling"] = sampling
+        for field in ("reasoning", "reasoning_format"):
+            value = runtime.get(field, benchmark_runtime.get(field))
+            if value is not None:
+                request_defaults[field] = value
+        models.append(
+            {
+                "registry_key": key,
+                "model_path": model_path,
+                "start_args": command[1:],
+                "request_defaults": request_defaults,
+            }
+        )
+
+    registry_bytes = REGISTRY_PATH.read_bytes() if REGISTRY_PATH.exists() else b""
+    manifest = {
+        "schema_version": 1,
+        "generated_at": datetime.now(UTC).isoformat(),
+        "registry_sha256": hashlib.sha256(registry_bytes).hexdigest(),
+        "provider": "llama_cpp",
+        "server": _llama_server_metadata(selected_executable),
+        "api_base": base,
+        "models": models,
+        "skipped_registry_entries": skipped,
+        "warnings": sorted(set(warnings)),
+    }
+    return manifest, skipped
+
+
+def cmd_export_llama_args(output_path: str | Path | None = None) -> int:
+    """Write a JSON manifest with direct llama.cpp start/request arguments."""
+    target = Path(output_path) if output_path else PROJECT_ROOT / "ergebnisse" / "llama-cpp-generated" / "args-manifest.json"
+    registry = load_registry()
+    manifest, skipped = build_llama_argument_manifest(registry)
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
+    except OSError as exc:
+        print(f"[ERROR] Could not write llama.cpp argument manifest {target}: {exc}")
+        return 1
+    print(f"[OK] Wrote llama.cpp argument manifest: {target} ({len(manifest['models'])} local models)")
+    if skipped:
+        print(f"[WARN] Skipped {len(skipped)} Registry entries without a local GGUF")
+    if manifest["warnings"]:
+        for message in manifest["warnings"]:
+            print(f"[WARN] {message}")
+    return 0
+
+
 # ── fix-np command ─────────────────────────────────────────────────
 
 
@@ -872,10 +1037,10 @@ def _resolve_exact(reg_key: str, lms_path_map: dict[str, str]) -> str:
 
 
 def cmd_fix_np() -> None:
-    """Seit 13.08. überflüssig: np ist feste Policy (SS>=10 → 4, sonst 1),
+    """Seit 13.08. überflüssig: np ist feste Policy (SS<=5 → 1, sonst 4),
     kein Registry-Feld mehr. Arch-Reclassification erledigt sync-from-gguf."""
     print("[INFO] fix-np entfällt: num_parallel ist seit 13.08. eine feste")
-    print("       Benchmark-Policy (SS>=10 → 4, sonst 1) und kein Registry-Feld.")
+    print("       Benchmark-Policy (SS<=5 → 1, sonst 4) und kein Registry-Feld.")
     print("       Arch-Reclassification: registry_tool.py sync-from-gguf.")
 
 
@@ -1154,7 +1319,7 @@ def _compute_ukv(
 ) -> tuple[bool, int]:
     """Compute optimal useUnifiedKvCache and context_length based on VRAM budget.
 
-    Seit 13.08.: num_parallel ist eine feste Benchmark-Policy (SS>=10 → 4, sonst 1),
+    Seit 13.08.: num_parallel ist eine feste Benchmark-Policy (SS<=5 → 1, sonst 4),
     kein Registry-Feld. Vom verfügbaren Speicher, der Kontextlänge und der
     KV-Quantisierung abhängig ist nur UKV — nicht np. Die Kontextberechnung
     geht daher von der Standard-Benchmark-Konfiguration (np=_NP_POLICY) aus.
@@ -1213,6 +1378,14 @@ def cmd_add(
     sampling_unresolved: list[str] = []
 
     for m in models:
+        if is_support_model_record(m):
+            skipped.append(
+                (
+                    str(m.get("modelKey") or m.get("key") or "?"),
+                    "Zusatzdatei (MTP-Drafter/mmproj/imatrix) - kein eigenständiges Modell",
+                )
+            )
+            continue
         if not is_registry_candidate(m):
             skipped.append((str(m.get("modelKey") or m.get("key") or "?"), "nicht benchmarkfähig"))
             continue
@@ -1556,6 +1729,7 @@ def cmd_rm(model_key: str, delete_files: bool = False, assume_yes: bool = False)
 def cmd_sync_from_configs(
     write: bool = False,
     write_context: bool = False,
+    write_experts: bool = False,
     installed_models: list[dict[str, Any]] | None = None,
 ) -> None:
     """Compare GUI load settings and optionally persist them in the registry.
@@ -1566,9 +1740,11 @@ def cmd_sync_from_configs(
     untouched. Conflicting values across configs for one registry entry are
     reported and skipped. When ``installed_models`` is provided by ``sync``,
     configs with no matching current LMS inventory entry are ignored as stale
-    runtime artifacts.
+    runtime artifacts. ``write_experts=True`` is the narrow variant for the
+    selected LM Studio runtime expert count. The GGUF architectural maximum
+    is kept separately as ``max_experts``.
     """
-    if write_context:
+    if write_context or write_experts:
         write = True
     if not REGISTRY_PATH.exists():
         print(f"[ERROR] Registry not found: {REGISTRY_PATH}")
@@ -1613,21 +1789,32 @@ def cmd_sync_from_configs(
         if is_blacklisted_model_name(match):
             blacklisted += 1
             continue
-        fields_to_sync = (("context_length", "context_length"),) if write_context else (
-            ("offload", "offload"),
-            ("useUnifiedKvCache", "use_unified_kv"),
-            ("context_length", "context_length"),
-            ("k_cache", "k_cache"),
-            ("v_cache", "v_cache"),
-        )
+        if write_context:
+            fields_to_sync = (("context_length", "context_length"),)
+        elif write_experts:
+            fields_to_sync = (("experts", "num_experts"),)
+        else:
+            fields_to_sync = (
+                ("offload", "offload"),
+                ("useUnifiedKvCache", "use_unified_kv"),
+                ("context_length", "context_length"),
+                ("k_cache", "k_cache"),
+                ("v_cache", "v_cache"),
+                ("experts", "num_experts"),
+            )
         for field, cfg_field in fields_to_sync:
             value = cfg.get(cfg_field)
             if value is not None:
-                if field == "context_length":
+                if field in {"context_length", "experts"}:
                     try:
+                        if isinstance(value, bool):
+                            raise ValueError
                         value = int(value)
                     except (TypeError, ValueError):
-                        print(f"[WARN] {match}: ungueltige context_length in {cfg['json_path']}: {value!r}")
+                        print(f"[WARN] {match}: ungueltige {field} in {cfg['json_path']}: {value!r}")
+                        continue
+                    if value <= 0:
+                        print(f"[WARN] {match}: {field} muss > 0 sein in {cfg['json_path']}: {value!r}")
                         continue
                 observations.setdefault(match, {}).setdefault(field, []).append(
                     (value, Path(cfg["json_path"]))
@@ -1725,6 +1912,8 @@ def _benchmark_lms_models(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Keep only installed records eligible for this benchmark registry."""
     eligible: list[dict[str, Any]] = []
     for model in models:
+        if is_support_model_record(model):
+            continue
         if not is_registry_candidate(model):
             continue
         path = str(model.get("path") or model.get("indexedModelIdentifier") or "")
@@ -1794,7 +1983,9 @@ def _lms_record_for_registry_key(
 ) -> dict[str, Any] | None:
     """Find an eligible LMS record by base identity and, for variants, quant."""
     registry_aliases = _identity_aliases(registry_key)
-    has_quant = "@" in registry_key
+    # ``@?`` is the explicit unknown-quant placeholder and therefore matches
+    # an LMS base record whose quantization metadata is absent.
+    has_quant = _registry_quant(registry_key) is not None
     for model in models:
         if not is_registry_candidate(model):
             continue
@@ -1818,7 +2009,8 @@ def _lms_record_for_registry_key(
 def _lms_matches_registry_key(model: dict[str, Any], registry_key: str) -> bool:
     """Return whether one LMS row represents a registry base/quant identity."""
     registry_aliases = _identity_aliases(registry_key)
-    has_quant = "@" in registry_key
+    # ``@?`` is a wildcard placeholder, not an identity-bearing quantization.
+    has_quant = _registry_quant(registry_key) is not None
     for identity in _lms_identity_keys(model):
         if has_quant and "@" not in identity:
             continue
@@ -2087,10 +2279,10 @@ _REASONING_TOKEN_RE = re.compile(
 
 
 _KNOWN_QUANTS = (
-    "q1_0", "q2_k", "q3_k_s", "q3_k_m", "q3_k_l", "q4_0", "q4_k_s", "q4_k_m",
+    "q1_0", "q2_k", "q2_g64", "q3_k_s", "q3_k_m", "q3_k_l", "q4_0", "q4_k_s", "q4_k_m",
     "q5_0", "q5_k_s", "q5_k_m", "q6_k", "q8_0_i", "q8_0", "iq2_xxs", "iq2_xs", "iq2_s",
     "iq2_m", "iq3_xxs", "iq3_xs", "iq3_s", "iq3_m", "iq4_xs", "iq4_nl",
-    "q2_k_s", "q3_k_xs", "q4_k_xl", "mxfp4", "fp16", "f16",
+    "q2_k_s", "q3_k_xs", "q4_k_xl", "mxfp4", "fp16", "f16", "mini",
 )
 
 
@@ -2467,6 +2659,7 @@ def cmd_sync_from_gguf() -> None:
     gguf_arch: dict[str, tuple[int, int, bool | None, int | None]] = {}
     gguf_family: dict[str, str] = {}
     gguf_moe: dict[str, bool] = {}
+    gguf_max_experts: dict[str, int] = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
         fut_to_base = {pool.submit(_read_gguf_arch, p): b for b, p in unique.items()}
         for i, fut in enumerate(concurrent.futures.as_completed(fut_to_base), 1):
@@ -2479,6 +2672,8 @@ def cmd_sync_from_gguf() -> None:
                 gguf_arch[base] = (nl, hd, is_reasoning, ctx)
             if exp is not None:
                 gguf_moe[base] = bool(exp)
+                if exp > 0:
+                    gguf_max_experts[base] = int(exp)
             if i % 10 == 0:
                 print(f"     ({i}/{len(unique)})")
     print(f"  -> {len(gguf_arch)} mit n_layers/hidden_dim/context_length")
@@ -2508,6 +2703,18 @@ def cmd_sync_from_gguf() -> None:
             old = entry.get("arch")
             entry["arch"] = expected_arch
             fixes.append(f"{key}: arch {old!r} -> {expected_arch!r} (GGUF expert_count={exp})")
+
+        max_experts = gguf_max_experts.get(base)
+        if max_experts is None:
+            for gguf_key, gguf_value in gguf_max_experts.items():
+                normalized_key = normalize_model_name(key)
+                if normalized_key in gguf_key or gguf_key in normalized_key:
+                    max_experts = gguf_value
+                    break
+        if max_experts is not None and entry.get("max_experts") != max_experts:
+            old = entry.get("max_experts")
+            entry["max_experts"] = max_experts
+            fixes.append(f"{key}: max_experts {old!r} -> {max_experts} (GGUF expert_count)")
 
         if ctx is not None and entry.get("max_context_length") != ctx:
             old = entry.get("max_context_length")
@@ -2663,7 +2870,8 @@ def cmd_sync_templates() -> None:
     geprueft; fehlt/leer ist das Feld ``llm.prediction.promptTemplate``, wird
     der Inhalt der .jinja-Datei geschrieben. Behebt die validate-Kategorie
     ``template_missing_config``. Das Registry-``template:``-Feld gilt als
-    veraltet (Fallback).
+    veraltet (Fallback). ``pipeline full`` ruft diesen idempotenten Schritt
+    ebenfalls auf; befuellte Templates werden nicht ueberschrieben.
     """
     reg = load_registry()
     cfgs = read_lms_configs(CONFIG_ROOT)
@@ -2949,6 +3157,7 @@ def _gguf_drift_errors(reg: dict[str, Any]) -> list[str]:
 
     gguf_arch: dict[str, tuple[int, int, bool | None, int | None]] = {}
     gguf_moe: dict[str, bool] = {}
+    gguf_max_experts: dict[str, int] = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
         fut_to_base = {pool.submit(_read_gguf_arch, p): b for b, p in unique.items()}
         for fut in concurrent.futures.as_completed(fut_to_base):
@@ -2958,6 +3167,8 @@ def _gguf_drift_errors(reg: dict[str, Any]) -> list[str]:
                 gguf_arch[base] = (nl, hd, is_reasoning, ctx)
             if exp is not None:
                 gguf_moe[base] = bool(exp)
+                if exp > 0:
+                    gguf_max_experts[base] = int(exp)
 
     out: list[str] = []
     for key, entry in reg.items():
@@ -2969,10 +3180,16 @@ def _gguf_drift_errors(reg: dict[str, Any]) -> list[str]:
         nl, hd, is_reasoning, ctx = found
         base = normalize_model_name(key).split("@")[0]
         exp = gguf_moe.get(base)
+        max_experts = gguf_max_experts.get(base)
 
         if exp is True and entry.get("arch") != "moe":
             out.append(
                 f"{key}: arch={entry['arch']} vs GGUF expert_count=True (Quelle: gguf, Auto-Fix via sync-from-gguf)"
+            )
+        if max_experts is not None and entry.get("max_experts") != max_experts:
+            out.append(
+                f"{key}: max_experts={entry.get('max_experts')} vs GGUF={max_experts} "
+                "(Quelle: gguf, Auto-Fix via sync-from-gguf)"
             )
         if ctx is not None and entry.get("max_context_length") != ctx:
             out.append(
@@ -3012,6 +3229,9 @@ def cmd_validate(verbose: bool = False, repro: bool = False, ci: bool = False) -
         "registry_no_config": [],
         "reasoning_arch_mismatch": [],
         "config_context_drift": [],
+        "config_experts_drift": [],
+        "runtime_experts_missing": [],
+        "runtime_experts_exceed_max": [],
         "config_np_ukv_drift": [],
         "config_context_too_small": [],
         "gguf_header_drift": [],
@@ -3148,10 +3368,9 @@ def cmd_validate(verbose: bool = False, repro: bool = False, ci: bool = False) -
                 f"{model_key}: reasoning={reasoning}, aber Architektur '{arch_raw}' erwartet '{detected}'"
             )
 
-    # ── Check 8: JSON-Config vs. Registry (Drift) ──────────────────
-    # Die JSON-Configs sind die Quelle (LMS GUI). Registry weicht ab?
-    # context_length: nur WARNEN wenn Config < Registry-Erwartung oder
-    # Context > native max_context_length (dann ist Config inkonsistent).
+    # ── Check 8: LM Studio runtime evidence vs. Registry ───────────
+    # Registry.context_length is the benchmark SSOT. LM Studio context values
+    # are local tuning artifacts and differences are reported as advisory.
     registry_key_sorted = sorted(
         [(normalize_model_name(k), k) for k, v in reg.items() if isinstance(v, dict)],
         key=lambda x: -len(x[0]),
@@ -3173,8 +3392,10 @@ def cmd_validate(verbose: bool = False, repro: bool = False, ci: bool = False) -
         }
 
         cfg_ctx = load_fields.get("llm.load.contextLength")
+        cfg_experts = load_fields.get("llm.load.numExperts")
 
-        # context_length: Config-Wert kleiner als Registry-Erwartung → Altlast?
+        # Report local LM Studio context differences without changing the
+        # benchmark context selected from the Registry.
         reg_ctx = entry.get("context_length")
         if isinstance(cfg_ctx, int) and isinstance(reg_ctx, int) and cfg_ctx != reg_ctx:
             errors["config_context_drift"].append(
@@ -3193,9 +3414,74 @@ def cmd_validate(verbose: bool = False, repro: bool = False, ci: bool = False) -
                 f"{match}: Config contextLength={cfg_ctx} <= 0 (invalid, {cfg['json_path']})"
             )
 
+        # experts is the selected LM Studio runtime value. It is distinct
+        # from the immutable GGUF max_experts architecture limit.
+        reg_experts = entry.get("experts")
+        cfg_experts_valid = (
+            isinstance(cfg_experts, int)
+            and not isinstance(cfg_experts, bool)
+            and cfg_experts > 0
+        )
+        reg_experts_valid = (
+            isinstance(reg_experts, int)
+            and not isinstance(reg_experts, bool)
+            and reg_experts > 0
+        )
+        if cfg_experts is not None and not cfg_experts_valid:
+            errors["config_experts_drift"].append(
+                f"{match}: Config numExperts={cfg_experts!r} is not a positive integer "
+                f"({cfg['json_path']})"
+            )
+        elif cfg_experts_valid and (not reg_experts_valid or cfg_experts != reg_experts):
+            errors["config_experts_drift"].append(
+                f"{match}: Config numExperts={cfg_experts} != Registry experts={reg_experts!r} "
+                f"({cfg['json_path']})"
+            )
+        max_experts = entry.get("max_experts")
+        if (
+            cfg_experts_valid
+            and isinstance(max_experts, int)
+            and not isinstance(max_experts, bool)
+            and max_experts > 0
+            and cfg_experts > max_experts
+        ):
+            errors["runtime_experts_exceed_max"].append(
+                f"{match}: Config numExperts={cfg_experts} > Registry max_experts={max_experts} "
+                f"({cfg['json_path']})"
+            )
+
         # np/UKV/offload: Registry ist SSOT (Stand 11.08.2026).
         # JSON-Configs werden ignoriert — Benchmark überschreibt alle Parameter
         # explizit via API. Drift-Check entfernt, da Configs irrelevant.
+
+    # Every MoE Registry entry must document the selected runtime value. Do
+    # not silently use max_experts as a fallback: it may exceed available VRAM.
+    for model_key, entry in reg.items():
+        if not isinstance(entry, dict) or str(entry.get("arch", "")).casefold() != "moe":
+            continue
+        runtime_experts = entry.get("experts")
+        if not (
+            isinstance(runtime_experts, int)
+            and not isinstance(runtime_experts, bool)
+            and runtime_experts > 0
+        ):
+            errors["runtime_experts_missing"].append(
+                f"{model_key}: MoE runtime experts missing; import the tested LM Studio "
+                "value with sync-from-configs --write-experts"
+            )
+        max_experts = entry.get("max_experts")
+        if (
+            isinstance(runtime_experts, int)
+            and not isinstance(runtime_experts, bool)
+            and runtime_experts > 0
+            and isinstance(max_experts, int)
+            and not isinstance(max_experts, bool)
+            and max_experts > 0
+            and runtime_experts > max_experts
+        ):
+            errors["runtime_experts_exceed_max"].append(
+                f"{model_key}: Registry experts={runtime_experts} > max_experts={max_experts}"
+            )
 
     # ── Check 9: GGUF-Header vs. Registry (Feld-Ownership) ──────────
     # auto_fix-Felder (n_layers/hidden_dim/max_context_length/arch) aus den
@@ -3206,7 +3492,7 @@ def cmd_validate(verbose: bool = False, repro: bool = False, ci: bool = False) -
     errors["gguf_header_drift"] = gguf_drift_errors
 
     # ── Report ─────────────────────────────────────────────────────
-    advisory_checks = {"missing_capabilities"}
+    advisory_checks = _VALIDATION_ADVISORY_CHECKS
     blocking_total = sum(len(v) for k, v in errors.items() if k not in advisory_checks)
     advisory_total = sum(len(v) for k, v in errors.items() if k in advisory_checks)
     print(f"\n{'=' * 60}")
@@ -3230,9 +3516,38 @@ def cmd_validate(verbose: bool = False, repro: bool = False, ci: bool = False) -
     return errors
 
 
-# Drift-Kategorien, die beim pipeline full zu Exit-Code != 0 führen (CI-fähig).
-# Das sind die Feld-Ownership-Melde-Felder (Config-Felder + GGUF-Header-Drift).
-_DRIFT_CHECKS = ("config_context_drift", "config_context_too_small", "gguf_header_drift")
+# These local LM Studio observations do not block Registry validation or the
+# direct llama.cpp workflow. They remain visible so LMS-specific maintenance
+# can be performed deliberately.
+_VALIDATION_ADVISORY_CHECKS = frozenset(
+    {
+        "missing_capabilities",
+        "template_missing_config",
+        "registry_no_config",
+        "config_context_drift",
+        "config_context_too_small",
+        "config_np_ukv_drift",
+    }
+)
+
+
+def _blocking_validation_errors(errors: dict[str, list[str]]) -> dict[str, list[str]]:
+    """Return validation findings that invalidate Registry/backend readiness."""
+    return {
+        check: items
+        for check, items in errors.items()
+        if items and check not in _VALIDATION_ADVISORY_CHECKS
+    }
+
+
+# Registry/runtime ownership conflicts that make pipeline full fail.
+# LM Studio context values are local runtime artifacts; Registry context is SSOT.
+_DRIFT_CHECKS = (
+    "config_experts_drift",
+    "runtime_experts_missing",
+    "runtime_experts_exceed_max",
+    "gguf_header_drift",
+)
 
 
 # ── sync command (full) ────────────────────────────────────────────
@@ -3312,7 +3627,7 @@ def cmd_pipeline(
     Modus:
       status  -> LMS-Modellzahl + compare-Report (Default, schreibt nichts)
       sync    -> status + registry_tool sync + Klassifikation
-      full    -> sync + read-only Prompt-Preview + Validierung
+      full    -> sync + fehlende Template-Felder + Prompt-Preview + Validierung
 
     ignore_drift: beendet full NICHT mit Exit-Code 1, auch wenn Melde-Konflikte
     (Feld-Ownership: Config-Felder, GGUF-Header-Drift) offen sind.
@@ -3340,9 +3655,11 @@ def cmd_pipeline(
     classify_registry()
 
     if mode == "full":
-        print("[5] Prompt-Assembly (PREVIEW, Config-JSONs bleiben unverändert) ...")
+        print("[4a] Fehlende LM-Studio-Prompt-Templates ergänzen ...")
+        cmd_sync_templates()
+        print("[5] Prompt-Assembly (PREVIEW; System-Prompts werden nicht geschrieben) ...")
         assemble_prompts(preview_only=True)
-        print("[5a] GLM-Config-Patch übersprungen (pipeline full ist read-only für Config-JSONs) ...")
+        print("[5a] GLM-Config-Patch übersprungen (separater Schreibbefehl) ...")
         print("[6] Validierung ...")
         validate_prompts()
         print("[6a] Registry-Drift-Validierung (Feld-Ownership) ...")
@@ -3470,7 +3787,16 @@ def find_glm_configs() -> list[str]:
 
 
 def glm_patch_config(path: str, dry_run: bool = False) -> tuple[bool, list[str], str | None]:
-    """GLM-Config patchen. Returns (changed, actions, backup_path)."""
+    """Patch only GLM reasoning fields; preserve Structured Output ownership.
+
+    The maintenance command may repair parsing, reasoning budget, stop
+    strings, and stale JSON prompt instructions. It deliberately neither
+    creates nor removes ``llm.prediction.structured``: the LM Studio GUI
+    default remains user-owned, while benchmark Structured Output is an
+    explicit request-level policy.
+
+    Returns ``(changed, actions, backup_path)``.
+    """
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
     fields = data.get("operation", {}).get("fields", [])
@@ -3484,6 +3810,9 @@ def glm_patch_config(path: str, dry_run: bool = False) -> tuple[bool, list[str],
     parsing_cfg = profile.get("reasoning_parsing") or {
         "enabled": True, "startString": " thinking", "endString": " response"
     }
+
+    # Do not infer or normalize the GUI Structured Output setting here. A
+    # missing field stays missing and an existing field stays unchanged.
 
     # reasoning.parsing must be active so the model's thought channel does
     # not leak into final content. The exact markers come from the blueprint.
@@ -3686,6 +4015,7 @@ def _run_menu_cmd(cmd: str) -> None:
         "sync-from-configs": cmd_sync_from_configs,
         "sync-templates": cmd_sync_templates,
         "export-llama-preset": cmd_export_llama_preset,
+        "export-llama-args": cmd_export_llama_args,
         "migrate-keys": cmd_migrate_keys,
         "quarantine-missing": lambda: cmd_quarantine_missing(dry_run=True),
     }
@@ -3720,7 +4050,7 @@ def _interactive_menu() -> None:
     """Show interactive command selection menu when no args given."""
     cmds = [
         ("sync", "Full sync: add → fill-quant → fill-arch → sync-from-gguf → fill-reasoning → sync-from-configs → fmt"),
-        ("pipeline", "Status/Sync/Full-Wartung: status | sync | full (Exit 1 bei Drift)"),
+        ("pipeline", "Status/Sync/Full-Wartung: status | sync | full (Exit 1 bei blockierendem Registry-/Runtime-Konflikt)"),
         ("patch-reasoning-effort", "gpt-oss-20b Reasoning-Effort in LMS-Configs nachtragen"),
         ("validate", "Check model_registry.yaml consistency (inkl. Config-Abweichungen)"),
         ("sync-templates", "promptTemplate aus Registry-Templates in Config-JSONs nachtragen"),
@@ -3736,8 +4066,9 @@ def _interactive_menu() -> None:
         ("fill-ctx", "Add default context_length to missing entries"),
         ("fill-size", "Look up file_size_bytes from LMS"),
         ("fill-quant", "Read @quant from GGUF filename (Source of Truth)"),
-        ("sync-from-configs", "GUI-Config-Felder melden; --write übernimmt Offload/UKV/Context/KV-Quant"),
+        ("sync-from-configs", "GUI-Config-Felder melden; --write-experts importiert nur den getesteten MoE-Laufzeitwert"),
         ("export-llama-preset", "Abgeleitetes llama.cpp preset.ini aus lokalen GGUFs und Registry-Runtime erzeugen"),
+        ("export-llama-args", "Direkte llama.cpp Start- und Request-Argumente als JSON exportieren"),
         ("migrate-keys", "Re-key entries without publisher prefix"),
         ("quarantine-missing", "Nicht-installierte Modelle: Configs+Eintrag in Quarantäne (Dry-run)"),
         ("rm", "Remove registry entry (optionally files + configs too)"),
@@ -3798,13 +4129,15 @@ def main() -> None:
         cmd_suggest()
     elif cmd == "sync-from-configs":
         write_context = "--write-context" in sys.argv[2:]
+        write_experts = "--write-experts" in sys.argv[2:]
         # The narrow context repair also covers matching retained configs that
         # are no longer in the current LMS inventory; validation still checks
         # those Registry identities and must be repairable deterministically.
         installed_models = None if write_context else _benchmark_lms_models(_run_lms_ls())
         cmd_sync_from_configs(
-            write="--write" in sys.argv[2:] or write_context,
+            write="--write" in sys.argv[2:] or write_context or write_experts,
             write_context=write_context,
+            write_experts=write_experts,
             installed_models=installed_models,
         )
     elif cmd == "fill-ctx":
@@ -3841,10 +4174,7 @@ def main() -> None:
             repro="--repro" in flags,
             ci="--ci" in flags or "--headless" in flags,
         )
-        advisory_checks = {"missing_capabilities"}
-        has_blocking_errors = any(
-            items for check, items in errors.items() if check not in advisory_checks
-        )
+        has_blocking_errors = bool(_blocking_validation_errors(errors))
         sys.exit(1 if has_blocking_errors else 0)
     elif cmd == "quarantine-missing":
         dry_run = "--dry-run" in sys.argv
@@ -3860,6 +4190,9 @@ def main() -> None:
         arguments = sys.argv[2:]
         output_path = next((item for item in arguments if not item.startswith("-")), None)
         sys.exit(cmd_export_llama_preset(output_path, merge_existing="--merge-existing" in arguments))
+    elif cmd == "export-llama-args":
+        output_path = next((item for item in sys.argv[2:] if not item.startswith("-")), None)
+        sys.exit(cmd_export_llama_args(output_path))
     elif cmd == "pipeline":
         mode = sys.argv[2] if len(sys.argv) > 2 else "status"
         if mode.startswith("-"):

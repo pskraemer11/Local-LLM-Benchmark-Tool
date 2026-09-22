@@ -40,7 +40,21 @@ def test_provider_factory_selects_direct_llama_cpp_provider(monkeypatch: pytest.
     assert provider.base_url == "http://127.0.0.1:18080/v1"
     assert provider.capabilities.can_load_models is True
     assert provider.capabilities.can_unload_models is True
-    assert provider.capabilities.max_parallel == 1
+    assert provider.capabilities.max_parallel == 4
+
+
+def test_provider_context_owns_client_endpoint_and_capabilities(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "llama_cpp")
+    monkeypatch.setenv("LLAMA_CPP_API_BASE", "http://127.0.0.1:18083/v1")
+    monkeypatch.setenv("LLAMA_CPP_SERVER_EXE", "C:/Program Files/llama.cpp/llama-server.exe")
+    monkeypatch.setattr(model_manager, "API_BASE", model_manager._configured_api_base())
+
+    context = model_manager.get_provider_context()
+
+    assert context.name == "llama_cpp"
+    assert context.base_url == "http://127.0.0.1:18083/v1"
+    assert context.client is model_manager.get_provider()
+    assert context.capabilities.max_parallel == 4
 
 
 def test_provider_specific_api_base_aliases(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -113,6 +127,33 @@ def test_lmstudio_load_rejects_explicit_api_error() -> None:
         ensure_server=lambda: pytest.fail("an explicit API error must not start a second server"),
     )
     assert provider.load_model("missing-model") == (False, None)
+
+
+def test_lmstudio_load_passes_registry_expert_count_to_native_api() -> None:
+    calls: list[dict[str, object]] = []
+
+    def request(endpoint: str, **kwargs: object) -> dict[str, object]:
+        calls.append({"endpoint": endpoint, **kwargs})
+        return {
+            "status": "loaded",
+            "instance_id": "gpt-oss-instance",
+            "load_time_seconds": 1.0,
+            "load_config": {"num_experts": 32},
+        }
+
+    provider = LMStudioProvider(
+        "http://127.0.0.1:1234/v1",
+        rest_request=request,
+        runtime_loader=lambda _model: {"num_experts": 32, "max_experts": 32},
+    )
+
+    assert provider.load_model("ggml-org/gpt-oss-20b@mxfp4") == (True, "gpt-oss-instance")
+    assert calls[0]["endpoint"] == "/api/v1/models/load"
+    assert calls[0]["data"] == {
+        "model": "ggml-org/gpt-oss-20b@mxfp4",
+        "echo_load_config": True,
+        "num_experts": 32,
+    }
 
 
 def test_facade_delegates_model_listing_to_non_lms_provider(monkeypatch: pytest.MonkeyPatch) -> None:

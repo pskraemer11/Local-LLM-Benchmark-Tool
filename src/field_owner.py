@@ -13,10 +13,14 @@ auto_fix=True nur bei unveraenderlichen Quellen (gguf): Abweichungen werden
 automatisch aus der Quelle in die Registry geschrieben.
 
 Wichtige Felder:
-  - num_parallel: KEIN Registry-Feld mehr (feste Policy seit 13.08.: SS>=10 -> 4, sonst 1)
+  - num_parallel: KEIN Registry-Feld mehr (feste Policy: SS<=5 -> 1, sonst 4)
   - useUnifiedKvCache: Formel (>= 12 GB -> True) + Ausnahmen
     (gemma-4, kimi-linear, gpt-oss -> immer True, vertragen keine KV-Quant)
   - context_length: Registry-SSOT (Benchmark-Wert, <= GGUF-Native-Max)
+  - experts: selected LM Studio runtime expert count, imported from the
+    tested JSON config and passed to the native load API
+  - max_experts: immutable GGUF architectural maximum; never use it as the
+    selected runtime count automatically
 """
 
 from __future__ import annotations
@@ -116,7 +120,14 @@ FIELD_OWNERSHIP: dict[str, FieldRule] = {
         False,
         description="Sampling values and compact provenance per registry model",
     ),
-    "experts": FieldRule("registry", "registry", False),
+    "experts": FieldRule(
+        "config", "registry", False,
+        description="Selected runtime expert count from the tested LM Studio config",
+    ),
+    "max_experts": FieldRule(
+        "gguf", "registry", True,
+        description="Immutable GGUF architectural expert maximum",
+    ),
     "custom_template": FieldRule("registry", "registry", False),
 }
 

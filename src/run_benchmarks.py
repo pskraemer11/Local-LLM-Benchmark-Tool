@@ -79,6 +79,7 @@ import model_manager as _model_manager
 from model_paths import configured_gguf_roots
 
 if TYPE_CHECKING:
+    from providers.base import ProviderContext
     from type_defs import AvailableModelInfo, BenchmarkDef, PipelineResult
 
 # ── Model Management from Shared Module ──────────────────────
@@ -107,10 +108,10 @@ from benchmark_config import (
 )
 from model_manager import (
     configure_provider,
-    get_api_base,
     get_available_models,
     get_current_loaded_model,
     get_provider_capabilities,
+    get_provider_context,
     has_assembled_system_prompt,
     is_model_ready,
     load_model,
@@ -618,14 +619,21 @@ def _get_safe_context(model_identifier: str) -> int | None:
     return None
 
 
-def _resolve_num_parallel(sample_size: int) -> int:
+def _resolve_num_parallel(sample_size: int, provider_context: ProviderContext | None = None) -> int:
     """Determine requested slots, capped by the selected provider.
 
-    Seit 13.08.: np ist eine feste Benchmark-Policy, keine Registry-Eigenschaft.
-    SampleSize >= 10 → 4 Slots (batching benefit), sonst 1.
+    ``num_parallel`` is a fixed benchmark policy, not a Registry field.
+    Small runs use one client worker because setup overhead dominates; larger
+    runs use four workers.  The selected provider may lower that request when
+    it advertises a smaller safe concurrency limit.
     """
-    desired = 4 if sample_size >= 10 else 1
-    max_parallel = getattr(get_provider_capabilities(), "max_parallel", None)
+    desired = 1 if sample_size <= 5 else 4
+    capabilities = (
+        provider_context.capabilities
+        if provider_context is not None
+        else get_provider_capabilities()
+    )
+    max_parallel = capabilities.max_parallel
     if isinstance(max_parallel, int) and max_parallel > 0:
         return min(desired, max_parallel)
     return desired
@@ -853,6 +861,19 @@ def _get_evaluation_parameters(model_identifier: str, bench_name: str = "") -> d
     if config.get("stop"):
         generation_parameters["until"] = config["stop"]
 
+    # GPT-OSS separates the reasoning budget from the total completion
+    # budget.  Keep the blueprint-owned cap in the API generation kwargs;
+    # otherwise lm-eval can spend all ``max_tokens`` on Harmony reasoning and
+    # return an empty final channel.  ``reasoning_effort`` is deliberately not
+    # sent here: LM Studio's OpenAI-compatible endpoint does not support that
+    # field reliably for every GGUF/config pairing.  The direct llama.cpp
+    # provider applies it when starting llama-server; LM Studio keeps its
+    # model-specific GUI setting instead.
+    if _is_gptoss_model(model_identifier):
+        max_thinking_tokens = config.get("max_thinking_tokens")
+        if isinstance(max_thinking_tokens, int) and max_thinking_tokens > 0:
+            generation_parameters["max_thinking_tokens"] = max_thinking_tokens
+
 # ── chat_template_kwargs for enable_thinking / reasoning_effort ──
     #
     # WICHTIG: chat_template_kwargs ist KEIN OpenAI-Standard-Parameter.
@@ -864,11 +885,9 @@ def _get_evaluation_parameters(model_identifier: str, bench_name: str = "") -> d
     #   Gemma-4: Kategorie-basierte Steuerung via Blueprint-Feld
     #   enable_thinking_by_category (Fix 15.08.).
     #
-    # 2026-08-02: gpt-oss-Override (reasoning_effort/max_thinking_tokens)
-    # entfernt; Reasoning-Budget wird in LM Studio GUI per Modell gesetzt.
-    #
-    # 2026-08-02: gpt-oss-Override (reasoning_effort/max_thinking_tokens)
-    #   entfernt; Reasoning-Budget wird in LM Studio GUI per Modell gesetzt.
+    # 2026-08-02: gpt-oss-Override via chat_template_kwargs was removed.
+    # LM Studio controls the GUI-side effort/budget per model; direct
+    # llama.cpp controls effort at server start via --reasoning-effort.
     #
     if not _is_gptoss_model(model_identifier):
         ctw = {}
@@ -882,16 +901,26 @@ def _get_evaluation_parameters(model_identifier: str, bench_name: str = "") -> d
     return generation_parameters
 
 
-def _build_lmeval_cmd(model_identifier: str, api_model: str, subset_task: str, per_limit: int, output_dir: str, bench_name: str = "", num_parallel: int = 1) -> list[str]:
+def _build_lmeval_cmd(
+    model_identifier: str,
+    api_model: str,
+    subset_task: str,
+    per_limit: int,
+    output_dir: str,
+    bench_name: str = "",
+    num_parallel: int = 1,
+    provider_context: ProviderContext | None = None,
+) -> list[str]:
     """Like run_lmeval(), but returns the cmd list instead of executing it.
     
     Used by run_agentic() for per-scenario lm_eval invocations.
     Mirrors the same --model_args / --generation_parameters split as run_lmeval().
     """
     gptoss = _is_gptoss_model(model_identifier)
+    context = provider_context or get_provider_context()
     evaluation_parameters = _get_evaluation_parameters(model_identifier, bench_name=bench_name)
     model_settings = {
-        "base_url": f"{get_api_base()}/chat/completions",
+        "base_url": f"{context.base_url}/chat/completions",
         "model": api_model,
         "num_concurrent": num_parallel,
     }
@@ -906,7 +935,7 @@ def _build_lmeval_cmd(model_identifier: str, api_model: str, subset_task: str, p
         if eos_str:
             model_settings["eos_string"] = eos_str
     # Generation params go to --generation_parameters (overrides YAML generation_parameters via merge)
-    generation_parameters_keys = {"max_tokens", "temperature", "top_p", "top_k", "min_p", "presence_penalty", "repetition_penalty",
+    generation_parameters_keys = {"max_tokens", "max_thinking_tokens", "temperature", "top_p", "top_k", "min_p", "presence_penalty", "repetition_penalty",
                        "until", "chat_template_kwargs", "reasoning", "reasoning_effort"}
     generation_parameters = {k: v for k, v in evaluation_parameters.items()
                   if k in generation_parameters_keys and v is not None}
@@ -964,12 +993,21 @@ def _parse_subset_score(sub_output_dir: str, subset_task: str) -> float | None:
 #
 
 
-def _ensure_model_still_loaded(model_identifier: str, model_load_key: str, bench_name: str = "") -> None:
+def _ensure_model_still_loaded(
+    model_identifier: str,
+    model_load_key: str,
+    bench_name: str = "",
+    provider_context: ProviderContext | None = None,
+) -> None:
     """After EVERY benchmark (Custom/EvalPlus/LM-Eval/Agentic) verify the
     model is still loaded. If not, transparently reload it. This avoids
     silent crashes when a sub-process accidentally unloads the model.
     """
-    capabilities = get_provider_capabilities()
+    capabilities = (
+        provider_context.capabilities
+        if provider_context is not None
+        else get_provider_capabilities()
+    )
     if not capabilities.can_report_current_model:
         if not is_model_ready(timeout=60):
             label = f" after {bench_name}" if bench_name else ""
@@ -993,7 +1031,15 @@ def _ensure_model_still_loaded(model_identifier: str, model_load_key: str, bench
 
 
 # Returns: dict with pipeline="custom", score (0-1).
-def run_custom_benchmark(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_size: int = 20, seed: int | None = None, is_structured_output_disabled: bool = False, should_keep_response: bool = False) -> PipelineResult | None:
+def run_custom_benchmark(
+    model_info: AvailableModelInfo,
+    bench: BenchmarkDef,
+    sample_size: int = 20,
+    seed: int | None = None,
+    is_structured_output_disabled: bool = False,
+    should_keep_response: bool = False,
+    provider_context: ProviderContext | None = None,
+) -> PipelineResult | None:
     model_identifier = model_info.get("registry_key", model_info["key"])
     model_display = model_info["display"]
     fp = os.path.join(DATA_DIR, bench["file"])
@@ -1035,8 +1081,22 @@ def run_custom_benchmark(model_info: AvailableModelInfo, bench: BenchmarkDef, sa
     if should_keep_response:
         cmd.append("--keep-response")
     t0 = time.time()
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=PIPELINE_TIMEOUTS["custom_subprocess"],
-                            encoding="utf-8", errors="replace")
+    context = provider_context or get_provider_context()
+    child_env = {
+        **os.environ,
+        "LLM_PROVIDER": context.name,
+        "LLM_API_BASE": context.base_url,
+        "PYTHONIOENCODING": "utf-8",
+    }
+    result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=PIPELINE_TIMEOUTS["custom_subprocess"],
+        encoding="utf-8",
+        errors="replace",
+        env=child_env,
+    )
     elapsed = time.time() - t0
     # Print full subprocess output. Truncation would slice mid-line and
     # corrupt the header (e.g. "Subsampling:" -> "pling:"), so only trim
@@ -1060,7 +1120,8 @@ def run_custom_benchmark(model_info: AvailableModelInfo, bench: BenchmarkDef, sa
         print("  [INFO] Channel-Error detected - retrying with --no-structured-output")
         return run_custom_benchmark(model_info, bench, sample_size=sample_size,
                                    seed=seed, is_structured_output_disabled=True,
-                                   should_keep_response=should_keep_response)
+                                   should_keep_response=should_keep_response,
+                                   provider_context=context)
     if result.returncode != 0:
         print(f"  [ERROR] Returncode {result.returncode}")
         print(stderr_text[-500:])
@@ -1107,7 +1168,15 @@ class _WindowsSignalShim:
         return 0
 
 
-def run_evalplus(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_size: int = 20, seed: int | None = None, is_reasoning_model: bool = False, num_parallel: int = 1) -> PipelineResult | None:
+def run_evalplus(
+    model_info: AvailableModelInfo,
+    bench: BenchmarkDef,
+    sample_size: int = 20,
+    seed: int | None = None,
+    is_reasoning_model: bool = False,
+    num_parallel: int = 1,
+    provider_context: ProviderContext | None = None,
+) -> PipelineResult | None:
     # Some models (e.g. DeepSeek Coder) generate regex patterns like "\d+"
     # instead of r"\d+", causing SyntaxWarning spam from Python 3.12+.
     warnings.filterwarnings("ignore", category=SyntaxWarning)
@@ -1156,11 +1225,12 @@ def run_evalplus(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_siz
     max_tokens = evaluation_parameters.get("max_tokens", 4096)
     gen_temp = float(evaluation_parameters.get("temperature", 0.0))
     print(f"  {_evaluation_summary(model_identifier, _derive_category(dataset))}")
+    context = provider_context or get_provider_context()
     model_obj = make_model(
         model=EVALPLUS_SENTINEL_MODEL,
         backend="openai",
         dataset=dataset,
-        base_url=get_api_base(),
+        base_url=context.base_url,
         temperature=gen_temp,
         instruction_prefix="Please provide a self-contained Python script that solves the following problem in a markdown code block:",
         response_prefix="Below is a Python script with a self-contained function that solves the problem and passes corresponding tests:",
@@ -1338,7 +1408,14 @@ def run_evalplus(model_info: AvailableModelInfo, bench: BenchmarkDef, sample_siz
 # For MMLU-Pro there is a separate modified function (see below),
 # which stratifies the benchmark across 14 subset tasks.
 # Returns: dict with pipeline="lmeval", score (0-1).
-def run_lmeval(model_info: AvailableModelInfo, bench: BenchmarkDef, limit: int = 5, is_reasoning_model: bool = False, num_parallel: int = 1) -> PipelineResult | None:
+def run_lmeval(
+    model_info: AvailableModelInfo,
+    bench: BenchmarkDef,
+    limit: int = 5,
+    is_reasoning_model: bool = False,
+    num_parallel: int = 1,
+    provider_context: ProviderContext | None = None,
+) -> PipelineResult | None:
     model_identifier = model_info.get("registry_key", model_info["key"])
     model_display = model_info["display"]
     gptoss = _is_gptoss_model(model_identifier)
@@ -1371,7 +1448,12 @@ def run_lmeval(model_info: AvailableModelInfo, bench: BenchmarkDef, limit: int =
     #           (no timeout, no error response) - therefore ALWAYS use api_model.
     # Use proxy only when explicitly started (e.g. for custom base_url routing)
     use_proxy = _proxy_is_running()
-    lm_base_url = f"http://127.0.0.1:{LMEVAL_PROXY_PORT}/v1/chat/completions" if use_proxy else f"{get_api_base()}/chat/completions"
+    context = provider_context or get_provider_context()
+    lm_base_url = (
+        f"http://127.0.0.1:{LMEVAL_PROXY_PORT}/v1/chat/completions"
+        if use_proxy
+        else f"{context.base_url}/chat/completions"
+    )
     model_settings = {
         "base_url": lm_base_url,
         "model": api_model,
@@ -1392,7 +1474,7 @@ def run_lmeval(model_info: AvailableModelInfo, bench: BenchmarkDef, limit: int =
             model_settings["eos_string"] = eos_str
             print(f"  [CFG] eos_string={eos_str!r} (Task {task_name} hat keine until-Stops)")
     # Gen_kwargs keys that should override YAML generation_kwargs per request.
-    generation_parameters_keys = {"max_tokens", "temperature", "top_p", "top_k", "min_p", "presence_penalty", "repetition_penalty",
+    generation_parameters_keys = {"max_tokens", "max_thinking_tokens", "temperature", "top_p", "top_k", "min_p", "presence_penalty", "repetition_penalty",
                        "until", "chat_template_kwargs", "reasoning", "reasoning_effort"}
     generation_parameters = {k: v for k, v in evaluation_parameters.items()
                   if k in generation_parameters_keys and v is not None}
@@ -1554,8 +1636,13 @@ def run_lmeval(model_info: AvailableModelInfo, bench: BenchmarkDef, limit: int =
 # tool-use capabilities (function calls, API usage).
 # Result is extracted from JSON envelope (final_score 0-100 -> 0-1).
 # Returns: dict with pipeline="agentic", score (0-1).
-def run_agentic(model_info: AvailableModelInfo, limit: int = 5, mode: str = "random",
-                seed: int | None = None) -> PipelineResult | None:
+def run_agentic(
+    model_info: AvailableModelInfo,
+    limit: int = 5,
+    mode: str = "random",
+    seed: int | None = None,
+    provider_context: ProviderContext | None = None,
+) -> PipelineResult | None:
     """Agentic: tool-eval-bench with sample_size scenarios.
 
     mode:
@@ -1584,9 +1671,10 @@ def run_agentic(model_info: AvailableModelInfo, limit: int = 5, mode: str = "ran
 
     t0 = time.time()
     agentic_runner = os.path.join(SRC_DIR, "tools", "tool_eval_bench_runner.py")
+    context = provider_context or get_provider_context()
     cmd = [
         sys.executable, agentic_runner,
-        "--base-url", get_api_base(),
+        "--base-url", context.base_url,
         "--scenarios", *selected,
         "--json-file", json_path,
         "--timeout", str(PIPELINE_TIMEOUTS["agentic_scenario"]),
@@ -2099,14 +2187,25 @@ def _load_model(model_info: AvailableModelInfo, model_load_key: str, args: Any) 
     return api_model
 
 
-def _run_benchmarks_for_model(model_info: AvailableModelInfo, benchmarks: list[BenchmarkDef],
-                               args: Any, is_reasoning_model: bool,
-                               all_summary: list[dict]) -> list[dict]:
+def _run_benchmarks_for_model(
+    model_info: AvailableModelInfo,
+    benchmarks: list[BenchmarkDef],
+    args: Any,
+    is_reasoning_model: bool,
+    all_summary: list[dict],
+    provider_context: ProviderContext | None = None,
+) -> list[dict]:
     """Benchmark-Dispatch: Custom/EvalPlus/LM-Eval/Agentic für ein Modell."""
+    context = provider_context or get_provider_context()
     model_results: list[dict] = []
     model_load_key = model_info.get("model_identifier", model_info["key"])
 
-    if args.unload_between and not get_provider_capabilities().can_unload_models:
+    capabilities = (
+        context.capabilities
+        if provider_context is not None
+        else get_provider_capabilities()
+    )
+    if args.unload_between and not capabilities.can_unload_models:
         print("  [ERROR] --unload-between wird vom gewählten Provider nicht unterstützt.")
         return model_results
 
@@ -2130,32 +2229,37 @@ def _run_benchmarks_for_model(model_info: AvailableModelInfo, benchmarks: list[B
         agentic_names = {b["name"] for b in AGENTIC_BENCHMARKS}
 
         try:
-            np = _resolve_num_parallel(args.sample_size)
+            np = _resolve_num_parallel(args.sample_size, context)
             if np > 1:
                 print(f"  [PARALLEL] num_parallel={np} (SS={args.sample_size})")
 
             if bname in agentic_names:
                 result = run_agentic(model_info, limit=args.sample_size,
                                      mode=getattr(args, "agentic_mode", "random"),
-                                     seed=args.seed)
+                                     seed=args.seed,
+                                     provider_context=context)
             elif bname in ep_names:
                 result = run_evalplus(model_info, bench, sample_size=args.sample_size,
                                       seed=args.seed, is_reasoning_model=is_reasoning_model,
-                                      num_parallel=np)
+                                      num_parallel=np, provider_context=context)
             elif bname in lmeval_names:
                 per_limit = max(bench.get("min_limit", 0), args.sample_size)
                 result = run_lmeval(model_info, bench, limit=per_limit,
-                                    is_reasoning_model=is_reasoning_model, num_parallel=np)
+                                    is_reasoning_model=is_reasoning_model, num_parallel=np,
+                                    provider_context=context)
+
             else:
                 result = run_custom_benchmark(model_info, bench, sample_size=args.sample_size,
                                               seed=args.seed, is_structured_output_disabled=args.no_structured_output,
-                                              should_keep_response=args.keep_response)
+                                              should_keep_response=args.keep_response,
+                                              provider_context=context)
 
             if result:
                 model_results.append(result)
                 all_summary.append(result)
 
-            _ensure_model_still_loaded(model_info["key"], model_load_key, bench_name=bname)
+            _ensure_model_still_loaded(model_info["key"], model_load_key, bench_name=bname,
+                                       provider_context=context)
         except subprocess.TimeoutExpired:
             print(f"  [ERROR] {bench['name']} timeout (expired)")
         except (subprocess.SubprocessError, OSError, ValueError, TypeError, KeyError) as e:
@@ -2214,6 +2318,7 @@ def main() -> None:
     global IS_THINKING_ENABLED
     IS_THINKING_ENABLED = args.thinking
 
+    provider_context = get_provider_context()
     available = get_available_models(exclude_keywords=EXCLUDE_KEYWORDS, registry_only=True)
     models = _resolve_models(args, available)
     benchmarks = _resolve_benchmarks(args)
@@ -2243,15 +2348,21 @@ def main() -> None:
             print("  [ERROR] Loading failed. Skipping.")
             continue
 
-        model_results = _run_benchmarks_for_model(model_info, benchmarks, args,
-                                                   is_reasoning_model, all_summary)
+        model_results = _run_benchmarks_for_model(
+            model_info,
+            benchmarks,
+            args,
+            is_reasoning_model,
+            all_summary,
+            provider_context=provider_context,
+        )
         _write_intermediate_summary(model_results, model_info, args)
 
     _stop_lmeval_proxy()
     _print_final_summary(all_summary)
 
     print("\n  [INFO] Cleaning up - unloading model(s)...")
-    if get_provider_capabilities().can_unload_models:
+    if provider_context.capabilities.can_unload_models:
         unload_all()
     else:
         print("  [INFO] Provider exposes no unload operation; server lifecycle remains external.")

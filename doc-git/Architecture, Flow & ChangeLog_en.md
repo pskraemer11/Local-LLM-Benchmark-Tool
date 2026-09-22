@@ -111,6 +111,11 @@ policy, context/KV settings, templates, reasoning behavior, and sampling
 evidence. `registry_tool.py export-llama-preset` translates that policy into
 the preset; it does not make the preset authoritative.
 
+For direct per-model execution, `registry_tool.py export-llama-args` produces
+a report-only JSON manifest with the resolved GGUF path, concrete start
+arguments, request defaults, Registry SHA-256, and detected server version.
+This manifest is an audit artifact, not a second source of truth.
+
 The effective precedence is two related sequences:
 
 ~~~text
@@ -225,6 +230,13 @@ support files are also filtered as auxiliary rather than standalone benchmark
 models. A real standalone model whose name contains mtp remains eligible when
 it is not a small companion file.
 
+LM Studio also relies on a naming convention for vision projectors: the
+projector filename should start with `mmproj-` (for example,
+`mmproj-Millie-35B-A3B.gguf`). Otherwise LM Studio can expose it as a separate
+model instead of associating it with the main language-model GGUF. The
+benchmark-side inventory filter checks all available identity fields, so a
+projector remains auxiliary even when an inventory record omits its path.
+
 ### 3.2 The three pipeline modes
 
 The commands share names but have different scopes.
@@ -284,6 +296,18 @@ because validation still checks their Registry identities. The broader
 `--write` mode imports all supported config-derived fields and must therefore
 be selected deliberately.
 
+For MoE runtime tuning, use the focused import:
+
+~~~text
+py -3.12 src\registry_tool.py sync-from-configs --write-experts
+~~~
+
+This imports the live-tested LM Studio load field llm.load.numExperts into
+Registry.experts. It is distinct from max_experts, the immutable GGUF
+architectural maximum. LM Studio receives the runtime value as num_experts;
+direct llama.cpp receives the architecture-specific
+--override-kv <architecture>.expert_used_count=int:<N> override.
+
 #### pipeline sync
 
 ~~~text
@@ -312,14 +336,27 @@ py -3.12 src\registry_tool.py pipeline full
 pipeline full performs pipeline sync and then:
 
 1. reports non-installed Registry models in quarantine dry-run mode;
-2. runs a read-only prompt assembly preview;
-3. validates prompt and template completeness;
-4. validates Registry drift and field ownership.
+2. classifies Registry entries and fills missing LM Studio `promptTemplate` fields;
+3. runs a read-only system-prompt assembly preview;
+4. validates prompt and template completeness;
+5. validates Registry drift and field ownership.
 
-The assembly is explicitly preview-only. The GLM config patch is skipped and
-LM Studio config JSONs remain unchanged. Open blocking ownership drift causes
-exit code 1 unless --ignore-drift is passed. The flag changes the exit
-behavior only; it is not an automatic repair.
+System-prompt assembly is explicitly preview-only. The GLM config patch is
+skipped. Open blocking Registry/runtime issues cause exit code 1 unless
+--ignore-drift is passed. The flag changes the exit behavior only; it is not
+an automatic repair.
+
+Validation treats LM Studio context values as local runtime observations.
+Registry `context_length` is the benchmark source of truth, so a different
+`contextLength` in an LM Studio JSON is reported but does not block `validate`
+or the direct llama.cpp path. Missing LM Studio config files and missing
+`promptTemplate` values are reported the same way. A missing or invalid
+Registry-owned runtime value, such as MoE `experts`, remains blocking.
+
+`pipeline full` runs `sync-templates` before prompt preview. It fills only
+missing or empty `promptTemplate` fields in matching LM Studio config JSONs
+and preserves populated values. System-prompt assembly remains preview-only;
+the separate GLM config patch is not run.
 
 ### 3.3 Direct maintenance commands
 
@@ -333,8 +370,8 @@ commands remain useful for focused repairs:
 | fill-quant              | Fill missing quantization from GGUF names                                                | No                   |
 | fill-arch               | Read architecture values from GGUF headers                                               | No                   |
 | fill-reasoning          | Detect reasoning from GGUF templates                                                     | No                   |
-| sync-from-configs       | Report drift; --write-context imports only context; --write imports all supported fields | No by default        |
-| sync-templates          | Explicitly copy missing prompt templates into configs                                    | Yes                  |
+| sync-from-configs       | Report drift; --write-context imports only context; --write-experts imports tested MoE runtime experts; --write imports all supported fields | No by default        |
+| sync-templates          | Copy missing prompt templates into configs; also run by pipeline full                   | Yes                  |
 | sync-template-from-gguf | Explicitly copy an embedded GGUF template into one config                                | Yes                  |
 | patch-reasoning-effort  | Explicit GLM runtime-config patch                                                        | Yes                  |
 

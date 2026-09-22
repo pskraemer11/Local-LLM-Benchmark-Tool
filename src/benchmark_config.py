@@ -767,7 +767,8 @@ def is_support_file(
 ) -> bool:
     """True for auxiliary GGUF files that are NOT standalone benchmark models.
 
-    - ``mmproj*``: vision projector files
+    - ``mmproj-*``: vision projector files. LM Studio expects this prefix;
+      the benchmark filter also rejects legacy names containing ``mmproj``.
     - ``mtp-*`` or ``*/MTP/*``: MTP draft models (speculative-decoding add-ons,
       e.g. unsloth's ``mtp-gemma-4-12B-it-Q8_0.gguf``). Legitimate standalone
       MTP models (``qwen3.6-27b-mtp``, ``...-MTP-...`` in the name) are NOT
@@ -798,6 +799,22 @@ def is_support_file(
         return True
     arch = architecture.lower().strip()
     return arch.endswith("-assistant")
+
+
+def is_support_model_record(model: dict[str, Any]) -> bool:
+    """Return whether an LM Studio inventory record is an auxiliary file.
+
+    LM Studio normally exposes the GGUF path, but older inventories and some
+    discovery paths provide only ``modelKey`` or ``displayName``. Check all
+    available identity fields so a ``mmproj`` projector cannot become a
+    standalone benchmark target merely because one field is missing.
+    """
+    architecture = str(model.get("architecture") or "")
+    for field in ("modelKey", "key", "path", "indexedModelIdentifier", "displayName"):
+        value = model.get(field)
+        if value and is_support_file(str(value), architecture):
+            return True
+    return False
 
 
 # Code-Review 2026-07-18 §5.1: Centralised VRAM constants. Previously

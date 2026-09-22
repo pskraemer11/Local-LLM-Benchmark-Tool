@@ -43,7 +43,7 @@ SRC_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SRC_DIR)
 PROJECT_ROOT = os.path.dirname(SRC_DIR)
 RESULTS_DIR = os.path.join(PROJECT_ROOT, "ergebnisse")
-INSTALLED_CACHE = None
+INSTALLED_CACHE: set[str] | None = None
 
 from benchmark_config import (
     CAT_WEIGHTS,
@@ -56,7 +56,7 @@ from model_identity import build_model_identity, decompose_model_identity, match
 from utils.terminal import error, warn
 
 # --- Model info cache (from lms ls --json) ---
-_MODEL_INFO_CACHE = None
+_MODEL_INFO_CACHE: dict[str, dict[str, Any]] | None = None
 
 def _get_model_info() -> dict[str, Any]:
     """Cached map model_key -> display metadata from lms ls (via get_available_models).
@@ -89,7 +89,7 @@ def _get_model_info() -> dict[str, Any]:
     return model_info
 
 
-def _get_installed_model_keys() -> set:
+def _get_installed_model_keys() -> set[str]:
     """Cached set of normalized installed model keys ("publisher/model@quant").
 
     Used by the installed-only filter so historical results of models
@@ -98,7 +98,7 @@ def _get_installed_model_keys() -> set:
     global INSTALLED_CACHE
     if INSTALLED_CACHE is not None:
         return INSTALLED_CACHE
-    installed = set()
+    installed: set[str] = set()
     try:
         from model_manager import get_available_models
         models = get_available_models()
@@ -164,6 +164,7 @@ def _get_registry_data() -> tuple[list[str], dict[str, list[tuple[str, str]]], s
     """
     global _REGISTRY_KEYS_CACHE, _PUBLISHER_BASE_CACHE, _KNOWN_PUBLISHERS
     if _REGISTRY_KEYS_CACHE is not None:
+        assert _PUBLISHER_BASE_CACHE is not None and _KNOWN_PUBLISHERS is not None
         return _REGISTRY_KEYS_CACHE, _PUBLISHER_BASE_CACHE, _KNOWN_PUBLISHERS
     reg: dict[str, Any] = {}
     try:
@@ -209,7 +210,7 @@ def _join_triple(publisher: str, model: str, quant: str) -> str:
     if not model:
         base = f"{publisher}/{model}" if publisher else model
         return f"{base}@{quant}" if quant else base
-    return build_model_identity(publisher, model, quant)
+    return str(build_model_identity(publisher, model, quant))
 
 
 def _get_canonical_key(model_key: str) -> str:
@@ -431,8 +432,8 @@ def paired_bootstrap_ci(scores_a: list[float], scores_b: list[float],
         for i in range(n_resamples):
             s = 0.0
             for _ in range(n):
-                idx = rng.randrange(n)
-                s += scores_a[idx] - scores_b[idx]
+                sample_idx = rng.randrange(n)
+                s += scores_a[sample_idx] - scores_b[sample_idx]
             diffs[i] = s / n
         diffs.sort()
         lo_idx = int(n_resamples * alpha / 2)
@@ -448,7 +449,7 @@ def read_paired_scores(path_a: str, path_b: str) -> tuple[list[float], list[floa
     the same --seed so they contain the same tasks in the same order.
     Unmatched rows are dropped.
     """
-    def _read_scores_by_index(path: str) -> dict[int, float]:
+    def _read_scores_by_index(path: str) -> dict[str, float]:
         """Read a benchmark CSV into {task_index: score} for pairing."""
         out = {}
         delim = _auto_delimiter(path)
@@ -525,11 +526,14 @@ def _auto_delimiter(path: str) -> str:
 
 def read_custom_csv(path: str, out_scores: list[float] | None = None) -> tuple[float | None, float | None, float | None, dict[str, Any]]:
     """Read benchmark CSV; collect per-item scores in out_scores (for Bootstrap)."""
-    scores = []
-    tok_speeds = []
-    latencies = []
-    cpu_per_task, gpu_per_task = [], []
-    ram_vals, temp_vals, vram_vals = [], [], []
+    scores: list[float] = []
+    tok_speeds: list[float] = []
+    latencies: list[float] = []
+    cpu_per_task: list[float] = []
+    gpu_per_task: list[float] = []
+    ram_vals: list[float] = []
+    temp_vals: list[float] = []
+    vram_vals: list[float] = []
     # Wrap the entire file-handling in try/except so that a missing
     # file (FileNotFoundError), a permission error, or an unreadable
     # directory gracefully returns (None, None, None, {}) instead of
@@ -718,7 +722,7 @@ def find_latest_csvs(min_sample_size: int = 0, since: str | None = None,
         # model have slightly different timestamps (written seconds apart), so
         # grouping by timestamp alone would split pairs → keep only 1 CSV per model.
         # Fix: group by model_key, use max(DS_ts, CE_ts) as run timestamp.
-        model_groups: dict[str, dict] = {}
+        model_groups: dict[str, dict[str, Any]] = {}
         for ts, btype, lookup_key, fpath in all_entries:
             if lookup_key not in model_groups:
                 model_groups[lookup_key] = {"max_ts": ts, "ds1000": None, "codereval": None}
@@ -745,29 +749,29 @@ def find_latest_csvs(min_sample_size: int = 0, since: str | None = None,
         return ds1000, codereval, custom_sizes
     elif all_runs:
         # Keep latest per model (all historical runs)
-        ds1000: dict[str, tuple[str, str]] = {}
-        codereval: dict[str, tuple[str, str]] = {}
+        ds1000_current: dict[str, tuple[str, str]] = {}
+        codereval_current: dict[str, tuple[str, str]] = {}
         for ts, btype, lookup_key, fpath in all_entries:
-            target = ds1000 if btype == "DS1000" else codereval
+            target = ds1000_current if btype == "DS1000" else codereval_current
             if lookup_key not in target or ts > target[lookup_key][0]:
                 target[lookup_key] = (ts, fpath)
-        custom_sizes = {"DS1000": _extract_csv_sizes(ds1000, path_ss),
-                        "CoderEval": _extract_csv_sizes(codereval, path_ss)}
-        return {k: v[1] for k, v in ds1000.items()}, {k: v[1] for k, v in codereval.items()}, custom_sizes
+        custom_sizes = {"DS1000": _extract_csv_sizes(ds1000_current, path_ss),
+                        "CoderEval": _extract_csv_sizes(codereval_current, path_ss)}
+        return {k: v[1] for k, v in ds1000_current.items()}, {k: v[1] for k, v in codereval_current.items()}, custom_sizes
     else:
         # Only keep CSVs from the latest timestamp overall (single benchmark run)
         latest_ts = max(ts for ts, _, _, _ in all_entries)
-        ds1000: dict[str, tuple[str, str]] = {}
-        codereval: dict[str, tuple[str, str]] = {}
+        ds1000_latest: dict[str, tuple[str, str]] = {}
+        codereval_latest: dict[str, tuple[str, str]] = {}
         for ts, btype, lookup_key, fpath in all_entries:
             if ts != latest_ts:
                 continue
-            target = ds1000 if btype == "DS1000" else codereval
+            target = ds1000_latest if btype == "DS1000" else codereval_latest
             if lookup_key not in target or ts > target[lookup_key][0]:
                 target[lookup_key] = (ts, fpath)
-        custom_sizes = {"DS1000": _extract_csv_sizes(ds1000, path_ss),
-                        "CoderEval": _extract_csv_sizes(codereval, path_ss)}
-        return {k: v[1] for k, v in ds1000.items()}, {k: v[1] for k, v in codereval.items()}, custom_sizes
+        custom_sizes = {"DS1000": _extract_csv_sizes(ds1000_latest, path_ss),
+                        "CoderEval": _extract_csv_sizes(codereval_latest, path_ss)}
+        return {k: v[1] for k, v in ds1000_latest.items()}, {k: v[1] for k, v in codereval_latest.items()}, custom_sizes
 
 
 def _find_newest_by_mtime(prefix: str, model_key: str) -> str | None:
@@ -971,12 +975,12 @@ def read_agentic(model_key: str) -> float | None:
         with open(latest, encoding="utf-8") as f:
             data = json.load(f)
         raw = data.get("final_score") if isinstance(data, dict) else None
-        if raw is not None:
-            return raw / 100.0
+        if isinstance(raw, (int, float)):
+            return float(raw) / 100.0
         scores_meta = data.get("scores", {}) if isinstance(data, dict) else {}
         results_list = scores_meta.get("scenario_results", [])
         if results_list:
-            vals = [s.get("score", 0) for s in results_list if isinstance(s, dict)]
+            vals = [s.get("score", 0) for s in results_list if isinstance(s, dict) and isinstance(s.get("score", 0), (int, float))]
             return sum(vals) / len(vals) if vals else None
     except Exception:
         print(f"  [WARN] _try_read_agentic_score: could not parse {os.path.basename(latest)}", file=sys.stderr)
@@ -1038,9 +1042,9 @@ def _collect_pipeline_sample_sizes(model_keys: list[str]) -> dict[str, set[int]]
                     with open(candidates[0][1], encoding="utf-8") as f:
                         data = json.load(f)
                     for td in data.get("results", {}).values():
-                        n = td.get("sample_len") if isinstance(td, dict) else None
-                        if n:
-                            sizes.setdefault("LM-Eval", set()).add(n)
+                        sample_len = td.get("sample_len") if isinstance(td, dict) else None
+                        if isinstance(sample_len, int) and sample_len > 0:
+                            sizes.setdefault("LM-Eval", set()).add(sample_len)
                             break
                 except Exception:  # noqa: S110 - kaputte Ergebnisdateien ueberspringen
                     pass
@@ -1058,11 +1062,11 @@ def _collect_pipeline_sample_sizes(model_keys: list[str]) -> dict[str, set[int]]
                 try:
                     with open(all_json[0], encoding="utf-8") as f:
                         data = json.load(f)
-                    n = data.get("total_scenarios") if isinstance(data, dict) else None
+                    total_scenarios = data.get("total_scenarios") if isinstance(data, dict) else None
                 except Exception:
-                    n = None
-                if n:
-                    sizes.setdefault("Agentic", set()).add(n)
+                    total_scenarios = None
+                if isinstance(total_scenarios, int) and total_scenarios > 0:
+                    sizes.setdefault("Agentic", set()).add(total_scenarios)
     return sizes
 
 
@@ -1096,20 +1100,22 @@ def compute_category_scores(bench_scores: dict[str, float | None]) -> dict[str, 
     Overall = sum(cat_weight * cat_score) / sum(cat_weight)
     for all categories with data.
     """
-    cats = {}
+    cats: dict[str, float | None] = {}
     for cat, bench_weights in CAT_WEIGHTS.items():
         score = 0.0
         total_w = 0.0
         for bench, w in bench_weights.items():
-            if bench in bench_scores and bench_scores[bench] is not None:
-                score += bench_scores[bench] * w
+            benchmark_score = bench_scores.get(bench)
+            if benchmark_score is not None:
+                score += benchmark_score * w
                 total_w += w
         cats[cat] = score / total_w if total_w > 0 else None
     overall = 0.0
     total_w = 0.0
     for cat, w in OVERALL_WEIGHTS.items():
-        if cats[cat] is not None:
-            overall += cats[cat] * w
+        category_score = cats[cat]
+        if category_score is not None:
+            overall += category_score * w
             total_w += w
     cats["overall"] = overall / total_w if total_w > 0 else None
     return cats
@@ -1256,12 +1262,12 @@ def read_data(model_keys: list[str] | None = None, min_sample_size: int = 0,
     # Normalize and deduplicate model_keys: lowercase @variant, merge duplicates
     model_keys = _normalize_model_keys(model_keys)
 
-    rows = []
+    rows: list[ModelData] = []
     for model_key in model_keys:
         display = _get_canonical_key(model_key) if not model_key.startswith("_dummy_") else model_key
-        bench_scores = {}
-        tok_speeds = {}
-        latencies = []
+        bench_scores: dict[str, float | None] = {}
+        tok_speeds: dict[str, float | None] = {}
+        latencies: list[float] = []
 
         # DS1000 - match by model_key (handle missing @variant in CSV)
         ds_scores: list[float] = []
@@ -1297,13 +1303,14 @@ def read_data(model_keys: list[str] | None = None, min_sample_size: int = 0,
 
         # Aggregate system metrics from all available benchmarks
         all_metrics = [m for m in [ds_m, ce_m] if m]
-        sys_metrics = {}
+        sys_metrics: dict[str, float] = {}
         if all_metrics:
             for k in ["CPU_med", "CPU_p90",
                        "GPU_med", "GPU_p90",
                        "RAM_med", "RAM_p90",
                        "VRAM_GB", "GPU_Temp_p90"]:
-                vals = [m.get(k) for m in all_metrics if m.get(k) is not None]
+                raw_vals = [m.get(k) for m in all_metrics]
+                vals: list[float] = [float(value) for value in raw_vals if isinstance(value, (int, float))]
                 if vals:
                     sys_metrics[k] = max(vals)
 
@@ -1354,7 +1361,8 @@ def read_data(model_keys: list[str] | None = None, min_sample_size: int = 0,
         rt_min = runtime_h * 60 if runtime_h else None
         runtime_str = f"{rt_min:.1f} min" if rt_min else "—"
         print(f"    {'Runtime':20s} {runtime_str}")
-        eff_str = f"{cats['overall']/runtime_h:.1f}" if cats.get("overall") is not None and runtime_h else "—"
+        overall_score = cats.get("overall")
+        eff_str = f"{overall_score/runtime_h:.1f}" if overall_score is not None and runtime_h else "—"
         print(f"    {'Eff (Score/h)':20s} {eff_str} %p/h")
 
         def pct(val: float | None) -> float | None:
@@ -1369,8 +1377,10 @@ def read_data(model_keys: list[str] | None = None, min_sample_size: int = 0,
         if len(ce_scores) > 1:
             ce_ci_lo, ce_ci_hi = bootstrap_ci(ce_scores)
 
-        coding_eff = f"{cats['coding']/runtime_h:.1f}" if cats.get("coding") is not None and runtime_h else ""
+        coding_score = cats.get("coding")
+        coding_eff = f"{coding_score/runtime_h:.1f}" if coding_score is not None and runtime_h else ""
         vram = _lookup_vram(model_key)
+        vram_gb = _try_float(vram.get("vram_gb")) if vram else None
         rows.append(ModelData(
             name=display,
             ds1000=pct(ds_score),
@@ -1392,10 +1402,10 @@ def read_data(model_keys: list[str] | None = None, min_sample_size: int = 0,
             math=pct(cats.get("math")),
             overall=pct(cats.get("overall")),
             runtime_min=f"{rt_min:.1f}" if rt_min else "",
-            eff_score_h=f"{cats['overall']/runtime_h:.1f}" if cats.get("overall") is not None and runtime_h else "",
+            eff_score_h=f"{overall_score/runtime_h:.1f}" if overall_score is not None and runtime_h else "",
             coding_eff_score_h=coding_eff,
             tok_s=f"{avg_tps:.1f}" if avg_tps else "",
-            vram_gb=vram["vram_gb"] if vram else "",
+            vram_gb=vram_gb,
             quant=vram["quant"] if vram else "",
             cpu_med=sys_metrics.get("CPU_med"),
             cpu_p90=sys_metrics.get("CPU_p90"),

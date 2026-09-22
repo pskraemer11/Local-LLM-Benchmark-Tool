@@ -44,9 +44,10 @@ import re
 import subprocess
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from model_registry import ModelRegistry
+from providers.base import ProviderContext
 from utils.terminal import error, warn
 
 if TYPE_CHECKING:
@@ -98,6 +99,9 @@ HEALTH_CHECK_SENTINEL_MODEL = "check"
 
 SUPPORTED_PROVIDERS = {"lmstudio", "tabbyapi", "openai_compat", "unsloth_server", "llama_cpp"}
 
+_PROVIDER_CONTEXT: ProviderContext | None = None
+_PROVIDER_CONTEXT_SIGNATURE: tuple[str, ...] | None = None
+
 
 def get_provider_name() -> str:
     """Return the configured provider name, defaulting to LM Studio."""
@@ -119,7 +123,27 @@ def get_provider_name() -> str:
     return name
 
 
-def get_provider() -> Any:
+def _provider_context_signature() -> tuple[str, ...]:
+    """Return settings that require rebuilding the selected provider context."""
+    provider = get_provider_name()
+    names = (
+        "LLM_API_BASE",
+        "LMSTUDIO_API_BASE",
+        "TABBYAPI_API_BASE",
+        "UNSLOTH_API_BASE",
+        "UNSLOTH_LOCAL_API_BASE",
+        "LLAMA_CPP_API_BASE",
+        "LLAMA_CPP_SERVER_EXE",
+        "LLAMA_CPP_MODEL_ROOT",
+        "GGUF_MODEL_ROOT",
+        "LMSTUDIO_MODELS_DIR",
+        "UNSLOTH_MODEL_ROOT",
+        "UNSLOTH_SERVER_EXE",
+    )
+    return (provider, API_BASE, *(os.environ.get(name, "") for name in names))
+
+
+def _create_provider() -> Any:
     """Create the configured provider on demand.
 
     Imports stay local so the legacy LM Studio path keeps its current import
@@ -174,10 +198,33 @@ def get_provider() -> Any:
         ensure_server=_is_lmstudio_running,
         registry_overrides=_registry_display_overrides,
         registry_loader=_load_registry_data,
+        runtime_loader=_lmstudio_runtime_overrides,
         time_fn=time.time,
         sleep_fn=time.sleep,
         subprocess_run=subprocess.run,
     )
+
+
+def get_provider_context() -> ProviderContext:
+    """Return the explicit client context for the configured provider."""
+    global _PROVIDER_CONTEXT, _PROVIDER_CONTEXT_SIGNATURE
+    signature = _provider_context_signature()
+    if _PROVIDER_CONTEXT is None or _PROVIDER_CONTEXT_SIGNATURE != signature:
+        provider_name = get_provider_name()
+        _PROVIDER_CONTEXT = ProviderContext(provider_name, _create_provider())
+        _PROVIDER_CONTEXT_SIGNATURE = signature
+    return _PROVIDER_CONTEXT
+
+
+def get_provider() -> Any:
+    """Return the selected provider client (legacy facade)."""
+    # Keep the historical fresh-instance behavior for LM Studio compatibility
+    # callers: its tests and integrations patch subprocess/REST seams per call.
+    # Direct and other explicit providers retain the stable context client so
+    # their lifecycle controller remains owned by one provider instance.
+    if get_provider_name() == "lmstudio":
+        return _create_provider()
+    return get_provider_context().client
 
 
 def get_provider_capabilities() -> Any:
@@ -187,24 +234,26 @@ def get_provider_capabilities() -> Any:
 
 def get_api_base() -> str:
     """Return the current provider endpoint for child pipelines."""
-    return API_BASE
+    return cast("str", get_provider_context().base_url)
 
 
-def configure_provider(provider: str | None = None, api_base: str | None = None) -> str:
+def configure_provider(provider: str | None = None, api_base: str | None = None) -> ProviderContext:
     """Apply explicit launcher provider options before discovery starts.
 
     The module-level ``API_BASE`` remains as a compatibility alias for older
     imports, while new callers can retrieve the refreshed endpoint through
     :func:`get_api_base`.
     """
-    global API_BASE, _REST_API_BASE
+    global API_BASE, _REST_API_BASE, _PROVIDER_CONTEXT, _PROVIDER_CONTEXT_SIGNATURE
     if provider:
         os.environ["LLM_PROVIDER"] = provider
     if api_base:
         os.environ["LLM_API_BASE"] = api_base
     API_BASE = _configured_api_base()
     _REST_API_BASE = API_BASE.rsplit("/v1", 1)[0] if API_BASE.endswith("/v1") else API_BASE
-    return API_BASE
+    _PROVIDER_CONTEXT = None
+    _PROVIDER_CONTEXT_SIGNATURE = None
+    return get_provider_context()
 
 
 def _uses_legacy_lmstudio_path() -> bool:
@@ -219,35 +268,45 @@ def has_assembled_system_prompt(model_identifier: str) -> bool | None:
     provider = get_provider()
     checker = getattr(provider, "has_assembled_system_prompt", None)
     if callable(checker):
-        return checker(model_identifier)
+        return cast("bool | None", checker(model_identifier))
     return None
 
 
 def _unsloth_server_runtime_overrides(model_identifier: str) -> dict[str, Any]:
     """Map provider-neutral registry runtime values to llama-server options."""
-    return _registry_view().provider_runtime(model_identifier, "unsloth_server")
+    return cast("dict[str, Any]", _registry_view().provider_runtime(model_identifier, "unsloth_server"))
 
 
 def _llama_cpp_runtime_overrides(model_identifier: str) -> dict[str, Any]:
     """Map Registry values to direct llama-server arguments."""
-    return _registry_view().provider_runtime(model_identifier, "llama_cpp")
+    return cast("dict[str, Any]", _registry_view().provider_runtime(model_identifier, "llama_cpp"))
+
+
+def _lmstudio_runtime_overrides(model_identifier: str) -> dict[str, Any]:
+    """Map Registry-selected runtime values to LM Studio's native load API."""
+    return cast("dict[str, Any]", _registry_view().provider_runtime(model_identifier, "lmstudio"))
 
 
 # ── Legacy adapters ───────────────────────────────────────────────
 # The concrete TabbyAPI implementation lives in providers/tabbyapi_provider.py.
 # These names remain patchable for existing callers and tests.
 
-def _tabbyapi_request(endpoint: str, method: str = "GET", data: dict | None = None,
-                      timeout: int = 30, read_body: bool = True) -> dict | None:
+def _tabbyapi_request(
+    endpoint: str,
+    method: str = "GET",
+    data: dict[str, Any] | None = None,
+    timeout: int = 30,
+    read_body: bool = True,
+) -> dict[str, Any] | None:
     from providers.tabbyapi_provider import TabbyAPIProvider
 
-    return TabbyAPIProvider(API_BASE).request_json(
+    return cast("dict[str, Any] | None", TabbyAPIProvider(API_BASE).request_json(
         endpoint,
         method=method,
         payload=data,
         timeout=timeout,
         read_body=read_body,
-    )
+    ))
 
 
 def _tabbyapi_loaded_name() -> str | None:
@@ -257,10 +316,10 @@ def _tabbyapi_loaded_name() -> str | None:
     return current["model_identifier"] if current else None
 
 
-def _tabbyapi_config_load_args() -> dict:
+def _tabbyapi_config_load_args() -> dict[str, Any]:
     from providers.tabbyapi_provider import TabbyAPIProvider
 
-    return TabbyAPIProvider(API_BASE)._config_args()
+    return cast("dict[str, Any]", TabbyAPIProvider(API_BASE)._config_args())
 
 
 def _tabbyapi_load_model(model_identifier: str, timeout: int = TIMEOUT_LOAD_MODEL) -> str | None:
@@ -273,7 +332,7 @@ def _tabbyapi_load_model(model_identifier: str, timeout: int = TIMEOUT_LOAD_MODE
 def _tabbyapi_unload(timeout: int = TIMEOUT_MODEL_READY) -> bool:
     from providers.tabbyapi_provider import TabbyAPIProvider
 
-    return TabbyAPIProvider(API_BASE).unload_all(timeout=timeout)
+    return cast("bool", TabbyAPIProvider(API_BASE).unload_all(timeout=timeout))
 
 
 # ── Pipeline-specific timeouts ──────────────────────────────────
@@ -309,30 +368,34 @@ def safe_json_loads(text: str) -> Any:
     return json.loads(text, object_pairs_hook=OrderedDict)
 
 
-def _rest_request(endpoint: str, method: str = "GET", data: dict | None = None,
-                  timeout: int = TIMEOUT_HTTP) -> dict | None:
+def _rest_request(
+    endpoint: str,
+    method: str = "GET",
+    data: dict[str, Any] | None = None,
+    timeout: int = TIMEOUT_HTTP,
+) -> dict[str, Any] | None:
     """Compatibility adapter for the provider HTTP transport."""
     from providers.base import HttpProvider
 
-    return HttpProvider(_REST_API_BASE).request_json(
+    return cast("dict[str, Any] | None", HttpProvider(_REST_API_BASE).request_json(
         endpoint,
         method=method,
         payload=data,
         timeout=timeout,
-    )
+    ))
 
 
 def is_api_available() -> bool:
-    return get_provider().is_available(timeout=TIMEOUT_HEALTH_CHECK)
+    return cast("bool", get_provider().is_available(timeout=TIMEOUT_HEALTH_CHECK))
 
 
 def get_current_loaded_model() -> LoadedModelInfo | None:
-    return get_provider().current_model()
+    return cast("LoadedModelInfo | None", get_provider().current_model())
 
 
 def unload_all(timeout: int = TIMEOUT_MODEL_READY) -> bool:
     """Unload all models through the selected provider."""
-    return get_provider().unload_all(timeout=timeout)
+    return cast("bool", get_provider().unload_all(timeout=timeout))
 
 
 def has_unloaded_all_models() -> bool:
@@ -341,7 +404,7 @@ def has_unloaded_all_models() -> bool:
 
 
 # ── Registry Helpers ─────────────────────────────────────────────────
-_REGISTRY_CACHE: dict | None = None
+_REGISTRY_CACHE: dict[str, Any] | None = None
 _MODEL_REGISTRY: ModelRegistry | None = None
 
 
@@ -355,9 +418,9 @@ def _registry_view() -> ModelRegistry:
 
 def _tabbyapi_runtime_overrides(model_identifier: str) -> dict[str, Any]:
     """Resolve safe TabbyAPI load arguments from the registry."""
-    return _registry_view().provider_runtime(model_identifier, "tabbyapi")
+    return cast("dict[str, Any]", _registry_view().provider_runtime(model_identifier, "tabbyapi"))
 
-def _load_registry_data() -> dict:
+def _load_registry_data() -> dict[str, Any]:
     """Load and cache model_registry.yaml."""
     global _REGISTRY_CACHE
     if _REGISTRY_CACHE is not None:
@@ -376,8 +439,8 @@ def _load_registry_data() -> dict:
     except (YAMLError, OSError, UnicodeDecodeError) as e:
         warn(f"model_registry.yaml fehlerhaft: {e}")
         data = {}
-    _REGISTRY_CACHE = data
-    return data
+    _REGISTRY_CACHE = cast("dict[str, Any]", data) if isinstance(data, dict) else {}
+    return _REGISTRY_CACHE
 
 
 def _registry_display_overrides() -> dict[str, str]:
@@ -387,7 +450,9 @@ def _registry_display_overrides() -> dict[str, str]:
     overrides = {}
     for key, entry in data.items():
         if isinstance(entry, dict) and "display_name" in entry:
-            overrides[normalize_model_name(key)] = entry["display_name"]
+            display_name = entry["display_name"]
+            if isinstance(display_name, str):
+                overrides[normalize_model_name(key)] = display_name
     return overrides
 
 
@@ -454,7 +519,7 @@ def _is_lmstudio_running() -> bool:
     """Compatibility adapter for LM Studio server startup and discovery."""
     from providers.lmstudio_provider import LMStudioProvider
 
-    return LMStudioProvider(API_BASE).ensure_server()
+    return cast("bool", LMStudioProvider(API_BASE).ensure_server())
 
 
 # Code-Review 2026-07-18 §6.1: defensive model_identifier validation.
@@ -493,7 +558,7 @@ def load_model(model_identifier: str, gpu_offload: float | None = None) -> tuple
         error(str(e))
         return False, None
 
-    return get_provider().load_model(model_identifier, gpu_offload=gpu_offload)
+    return cast("tuple[bool, str | None]", get_provider().load_model(model_identifier, gpu_offload=gpu_offload))
 
 
 def load_model_via_lms(model_identifier: str, gpu_offload: float | None = None) -> tuple[bool, str | None]:
@@ -507,4 +572,4 @@ def is_model_ready(timeout: int = TIMEOUT_MODEL_READY) -> bool:
     Unlike the previous implementation, this only considers HTTP 200 as "ready".
     Other errors (e.g. "No models loaded", 500, timeout) are retried until timeout.
     """
-    return get_provider().wait_ready(timeout=timeout)
+    return cast("bool", get_provider().wait_ready(timeout=timeout))

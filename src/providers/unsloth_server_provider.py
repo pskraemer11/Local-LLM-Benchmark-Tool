@@ -158,9 +158,10 @@ class UnslothServerProvider(HttpProvider):
         result: list[dict[str, Any]] = []
         for item in raw_models:
             if isinstance(item, str):
-                identifier = item
+                identifier: str | None = item
             elif isinstance(item, dict):
-                identifier = item.get("id") or item.get("model") or item.get("name")
+                candidate = item.get("id") or item.get("model") or item.get("name")
+                identifier = candidate if isinstance(candidate, str) else None
             else:
                 identifier = None
             if identifier:

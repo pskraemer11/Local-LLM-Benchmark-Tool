@@ -27,6 +27,7 @@ from run_benchmarks import (
     _model_family,
     _model_short_name,
     _parse_subset_score,
+    _resolve_num_parallel,
     resolve_benchmarks,
     resolve_models,
 )
@@ -36,7 +37,7 @@ def _patch_gpt_oss_registry(mocker):
     import benchmark_config as bc
 
     registry = dict(bc._load_quant_registry())
-    registry["openai/gpt-oss-20b@mxfp4"] = {
+    gpt_entry = {
         "blueprint": "gptoss_reasoning",
         "reasoning": "thinking",
         "sampling_source": "web-research",
@@ -45,6 +46,12 @@ def _patch_gpt_oss_registry(mocker):
             for category in ("coding", "knowledge", "agentic", "math")
         },
     }
+    # The production registry uses the actual GGUF publisher (ggml-org),
+    # while older tests used the original OpenAI publisher.  Override every
+    # current GPT-OSS entry so matching remains deterministic for both forms.
+    matching_keys = [key for key in registry if "gpt-oss-20b" in key.lower()]
+    for key in matching_keys or ["openai/gpt-oss-20b@mxfp4"]:
+        registry[key] = dict(gpt_entry)
     mocker.patch.object(bc, "_load_quant_registry", return_value=registry)
 
 
@@ -127,6 +134,24 @@ class TestModelDetection:
 
 
 class TestModelHelpers:
+    def test_num_parallel_uses_one_worker_for_small_samples(self):
+        assert _resolve_num_parallel(1) == 1
+        assert _resolve_num_parallel(5) == 1
+
+    def test_num_parallel_uses_four_workers_above_small_sample_threshold(self):
+        assert _resolve_num_parallel(6) == 4
+        assert _resolve_num_parallel(20) == 4
+
+    def test_num_parallel_respects_provider_capability(self):
+        context = MagicMock()
+        context.capabilities.max_parallel = 2
+        assert _resolve_num_parallel(20, context) == 2
+
+    def test_num_parallel_ignores_invalid_provider_capability(self):
+        context = MagicMock()
+        context.capabilities.max_parallel = 0
+        assert _resolve_num_parallel(20, context) == 4
+
     def test_model_short_name_basic(self):
         assert _model_short_name("plain-model") == "plain-model"
 
@@ -384,6 +409,28 @@ class TestLmevalParams:
         _patch_gpt_oss_registry(mocker)
         params = _get_evaluation_parameters("unsloth/gpt-oss-20b", "coding")
         assert params.get("until") == ["<|return|>"]
+
+    def test_gptoss_thinking_budget_is_forwarded(self, mocker):
+        """The Harmony reasoning cap must reach lm-eval as a gen kwarg."""
+        _patch_gpt_oss_registry(mocker)
+        params = _get_evaluation_parameters("unsloth/gpt-oss-20b", "coding")
+        assert params["max_thinking_tokens"] == 4096
+        assert "reasoning_effort" not in params
+
+    def test_gptoss_thinking_budget_is_in_lmeval_command(self, mocker, tmp_path):
+        """The lm-eval command must retain the GPT-OSS budget in --gen_kwargs."""
+        _patch_gpt_oss_registry(mocker)
+        cmd = _build_lmeval_cmd(
+            "unsloth/gpt-oss-20b",
+            "gpt-oss-20b",
+            "gsm8k",
+            1,
+            str(tmp_path),
+            bench_name="gsm8k",
+        )
+        kwargs = json.loads(cmd[cmd.index("--gen_kwargs") + 1])
+        assert kwargs["max_thinking_tokens"] == 4096
+        assert "reasoning_effort" not in kwargs
 
     def test_enable_thinking_false_emits_chat_template_kwargs(self):
         # Wenn enable_thinking=False, wird chat_template_kwargs mit enable_thinking=False gesetzt

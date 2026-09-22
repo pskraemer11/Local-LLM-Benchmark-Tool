@@ -88,7 +88,10 @@ def _load_problems(dataset: str) -> dict[str, dict[str, Any]]:
     from evalplus.data import get_human_eval_plus, get_mbpp_plus
 
     fn = get_human_eval_plus if dataset == "humaneval" else get_mbpp_plus
-    return fn()
+    data = fn()
+    if not isinstance(data, dict):
+        raise TypeError("EvalPlus dataset must be a mapping")
+    return {str(key): value for key, value in data.items() if isinstance(value, dict)}
 
 
 def _load_problem_hashes(dataset: str) -> tuple[str, list[str]]:
