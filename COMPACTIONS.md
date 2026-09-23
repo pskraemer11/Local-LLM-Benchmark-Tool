@@ -296,28 +296,28 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 
 =============== Compaction 15.08.2026 / 20:00 ================
 ## Objective
-- **Probelauf aller 13 Registry-Modelle** (Gemma-4, GPT-OSS, Granite, phi, GLM) als Smoke-Test der modellspezifischen Konfiguration 
+- **Probelauf aller 13 Registry-Modelle** (Gemma-4, GPT-OSS, Granite, phi, GLM) als Smoke-Test der modellspezifischen Konfiguration
     (Systemprompt + Jinja-Template + reasoning.parsing), SS=10, je DS1000/HumanEval+/MATH-500/Agentic.
 - Lauf ist **abgebrochen** (Prozess gekillt bei MATH-500 5/10); Ergebnisauswertung + Compaction standen an.
 
 ## Important Details
-- **Lauf-Keys (13, aus `lms ls --json`/`get_available_models`):** `gemma-4-19b-a4b-it-reap-i1@q4_k_m`, `gemma-4-26b-a4b-it-i1@iq4_xs`, `gemma-4-26b-a4b-it@iq3_s`, 
-    `gemma-4-12b-it-qat@q4_k_xl`, `gemma-4-26b-a4b-it-heretic-i1@iq3_m`, `gemma4-26b-a4b-reap-25@Q3_K`, `openai/gpt-oss-20b@mxfp4`, `granite-4.1-8b@Q6_K`, `granite-4.1-30b@Q3_K_S`, 
+- **Lauf-Keys (13, aus `lms ls --json`/`get_available_models`):** `gemma-4-19b-a4b-it-reap-i1@q4_k_m`, `gemma-4-26b-a4b-it-i1@iq4_xs`, `gemma-4-26b-a4b-it@iq3_s`,
+    `gemma-4-12b-it-qat@q4_k_xl`, `gemma-4-26b-a4b-it-heretic-i1@iq3_m`, `gemma4-26b-a4b-reap-25@Q3_K`, `openai/gpt-oss-20b@mxfp4`, `granite-4.1-8b@Q6_K`, `granite-4.1-30b@Q3_K_S`,
     `granite-4.0-h-tiny@Q8_0`, `unsloth/phi-4@Q5_K_M`, `glm-4.7-flash@Q3_K_S`, `zai-org/glm-4.6v-flash@q6_k`. Run-Spec: `run.probelauf-familien.yaml`.
-- **User-Entscheidungen:** GLM gehört in den Lauf (Steuerung über `reasoning.parsing.enabled:true` laut Hints-Datei, kein eigenes Jinja-Template); 
-    alle 13 Registry-Modelle testen (nicht nur 10 mit Templates); GLM-Configs auf `enabled:true`; `registry_tool.glm_patch_config` dauerhaft auf `enabled:true` („GLM sind Reasoning-Modelle"); 
+- **User-Entscheidungen:** GLM gehört in den Lauf (Steuerung über `reasoning.parsing.enabled:true` laut Hints-Datei, kein eigenes Jinja-Template);
+    alle 13 Registry-Modelle testen (nicht nur 10 mit Templates); GLM-Configs auf `enabled:true`; `registry_tool.glm_patch_config` dauerhaft auf `enabled:true` („GLM sind Reasoning-Modelle");
     Logs gehören nach `C:\...\Benchmarks\logs\`, nicht `Doku-intern\logs`.
-- **`glm_patch_config`-Fix (src\registry_tool.py):** setzt jetzt `reasoning.parsing.enabled:true` (vorher false), Docstring + Pipeline-Ausgabe „[5a] GLM-Configs verankern (reasoning parsing enabled, kein JSON-Zwang)". 
+- **`glm_patch_config`-Fix (src\registry_tool.py):** setzt jetzt `reasoning.parsing.enabled:true` (vorher false), Docstring + Pipeline-Ausgabe „[5a] GLM-Configs verankern (reasoning parsing enabled, kein JSON-Zwang)".
     `pipeline full` ruft das auf → jetzt sicher. 5 neue Tests (`TestGlmPatchConfig`) in `tests\test_registry_tool.py`.
-- **Bugfix Template-Skip (src\run_benchmarks.py `_check_registry_for_model`):** `return None` stand auf falscher Einrückungsebene 
-    → JEDES Modell mit Template wurde übersprungen (Lauf 14.08. nur 4/13 Modelle). 
+- **Bugfix Template-Skip (src\run_benchmarks.py `_check_registry_for_model`):** `return None` stand auf falscher Einrückungsebene
+    → JEDES Modell mit Template wurde übersprungen (Lauf 14.08. nur 4/13 Modelle).
     Fix: `return None` nur bei fehlender Template-Datei. 3 neue Tests (`TestCheckRegistryForModel`).
 - **GLM-Configs gepatcht** (Backups `.bak-parsing`): `zai-org\glm-4.6v-flash.json`, `unsloth\GLM-4.7-Flash-GGUF\GLM-4.7-Flash-Q3_K_S.gguf.json` → `enabled:true` verifiziert.
-- **Aktueller Lauf (15.08. 19:33, PID 25572):** Modell 1/13 (gemma-4-19b-reap) DS1000 done 28s, HumanEval+ pass@1 0.700, dann MATH-500 bei 5/10 abgebrochen 
+- **Aktueller Lauf (15.08. 19:33, PID 25572):** Modell 1/13 (gemma-4-19b-reap) DS1000 done 28s, HumanEval+ pass@1 0.700, dann MATH-500 bei 5/10 abgebrochen
     — `lm_eval returncode=3221225786` (=0xC000013A STATUS_CONTROL_C_EXIT, extern gekillt). **Kein Python-Prozess mehr aktiv.**
-- **Modell gesund:** Direkter API-Test an `gemma-4-19b-a4b-it-reap-i1@q4_k_m` antwortet in 1,5 s („Hello."). 
+- **Modell gesund:** Direkter API-Test an `gemma-4-19b-a4b-it-reap-i1@q4_k_m` antwortet in 1,5 s („Hello.").
     Es „schläft" nur, weil es als `idle` in LMS geladen blieb (LMS-Server läuft, Port 1234).
-- **Skill-Bug gefunden:** `SKILL.md` (compaction-Skill) zeigte auf `Doku-intern/Chatverlauf*.md` statt `Doku-intern\compaction\compactions.md` 
+- **Skill-Bug gefunden:** `SKILL.md` (compaction-Skill) zeigte auf `Doku-intern/Chatverlauf*.md` statt `Doku-intern\compaction\compactions.md`
     → Compactions wurden nicht korrekt angehängt. Zielpfad korrigiert + „hinten anhängen" explizit.
 
 **Dieser Block ist der erste nach der Fix-Verifikation.**
@@ -355,28 +355,28 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 
 =============== Compaction 16.08.2026 / Session-Skills ================
 ## Objective
-- (Completed) Skill-Landschaft fuer lokal installierte LLMs gesichtet; offizielle Hersteller-Skills vs. Cloud/Community eingeordnet; 
+- (Completed) Skill-Landschaft fuer lokal installierte LLMs gesichtet; offizielle Hersteller-Skills vs. Cloud/Community eingeordnet;
     nemotron-customize installiert; glmv-caption fuer lokalen OpenAI-kompatiblen Endpunkt als lokale Kopie adaptiert.
 
 ## Important Details
-- **Skill-Provenienz:** `gemma-dev` stammt aus `google-gemma/gemma-skills` (quell-verifiziert); lokale SKILL.md am 11.08. modifiziert gewesen (1.081 B vs. 9.142 B upstream) 
+- **Skill-Provenienz:** `gemma-dev` stammt aus `google-gemma/gemma-skills` (quell-verifiziert); lokale SKILL.md am 11.08. modifiziert gewesen (1.081 B vs. 9.142 B upstream)
     -> Original wiederhergestellt; volle Version greift erst nach OpenCode-Neustart.
 
-- **Hersteller-Skills (Recherche):** nur 3 offizielle Repos relevant: `google-gemma/gemma-skills` (gemma-dev+gemma-trainer, einziges echtes LOCAL-Deployment), 
-    `zai-org/GLM-skills` (17 Skills, aber alle `ZHIPU_API_KEY`-Cloud), `nvidia/skills` (nemotron-customize etc., CUDA/Finetune-lastig). 
-    Qwen/Kimi/DeepSeek/Phi/ERNIE/InternLM: keine offiziellen Skills, nur Community/Cloud-Wrapper. 
+- **Hersteller-Skills (Recherche):** nur 3 offizielle Repos relevant: `google-gemma/gemma-skills` (gemma-dev+gemma-trainer, einziges echtes LOCAL-Deployment),
+    `zai-org/GLM-skills` (17 Skills, aber alle `ZHIPU_API_KEY`-Cloud), `nvidia/skills` (nemotron-customize etc., CUDA/Finetune-lastig).
+    Qwen/Kimi/DeepSeek/Phi/ERNIE/InternLM: keine offiziellen Skills, nur Community/Cloud-Wrapper.
     Generische lokale Alternativen auf skills.sh (grepai-ollama-setup 748, local-llm-ops 346, llm-wiki 1.4K).
 
 - **nemotron-customize installiert** (`npx skills add nvidia/skills@nemotron-customize -g -y`, Safe/0 Alerts). User hat CUDA 12.8-Backup llama.cpp.
 
-- **GLM-skills Lokalisierung geprueft:** `glmv-caption.py` nutzt bereits OpenAI-kompatibles `/chat/completions` + base64 `image_url` -> direkt adaptierbar. 
+- **GLM-skills Lokalisierung geprueft:** `glmv-caption.py` nutzt bereits OpenAI-kompatibles `/chat/completions` + base64 `image_url` -> direkt adaptierbar.
     `glm_ocr_cli.py` nutzt proprietären `…/v4/layout_parsing`-Endpoint (hartkodiert, explizit kein Custom-URL-Support) -> NICHT lokalisierbar.
 
-- **glmv-caption-local erstellt** unter `C:\Users\pskra\.agents\skills\glmv-caption-local\` (SKILL.md + `scripts\glmv_caption.py` + requirements.txt): 
+- **glmv-caption-local erstellt** unter `C:\Users\pskra\.agents\skills\glmv-caption-local\` (SKILL.md + `scripts\glmv_caption.py` + requirements.txt):
     Base-URL via `GLM_LOCAL_API_BASE` (Default `http://127.0.0.1:1234/v1`), kein API-Key noetig, Default-Modell `zai-org/glm-4.6v-flash`,
     nur Bilder (kein video/file_url, kein thinking-Payload), deutscher Default-Prompt.
 
-- **Verifikation:** Python-Syntax OK, `--help` OK, Pipeline erreicht Server korrekt (400 = Modell nicht geladen, kein Script-Fehler). 
+- **Verifikation:** Python-Syntax OK, `--help` OK, Pipeline erreicht Server korrekt (400 = Modell nicht geladen, kein Script-Fehler).
     `zai-org/glm-4.6v-flash` laedt via `lms load` in 13.36s (9.36 GiB) - VLM lauffaehig.
 
 ## Work State
@@ -1532,3 +1532,29 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 - `PLANUNG.md`: aktueller Migrations- und Abnahmestatus.
 - `src/`, `tests/`, `doc-git/`: zusammengehöriger Implementierungs-, Test- und
   Dokumentationsstand des aktuellen Checkpoints.
+
+=============== Compaction 23.09.2026 / Commit checkpoint ================
+## Objective
+- Registry-Synchronisierung und direkter llama.cpp-Preset-Export als zusammenhängenden lokalen Checkpoint committen.
+- Den Commit-Hook ausführen; kein Push.
+
+## Important Details
+- **Preset-Auflösung:** LM-Studios `model.yaml` kann auf ein anders benanntes GGUF-Repository zeigen. Der Export folgt dieser Zuordnung und prüft weiterhin die konkrete Quantisierung.
+- **Datenbereinigung:** Veraltete Registry-Aliase wurden entfernt; unterschiedliche Qwen-Quantisierungen bleiben getrennte Einträge.
+- **Verifikation:** Registry-CI ohne Blocker; fokussierte Registry-/Assembly-Tests bestanden. Die bestehenden mypy-Meldungen bleiben informativ und sind nicht Teil dieses Checkpoints.
+
+## Work State
+### Completed / Active / Blocked
+- Completed: Code, Tests, Dokumentation und Registry-Daten sind geprüft und für den lokalen Commit vorbereitet.
+- Active: staged Diff und Pre-Commit-Hook.
+- Deferred: Push und der pausierte SampleSize-5-Gesamtlauf.
+
+## Next Move
+1. Staged-Diff auf Umfang, Whitespace und Secrets prüfen.
+2. Commit mit dem normalen `.githooks`-Ablauf erstellen.
+3. Commit-Hash und verbleibende Änderungen berichten; nicht pushen.
+
+## Relevant Files
+- `src/registry_tool.py`: Hub-Quellenauflösung für lokale GGUF-Dateien.
+- `tests/test_registry_tool.py`: Regressionstest für den RNJ-1-Repository-Alias.
+- `doc-git/model_registry.yaml`, `CHANGELOG.md`, `PLANUNG.md`: bereinigter und dokumentierter Projektstand.

@@ -21,6 +21,7 @@ from assemble_blueprint import (
     classify_reasoning,
     extract_params,
     find_config_for_registry_key,
+    find_registry_matches_for_config,
     find_registry_key_for_config,
     format_capabilities,
     format_publishers,
@@ -433,6 +434,70 @@ class TestFindRegistryKeyForConfig:
     def test_no_match_returns_none(self):
         reg = self._sorted(["unsloth/phi-4"])
         assert find_registry_key_for_config(self._norm("meta-llama/llama-3-8b"), reg) is None
+
+    def test_best_match_helper_reports_ambiguous_quant_variants(self):
+        keys = self._sorted(
+            ["publisher/model@q4_k_m", "publisher/model@q5_k_m"]
+        )
+        config = {
+            "publisher": "publisher",
+            "dir_name": "model-GGUF",
+            "file_name": "model.gguf.json",
+        }
+
+        matches = find_registry_matches_for_config("publisher/model", keys, config=config)
+
+        assert matches == ["publisher/model@q4_k_m", "publisher/model@q5_k_m"]
+
+    def test_concrete_config_quant_prefers_known_registry_variant_over_unknown(self):
+        keys = self._sorted(
+            ["gguf-org/muse-glimmer-30b@?", "gguf-org/muse-glimmer-30b@nvfp4"]
+        )
+        config = {
+            "publisher": "gguf-org",
+            "dir_name": "muse-glimmer-30b-gguf",
+            "file_name": "muse-glimmer-30b-nvfp4.gguf.json",
+            "quant": "nvfp4",
+        }
+
+        assert find_registry_matches_for_config("muse-glimmer-30b", keys, config) == [
+            "gguf-org/muse-glimmer-30b@nvfp4"
+        ]
+
+    def test_canonical_quant_key_wins_over_quant_repeated_in_model_name(self):
+        keys = self._sorted(
+            [
+                "freedomaisvr/gemma-4-12b-it-qat-nvfp4@nvfp4",
+                "freedomaisvr/gemma-4-12b-it-qat@nvfp4",
+            ]
+        )
+        config = {
+            "publisher": "FreedomAISVR",
+            "dir_name": "Gemma-4-12B-it-QAT-NVFP4-GGUF",
+            "file_name": "gemma-4-12b-it-qat-nvfp4.gguf.json",
+            "quant": "nvfp4",
+        }
+
+        assert find_registry_matches_for_config(
+            "gemma-4-12b-it-qat-nvfp4", keys, config
+        ) == ["freedomaisvr/gemma-4-12b-it-qat@nvfp4"]
+
+    def test_canonical_key_wins_over_format_only_gguf_suffix(self):
+        keys = self._sorted(
+            [
+                "Qwen/Qwen3.5-9B-GGUF@q6_k",
+                "qwen/qwen3.5-9b@q6_k",
+            ]
+        )
+        config = {
+            "publisher": "qwen",
+            "dir_name": "qwen3.5-9b",
+            "file_name": "qwen3.5-9b.json",
+        }
+
+        assert find_registry_matches_for_config("qwen3-5-9b", keys, config) == [
+            "qwen/qwen3.5-9b@q6_k"
+        ]
 
     def test_broad_match_does_not_crash_with_value_tuples(self):
         # Regression: rnk was passed to normalize_for_config instead of rn2,

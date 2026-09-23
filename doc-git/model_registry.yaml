@@ -114,7 +114,7 @@ mradermacher/gemma-4-19b-a4b-it-reap-i1@q4_k_m:
       - https://huggingface.co/0xSero/Gemma-4-19B
   experts: 45
   k_cache: q8_0
-  v_cache: q8_0
+  v_cache: q5_1
   offload: 1.0
   notes: 'Architektur: MoE | REAP-pruned google/gemma-4-26b-a4b-it to ~19B Params
     | max. 90 Experts (from 128) | max. 256K Kontext | Text, Image (dedicated vision
@@ -126,119 +126,12 @@ mradermacher/gemma-4-19b-a4b-it-reap-i1@q4_k_m:
   custom_template: true
   context_length: 98304
   useUnifiedKvCache: true
-  file_size_bytes: 12534643616
+  file_size_bytes: 12291399328
   n_layers: 30
   hidden_dim: 2816
   max_context_length: 262144
   architecture_family: gemma4
   max_experts: 90
-
-mradermacher/gemma-4-26b-a4b-it-i1@iq4_xs:
-  publisher: mradermacher
-  hf_url: https://huggingface.co/mradermacher/gemma-4-26b-a4b-it-i1
-  pub_url: https://ai.google.dev/gemma/docs/core/model_card_4?hl=de
-  arch: moe
-  sampling:
-    coding:
-      temperature: 1.0
-      top_p: 0.95
-      top_k: 64
-      evidence_kind: direct
-    knowledge:
-      temperature: 1.0
-      top_p: 0.95
-      top_k: 64
-      evidence_kind: derived
-      derived_from: coding
-    agentic:
-      temperature: 1.0
-      top_p: 0.95
-      top_k: 64
-      evidence_kind: derived
-      derived_from: coding
-    math:
-      temperature: 1.0
-      top_p: 0.95
-      top_k: 64
-      evidence_kind: derived
-      derived_from: coding
-    sampling_research_status: confirmed
-    sampling_researched_at: '2026-09-20T19:42:28+00:00'
-    sampling_sources:
-      - https://huggingface.co/google/gemma-4-26B-A4B-it
-  quants: IQ4_XS
-  k_cache: q5_1
-  v_cache: q5_1
-  offload: 1.0
-  notes: 'Architektur: Gemma-4 Dense | 26B-A4B Parameter | Tool-Use'
-  reasoning: thinking
-  capabilities: coding, vision, text
-  blueprint: gemma_reasoning
-  truncation: full
-  context_length: 28000
-  useUnifiedKvCache: true
-  file_size_bytes: 13917721664
-  n_layers: 30
-  hidden_dim: 2816
-  max_context_length: 262144
-  custom_template: true
-  architecture_family: gemma4
-  experts: 36
-  max_experts: 128
-
-unsloth/gemma-4-26b-a4b-it@iq3_s:
-  publisher: unsloth
-  hf_url: https://huggingface.co/unsloth/gemma-4-26b-a4b-it
-  pub_url: https://ai.google.dev/gemma/docs/core/model_card_4?hl=de
-  arch: moe
-  sampling:
-    coding:
-      temperature: 1.0
-      top_p: 0.95
-      top_k: 64
-      evidence_kind: direct
-    knowledge:
-      temperature: 1.0
-      top_p: 0.95
-      top_k: 64
-      evidence_kind: derived
-      derived_from: coding
-    agentic:
-      temperature: 1.0
-      top_p: 0.95
-      top_k: 64
-      evidence_kind: derived
-      derived_from: coding
-    math:
-      temperature: 1.0
-      top_p: 0.95
-      top_k: 64
-      evidence_kind: derived
-      derived_from: coding
-    sampling_research_status: confirmed
-    sampling_researched_at: '2026-09-20T19:43:30+00:00'
-    sampling_sources:
-      - https://huggingface.co/google/gemma-4-26B-A4B/raw/main/README.md
-  quants: IQ3_S
-  k_cache: q8_0
-  v_cache: q5_1
-  offload: 1.0
-  notes: 'Architektur: MoE | Experts: 128 total, 8 active + 1 shared | max. 256K Kontext
-    | Text, Image'
-  reasoning: thinking
-  capabilities: coding, vision, text
-  blueprint: gemma_reasoning
-  truncation: full
-  custom_template: true
-  file_size_bytes: 13580873493
-  context_length: 28000
-  n_layers: 30
-  hidden_dim: 2816
-  useUnifiedKvCache: true
-  max_context_length: 262144
-  architecture_family: gemma4
-  experts: 36
-  max_experts: 128
 
 unsloth/qwen3-30b-a3b-instruct-2507@q3_k_s:
   publisher: unsloth
@@ -299,11 +192,11 @@ unsloth/qwen3-30b-a3b-instruct-2507@q3_k_s:
   architecture_family: qwen3moe
   max_experts: 128
 
-Qwen/Qwen3.5-9B-GGUF@q6_k:
+qwen/qwen3.5-9b@q5_k_s:
   publisher: qwen
   hf_url: https://huggingface.co/Qwen/Qwen3.5-9B
   pub_url: https://qwen.ai
-  quants: Q6_K
+  quants: Q5_K_S
   arch: dense
   sampling:
     coding:
@@ -341,8 +234,9 @@ Qwen/Qwen3.5-9B-GGUF@q6_k:
   useUnifiedKvCache: true
   n_layers: 32
   hidden_dim: 4096
-  file_size_bytes: 8281142495
+  file_size_bytes: 5721438048
   max_context_length: 262144
+  architecture_family: qwen35
 
 mradermacher/qwen3.6-28b-reap-i1@iq3_s:
   publisher: mradermacher
@@ -784,63 +678,11 @@ unsloth/januscoder-14b@q6_k:
   max_context_length: 32768
   architecture_family: qwen3
 
-jetbrains/mellum2-12b-a2.5b-instruct@q4_k_m:
-  publisher: JetBrains
-  hf_url:
-    https://huggingface.co/JetBrains/Mellum2-12B-A2.5B-Instruct-GGUF-Q4_K_M
-  pub_url: https://www.jetbrains.com
-  quants: Q4_K_M
-  arch: moe
-  sampling:
-    coding:
-      temperature: 0.6
-      top_p: 0.95
-      top_k: 20
-      evidence_kind: direct
-    knowledge:
-      temperature: 0.6
-      top_p: 0.95
-      top_k: 20
-      evidence_kind: derived
-      derived_from: coding
-    agentic:
-      temperature: 0.6
-      top_p: 0.95
-      top_k: 20
-      evidence_kind: derived
-      derived_from: coding
-    math:
-      temperature: 0.6
-      top_p: 0.95
-      top_k: 20
-      evidence_kind: derived
-      derived_from: coding
-    sampling_research_status: confirmed
-    sampling_researched_at: '2026-09-20T19:48:06+00:00'
-    sampling_sources:
-      - https://huggingface.co/JetBrains/Mellum2-12B-A2.5B-Instruct-GGUF-Q4_K_M/raw/main/README.md
-  experts: 16
-  k_cache: q8_0
-  v_cache: q5_1
-  offload: 1.0
-  notes: 'Architektur: Mellum2 MoE | Experts: max 64, Activated: 8 per Token'
-  reasoning: instruct
-  capabilities: coding, text
-  blueprint: coding_agent
-  truncation: full
-  useUnifiedKvCache: false
-  context_length: 32768
-  file_size_bytes: 8071293600
-  n_layers: 28
-  hidden_dim: 2304
-  max_context_length: 131072
-  architecture_family: mellum
-  max_experts: 64
-
 unsloth/qwen3-coder-30b-a3b-instruct@q3_k_s:
   publisher: unsloth
   hf_url: https://huggingface.co/unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF
-  pub_url: https://qwen.ai
+  pub_url:
+    https://unsloth.ai/docs/models/tutorials/qwen3-coder-how-to-run-locally
   quants: Q3_K_S
   arch: moe
   sampling:
@@ -1000,7 +842,7 @@ quietimpostor/nemotron-3-nano-reap-21b-a3b@mxfp4:
   truncation: full
   useUnifiedKvCache: false
   architecture_family: nemotron_h_moe
-  experts: 12
+  experts: 24
   max_experts: 80
 
 intel/qwen3-30b-a3b-instruct-2507-q2ks-mixed-autoround@q2_k_s:
@@ -1142,13 +984,13 @@ qwen/qwen3.5-9b@q6_k:
     sampling_sources:
       - https://huggingface.co/qwen/qwen3.5-9b/raw/main/README.md
   k_cache: q8_0
-  v_cache: iq4_nl
+  v_cache: q8_0
   offload: 1.0
   notes: 'Architektur: dense | Vision'
-  file_size_bytes: 8281142495
-  context_length: 32768
+  file_size_bytes: 7359259040
+  context_length: 262144
   max_context_length: 262144
-  useUnifiedKvCache: false
+  useUnifiedKvCache: true
   reasoning: thinking
   capabilities: vision, coding, text
   blueprint: reasoning_coding
@@ -1207,57 +1049,13 @@ qwen/qwen3-14b@q6_k:
   v_cache: q8_0
   offload: 1.0
   notes: 'Architektur: dense'
-  file_size_bytes: 12122115888
+  file_size_bytes: 12121937696
   context_length: 32768
   reasoning: thinking
   capabilities: coding, vision, text
   blueprint: reasoning_coding
   truncation: full
   useUnifiedKvCache: true
-  quants: Q6_K
-
-zai-org/glm-4.6v-flash@q6_k:
-  publisher: zai-org
-  hf_url: https://huggingface.co/zai-org/glm-4.6v-flash
-  pub_url: https://z.ai/blog/glm-4.6v
-  arch: dense
-  sampling:
-    coding:
-      temperature: 0.8
-      top_p: 0.6
-    knowledge:
-      temperature: 0.8
-      top_p: 0.6
-    agentic:
-      temperature: 0.8
-      top_p: 0.6
-    math:
-      temperature: 0.8
-      top_p: 0.6
-      evidence_kind: unresolved
-      reason: Kein allgemeines Profil; Coding-/Math-Fallback kann nicht
-        belastbar bestimmt werden.
-    thinking:
-      enabled: true
-      temperature: 0.6
-      top_p: 0.95
-    sampling_research_status: unresolved
-    sampling_researched_at: '2026-09-20T19:51:19+00:00'
-    sampling_sources:
-      - https://huggingface.co/zai-org/glm-4.6v-flash/raw/main/README.md
-  k_cache: q8_0
-  v_cache: q8_0
-  offload: 1
-  notes: 'Architektur: dense | Vision'
-  architecture_family: glm4
-  file_size_bytes: 10053622727
-  context_length: 32768
-  useUnifiedKvCache: false
-  max_context_length: 131072
-  reasoning: thinking
-  capabilities: vision, text
-  blueprint: glm4v_reasoning
-  truncation: full
   quants: Q6_K
 
 mradermacher/f2llm-v2-4b@q6_k:
@@ -1385,7 +1183,7 @@ unsloth/gemma-4-12b-it@q6_k:
     sampling_sources:
       - https://huggingface.co/unsloth/gemma-4-12b-it/raw/main/README.md
   notes: 'Architektur: dense | Vision'
-  file_size_bytes: 9995544960
+  file_size_bytes: 6716355168
   context_length: 65536
   n_layers: 48
   hidden_dim: 3840
@@ -1441,12 +1239,12 @@ peculiar-ragdoll/tiel-coder-35b-a3b@iq3_xxs:
   publisher: peculiar-ragdoll
   hf_url: https://huggingface.co/peculiar-ragdoll/tiel-coder-35b-a3b
   arch: moe
-  k_cache: q8_0
-  v_cache: q5_1
+  k_cache: q5_1
+  v_cache: q4_1
   offload: 1
   notes: 'Architektur: dense | Vision'
-  file_size_bytes: 14113997536
-  context_length: 32768
+  file_size_bytes: 13211175520
+  context_length: 28000
   quants: IQ3_XXS
   max_context_length: 262144
   n_layers: 40
@@ -1465,7 +1263,7 @@ peculiar-ragdoll/tiel-coder-35b-a3b@iq3_xxs:
     sampling_sources:
       - https://huggingface.co/LuffyTheFox/Tiel-Coder-35B-A3B-Genesis-Hermes-GGUF/raw/main/README.md
   architecture_family: qwen35moe
-  experts: 64
+  experts: 128
   max_experts: 256
 
 empero-ai/qwythos-9b-claude-mythos-5-1m@q6_k:
@@ -1476,8 +1274,8 @@ empero-ai/qwythos-9b-claude-mythos-5-1m@q6_k:
   v_cache: q8_0
   offload: 1
   notes: 'Architektur: dense | Vision'
-  file_size_bytes: 8535983680
-  context_length: 131072
+  file_size_bytes: 7617818208
+  context_length: 196608
   n_layers: 33
   hidden_dim: 4096
   max_context_length: 1048576
@@ -1560,54 +1358,6 @@ mradermacher/darwin-28b-coder-i1@q3_k_s:
       - https://huggingface.co/FINAL-Bench/Darwin-28B-Coder/raw/main/README.md
   architecture_family: qwen35
 
-mradermacher/gemma-4-31b-i1@iq3_s:
-  publisher: mradermacher
-  hf_url: https://huggingface.co/mradermacher/gemma-4-31b-i1
-  arch: dense
-  k_cache: q8_0
-  v_cache: iq4_nl
-  offload: 1
-  notes: 'Architektur: dense'
-  file_size_bytes: 13761339840
-  context_length: 16384
-  n_layers: 60
-  hidden_dim: 5376
-  max_context_length: 262144
-  reasoning: instruct
-  quants: IQ3_S
-  capabilities: coding, vision, text
-  blueprint: gemma_assistant
-  truncation: full
-  sampling:
-    coding:
-      temperature: 1.0
-      top_p: 0.95
-      top_k: 64
-      evidence_kind: direct
-    knowledge:
-      temperature: 1.0
-      top_p: 0.95
-      top_k: 64
-      evidence_kind: derived
-      derived_from: coding
-    agentic:
-      temperature: 1.0
-      top_p: 0.95
-      top_k: 64
-      evidence_kind: derived
-      derived_from: coding
-    math:
-      temperature: 1.0
-      top_p: 0.95
-      top_k: 64
-      evidence_kind: derived
-      derived_from: coding
-    sampling_research_status: confirmed
-    sampling_researched_at: '2026-09-20T19:53:51+00:00'
-    sampling_sources:
-      - https://huggingface.co/google/gemma-4-31B-it
-  architecture_family: gemma4
-
 ibm-granite/granite-4.0-h-tiny@q8_0:
   publisher: ibm-granite
   hf_url: https://huggingface.co/ibm-granite/granite-4.0-h-tiny-GGUF
@@ -1659,55 +1409,6 @@ ibm-granite/granite-4.0-h-tiny@q8_0:
   max_context_length: 1048576
   architecture_family: granitehybrid
   max_experts: 64
-
-ibm-granite/granite-4.1-30b@q3_k_s:
-  publisher: ibm-granite
-  hf_url: https://huggingface.co/ibm-granite/granite-4.1-30b-GGUF
-  pub_url: https://www.ibm.com/granite/docs/models/granite4-1
-  quants: Q3_K_S
-  arch: dense
-  k_cache: q5_1
-  v_cache: iq4_nl
-  offload: 1.0
-  notes: 'Architektur: Granite-4.1 | Dense 30B | 131K max. Kontext | improved tool
-    calling, instruction following, coding, and mathematical reasoning'
-  reasoning: instruct
-  capabilities: coding, text
-  blueprint: granite_coding_agent
-  sampling:
-    coding:
-      temperature: 1.0
-      top_p: 0.95
-    knowledge:
-      temperature: 1.0
-      top_p: 0.95
-    agentic:
-      temperature: 1.0
-      top_p: 0.95
-    math:
-      temperature: 1.0
-      top_p: 0.95
-      evidence_kind: unresolved
-      reason: Kein allgemeines Profil; Coding-/Math-Fallback kann nicht
-        belastbar bestimmt werden.
-    thinking:
-      enabled: true
-      temperature: 1.0
-      top_p: 0.95
-    sampling_research_status: unresolved
-    sampling_researched_at: '2026-09-20T19:55:01+00:00'
-    sampling_sources:
-      - https://huggingface.co/ibm-granite/granite-4.1-30b-GGUF/raw/main/README.md
-      - https://huggingface.co/ibm-granite/granite-4.1-30b/raw/main/README.md
-  truncation: full
-  custom_template: true
-  context_length: 49152
-  useUnifiedKvCache: true
-  file_size_bytes: 12569273568
-  n_layers: 64
-  hidden_dim: 4096
-  max_context_length: 131072
-  architecture_family: granite
 
 internlm/internlm2_5-20b-chat@q4_k_m:
   publisher: internlm
@@ -1817,7 +1518,7 @@ noctrex/lfm2-24b-a2b_moe@mxfp4:
   max_context_length: 128000
   quants: MXFP4
   architecture_family: lfm2moe
-  experts: 16
+  experts: 18
   max_experts: 64
 
 unsloth/glm-4.7-flash@q3_k_s:
@@ -1865,53 +1566,6 @@ unsloth/glm-4.7-flash@q3_k_s:
   architecture_family: deepseek2
   experts: 24
   max_experts: 64
-
-ibm-granite/granite-4.1-8b@q6_k:
-  publisher: ibm-granite
-  hf_url: https://huggingface.co/ibm-granite/granite-4.1-8b
-  pub_url: https://www.ibm.com/granite/docs/models/granite4-1
-  arch: dense
-  k_cache: q8_0
-  v_cache: iq4_nl
-  offload: 1.0
-  notes: 'Architektur: Granite-4.1 | Dense 8B | 131K max. Kontext | improved tool
-    calling, instruction following, coding, and mathematical reasoning'
-  file_size_bytes: 7216476832
-  context_length: 90304
-  n_layers: 40
-  hidden_dim: 4096
-  useUnifiedKvCache: false
-  reasoning: instruct
-  capabilities: coding, text
-  blueprint: granite_coding_agent
-  sampling:
-    coding:
-      temperature: 0.001
-      top_p: 1.0
-      evidence_kind: direct
-    knowledge:
-      temperature: 0.001
-      top_p: 1.0
-      evidence_kind: derived
-      derived_from: coding
-    agentic:
-      temperature: 0.001
-      top_p: 1.0
-      evidence_kind: derived
-      derived_from: coding
-    math:
-      temperature: 0.001
-      top_p: 1.0
-      evidence_kind: derived
-      derived_from: coding
-    sampling_research_status: confirmed
-    sampling_researched_at: '2026-09-20T19:57:03+00:00'
-    sampling_sources:
-      - https://huggingface.co/datasets/Salesforce/xlam-function-calling-60k
-  truncation: full
-  max_context_length: 131072
-  quants: Q6_K
-  architecture_family: granite
 
 thebloke/em_german_13b_v01@q6_k:
   publisher: TheBloke
@@ -2056,117 +1710,6 @@ lmstudio-community/starcoder2-15b-instruct-v0.1@q6_k:
     sampling_sources:
       - https://huggingface.co/papers/2402.19173
   architecture_family: starcoder2
-
-prism-ml/bonsai-27b@q1_0:
-  publisher: prism-ml
-  hf_url: https://huggingface.co/prism-ml/bonsai-27b
-  arch: dense
-  quants: Q1_0
-  k_cache: q8_0
-  v_cache: iq4_nl
-  offload: 1
-  notes: 'Architektur: dense | Vision'
-  file_size_bytes: 4734614604
-  context_length: 262144
-  reasoning: instruct
-  capabilities: vision, text
-  blueprint: default_chat
-  truncation: full
-  sampling:
-    coding:
-      temperature: 0.7
-      top_p: 0.8
-      top_k: 20
-      min_p: 0.0
-      presence_penalty: 1.5
-      repetition_penalty: 1.0
-      evidence_kind: direct
-    knowledge:
-      temperature: 0.7
-      top_p: 0.8
-      top_k: 20
-      min_p: 0.0
-      presence_penalty: 1.5
-      repetition_penalty: 1.0
-      evidence_kind: derived
-      derived_from: coding
-    agentic:
-      temperature: 1.0
-      top_p: 0.95
-      top_k: 20
-      evidence_kind: direct
-    math:
-      temperature: 0.7
-      top_p: 0.8
-      top_k: 20
-      min_p: 0.0
-      presence_penalty: 1.5
-      repetition_penalty: 1.0
-      evidence_kind: derived
-      derived_from: coding
-    thinking:
-      enabled: true
-      temperature: 1.0
-      top_p: 0.95
-      top_k: 20
-      min_p: 0.0
-      presence_penalty: 0.0
-      repetition_penalty: 1.0
-      evidence_kind: direct
-    sampling_research_status: confirmed
-    sampling_researched_at: '2026-09-20T19:59:58+00:00'
-    sampling_sources:
-      - https://huggingface.co/Qwen/Qwen3.6-27B/raw/main/README.md
-      - https://huggingface.co/Qwen/Qwen3.8-27B/raw/main/README.md
-
-freedomaisvr/gemma-4-12b-it-qat-nvfp4@nvfp4:
-  publisher: FreedomAISVR
-  hf_url: https://huggingface.co/freedomaisvr/gemma-4-12b-it-qat-nvfp4
-  arch: dense
-  quants: NVFP4
-  k_cache: q8_0
-  v_cache: q8_0
-  offload: 1
-  sampling:
-    coding:
-      temperature: 1.0
-      top_p: 0.95
-      top_k: 64
-      evidence_kind: direct
-    knowledge:
-      temperature: 1.0
-      top_p: 0.95
-      top_k: 64
-      evidence_kind: derived
-      derived_from: coding
-    agentic:
-      temperature: 1.0
-      top_p: 0.95
-      top_k: 64
-      evidence_kind: derived
-      derived_from: coding
-    math:
-      temperature: 1.0
-      top_p: 0.95
-      top_k: 64
-      evidence_kind: derived
-      derived_from: coding
-    sampling_research_status: confirmed
-    sampling_researched_at: '2026-09-20T20:00:33+00:00'
-    sampling_sources:
-      - https://huggingface.co/google/gemma-4-12B-it-qat-q4_0-unquantized-assistant/raw/main/README.md
-  notes: 'Architektur: dense | Vision'
-  file_size_bytes: 6891470432
-  context_length: 131072
-  n_layers: 48
-  hidden_dim: 3840
-  max_context_length: 262144
-  reasoning: thinking
-  capabilities: vision, coding, audio, text
-  blueprint: gemma_reasoning
-  truncation: full
-  custom_template: true
-  architecture_family: gemma4
 
 unsloth/glm-4.7-flash-reap-23b-a3b@q4_k_s:
   publisher: unsloth
@@ -2339,10 +1882,10 @@ byteshape/qwen3.6-35b-a3b@iq3_s:
   hf_url: https://huggingface.co/byteshape/qwen3.6-35b-a3b
   arch: moe
   k_cache: q5_1
-  v_cache: iq4_nl
+  v_cache: q4_1
   offload: 1
   notes: 'Architektur: moe | Vision'
-  file_size_bytes: 13917478656
+  file_size_bytes: 13014656416
   context_length: 16384
   n_layers: 40
   hidden_dim: 2048
@@ -2392,7 +1935,7 @@ byteshape/qwen3.6-35b-a3b@iq3_s:
     sampling_sources:
       - https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html
   architecture_family: qwen35moe
-  experts: 64
+  experts: 128
   max_experts: 256
 
 byteshape/qwen3.8-27b@iq4_xs:
@@ -2459,11 +2002,11 @@ empero-ai/qwen3.8-9b-distill@q8_0:
   hf_url: https://huggingface.co/empero-ai/qwen3.8-9b-distill
   arch: dense
   k_cache: q8_0
-  v_cache: q5_1
+  v_cache: q8_0
   offload: 1
   notes: 'Architektur: dense'
   file_size_bytes: 9786060096
-  context_length: 65536
+  context_length: 131072
   n_layers: 33
   hidden_dim: 4096
   max_context_length: 262144
@@ -2775,8 +2318,8 @@ byteshape/qwen3-coder-30b-a3b-instruct@iq3_s:
   publisher: byteshape
   hf_url: https://huggingface.co/byteshape/qwen3-coder-30b-a3b-instruct
   arch: moe
-  k_cache: q8_0
-  v_cache: q5_1
+  k_cache: q5_1
+  v_cache: q4_1
   offload: 1
   notes: 'Architektur: moe'
   file_size_bytes: 13270797856
@@ -2839,7 +2382,7 @@ byteshape/qwen3.5-9b@q5_k_s:
   v_cache: q5_1
   offload: 1
   notes: 'Architektur: dense | Vision'
-  file_size_bytes: 6643142944
+  file_size_bytes: 5721438048
   context_length: 262144
   n_layers: 32
   hidden_dim: 4096
@@ -3007,8 +2550,9 @@ gguf-org/muse-glimmer-30b@nvfp4:
   v_cache: q5_1
   offload: 1
   notes: 'Architektur: dense | Vision'
-  file_size_bytes: 10072485600
-  context_length: 65536
+  file_size_bytes: 8879977472
+  quants: NVFP4
+  context_length: 131072
   n_layers: 52
   hidden_dim: 6656
   max_context_length: 131072
@@ -3037,7 +2581,7 @@ gguf-org/muse-glimmer-30b@nvfp4:
       evidence_kind: derived
       derived_from: coding
     sampling_research_status: confirmed
-    sampling_researched_at: '2026-09-20T20:06:11+00:00'
+    sampling_researched_at: '2026-09-21T07:10:06+00:00'
     sampling_sources:
       - https://huggingface.co/0bserverx/Muse-Glimmer-30B-Heretic-Uncensored-GGUF/raw/main/README.md
       - https://huggingface.co/Blackfrost-AI/Muse-Glimmer-30B-Abliterated-BF16/raw/main/README.md
@@ -3051,7 +2595,7 @@ techhermit/gemma-4-26b-a4b-it-reap126@iq4_nl:
   hf_url: https://huggingface.co/techhermit/gemma-4-26b-a4b-it-reap126
   arch: dense
   k_cache: q5_1
-  v_cache: iq4_nl
+  v_cache: q4_1
   offload: 1
   notes: 'Architektur: dense'
   architecture_family: gemma4
@@ -3170,14 +2714,15 @@ nani-nithin/k2-horizon-mova-36b-a4b@iq2_m:
 freedomaisvr/gemma-4-12b-it-qat@nvfp4:
   publisher: FreedomAISVR
   hf_url: https://huggingface.co/freedomaisvr/gemma-4-12b-it-qat
+  quants: NVFP4
   arch: dense
   k_cache: q8_0
-  v_cache: iq4_nl
+  v_cache: q8_0
   offload: 1
   notes: 'Architektur: dense | Vision'
   architecture_family: gemma4
   file_size_bytes: 6891470432
-  context_length: 65536
+  context_length: 262144
   n_layers: 48
   hidden_dim: 3840
   max_context_length: 262144
@@ -3266,64 +2811,17 @@ ibm-granite/granite-4.2-8b@q6_k:
   truncation: full
   useUnifiedKvCache: true
 
-gguf-org/muse-glimmer-30b@?:
-  publisher: gguf-org
-  hf_url: https://huggingface.co/gguf-org/muse-glimmer-30b
-  arch: dense
-  k_cache: q8_0
-  v_cache: iq4_nl
-  offload: 1
-  notes: 'Architektur: dense | Vision'
-  architecture_family: muse-glimmer
-  file_size_bytes: 10072485600
-  context_length: 24576
-  n_layers: 52
-  hidden_dim: 6656
-  max_context_length: 131072
-  reasoning: instruct
-  sampling:
-    coding:
-      temperature: 1.0
-      top_p: 0.95
-      top_k: 64
-      evidence_kind: direct
-    knowledge:
-      temperature: 1.0
-      top_p: 0.95
-      top_k: 64
-      evidence_kind: derived
-      derived_from: coding
-    agentic:
-      temperature: 1.0
-      top_p: 0.95
-      top_k: 64
-      evidence_kind: direct
-    math:
-      temperature: 1.0
-      top_p: 0.95
-      top_k: 64
-      evidence_kind: derived
-      derived_from: coding
-    sampling_research_status: confirmed
-    sampling_researched_at: '2026-09-21T07:10:06+00:00'
-    sampling_sources:
-      - https://huggingface.co/0bserverx/Muse-Glimmer-30B-Heretic-Uncensored-GGUF/raw/main/README.md
-      - https://huggingface.co/Blackfrost-AI/Muse-Glimmer-30B-Abliterated-BF16/raw/main/README.md
-  capabilities: vision, text
-  blueprint: default_chat
-  truncation: full
-
 kookiesxy/muse-glimmer-30b-ternary-quants@iq1_s:
   publisher: KookiesXy
   hf_url: https://huggingface.co/kookiesxy/muse-glimmer-30b-ternary-quants
   arch: dense
   k_cache: q8_0
-  v_cache: iq4_nl
+  v_cache: q8_0
   offload: 1
   notes: 'Architektur: dense'
   architecture_family: muse-glimmer
   file_size_bytes: 6526419008
-  context_length: 65536
+  context_length: 131072
   n_layers: 52
   hidden_dim: 6656
   max_context_length: 131072
@@ -3406,13 +2904,13 @@ prism-ml/ternary-bonsai-27b@q2_g64:
   publisher: prism-ml
   hf_url: https://huggingface.co/prism-ml/ternary-bonsai-27b
   arch: dense
-  k_cache: q8_0
-  v_cache: iq4_nl
+  k_cache: q5_1
+  v_cache: q4_1
   offload: 1
   notes: 'Architektur: dense | Vision'
   architecture_family: qwen35
-  file_size_bytes: 8516476000
-  context_length: 65536
+  file_size_bytes: 7585330240
+  context_length: 131072
   n_layers: 64
   hidden_dim: 5120
   max_context_length: 262144
@@ -3449,13 +2947,95 @@ prism-ml/ternary-bonsai-27b@q2_g64:
   blueprint: reasoning_assistant
   truncation: full
 
+bartowski/zai-org_glm-4.6v-flash@q6_k_l:
+  publisher: bartowski
+  hf_url: https://huggingface.co/bartowski/zai-org_glm-4.6v-flash
+  arch: dense
+  quants: Q6_K_L
+  k_cache: q8_0
+  v_cache: q8_0
+  offload: 1
+  notes: 'Architektur: dense | Vision'
+  architecture_family: glm4
+  file_size_bytes: 8567325824
+  context_length: 131072
+  n_layers: 40
+  hidden_dim: 4096
+  max_context_length: 131072
+  reasoning: thinking
+  sampling:
+    math:
+      evidence_kind: unresolved
+      reason: Kein allgemeines Profil; Coding-/Math-Fallback kann nicht
+        belastbar bestimmt werden.
+    sampling_research_status: unresolved
+    sampling_researched_at: '2026-09-22T17:43:08+00:00'
+    sampling_sources:
+      - https://huggingface.co/papers/2507.01006
+  capabilities: vision, text
+  blueprint: glm4v_reasoning
+  truncation: full
+
+mudler/gemma-4-26b-a4b-it-apex@mini:
+  publisher: mudler
+  hf_url: https://huggingface.co/mudler/gemma-4-26B-A4B-it-APEX-GGUF
+  pub_url: https://github.com/localai-org/apex-quant
+  arch: moe
+  k_cache: q5_1
+  v_cache: q4_1
+  offload: 1
+  notes: 'Architektur: MoE APEX pruned - Three-tier gradient with IQ2_S middle-layer
+    experts, Q5_K shared edges, Q4_K shared middle, Q3_K/Q4_K attention | Vision'
+  architecture_family: gemma4
+  file_size_bytes: 12274573632
+  context_length: 24576
+  n_layers: 30
+  hidden_dim: 2816
+  max_context_length: 262144
+  reasoning: thinking
+  sampling:
+    coding:
+      temperature: 1.0
+      top_p: 0.95
+      top_k: 64
+      evidence_kind: direct
+    knowledge:
+      temperature: 1.0
+      top_p: 0.95
+      top_k: 64
+      evidence_kind: derived
+      derived_from: coding
+    agentic:
+      temperature: 1.0
+      top_p: 0.95
+      top_k: 64
+      evidence_kind: derived
+      derived_from: coding
+    math:
+      temperature: 1.0
+      top_p: 0.95
+      top_k: 64
+      evidence_kind: derived
+      derived_from: coding
+    sampling_research_status: confirmed
+    sampling_researched_at: '2026-09-22T15:10:00+00:00'
+    sampling_sources:
+      - https://huggingface.co/google/gemma-4-26B-A4B-it
+  quants: MINI
+  capabilities: vision, coding, text
+  blueprint: gemma_reasoning
+  truncation: full
+  custom_template: true
+  max_experts: 128
+  experts: 36
+
 llmsforall/millie-35b-a3b-11gb@?:
   publisher: llmsforall
   hf_url:
     https://huggingface.co/llmsforall/millie-35b-a3b-11gb/millie-35b-a3b-11gb
   arch: moe
-  k_cache: q8_0
-  v_cache: q8_0
+  k_cache: q5_1
+  v_cache: q4_1
   offload: 1
   notes: 'Architektur: moe; vision projector: mmproj-Millie-35B-A3B.gguf'
   architecture_family: qwen35moe
@@ -3504,82 +3084,66 @@ llmsforall/millie-35b-a3b-11gb@?:
   experts: 64
   useUnifiedKvCache: false
 
-bartowski/zai-org_glm-4.6v-flash@q6_k_l:
-  publisher: bartowski
-  hf_url: https://huggingface.co/bartowski/zai-org_glm-4.6v-flash
-  arch: dense
-  k_cache: q8_0
-  v_cache: q8_0
+mrfuzzihead/qwen3.8-35b-a3b-distill-apex@?:
+  publisher: MrFuzzihead
+  hf_url: https://huggingface.co/mrfuzzihead/qwen3.8-35b-a3b-distill-apex
+  arch: moe
+  k_cache: q5_1
+  v_cache: q4_1
   offload: 1
-  notes: 'Architektur: dense | Vision'
-  architecture_family: glm4
-  file_size_bytes: 10354285440
-  context_length: 131072
+  notes: 'Architektur: moe | Vision'
+  architecture_family: qwen35moe
+  file_size_bytes: 11778430656
+  context_length: 32768
   n_layers: 40
-  hidden_dim: 4096
-  max_context_length: 131072
+  hidden_dim: 2048
+  max_context_length: 262144
   reasoning: thinking
-  sampling:
-    math:
-      evidence_kind: unresolved
-      reason: Kein allgemeines Profil; Coding-/Math-Fallback kann nicht
-        belastbar bestimmt werden.
-    sampling_research_status: unresolved
-    sampling_researched_at: '2026-09-22T17:43:08+00:00'
-    sampling_sources:
-      - https://huggingface.co/papers/2507.01006
-  capabilities: vision, text
-  blueprint: glm4v_reasoning
+  max_experts: 256
+  experts: 128
+  capabilities: vision, coding, text
+  blueprint: reasoning_coding
   truncation: full
 
-mudler/gemma-4-26b-a4b-it-apex@mini:
-  publisher: mudler
-  hf_url: https://huggingface.co/mudler/gemma-4-26B-A4B-it-APEX-GGUF
+unsloth/gemma-4-26b-a4b-it@iq3_xxs:
+  publisher: unsloth
+  hf_url: https://huggingface.co/unsloth/gemma-4-26b-a4b-it
   arch: moe
-  k_cache: q8_0
-  v_cache: q5_1
+  k_cache: q5_1
+  v_cache: q4_1
   offload: 1
   notes: 'Architektur: moe | Vision'
   architecture_family: gemma4
-  file_size_bytes: 13467632256
-  context_length: 16384
+  file_size_bytes: 11416548832
+  context_length: 24576
   n_layers: 30
   hidden_dim: 2816
   max_context_length: 262144
   reasoning: thinking
-  sampling:
-    coding:
-      temperature: 1.0
-      top_p: 0.95
-      top_k: 64
-      evidence_kind: direct
-    knowledge:
-      temperature: 1.0
-      top_p: 0.95
-      top_k: 64
-      evidence_kind: derived
-      derived_from: coding
-    agentic:
-      temperature: 1.0
-      top_p: 0.95
-      top_k: 64
-      evidence_kind: derived
-      derived_from: coding
-    math:
-      temperature: 1.0
-      top_p: 0.95
-      top_k: 64
-      evidence_kind: derived
-      derived_from: coding
-    sampling_research_status: confirmed
-    sampling_researched_at: '2026-09-22T15:10:00+00:00'
-    sampling_sources:
-      - https://huggingface.co/google/gemma-4-26B-A4B-it
-  quants: MINI
+  max_experts: 128
   capabilities: vision, coding, text
   blueprint: gemma_reasoning
   truncation: full
   custom_template: true
-  max_experts: 128
   experts: 36
-  pub_url: https://github.com/localai-org/apex-quant
+
+unsloth/qwen3.6-35b-a3b-mtp@iq2_m:
+  publisher: unsloth
+  hf_url: https://huggingface.co/unsloth/qwen3.6-35b-a3b-mtp
+  arch: moe
+  k_cache: q5_1
+  v_cache: q4_1
+  offload: 1
+  notes: 'Architektur: moe | Vision'
+  architecture_family: qwen35moe
+  file_size_bytes: 11882969376
+  context_length: 16384
+  n_layers: 41
+  hidden_dim: 2048
+  max_context_length: 262144
+  reasoning: thinking
+  max_experts: 256
+  capabilities: vision, coding, text
+  blueprint: reasoning_coding
+  truncation: full
+  experts: 128

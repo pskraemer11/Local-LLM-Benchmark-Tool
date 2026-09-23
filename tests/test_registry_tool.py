@@ -35,56 +35,185 @@ from registry_tool import (
 )
 
 
-def test_help_describes_pipeline_modes() -> None:
-    """The CLI help must explain scope and write behavior for each mode."""
+def test_public_help_exposes_short_workflow(monkeypatch, capsys) -> None:
+    """The default CLI help should lead with the small routine workflow."""
+    monkeypatch.setattr(sys, "argv", ["registry_tool.py", "--help"])
+    rt.main()
+    help_text = capsys.readouterr().out
+    assert "status" in help_text
+    assert "sync" in help_text
+    assert "full" in help_text
+    assert "--import-lms-settings" in help_text
+    assert "legacy `pipeline full` command" in help_text
+    assert "advanced <command>" in help_text
+
+
+def test_help_describes_registry_tool_surface() -> None:
     help_text = rt.__doc__ or ""
-    assert "Default: pipeline status" in help_text
-    assert "pipeline status" in help_text
-    assert "pipeline sync" in help_text
-    assert "pipeline full" in help_text
-    assert "May write" in help_text
-    assert "model_registry.yaml; does not write config JSONs." in help_text
-    assert "`--ignore-drift` keeps it report-only." in help_text
-    assert "Sample Size <= 5" in help_text
-    assert "Sample Size (SS)" not in help_text
-    assert "Unified KV-cache (UKV)" in help_text
-    assert "Fill only missing or zero context_length values" in help_text
-    assert "`pipeline full` runs prompt assembly as a preview" in help_text
-    assert "adds only missing" in help_text
+    assert "model_registry.yaml" in help_text
+    assert "Tested runtime evidence; import is opt-in" in help_text
+    assert "only missing" in help_text
     assert "assemble_blueprint.py assemble" in help_text
-    assert "export-llama-preset" in help_text
-    assert "export-llama-args" in help_text
-    assert "quarantine-missing [--dry-run]" in help_text
-    assert "entries are removed" in help_text
-    assert "pipeline full` runs preview mode only" in help_text
-    assert "SAMPLING RESEARCH AND MODEL FILTERS" in help_text
-    assert "`coding`, `knowledge`, `agentic`, and `math`" in help_text
-    assert "registry_tool.py sync --refresh-sampling" in help_text
-    assert "pipeline sync --refresh-sampling" in help_text
-    assert "Benchmark runs never" in help_text
-    assert "Run a web search for all benchmarkable candidates." in help_text
-    assert "may take several" in help_text
+    assert "sync --refresh-sampling" in help_text
+    assert "may take several minutes" in help_text
+    assert "max_context_length" in help_text
+    assert "max_experts" in help_text
 
-    workflow_lines = [
-        line
-        for line in help_text.splitlines()
-        if line.startswith(("  1)", "  2)", "  3)", "  4)", "  5)"))
+
+def test_inventory_reads_registry_models_and_configs_once() -> None:
+    models = [{"type": "llm", "modelKey": "publisher/model"}]
+    with (
+        patch.object(rt, "load_registry", return_value={"publisher/model": {}}) as load,
+        patch.object(rt, "_run_lms_ls", return_value=models) as list_models,
+        patch.object(rt, "read_lms_configs", return_value=[]) as read_configs,
+    ):
+        inventory = rt._collect_registry_inventory()
+
+    load.assert_called_once_with()
+    list_models.assert_called_once_with()
+    read_configs.assert_called_once_with(rt.CONFIG_ROOT)
+    assert inventory.raw_lms_models == models
+    assert inventory.gguf_candidates_loaded is False
+
+
+def test_shared_inventory_reuses_gguf_header_snapshot(tmp_path) -> None:
+    path = tmp_path / "model.gguf"
+    path.write_bytes(b"test")
+    inventory = rt.RegistryInventory({}, [], [], [], [])
+    header = (32, 4096, True, 131072, 64)
+    with (
+        patch.object(
+            rt,
+            "_read_gguf_header_details",
+            return_value=(*header, "qwen3moe"),
+        ) as read_header,
+    ):
+        first = rt._read_gguf_header_snapshot(str(path), inventory)
+        second = rt._read_gguf_header_snapshot(str(path), inventory)
+
+    assert first == second == (header, "qwen3moe")
+    read_header.assert_called_once_with(str(path.resolve()))
+
+
+def test_subcommand_help_never_runs_the_subcommand(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(sys, "argv", ["registry_tool.py", "quarantine-missing", "--help"])
+    with patch.object(
+        rt, "cmd_quarantine_missing", side_effect=AssertionError("help must not mutate")
+    ):
+        with pytest.raises(SystemExit) as exc_info:
+            rt.main()
+
+    assert exc_info.value.code == 0
+    assert "quarantine-missing" in capsys.readouterr().out
+
+
+def test_simple_sync_routes_to_pipeline_with_explicit_import(monkeypatch) -> None:
+    calls = []
+    monkeypatch.setattr(sys, "argv", ["registry_tool.py", "sync", "--import-lms-settings", "--refresh-sampling"])
+    monkeypatch.setattr(rt, "cmd_pipeline", lambda *args, **kwargs: calls.append((args, kwargs)))
+
+    rt.main()
+
+    assert calls == [
+        (
+            ("sync",),
+            {"refresh_sampling": True, "import_lms_settings": True},
+        )
     ]
-    assert len(workflow_lines) == 5
-    assert len({line.index("py -3.12") for line in workflow_lines}) == 1
 
-    ownership_rows = (
-        ("  Registry policy", "doc-git"),
-        ("  Technical facts", "GGUF files"),
-        ("  Prompt policy", "doc-git"),
-        ("  Runtime artifacts", "LM Studio JSON"),
-        ("  Results", "ergebnisse"),
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["full", "--ignore-drift", "--refresh-sampling", "--import-lms-settings"],
+        ["pipeline", "full", "--ignore-drift", "--refresh-sampling", "--import-lms-settings"],
+    ],
+)
+def test_full_public_command_and_pipeline_alias_share_the_same_options(monkeypatch, arguments) -> None:
+    calls = []
+    monkeypatch.setattr(sys, "argv", ["registry_tool.py", *arguments])
+    monkeypatch.setattr(rt, "cmd_pipeline", lambda *args, **kwargs: calls.append((args, kwargs)))
+
+    rt.main()
+
+    assert calls == [
+        (
+            ("full",),
+            {"ignore_drift": True, "refresh_sampling": True, "import_lms_settings": True},
+        )
+    ]
+
+
+def test_advanced_help_does_not_execute_specialist_command(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(sys, "argv", ["registry_tool.py", "advanced", "--help"])
+    rt.main()
+    output = capsys.readouterr().out
+    assert "sync-from-configs" in output
+    assert "export-llama-preset" in output
+
+
+def test_registry_save_keeps_original_when_temporary_serialization_fails(tmp_path) -> None:
+    registry_path = tmp_path / "registry.yaml"
+    original = "publisher/model:\n  context_length: 12345\n"
+    registry_path.write_text(original, encoding="utf-8")
+
+    with patch.object(rt, "_format_blank_lines", side_effect=OSError("simulated failure")):
+        with pytest.raises(OSError, match="simulated failure"):
+            rt.save_registry({"publisher/model": {"context_length": 67890}}, registry_path)
+
+    assert registry_path.read_text(encoding="utf-8") == original
+    assert list(tmp_path.glob(".registry.yaml.*.tmp")) == []
+
+
+def test_fill_size_never_imports_lm_studio_aggregate_size(monkeypatch) -> None:
+    registry = {"publisher/model@q4_k_m": {"context_length": 16384}}
+    inventory = rt.RegistryInventory(
+        registry,
+        [{"modelKey": "publisher/model", "sizeBytes": 99_000_000}],
+        [{"modelKey": "publisher/model", "sizeBytes": 99_000_000}],
+        [],
+        [],
+        True,
     )
-    ownership_columns = {
-        next(line for line in help_text.splitlines() if line.startswith(label)).index(marker)
-        for label, marker in ownership_rows
-    }
-    assert len(ownership_columns) == 1
+    with patch.object(rt, "save_registry") as save_registry:
+        assert rt.cmd_fill_size(inventory=inventory) == 0
+
+    assert "file_size_bytes" not in registry["publisher/model@q4_k_m"]
+    save_registry.assert_not_called()
+
+
+def test_add_uses_main_gguf_size_not_lm_studio_aggregate(tmp_path, monkeypatch) -> None:
+    main_gguf = tmp_path / "model-q4_k_m.gguf"
+    main_gguf.write_bytes(b"main")
+    monkeypatch.setattr(rt, "REGISTRY_PATH", tmp_path / "registry.yaml")
+    rt.REGISTRY_PATH.touch()
+    saved: dict[str, dict] = {}
+    monkeypatch.setattr(rt, "load_registry", lambda: {})
+    monkeypatch.setattr(rt, "save_registry", lambda value: saved.update(value))
+    monkeypatch.setattr(rt, "is_registry_candidate", lambda _model: True)
+    monkeypatch.setattr(rt, "is_support_model_record", lambda _model: False)
+    monkeypatch.setattr(rt, "is_blacklisted_model_name", lambda _name: False)
+    monkeypatch.setattr(rt, "is_mtp_drafter", lambda *_args: False)
+    monkeypatch.setattr(rt, "_is_support_file", lambda *_args: False)
+    monkeypatch.setattr(rt, "_find_gguf_relative_path", lambda _path: main_gguf)
+    monkeypatch.setattr(rt, "_classify_arch", lambda *_args: "dense")
+    monkeypatch.setattr(rt, "_read_gguf_arch", lambda _path: (1, 2, False, 32768, None))
+
+    rt.cmd_add(
+        [
+            {
+                "type": "llm",
+                "modelKey": "publisher/model",
+                "publisher": "publisher",
+                "selectedVariant": "publisher/model@q4_k_m",
+                "sizeBytes": 99_000_000,
+                "path": "publisher/model/model-q4_k_m.gguf",
+            }
+        ]
+    )
+
+    entry = next(iter(saved.values()))
+    assert entry["file_size_bytes"] == 4
 
 
 def test_fix_ctx_only_fills_missing_or_zero_values(monkeypatch) -> None:
@@ -139,6 +268,42 @@ def test_build_llama_preset_uses_local_gguf_and_provider_runtime(tmp_path: Path,
     assert skipped == ["publisher/missing@q4_k_m"]
 
 
+def test_build_llama_preset_resolves_lm_studio_hub_repository_alias(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    models_root = tmp_path / "models"
+    gguf = (
+        models_root
+        / "lmstudio-community"
+        / "rnj-1-instruct-GGUF"
+        / "rnj-1-instruct-Q8_0.gguf"
+    )
+    gguf.parent.mkdir(parents=True)
+    gguf.write_bytes(b"fixture")
+    monkeypatch.setattr(rt, "MODELS_CACHE", models_root)
+    monkeypatch.setattr(rt.Path, "home", staticmethod(lambda: tmp_path))
+    hub_model = tmp_path / ".lmstudio" / "hub" / "models" / "essentialai" / "rnj-1" / "model.yaml"
+    hub_model.parent.mkdir(parents=True)
+    hub_model.write_text(
+        """model: essentialai/rnj-1
+base:
+  - key: lmstudio-community/rnj-1-instruct-gguf
+    sources:
+      - type: huggingface
+        user: lmstudio-community
+        repo: rnj-1-instruct-GGUF
+""",
+        encoding="utf-8",
+    )
+    registry = {"essentialai/rnj-1@q8_0": {"publisher": "essentialai"}}
+
+    content, skipped = rt.build_llama_preset(registry)
+
+    assert "[essentialai/rnj-1@q8_0]" in content
+    assert f"model = {gguf}".casefold() in content.casefold()
+    assert skipped == []
+
+
 def test_build_llama_preset_does_not_guess_expert_override_key(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -178,6 +343,36 @@ ctx-size = 32768
     assert merged.count("[publisher/model@q4_k_m]") == 1
     assert merged_again.count("[publisher/model@q4_k_m]") == 1
     assert merged_again.count("[gpt-oss-20b]") == 1
+
+
+def test_merge_llama_preset_removes_stale_generated_sections_only() -> None:
+    existing = """# Registry-generated llama.cpp model sections; edit the Registry instead.
+
+[*]
+parallel = 4
+
+[manual-hf-model]
+hf = owner/model:Q4_K_M
+
+[publisher/stale@q4_k_m]
+model = D:\\models\\stale.gguf
+ctx-size = 16384
+"""
+    generated = """# Generated by registry_tool.py
+
+[publisher/current@q5_k_m]
+# registry_tool:generated-section
+model = D:\\models\\current.gguf
+ctx-size = 32768
+"""
+
+    merged = rt.merge_llama_preset(existing, generated)
+
+    assert "[*]" in merged and "parallel = 4" in merged
+    assert "[manual-hf-model]" in merged
+    assert "hf = owner/model:Q4_K_M" in merged
+    assert "[publisher/current@q5_k_m]" in merged
+    assert "[publisher/stale@q4_k_m]" not in merged
 
 
 def test_build_llama_argument_manifest_contains_runtime_and_provenance(
@@ -359,7 +554,10 @@ class TestGuiConfigRegistrySync:
         assert registry["publisher/model@q4_k_m"]["offload"] == 1.0
         assert registry["publisher/model@q4_k_m"]["useUnifiedKvCache"] is False
         save_registry.assert_not_called()
-        assert "5 Drifts" in capsys.readouterr().out
+        output = capsys.readouterr().out
+        assert "5 Drifts" in output
+        assert "[VORSCHLAG] publisher/model@q4_k_m: context_length" in output
+        assert str(configs[0]["json_path"]) in output
 
     def test_write_mode_persists_gui_values(self, tmp_path):
         registry, registry_path, configs = self._registry_and_configs(tmp_path)
@@ -431,6 +629,102 @@ class TestGuiConfigRegistrySync:
         assert registry["publisher/model@q4_k_m"]["k_cache"] == "q8_0"
         save_registry.assert_not_called()
         assert "k_cache" in capsys.readouterr().out
+
+    def test_conflicting_gui_values_are_proposed_but_never_chosen(self, tmp_path):
+        registry, _registry_path, configs = self._registry_and_configs(tmp_path)
+        second_config = dict(configs[0])
+        second_config["context_length"] = 12288
+        second_config["json_path"] = tmp_path / "model-duplicate.json"
+
+        proposals, skipped, conflicts = rt._build_config_sync_proposal(
+            registry,
+            [configs[0], second_config],
+            None,
+            (("context_length", "context_length"),),
+        )
+
+        assert skipped == 0
+        assert conflicts == 1
+        assert len(proposals) == 1
+        assert proposals[0].conflict is True
+        assert proposals[0].proposed == (8192, 12288)
+        assert registry["publisher/model@q4_k_m"]["context_length"] == 16384
+
+    def test_config_import_uses_canonical_quant_key_when_registry_has_legacy_alias(self, tmp_path):
+        canonical_key = "freedomaisvr/gemma-4-12b-it-qat@nvfp4"
+        legacy_key = "freedomaisvr/gemma-4-12b-it-qat-nvfp4@nvfp4"
+        registry = {
+            legacy_key: {"context_length": 131072, "max_context_length": 262144},
+            canonical_key: {"context_length": 65536, "max_context_length": 262144},
+        }
+        config = {
+            "publisher": "FreedomAISVR",
+            "dir_name": "Gemma-4-12B-it-QAT-NVFP4-GGUF",
+            "file_name": "gemma-4-12b-it-qat-nvfp4.gguf.json",
+            "quant": "nvfp4",
+            "context_length": 262144,
+            "json_path": tmp_path / "gemma-nvfp4.json",
+        }
+        installed_model = {
+            "modelKey": "gemma-4-12b-it-qat",
+            "publisher": "FreedomAISVR",
+            "path": "FreedomAISVR/Gemma-4-12B-it-QAT-NVFP4-GGUF/gemma-4-12b-it-qat-nvfp4.gguf",
+        }
+
+        registry_path = tmp_path / "model_registry.yaml"
+        registry_path.touch()
+        inventory = rt.RegistryInventory(
+            registry, [installed_model], [installed_model], [config], []
+        )
+        with (
+            patch.object(rt, "REGISTRY_PATH", registry_path),
+            patch.object(rt, "save_registry") as save_registry,
+        ):
+            proposals = rt.cmd_sync_from_configs(
+                write=True,
+                installed_models=[installed_model],
+                inventory=inventory,
+            )
+
+        assert len(proposals) == 1
+        assert proposals[0].model_key == canonical_key
+        assert proposals[0].current == 65536
+        assert proposals[0].proposed == 262144
+        assert proposals[0].conflict is False
+        assert registry[canonical_key]["context_length"] == 262144
+        assert registry[legacy_key]["context_length"] == 131072
+        save_registry.assert_called_once_with(registry)
+
+    @pytest.mark.parametrize(
+        ("field", "config_field", "current", "proposed", "limit_field", "limit"),
+        [
+            ("context_length", "context_length", 16384, 32768, "max_context_length", 24576),
+            ("experts", "num_experts", 16, 40, "max_experts", 32),
+        ],
+    )
+    def test_values_over_gguf_limits_are_conflicts(
+        self, tmp_path, field, config_field, current, proposed, limit_field, limit
+    ):
+        registry, _registry_path, configs = self._registry_and_configs(tmp_path)
+        entry = registry["publisher/model@q4_k_m"]
+        entry[field] = current
+        entry[limit_field] = limit
+        configs[0][config_field] = proposed
+
+        proposals, skipped, conflicts = rt._build_config_sync_proposal(
+            registry,
+            configs,
+            None,
+            ((field, config_field),),
+        )
+
+        assert skipped == 0
+        assert conflicts == 1
+        assert len(proposals) == 1
+        assert proposals[0].conflict is True
+        assert proposals[0].proposed == proposed
+        assert "exceeds GGUF-owned" in (proposals[0].problem or "")
+        assert entry[field] == current
 
     def test_lms_parser_extracts_nested_kv_quantization(self, tmp_path):
         root = tmp_path / "configs"
@@ -853,15 +1147,17 @@ def test_read_gguf_base_arch_returns_general_architecture(tmp_path):
     assert rt._read_gguf_base_arch(str(p)) == "qwen2"
 
 
-def test_read_gguf_base_arch_handles_duplicate_metadata(monkeypatch, tmp_path):
-    class BrokenReader:
+def test_read_gguf_base_arch_does_not_load_tensor_reader(monkeypatch, tmp_path):
+    class ForbiddenReader:
         def __init__(self, _path):
-            raise KeyError("Duplicate GGUF.version")
+            raise AssertionError("header scan must not construct GGUFReader")
 
-    import gguf
+    import types
 
-    monkeypatch.setattr(gguf, "GGUFReader", BrokenReader)
-    assert rt._read_gguf_base_arch(str(tmp_path / "broken.gguf")) is None
+    path = tmp_path / "model.gguf"
+    path.write_bytes(_make_mini_gguf(48, 5120, None))
+    monkeypatch.setitem(sys.modules, "gguf", types.SimpleNamespace(GGUFReader=ForbiddenReader))
+    assert rt._read_gguf_base_arch(str(path)) == "qwen2"
 
 
 class TestReadGgufArchReasoning:
@@ -1001,8 +1297,18 @@ class TestCmdQuarantineMissing:
         monkeypatch.setattr(rt, "REGISTRY_PATH", reg_path)
         monkeypatch.setattr(rt, "CONFIG_ROOT", cfg_root)
         monkeypatch.setattr(rt, "MODELS_CACHE", tmp_path / "models")
+        monkeypatch.setattr(rt, "PROJECT_ROOT", tmp_path)
         monkeypatch.setattr(rt, "_run_lms_ls", lambda: lms_models)
-        monkeypatch.setattr(rt, "_gguf_for_key_exists", lambda key: False)
+        monkeypatch.setattr(rt, "_gguf_for_key_exists", lambda key, candidates=None: False)
+
+        def collect_inventory():
+            benchmark_models = rt._benchmark_lms_models(lms_models)
+            return rt.RegistryInventory(
+                rt.load_registry(reg_path), lms_models, benchmark_models,
+                rt.read_lms_configs(cfg_root), [], True,
+            )
+
+        monkeypatch.setattr(rt, "_collect_registry_inventory", collect_inventory)
         return reg_path
 
     def test_missing_entry_quarantined(self, tmp_path, monkeypatch):
@@ -1015,7 +1321,7 @@ class TestCmdQuarantineMissing:
                 "openai/gpt-oss-20b": {"reasoning": "thinking", "blueprint": "full"},
             },
         )
-        assert rt.cmd_quarantine_missing() == 0
+        assert rt.cmd_quarantine_missing(dry_run=False) == 0
         reg = rt.load_registry(reg_path)
         assert "mradermacher/nemotron-cascade-14b-thinking" not in reg
         assert "openai/gpt-oss-20b" in reg
@@ -1033,8 +1339,8 @@ class TestCmdQuarantineMissing:
             },
             with_config=False,
         )
-        monkeypatch.setattr(rt, "_gguf_for_key_exists", lambda key: True)
-        assert rt.cmd_quarantine_missing() == 2
+        monkeypatch.setattr(rt, "_gguf_for_key_exists", lambda key, candidates=None: True)
+        assert rt.cmd_quarantine_missing(dry_run=False) == 2
         assert "mradermacher/nemotron-cascade-14b-thinking" in rt.load_registry(reg_path)
         assert not list((tmp_path / "configs").glob("_quarantine_missing_*"))
 
@@ -1047,9 +1353,34 @@ class TestCmdQuarantineMissing:
                 "mradermacher/nemotron-cascade-14b-thinking": {"reasoning": "thinking", "blueprint": "full"},
             },
         )
-        assert rt.cmd_quarantine_missing(dry_run=True) == 0
+        assert rt.cmd_quarantine_missing() == 0
         assert "mradermacher/nemotron-cascade-14b-thinking" in rt.load_registry(reg_path)
         assert not list((tmp_path / "configs").glob("_quarantine_missing_*"))
+
+    def test_quarantine_registry_write_failure_restores_moved_config(self, tmp_path, monkeypatch):
+        reg_path = self._setup(
+            tmp_path,
+            monkeypatch,
+            lms_models=[{"modelKey": "openai/gpt-oss-20b"}],
+            entries={
+                "mradermacher/nemotron-cascade-14b-thinking": {
+                    "reasoning": "thinking",
+                    "blueprint": "full",
+                    "context_length": 32768,
+                },
+            },
+        )
+        source_config = next((tmp_path / "configs").glob("**/*.json"))
+        monkeypatch.setattr(
+            rt, "save_registry", lambda _registry: (_ for _ in ()).throw(OSError("disk full"))
+        )
+
+        assert rt.cmd_quarantine_missing(dry_run=False) == 1
+
+        assert "mradermacher/nemotron-cascade-14b-thinking" in rt.load_registry(reg_path)
+        assert source_config.exists()
+        assert not list((tmp_path / "configs").glob("_quarantine_missing_*"))
+        assert not list((tmp_path / "doc-git" / "Review-Artifacts").glob("quarantine_registry_*.yaml"))
 
     def test_no_lms_data_aborts(self, tmp_path, monkeypatch):
         reg_path = self._setup(
@@ -1075,7 +1406,7 @@ class TestCmdQuarantineMissing:
             },
             with_config=False,
         )
-        assert rt.cmd_quarantine_missing() == 0
+        assert rt.cmd_quarantine_missing(dry_run=False) == 0
         reg = rt.load_registry(reg_path)
         assert "unsloth/ernie-4.5-21b-a3b-pt" in reg
         assert "unsloth/ernie-4.5-21b-a3b-pt@iq4_nl" not in reg
@@ -1096,11 +1427,78 @@ class TestCmdQuarantineMissing:
         cfg_dir.mkdir(parents=True)
         cfg_file = cfg_dir / "gemma-4-26B-A4B-it-UD-IQ3_S.gguf.json"
         cfg_file.write_text(json.dumps({"operation": {"fields": []}}), encoding="utf-8")
-        assert rt.cmd_quarantine_missing() == 0
+        assert rt.cmd_quarantine_missing(dry_run=False) == 0
         reg = rt.load_registry(reg_path)
         assert "google/gemma-4-26b-a4b-it-qat" not in reg
         assert "unsloth/gemma-4-26b-a4b-it@iq3_s" in reg
         assert cfg_file.exists()
+
+    def test_lms_record_matches_duplicate_quant_suffix_in_model_name(self):
+        model = {
+            "type": "llm",
+            "modelKey": "gemma-4-12b-it-qat",
+            "publisher": "FreedomAISVR",
+            "path": "FreedomAISVR/Gemma-4-12B-it-QAT-NVFP4-GGUF/gemma-4-12b-it-qat-nvfp4.gguf",
+        }
+
+        assert (
+            rt._lms_record_for_registry_key(
+                "freedomaisvr/gemma-4-12b-it-qat-nvfp4@nvfp4", [model]
+            )
+            is model
+        )
+
+    def test_unknown_quant_registry_key_matches_lms_base_and_known_quant(self):
+        model = {
+            "type": "llm",
+            "modelKey": "muse-glimmer-30b@?",
+            "publisher": "gguf-org",
+            "path": "gguf-org/muse-glimmer-30b-gguf/muse-glimmer-30b-nvfp4.gguf",
+        }
+
+        assert rt._lms_record_for_registry_key("gguf-org/muse-glimmer-30b@?", [model]) is model
+        assert rt._lms_record_for_registry_key("gguf-org/muse-glimmer-30b@nvfp4", [model]) is model
+
+    def test_mini_quant_is_inferred_from_lms_filename(self):
+        model = {
+            "type": "llm",
+            "modelKey": "gemma-4-26b-a4b-it-apex",
+            "publisher": "mudler",
+            "path": "mudler/gemma-4-26B-A4B-it-APEX-GGUF/gemma-4-26B-A4B-APEX-I-Mini.gguf",
+        }
+
+        assert rt._quant_from_lms_record(model) == "mini"
+        assert rt._lms_record_for_registry_key("mudler/gemma-4-26b-a4b-it-apex@mini", [model]) is model
+
+    def test_same_model_with_different_quant_remains_unmatched(self):
+        model = {
+            "type": "llm",
+            "modelKey": "mellum2-12b-a2.5b-instruct",
+            "publisher": "JetBrains",
+            "path": "JetBrains/Mellum2-12B-A2.5B-Instruct-GGUF-Q6_K/Mellum2-12B-A2.5B-Instruct-Q6_K.gguf",
+        }
+
+        assert rt._lms_record_for_registry_key(
+            "jetbrains/mellum2-12b-a2.5b-instruct@q4_k_m", [model]
+        ) is None
+
+    def test_physical_gguf_check_requires_exact_quant(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(rt, "MODELS_CACHE", tmp_path)
+        gguf = tmp_path / "publisher" / "example-model-GGUF" / "example-model-Q6_K.gguf"
+        gguf.parent.mkdir(parents=True)
+        gguf.touch()
+
+        assert rt._gguf_for_key_exists("publisher/example-model@q6_k")
+        assert rt._gguf_for_key_exists("publisher/example-model@?")
+        assert not rt._gguf_for_key_exists("publisher/example-model@q4_k_m")
+
+    def test_physical_gguf_check_ignores_mmproj_only(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(rt, "MODELS_CACHE", tmp_path)
+        mmproj = tmp_path / "publisher" / "example-model-GGUF" / "mmproj-example-model-Q6_K.gguf"
+        mmproj.parent.mkdir(parents=True)
+        mmproj.touch()
+
+        assert not rt._gguf_for_key_exists("publisher/example-model@q6_k")
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -1246,10 +1644,33 @@ class TestCmdAddSkipsSupportFiles:
         )
 
         reg = rt.load_registry(reg_path)
-        assert "example/example-coder-7b" in reg
+        assert "example/example-coder-7b@?" in reg
         assert "gpustack/text-embedding-bge-m3" not in reg
         assert "mradermacher/chandra-ocr-2" not in reg
         assert len(result["skipped"]) == 2
+
+    @pytest.mark.parametrize(
+        ("old_key", "expected_key"),
+        [
+            ("llmsforall/millie-35b-a3b-11gb", "llmsforall/millie-35b-a3b-11gb@?"),
+            ("llmsforall/millie-35b-a3b-11gb@?", "llmsforall/millie-35b-a3b-11gb@?"),
+        ],
+    )
+    def test_rekey_keeps_unknown_quant_placeholder(self, old_key, expected_key, monkeypatch):
+        model = {
+            "type": "llm",
+            "modelKey": "millie-35b-a3b-11gb",
+            "publisher": "llmsforall",
+            "path": "llmsforall/Millie-35B-A3B-11GB/Millie-35B-A3B-11GB.gguf",
+        }
+        registry = {old_key: {"context_length": 16384}}
+        monkeypatch.setattr(rt, "_lms_record_for_registry_key", lambda _key, _models: model)
+        monkeypatch.setattr(rt, "save_registry", lambda _registry: None)
+
+        changed = rt._rekey_registry_to_lms(registry, [model])
+
+        assert list(registry) == [expected_key]
+        assert changed == (old_key != expected_key)
 
     def test_add_keeps_a_new_quant_variant_of_an_existing_base(self, tmp_path, monkeypatch):
         reg_path = tmp_path / "registry.yaml"
@@ -1356,7 +1777,7 @@ def test_sync_from_configs_keeps_provider_and_quant_variants_separate(tmp_path, 
     assert registry["unsloth/gpt-oss-20b-GGUF@q8_0"]["context_length"] == 65536
     output = capsys.readouterr().out
     assert "0 Konflikte" in output
-    assert "Veraltete Config" in output
+    assert "ohne eindeutige Zuordnung/alte Configs" in output
 
 
 def test_fill_quant_uses_lms_quantization_without_gguf_path(monkeypatch):
@@ -1441,11 +1862,12 @@ class TestCmdSyncFromGguf:
             patch.object(rt, "REGISTRY_PATH", path),
             patch.object(rt, "_run_lms_ls", return_value=lms_models),
             patch.object(rt, "MODELS_CACHE", models_dir),
-            patch.object(rt, "_read_gguf_arch") as read,
+            patch.object(rt, "_read_gguf_header_details") as read,
         ):
             read.side_effect = lambda p: (
                 *gguf_data.get(p, (None, None, None, None)),
-                gguf_moe.get(p, False),
+                int(bool(gguf_moe.get(p, False))),
+                None,
             )
             rt.cmd_sync_from_gguf()
         return rt.load_registry(path)
@@ -1531,7 +1953,11 @@ class TestPipelineDriftExitCode:
 
     def _run_pipeline(self, validate_errors, ignore_drift=False):
         with (
-            patch.object(rt, "_run_lms_ls", return_value=[]),
+            patch.object(
+                rt,
+                "_collect_registry_inventory",
+                return_value=rt.RegistryInventory({}, [], [], [], [], True),
+            ),
             patch.object(rt, "cmd_compare"),
             patch.object(rt, "cmd_sync"),
             patch.object(rt, "classify_registry"),
@@ -1571,21 +1997,26 @@ class TestPipelineDriftExitCode:
         # template_missing_file etc. sind keine Melde-Konflikte -> kein Exit
         assert self._run_pipeline({"template_missing_file": ["unsloth/x: fehlt"]}) is None
 
-    def test_full_syncs_missing_templates_but_keeps_system_prompt_preview_only(self):
+    @pytest.mark.parametrize("import_lms_settings", [False, True])
+    def test_full_prints_explicit_write_paths_after_previews(self, import_lms_settings, capsys):
         calls = []
 
-        def record_quarantine(*, dry_run=False):
+        def record_quarantine(*, dry_run=False, inventory=None):
             calls.append(("quarantine", dry_run))
             return 0
 
         def record_assemble(*, preview_only=False):
             calls.append(("assemble", preview_only))
 
-        def record_templates():
+        def record_templates(*_args, **_kwargs):
             calls.append(("templates",))
 
         with (
-            patch.object(rt, "_run_lms_ls", return_value=[]),
+            patch.object(
+                rt,
+                "_collect_registry_inventory",
+                return_value=rt.RegistryInventory({}, [], [], [], [], True),
+            ),
             patch.object(rt, "cmd_compare"),
             patch.object(rt, "cmd_quarantine_missing", side_effect=record_quarantine),
             patch.object(rt, "cmd_sync"),
@@ -1596,9 +2027,18 @@ class TestPipelineDriftExitCode:
             patch.object(rt, "validate_prompts"),
             patch.object(rt, "cmd_validate", return_value={"gguf_header_drift": []}),
         ):
-            assert rt.cmd_pipeline("full") is None
+            assert rt.cmd_pipeline("full", import_lms_settings=import_lms_settings) is None
 
         assert calls == [("quarantine", True), ("templates",), ("assemble", True)]
+        output = capsys.readouterr().out
+        assert "py -3.12 .\\src\\registry_tool.py quarantine-missing --apply" in output
+        assert "py -3.12 .\\src\\assemble_blueprint.py assemble" in output
+        assert output.index("quarantine-missing --apply") < output.index("Prompt-Assembly")
+        assert output.index("Prompt-Assembly") < output.index("assemble_blueprint.py assemble")
+        if import_lms_settings:
+            assert "LM-Studio-Werte wurden nur berichtet" not in output
+        else:
+            assert "py -3.12 .\\src\\registry_tool.py sync --import-lms-settings" in output
 
 
 def test_lm_studio_local_findings_are_advisory_for_backend_validation() -> None:
@@ -1683,7 +2123,10 @@ def test_assemble_adds_system_prompt_without_touching_load_fields(tmp_path, monk
 class TestRegistryTemplateName:
     def test_resolves_from_blueprint_template_map(self):
         # gemma4-26b -> gemma_reasoning -> template_map 26b
-        name = rt._registry_template_name("unsloth/gemma-4-26b-a4b-it@iq3_s")
+        model_key = "unsloth/gemma-4-26b-a4b-it@iq3_s"
+        registry = {model_key: {"blueprint": "gemma_reasoning"}}
+        with patch.object(rt, "load_registry", return_value=registry):
+            name = rt._registry_template_name(model_key)
         assert name == "google_gemma-4-26B-A4B-it_chat_template.jinja"
 
     def test_resolves_from_blueprint_direct_template(self):

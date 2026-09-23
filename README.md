@@ -3,9 +3,11 @@
 This repository measures how large language models (LLMs) perform on a local Windows machine with limited resources.
 It is designed to calculate realistic benchmark scores using genuinely limited local resources, such as limited VRAM,
 heavily quantized GGUF files, and a quantized KV cache.
-The benchmarks run using the local LM Studio server (a frontend for managing and testing model parameters).
-LM Studio can also be launched in headerless mode with a daemon (llmster.exe) running in the background and a CLI version.
-Alternatively, a llama.cpp server with a more recent CUDA version or an OpenAI-compatible interface can be used.
+The default benchmark backend is the local CUDA build of `llama-server.exe`,
+started directly by the runner. LM Studio remains the local model inventory
+and parameter-tuning environment; its tested settings can be reviewed and
+explicitly imported into the Registry before deriving llama.cpp presets.
+Other providers remain available for compatibility checks.
 
 The project has two user-facing entry points:
 
@@ -116,7 +118,7 @@ The repository is easiest to use in five steps:
 Start with a read-only status report:
 
 ~~~powershell
-py -3.12 .\src\registry_tool.py pipeline status
+py -3.12 .\src\registry_tool.py status
 ~~~
 
 If new benchmarkable models are installed, run the registry sync:
@@ -125,10 +127,25 @@ If new benchmarkable models are installed, run the registry sync:
 py -3.12 .\src\registry_tool.py sync
 ~~~
 
+LM Studio configuration changes are shown as field-level proposals. After
+reviewing them, explicitly import valid and unambiguous tested values with:
+
+~~~powershell
+py -3.12 .\src\registry_tool.py sync --import-lms-settings
+~~~
+
 For the complete maintenance and validation workflow:
 
 ~~~powershell
-py -3.12 .\src\registry_tool.py pipeline full
+py -3.12 .\src\registry_tool.py full
+~~~
+
+After explicitly importing tested LM Studio settings, update the local
+llama.cpp router preset while preserving its global defaults and manual
+sections:
+
+~~~powershell
+py -3.12 .\src\registry_tool.py preset "C:\Users\<user>\.config\llama.cpp\preset.ini" --merge-existing
 ~~~
 
 Then inspect the available benchmark options:
@@ -156,11 +173,14 @@ The registry tool operates on:
 - doc-git\model_registry.yaml
 - local GGUF headers
 - the LM Studio model inventory
-- LM Studio config JSONs as read-only runtime evidence; an explicit
-  `sync-from-configs --write-context` may import only `contextLength` into
-  Registry `context_length`
+- LM Studio config JSONs as read-only runtime evidence; the explicit
+  `sync --import-lms-settings` option imports valid, field-listed settings
+  into the Registry after showing their proposals
 - blueprint definitions and Jinja templates
 - bounded web research for one-time sampling onboarding
+
+The authoritative source for each field and the permitted direction of data
+transfer are defined in the [field ownership and synchronization rules](<doc-git/Architecture, Flow & ChangeLog_en.md#213-field-authority-during-synchronization>). In particular, GGUF facts come from the main file on disk, LM Studio settings are evidence of tested runtime choices, and benchmark policy remains in the Registry. LM Studio's displayed model size can include support files such as `mmproj`; it is not the main GGUF file size.
 
 ### GGUF model root configuration
 
@@ -260,11 +280,11 @@ hardware `config.ini` default.
 
 The Registry remains the single source of truth for benchmark identity,
 context/KV policy, templates, reasoning behavior, and category-specific
-sampling evidence. `registry_tool.py` derives the llama.cpp preset from that
-source:
+sampling evidence. The public `preset` command derives the llama.cpp preset
+from that source:
 
 ~~~powershell
-py -3.12 .\src\registry_tool.py export-llama-preset "C:\Users\<user>\.config\llama.cpp\preset.ini" --merge-existing
+py -3.12 .\src\registry_tool.py preset "C:\Users\<user>\.config\llama.cpp\preset.ini" --merge-existing
 ~~~
 
 The export preserves existing non-Registry sections and updates the derived
@@ -290,14 +310,18 @@ The separate GUI log directory
 `config.ini` location. Server logs used for benchmark diagnostics are
 controlled by the direct provider's `LLAMA_CPP_LOG_DIR` setting.
 
-### The important pipeline variants
+### Registry maintenance commands
 
-These commands are related but not interchangeable.
+The routine interface is `status`, `sync`, `full`, `validate`, `preset`, and
+`quarantine-missing`; `sync` and `full` orchestrate lower-level operations
+from one shared inventory. Use `registry_tool.py advanced --help` for
+specialist commands. The old `export-llama-preset` command remains as a
+compatibility alias.
 
-#### pipeline status
+#### status
 
 ~~~powershell
-py -3.12 .\src\registry_tool.py pipeline status
+py -3.12 .\src\registry_tool.py status
 ~~~
 
 Read-only report:
@@ -313,7 +337,7 @@ Validation and active config matching ignore the existing `_quarantine_*`
 directories below the LM Studio config root. Those files are historical
 artifacts and are not treated as installed model configurations.
 
-pipeline without a mode uses this status mode.
+The old `pipeline status` spelling remains available for existing scripts.
 
 #### sync
 
@@ -324,26 +348,34 @@ py -3.12 .\src\registry_tool.py sync
 Direct registry maintenance:
 
 - adds new benchmarkable models;
-- performs one-time sampling onboarding for new models;
-- fills quantization, GGUF architecture, reasoning, and context metadata;
-- reports LM Studio config drift;
+- reads LM Studio models and configs once into a shared inventory;
+- prints field-level change proposals with their source config;
+- fills quantization, GGUF architecture, reasoning, and main-GGUF file size;
 - normalizes the registry file.
 
-It may write doc-git\model_registry.yaml. It does not write LM Studio
-config JSONs.
+It may write `doc-git\model_registry.yaml`. It does not write LM Studio
+config JSONs or search the web unless `--refresh-sampling` is supplied.
 
-#### sync-from-configs
+#### Import LM Studio runtime settings
 
 ~~~powershell
-py -3.12 .\src\registry_tool.py sync-from-configs
+py -3.12 .\src\registry_tool.py sync
 ~~~
 
-The command compares LM Studio config JSONs with the Registry and is
-report-only by default. To import the GUI context setting deliberately, use
-the narrow write mode:
+The command compares active LM Studio config JSONs with the Registry and is
+report-only by default. Each difference is shown with the old value, proposed
+value, and source file. Conflicting values or ambiguous model matches are
+reported and never imported. Values beyond GGUF context/expert limits are also
+rejected. After review, apply the supported values deliberately:
 
 ~~~powershell
-py -3.12 .\src\registry_tool.py sync-from-configs --write-context
+py -3.12 .\src\registry_tool.py sync --import-lms-settings
+~~~
+
+For a context-only import, the narrow write mode remains available:
+
+~~~powershell
+py -3.12 .\src\registry_tool.py advanced sync-from-configs --write-context
 ~~~
 
 `--write-context` writes only `llm.load.contextLength` to the Registry field
@@ -358,7 +390,7 @@ For MoE models, the tested LM Studio runtime expert count is imported
 separately and deliberately:
 
 ~~~powershell
-py -3.12 .\src\registry_tool.py sync-from-configs --write-experts
+py -3.12 .\src\registry_tool.py advanced sync-from-configs --write-experts
 ~~~
 
 This copies the LM Studio load field llm.load.numExperts to the Registry
@@ -369,13 +401,13 @@ experts as num_experts through its native load API. The direct llama.cpp
 provider translates it to the architecture-specific
 --override-kv <architecture>.expert_used_count=int:<N> argument.
 
-#### pipeline sync
+#### Full maintenance modes
 
 ~~~powershell
-py -3.12 .\src\registry_tool.py pipeline sync
+py -3.12 .\src\registry_tool.py sync
 ~~~
 
-This is an orchestration wrapper around sync:
+The short `sync` command is the recommended orchestration wrapper:
 
 1. prints the LMS model count and a Registry/LMS/config comparison;
 2. runs the complete sync operation;
@@ -385,7 +417,7 @@ The classification step can write additional fields such as reasoning,
 capabilities, blueprint, truncation, and custom_template to
 model_registry.yaml. It still does not write LM Studio config JSONs.
 
-Unlike pipeline full, it does not run prompt preview, prompt validation,
+Unlike `full`, it does not run prompt preview, prompt validation,
 or the blocking drift exit check.
 
 Validation distinguishes Registry/backend blockers from LM Studio-local
@@ -397,13 +429,13 @@ Studio compatibility rather than Registry readiness. Registry-owned runtime
 requirements, including a selected MoE `experts` value, remain blocking when
 missing or invalid.
 
-#### pipeline full
+#### Full validation and prompt maintenance
 
 ~~~powershell
-py -3.12 .\src\registry_tool.py pipeline full
+py -3.12 .\src\registry_tool.py full
 ~~~
 
-This runs pipeline sync and then adds:
+This runs synchronization and then adds:
 
 - a dry-run report for non-installed registry models;
 - blueprint and reasoning classification;
@@ -415,20 +447,42 @@ It may update model_registry.yaml through the sync and classification
 stages. It also fills only missing or empty LM Studio `promptTemplate` fields.
 It returns exit code 1 when blocking Registry/runtime ownership issues remain.
 
-`pipeline full` runs `sync-templates` before prompt preview. This step fills
+`full` runs template synchronization before prompt preview. This step fills
 only missing or empty `promptTemplate` fields in matching LM Studio configs;
 existing template values are preserved. System-prompt assembly remains
 preview-only, and the separate GLM config patch is not run.
+
+`full` is the short public command for the same workflow as the older
+`pipeline full` spelling; both accept the same options. The quarantine report
+and prompt assembly are previews. To apply those actions explicitly, run
+`py -3.12 .\src\registry_tool.py quarantine-missing --apply` after reviewing
+the proposed removals, or run `py -3.12 .\src\assemble_blueprint.py assemble`
+to write assembled system prompts. LM Studio settings remain report-only
+unless imported with `py -3.12 .\src\registry_tool.py sync --import-lms-settings`
+(or `full --import-lms-settings`).
 
 Use this only to keep the report/exit status while continuing after a known
 drift:
 
 ~~~powershell
-py -3.12 .\src\registry_tool.py pipeline full --ignore-drift
+py -3.12 .\src\registry_tool.py full --ignore-drift
 ~~~
 
 ignore-drift does not repair anything. It only prevents the open drift
 from turning the full pipeline into exit code 1.
+
+#### quarantine-missing
+
+This command is report-only by default. It lists Registry models with no
+matching LM Studio entry or local GGUF and shows which configs would be moved.
+Only the explicit `--apply` option moves matching config files to a quarantine
+folder and removes the Registry entries; an on-disk GGUF is never quarantined.
+
+### Legacy command spelling
+
+`py -3.12 .\src\registry_tool.py pipeline full` remains supported for existing
+scripts. It invokes the same workflow and options as the shorter recommended
+command `py -3.12 .\src\registry_tool.py full`.
 
 ### Sampling onboarding
 
@@ -437,14 +491,16 @@ benchmark run. The tool checks Hugging Face model cards and bounded official
 documentation paths for values such as temperature, top_p, top_k, and
 min_p. Values are accepted only after plausibility and consistency checks.
 
-The result is stored in the Registry with status and evidence. Later syncs
-skip terminal research statuses unless an explicit retry is requested:
+The result is stored in the Registry with status and evidence. Synchronization
+does not start a web search on its own. To research missing values, retry
+terminal results, or refresh every benchmarkable candidate, request it
+explicitly:
 
 ~~~powershell
 py -3.12 .\src\registry_tool.py sync --refresh-sampling
 ~~~
 
-Unresolved or conflicting cases are reviewed with the
+This uses a web search and may take several minutes. Unresolved or conflicting cases are reviewed with the
 registry-sampling-review workflow. Benchmark execution itself performs no
 web search and reads only local Registry values.
 

@@ -57,7 +57,7 @@ model_registry.yaml + provider ──> run_benchmarks.py
 | GGUF header and filename              | Model architecture and native limits           | Registry tool, resolver                   | Read-only source                                  |
 | doc-git/blueprint_definitions.yaml    | Prompt blueprint definitions                   | Assembly and validation                   | Maintained as project policy                      |
 | doc-git/Jinja-Chat-Templates/         | Explicit template files                        | Prompt assembly                           | Maintained as project assets                      |
-| LM Studio config JSONs                | LM Studio runtime state                        | Drift checks and explicit Registry import | Never written by ordinary sync/full               |
+| LM Studio config JSONs                | LM Studio runtime state                        | Drift checks and explicit Registry import | Read as evidence; full may add only missing promptTemplate fields |
 | llama.cpp `config.ini`                | Hardware-wide llama.cpp defaults               | Direct CLI/server processes               | User/system runtime configuration                 |
 | llama.cpp `preset.ini`                | Derived model router catalog                   | Direct server provider                    | Generated from Registry; preserve custom sections |
 | simple_evals/                         | Local custom benchmark tasks                   | Custom pipeline                           | Benchmark input; do not rewrite during runs       |
@@ -108,8 +108,9 @@ The model router preset is an explicit derived artifact at
 shared preset defaults; named sections contain model-specific server options.
 The Registry remains the authoritative source for model identity, benchmark
 policy, context/KV settings, templates, reasoning behavior, and sampling
-evidence. `registry_tool.py export-llama-preset` translates that policy into
-the preset; it does not make the preset authoritative.
+evidence. The public `registry_tool.py preset` command translates that policy
+into the preset; it does not make the preset authoritative. The older
+`export-llama-preset` spelling remains as a compatibility alias.
 
 For direct per-model execution, `registry_tool.py export-llama-args` produces
 a report-only JSON manifest with the resolved GGUF path, concrete start
@@ -136,6 +137,32 @@ JSON configuration remains an LM Studio-only runtime artifact.
 The current build accepts the relevant settings as CLI options but rejects
 `mmap` when it appears in a models preset. The generated preset therefore
 does not put `mmap` in `[*]` until the installed preset parser supports it.
+
+### 2.1.3 Field authority during synchronization
+
+The Registry is not a copy of every local file. It stores reviewed benchmark
+policy and the selected runtime values consumed by providers. Synchronization
+reads several sources, but each field has one defined authority:
+
+| Field or data                  | Authoritative source                           | Synchronization rule                                                                |
+| ------------------------------ | ---------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Model identity and eligibility | Registry key plus exact local identity         | Match publisher/model/quant; report ambiguity instead of guessing.                  |
+| Main GGUF path and byte size   | Resolved main GGUF file on disk                | Use the main file stat; exclude `mmproj` and LMS aggregate size.                    |
+| Technical facts and limits     | GGUF header and filename                       | Read-only: architecture, quant, native context, `max_experts`.                      |
+| Tested runtime settings        | Active LMS config after a real test            | Propose context, offload, K/V cache, unified KV, experts; import explicitly.        |
+| MoE expert counts              | GGUF maximum plus tested LMS value             | Keep fixed `max_experts`; store selected runtime value as `experts`.                |
+| Sampling values                | Official model card or documentation           | Import sourced categories only; leave missing or conflicting values unresolved.     |
+| Benchmark and prompt policy    | Registry plus blueprint/template files         | Registry holds policy; blueprint and Jinja files hold prompt content.               |
+| LMS prompt fields              | Project blueprint and templates                | Fill only missing `promptTemplate`; never import GUI prompt text.                   |
+| Parallel benchmark slots       | Runner rule plus provider capability           | Use Sample Size rule and provider cap; ignore GUI parallel-session settings.        |
+| llama.cpp model sections       | Registry, resolved GGUF, and test evidence     | Export model sections; preserve user-owned `config.ini` and preset `[*]`.           |
+
+LM Studio settings are evidence of a user's tested choice, not the ongoing
+source for benchmark execution. After an explicit import, `model_registry.yaml`
+is the value used by the runner and exported presets. A disagreement must be
+shown as a proposed field-level change with its source; a missing or ambiguous
+source must not silently produce a guessed value. The main model GGUF size is
+distinct from LM Studio's aggregate size when the model also has a projector.
 
 ### 2.2 Canonical model identity
 
@@ -237,7 +264,34 @@ model instead of associating it with the main language-model GGUF. The
 benchmark-side inventory filter checks all available identity fields, so a
 projector remains auxiliary even when an inventory record omits its path.
 
-### 3.2 The three pipeline modes
+### 3.2 Public registry command surface
+
+The routine interface is intentionally limited to a small set of
+workflow-level commands:
+
+~~~text
+py -3.12 src\registry_tool.py status
+py -3.12 src\registry_tool.py sync
+py -3.12 src\registry_tool.py sync --import-lms-settings
+py -3.12 src\registry_tool.py full
+py -3.12 src\registry_tool.py validate
+py -3.12 src\registry_tool.py preset "C:\Users\<user>\.config\llama.cpp\preset.ini" --merge-existing
+py -3.12 src\registry_tool.py quarantine-missing
+~~~
+
+`status` is read-only. `sync` uses a shared model/config inventory and prints
+field-level LM Studio proposals while updating deterministic Registry-owned
+facts. `--import-lms-settings` is an explicit write opt-in for valid,
+unambiguous local values; conflicting Configs and values exceeding GGUF-owned
+context/expert limits are never applied. `full` adds missing prompt-template
+maintenance, prompt preview, and validation. It does not write assembled
+system prompts. `preset` derives local model sections from the Registry while
+preserving the target INI's global and manually maintained sections.
+`quarantine-missing` is preview-only unless `--apply` is supplied. Specialist
+maintenance commands remain available through `registry_tool.py advanced
+<command>`; old command names continue to work as compatibility aliases.
+
+### 3.3 The three pipeline modes (compatibility aliases)
 
 The commands share names but have different scopes.
 
@@ -327,13 +381,15 @@ pipeline sync can change more Registry fields than direct sync.
 It does not run prompt preview or validation and it does not apply the
 blocking drift exit rule.
 
-#### pipeline full
+#### full (legacy spelling: pipeline full)
 
 ~~~text
-py -3.12 src\registry_tool.py pipeline full
+py -3.12 src\registry_tool.py full
 ~~~
 
-pipeline full performs pipeline sync and then:
+`full` is the concise public spelling for the same operation as the older
+`pipeline full` command. Both spellings route to the same workflow and accept
+the same flags. The full workflow performs synchronization and then:
 
 1. reports non-installed Registry models in quarantine dry-run mode;
 2. classifies Registry entries and fills missing LM Studio `promptTemplate` fields;
@@ -357,6 +413,26 @@ Registry-owned runtime value, such as MoE `experts`, remains blocking.
 missing or empty `promptTemplate` fields in matching LM Studio config JSONs
 and preserves populated values. System-prompt assembly remains preview-only;
 the separate GLM config patch is not run.
+
+These steps are intentionally previews or report-only unless explicitly
+applied. To move the proposed stale configs and Registry entries into
+quarantine, review the report and run:
+
+~~~text
+py -3.12 src\registry_tool.py quarantine-missing --apply
+~~~
+
+To write assembled system prompts instead of previewing them, run:
+
+~~~text
+py -3.12 src\assemble_blueprint.py assemble
+~~~
+
+LM Studio runtime settings are imported only when requested, for example:
+
+~~~text
+py -3.12 src\registry_tool.py sync --import-lms-settings
+~~~
 
 ### 3.3 Direct maintenance commands
 

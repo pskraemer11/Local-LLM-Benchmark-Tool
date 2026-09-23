@@ -8,7 +8,7 @@
  - Security considerations
 
 ## Umgebung
-**Betriebssystem:** Windows 11 Home (win32). Kein POSIX/UNIX.
+**Betriebssystem:** Windows 11 Home (win32). Kein POSIX/UNIX, aber WSL2.
 **Hardware und lokale LLM-Backends:** siehe zentrale Referenz
 `C:\Users\pskra\Python-Projekte\LOCAL-LLM-ENVIRONMENT.md`.
 
@@ -26,6 +26,7 @@
     `evalplus.gen.util.openai_request.make_auto_request` (gefixt 14.08. via
     `_WindowsSignalShim`). Bei neuen Abhängigkeiten/Codepfaden diese Stelle prüfen.
   - `os.fork`, POSIX-Signale, `/dev/...` etc. sind nicht verfügbar.
+  - hilfreich wäre LINUX Kompatibilität, insbesondere zu DEBIAN-Distributionen
 
 **Tests:** Bei neuen/geänderten Abhängigkeiten oder Codepfaden Kompatibilität mit Windows und python 3.12 testen (import + Smoke-Test),
   nicht nur logisch prüfen.
@@ -58,6 +59,11 @@
 - Blog: https://lmstudio.ai/blog
 - Lokale Referenz mit Parametertabellen: `doc-git/Developer-Docs/LM-Studio-API-References.md`
 - Hugging Face Modelle: https://huggingface.co/models (Zugriff via HF-MCP-Tool `hf-mcp-server`, authenticated user `pskraemer11`)
+
+## Llama.cpp
+- Llama.cpp Projektseite: https://github.com/ggml-org/llama.cpp/
+- HuggingFace Model Card Metadata Interoperability Consideration: https://github.com/ggml-org/llama.cpp/wiki/HuggingFace-Model-Card-Metadata-Interoperability-Consideration
+- Obtaining and quantizing models: https://github.com/ggml-org/llama.cpp/blob/master/docs/models.md
 
 **Alternative Frameworks:**
 - Unsloth Studio**:  For the complete documentation index, see [llms.txt](https://unsloth.ai/docs/llms.txt).

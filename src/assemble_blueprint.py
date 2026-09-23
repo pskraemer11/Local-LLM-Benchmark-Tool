@@ -242,20 +242,24 @@ def _find_all_configs_for_registry_key(
     return matched
 
 
-def find_registry_key_for_config(
+def find_registry_matches_for_config(
     config_norm: str,
     registry_sorted: list[tuple[str, str]],
     config: dict[str, Any] | None = None,
-) -> str | None:
-    """Find the best matching registry key for a config name.
+) -> list[str]:
+    """Return all Registry keys matching at the strongest matching level.
 
     Multi-level matching (mirrors the existing logic in cmd_configs + _strip_quant):
     1. Exact match
     2. Config starts with registry key + hyphen
     3. Registry key ends with hyphen + config
     4. Broad match (config vs broad registry key)
+
+    Results preserve the Registry sort order. Callers that need a safe import
+    can reject a tie instead of silently choosing the first candidate.
     """
     candidates = registry_sorted
+    config_quant: str | None = None
     if config is not None:
         config_publisher = str(config.get("publisher", "")).strip().lower()
         config_quant = _config_quant(config)
@@ -269,24 +273,94 @@ def find_registry_key_for_config(
             filtered.append((rn2, rnk))
         candidates = filtered
 
-    for rn2, rnk in candidates:
-        if config_norm == rn2:
-            return rnk
-    for rn2, rnk in candidates:
-        if config_norm.startswith(rn2 + "-"):
-            return rnk
-    for rn2, rnk in candidates:
-        if rn2.endswith("-" + config_norm):
-            return rnk
+        # A concrete config quant is more authoritative than an unknown
+        # ``@?`` Registry placeholder (or an unqualified legacy key). Prefer
+        # the concrete variant when one is present, while retaining the broad
+        # fallback for registries that have not learned the quant yet.
+        if config_quant:
+            exact_quant = [
+                item for item in candidates if _registry_quant(item[1]) == config_quant
+            ]
+            if exact_quant:
+                candidates = exact_quant
+
+    tiers = (
+        [rnk for rn2, rnk in candidates if config_norm == rn2],
+        [rnk for rn2, rnk in candidates if config_norm.startswith(rn2 + "-")],
+        [rnk for rn2, rnk in candidates if rn2.endswith("-" + config_norm)],
+    )
+    for matches in tiers:
+        if matches:
+            matches = _prefer_canonical_registry_matches(matches)
+            unique_matches: list[str] = []
+            for match in matches:
+                if match not in unique_matches:
+                    unique_matches.append(match)
+            return unique_matches
     # Broad match: strip quant, variant and format markers symmetrically from
     # both sides. Config directories such as ``...-QAT-NVFP4-GGUF`` must
     # match ``...-qat@nvfp4`` without relying on a publisher-specific alias.
     config_broad = normalize_for_config(config_norm)
-    for rn2, rnk in candidates:
-        rn2_clean = normalize_for_config(rn2)
-        if config_broad == rn2_clean:
-            return rnk
-    return None
+    broad_matches = [
+        rnk for rn2, rnk in candidates if config_broad == normalize_for_config(rn2)
+    ]
+    broad_matches = _prefer_canonical_registry_matches(broad_matches)
+    broad_unique_matches: list[str] = []
+    for match in broad_matches:
+        if match not in broad_unique_matches:
+            broad_unique_matches.append(match)
+    return broad_unique_matches
+
+
+def _prefer_canonical_registry_matches(matches: list[str]) -> list[str]:
+    """Collapse spelling aliases without merging distinct quant variants."""
+    if len(matches) < 2:
+        return matches
+
+    quant_values = {_registry_quant(key) for key in matches}
+    if len(quant_values) == 1:
+        quant = next(iter(quant_values))
+        if quant:
+            quant_suffix = normalize_model_name(quant)
+            canonical = [
+                key
+                for key in matches
+                if not normalize_model_name(key.split("/", 1)[-1].split("@", 1)[0]).endswith(
+                    f"-{quant_suffix}"
+                )
+            ]
+            if canonical:
+                matches = canonical
+
+    # Format-only suffixes such as ``-GGUF`` normalize away in model
+    # identities. If matching keys then have the same normalized model and
+    # quant, prefer the shorter canonical spelling. This also resolves flat
+    # configs without a quant while preserving real q4/q5 ambiguities.
+    normalized_identities = {
+        (
+            normalize_model_name(key.split("/", 1)[-1].split("@", 1)[0]),
+            _registry_quant(key),
+        )
+        for key in matches
+    }
+    if len(normalized_identities) == 1:
+        shortest_length = min(len(key.split("/", 1)[-1].split("@", 1)[0]) for key in matches)
+        return [
+            key
+            for key in matches
+            if len(key.split("/", 1)[-1].split("@", 1)[0]) == shortest_length
+        ]
+    return matches
+
+
+def find_registry_key_for_config(
+    config_norm: str,
+    registry_sorted: list[tuple[str, str]],
+    config: dict[str, Any] | None = None,
+) -> str | None:
+    """Return the first best match for compatibility with existing callers."""
+    matches = find_registry_matches_for_config(config_norm, registry_sorted, config)
+    return matches[0] if matches else None
 
 
 def classify_reasoning(

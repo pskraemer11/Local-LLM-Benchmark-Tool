@@ -6,6 +6,25 @@ Hinweise:
 - Stand: 06.08.2026 — umgezogen aus §20 der `doc-git/Architecture, Flow & ChangeLog_en.md` (dort nur noch Verweis).
 - Commit-Hashes beziehen sich auf `main`.
 
+## Registry-Synchronisierung in drei Phasen (23.09.2026)
+
+| Date | Change |
+| ---- | ------ |
+| 23.09. | `src/registry_tool.py`, `tests/test_registry_tool.py`, `C:\Users\pskra\.config\llama.cpp\preset.ini` | **FIX:** Preset-Auflösung folgt nun für lokale Registry-Modelle auch den GGUF-Repository-Aliasen aus LM Studios `model.yaml` und wählt die Datei nur bei passender Quantisierung. `essentialai/rnj-1@q8_0` wird so auf das installierte `rnj-1-instruct-Q8_0.gguf` aufgelöst; zwei F2LLM-Einträge bleiben mangels lokaler GGUF korrekt als Warnungen bestehen. |
+| 23.09. | `doc-git/model_registry.yaml`, `C:\Users\pskra\.config\llama.cpp\preset.ini` | **DATA FIX:** Veraltete FreedomAISVR- und Muse-Glimmer-Alias-Einträge entfernt; Qwen-Datei mit Q5_K_S-Quantisierung unter einer eigenen, korrekten Registry-ID bewahrt. Abgeleitetes Preset enthält nur noch die konkreten Modell-/Quant-Identitäten. |
+| 23.09. | `src/assemble_blueprint.py`, `src/registry_tool.py`, `tests/test_assemble_blueprint.py`, `tests/test_registry_tool.py`, `README.md`, `doc-git/Architecture, Flow & ChangeLog_en.md` | **FIX/DOC:** Config matching now prefers an exact concrete quant and the canonical Registry key over unknown-quant, repeated-quant, and format-suffix aliases. Explicit LM Studio imports can therefore reach the intended entry instead of being silently withheld as ambiguous. `full` prints explicit write commands for quarantine and prompt assembly; its equivalence to legacy `pipeline full` is documented and tested. |
+| 23.09. | `src/registry_tool.py`, `src/assemble_blueprint.py` | **SYNC:** Gemeinsamer Snapshot fuer Registry, LM-Studio-Inventar und Configs; GGUF-Dateisuche lazy und wiederverwendbar. LM-Studio-Werte werden als feldweise Vorschlaege mit Quellpfad gemeldet; mehrdeutige Matches, widerspruechliche Configs sowie Kontext-/Experts-Werte oberhalb der GGUF-Grenze werden nicht uebernommen. Import ist explizit opt-in. Haupt-GGUF-Dateigroesse wird unabhaengig von LMS-Sammelgroessen ermittelt. |
+| 23.09. | `src/registry_tool.py` | **SAFETY:** `quarantine-missing` ist Vorschau per Default und schreibt nur mit `--apply`; Config-Moves und Registry-Backup werden geplant und bei Fehlern soweit moeglich zurueckgerollt. Preset-Export ersetzt veraltete generierte Modellbloecke, behaelt aber globale und manuelle INI-Bloecke. Template-Sync verarbeitet nur aktive, eindeutig zugeordnete Configs und schreibt atomar. Web-Sampling bleibt explizit. |
+| 23.09. | `src/registry_tool.py`, `README.md`, `PLANUNG.md`, `doc-git/Architecture, Flow & ChangeLog_en.md` | **CLI/DOC:** Routineoberflaeche auf `status`, `sync`, `full`, `validate`, `preset` und `quarantine-missing` reduziert. Spezial- und alte Befehle bleiben ueber `advanced` sowie als direkte Kompatibilitaetsnamen erreichbar. |
+| 23.09. | `src/registry_tool.py`, `tests/test_registry_tool.py` | **PERFORMANCE/TEST:** Gemeinsamer GGUF-Metadatenleser liest jetzt auch `general.architecture`, ohne den tensorreichen `GGUFReader` parallel auf grosse Modelldateien anzuwenden; der Sync teilt den Header-Snapshot. Der speicherintensive Lauf wurde bei rund 6 GB abgebrochen; der anschliessende Metadatenlauf schloss erfolgreich ab. |
+| 23.09. | `doc-git/model_registry.yaml`, `C:\Users\pskra\.config\llama.cpp\preset.ini`, `PLANUNG.md`, `README.md` | **SYNC/VERIFY:** 23 eindeutige, getestete LM-Studio-Runtime-Werte importiert; drei mehrdeutige Modellidentitaeten blieben unveraendert. `preset.ini` mit 66 lokalen Modellsektionen aktualisiert und manuelle Defaults erhalten; 3 Modelle ohne lokale GGUF-Datei gemeldet. Registry-CI: 0 Blocker, 0 Hinweise; 229 fokussierte Tests und Ruff bestanden. |
+
+## Registry-Synchronisierung: verbindliche Feldhoheit (22.09.2026)
+
+| Date | Change |
+| ---- | ------ |
+| 22.09. | `README.md`, `doc-git/Architecture, Flow & ChangeLog_en.md`, `PLANUNG.md` | **DOC/POLICY:** Die Quellenhoheit pro Registry-Feld und die erlaubte Richtung der Synchronisierung sind verbindlich dokumentiert. Die Matrix trennt GGUF-Fakten, getestete LM-Studio-Laufzeitwerte, Benchmark-Regeln und abgeleitete llama.cpp-Presets. Die Umsetzung bleibt in drei Phasen getrennt. |
+
 ## Lokaler Commit-Checkpoint (22.09.2026)
 
 | Date | Change |

@@ -1,6 +1,6 @@
 # Planung: Prozessisolation, direkte llama.cpp-Migration und Benchmark-Abnahme
 
-Status: 2026-09-22. Prioritaet: reproduzierbare Backend-Abnahme und Score-Kompatibilitaet.
+Status: 2026-09-23. Prioritaet: reproduzierbare Backend-Abnahme und Score-Kompatibilitaet.
 
 ## Aktueller Gesamtstatus
 
@@ -20,9 +20,86 @@ Worker-/Manifest-Vergleiche noch aus.
   noch nicht vollstaendig abgenommen.
 - `[~]` Der fruehere LM-Studio-SampleSize-5-Lauf ist gesichert bzw. pausiert;
   er wird erst nach der direkten Backend-Abnahme fortgesetzt oder neu geplant.
-- `[ ]` Aktueller blockierender Registry-Check: Bei
-  `mudler/gemma-4-26b-a4b-it-apex` fehlen weiterhin der getestete
-  `experts`-Laufzeitwert und die Quantisierung.
+- `[x]` Gemma APEX ist mit dem live getesteten Wert `experts: 36` und dem
+  Registry-Schluessel `mudler/gemma-4-26b-a4b-it-apex@mini` erfasst;
+  `registry_tool.py validate --ci` meldete danach 0 Blocker und 0 Hinweise.
+
+## Naechste Schritte
+
+Die folgenden Punkte sind die noch ausstehenden Arbeiten. Die ersten fuenf
+bilden die Abnahme des direkten llama.cpp-Backends; erst danach soll der grosse
+Benchmarklauf beginnen.
+
+1. LM Studio und llama.cpp mit gleichen Modellen, Aufgaben und Einstellungen
+   vergleichen und technische Unterschiede festhalten.
+2. GLM-4.7 zusaetzlich im Streamingbetrieb testen und pruefen, ob Antwort,
+   Reasoning und Abschlussstatus vollstaendig ankommen.
+3. Fehler und Warnungen aus Runner, Benchmark-Pipelines und llama.cpp-Logs
+   einzeln untersuchen und ihre Bedeutung fuer die Ergebnisse dokumentieren.
+4. Feste Aufgabenlisten fuer die Code-Benchmarks erstellen und die isolierten
+   Worker mit genau denselben Aufgaben gegenpruefen.
+5. Die Antwortqualitaet mehrerer geeigneter Modelle fuer Coding, Mathematik
+   und agentische Aufgaben auswerten; kurze Funktionstests reichen dafuer nicht.
+6. Nach erfolgreicher Abnahme den pausierten Lauf mit `SampleSize=5` direkt
+   ueber llama.cpp fortsetzen oder als neuen, dokumentierten Lauf planen.
+7. Danach Ergebnisse, Vergleichbarkeit und Qualitaetsbaseline festhalten.
+
+Weitere, nicht blockierende Pflegepunkte sind die Qwen3.8-/Modellpflege, die
+vollstaendige Pruefung der Registry-Feldregeln, wiederholbare Exporttests fuer
+Modellfamilien, llama.cpp-Updatechecks und die Bereinigung des strengen mypy-
+Bestands. Details und Verifikationskriterien stehen in den jeweiligen
+Abschnitten weiter unten.
+
+### Registry-Synchronisierung vereinfachen
+
+Die Neugestaltung erfolgt bewusst in drei getrennten Phasen, damit Datenregeln,
+Schreibverhalten und Bedienung nicht gleichzeitig veraendert werden:
+
+1. [x] Verbindliche Feld- und Quellenmatrix in der Architektur-Dokumentation
+   festlegen und von der README aus verlinken.
+2. [x] Einen gemeinsamen Inventurbericht und daraus nachvollziehbare,
+   feldweise Aenderungsvorschlaege einfuehren; die sieben zuvor festgehaltenen
+   Architektur- und Sicherheitsbefunde schrittweise darin beheben:
+   - Registry, LM-Studio-Liste und Config-Dateien werden pro Lauf einmal
+     gelesen; der grosse GGUF-Dateibaum wird nur bei Bedarf einmal gescannt.
+   - Abweichungen werden feldweise mit Quelle, Ist-Wert, Vorschlag oder
+     Konflikt ausgewiesen; unklare Identitaeten und widerspruechliche Configs
+     werden nie automatisch gewaehlt.
+   - Config-Import bleibt standardmaessig ein Bericht; Schreiben benoetigt
+     `--import-lms-settings` bzw. den dokumentierten Spezialbefehl.
+   - Importierte Kontext- und Expertenwerte duerfen die GGUF-Obergrenzen nicht
+     ueberschreiten.
+   - `file_size_bytes` stammt ausschliesslich von der Haupt-GGUF-Datei, nicht
+     aus der groben LM-Studio-Groessenanzeige.
+   - `quarantine-missing` ist standardmaessig Vorschau; `--apply` plant Moves,
+     sichert Registry-Daten und rollt bei Schreibfehlern soweit moeglich zurueck.
+   - Sampling-Websuche ist nur explizit moeglich; Template-Sync nutzt aktive,
+     eindeutig zugeordnete Configs; Preset-Export ersetzt alte generierte
+     Abschnitte, behaelt aber globale und manuelle INI-Bloecke.
+3. [x] Nach stabilen Tests die sichtbaren Registry-Befehle auf
+   `status`, `sync`, `full`, `validate`, `preset` und `quarantine-missing`
+   vereinfachen. Spezialisierte und bisherige direkte Befehle bleiben als
+   Kompatibilitaetsschnittstelle unter `advanced` bzw. mit ihren alten Namen
+   erreichbar.
+
+Abschluss des Arbeitspakets am 23.09.2026: Die aktuellen LM-Studio-Configs
+wurden inventarisiert und als Feldvorschlaege geprueft. 23 eindeutige,
+unterstuetzte Runtime-Werte wurden explizit in die Registry importiert; ein
+neues Qwen3.8-APEX-Modell wurde mit unbekannter Quantisierung (`@?`) erfasst.
+Drei mehrdeutige Config-Identitaeten bleiben bewusst ohne Import, bis ihre
+Registry-Zuordnung eindeutig ist: FreedomAISVR Gemma QAT NVFP4, GGUF-org Muse
+Glimmer und Qwen3.5-9B. Der abschliessende Sync meldete keine weiteren
+Feldvorschlaege. `validate --ci` meldete 0 Blocker und 0 Hinweise.
+
+Das bestehende llama.cpp `preset.ini` wurde aus der Registry aktualisiert:
+66 lokale Modellsektionen, einschliesslich modell-/architekturspezifischer
+Experts-Overrides; drei Registry-Eintraege ohne lokale GGUF-Datei wurden
+uebersprungen und gemeldet. Die globalen Defaults und der manuelle
+`[gpt-oss-20b]`-Abschnitt blieben erhalten. Der Zieldatei-Abgleich gegen den
+vorher gesicherten Stand wurde vor dem Schreiben geprueft. Die gezielte Suite
+`test_registry_tool.py`, `test_registry_pipeline.py` und
+`test_assemble_blueprint.py` bestand mit 229 Tests; Ruff und die Registry-CI-
+Validierung bestanden ebenfalls.
 
 In dieser Datei bedeutet `[x]` abgeschlossen, `[~]` teilweise erledigt,
 bewusst zurueckgestellt oder noch mit einer offenen Teilabnahme und `[ ]`
@@ -139,9 +216,9 @@ Agentic-Benchmarks bleiben vorerst bei den vorhandenen Inspect-AI-Tools und dem 
   LLM-Inventur und Registry-Zuordnung herausfiltern; der Hauptlauf bleibt ein
   `qwen35moe`-Modell mit getrennt dokumentiertem Projektor.
 - [~] Qwen-Nachlauf und Top-Candidates-Neuauflage mit aktuellem Setup, vollstaendiger Modellabdeckung und korrekter Konsolidierung abschliessen.
-- [ ] Den fehlenden getesteten Laufzeitwert `experts` und die Quantisierung fuer
-  `mudler/gemma-4-26b-a4b-it-apex` aus einem realen LM-Studio-Test nachtragen;
-  bis dahin darf `validate --ci` diesen Eintrag nicht als gueltig melden.
+- [x] Den live getesteten Laufzeitwert `experts: 36` und die Quantisierung
+  `@mini` fuer `mudler/gemma-4-26b-a4b-it-apex` in die Registry uebernehmen;
+  die anschliessende Registry-Validierung meldete keine Blocker oder Hinweise.
 
 ### Provider-Architektur und Backend-Migration
 
@@ -199,8 +276,9 @@ model_registry.yaml + GGUF-Metadaten + Blueprint
 
 `registry_tool.py` soll deshalb nicht durch einen INI-Editor ersetzt werden.
 Stattdessen erhält es einen expliziten Exportpfad, beispielsweise
-`export-llama-preset` oder `export-llama-args`. Der Export ist reproduzierbar,
-prüfbar und darf keine stillen Rückschreibungen in die Registry auslösen.
+`preset` (mit dem Kompatibilitätsalias `export-llama-preset`) oder
+`export-llama-args`. Der Export ist reproduzierbar, prüfbar und darf keine
+stillen Rückschreibungen in die Registry auslösen.
 
 Für den zunächst geplanten Einzelprozess pro Modell werden modellabhängige
 Startargumente beziehungsweise ein Ein-Modell-Argumentmanifest bevorzugt.
@@ -289,10 +367,11 @@ Benchmarkpfads.
    und der separate Streamingtest bleiben Teil der offenen Abnahme.
 4. [ ] Für alle verwendeten Code-Benchmarks ein Task-Manifest erzeugen und die
    Worker-Kompatibilität mit identischen Aufgaben prüfen.
-5. [~] Fokussierte Registry-, Provider- und Runner-Tests sind als technische
-   Baseline dokumentiert. `registry_tool.py validate --ci` bleibt wegen des
-   oben genannten Gemma-Eintrags offen; Blueprint- und Gesamtvalidierung
-   müssen nach der Datenkorrektur erneut protokolliert werden.
+5. [x] Die Gemma-Registrykorrektur ist uebernommen. Der letzte Pre-Commit-
+   Prueflauf meldete `registry_tool.py validate --ci`: 0 Blocker, 0 Hinweise;
+   die fokussierte Registry-Suite bestand mit 112 Tests. Eine weitergehende
+   Blueprint-/Gesamtvalidierung bleibt nur dann erforderlich, wenn sich die
+   betreffenden Daten oder Codepfade erneut aendern.
 
 **Phase B – llama.cpp-Parametervertrag definieren**
 
@@ -317,7 +396,8 @@ Benchmarkpfads.
    Request-Defaults und Registry-Schlüssel erzeugen.
 3. [x] Ein `preset.ini` für den llama.cpp-Router erzeugen; dieses gilt
    als generiertes Artefakt und nicht als zweite editierbare Quelle. Der
-   Aufruf ist `py -3.12 src/registry_tool.py export-llama-preset [PATH]`.
+   öffentliche Aufruf ist `py -3.12 src/registry_tool.py preset [PATH]`;
+   `export-llama-preset` bleibt ein Kompatibilitätsalias.
 4. [x] Exportierte Artefakte mit Registry-Hash, llama.cpp-Version und Zeitstempel
    versehen.
 5. [~] Export-Tests für GLM-4.7, GPT-OSS, Gemma und ein normales Instruct-
@@ -423,10 +503,11 @@ Wert muss konfigurierbar bleiben.
   multimodale Hilfsartefakte behandelt. Für Millie ist der Hauptschlüssel
   `llmsforall/millie-35b-a3b-11gb@?` mit `experts: 64` und `max_experts: 256`
   dokumentiert; der Projektor bleibt separat.
-- Der aktuelle fokussierte Testlauf umfasst 233 bestandene Tests. Ruff und
-  Syntaxprüfungen der betroffenen Produktionspfade sind sauber. Der
-  verbleibende `validate --ci`-Fehler betrifft ausschließlich den noch nicht
-  dokumentierten Gemma-Expertenwert und die fehlende Quantisierung.
+- Ein frueherer fokussierter Testlauf mit 233 bestandenen Tests ist als
+  historischer Zwischenstand zu verstehen. Beim letzten Commit-Check bestanden
+  die fokussierten Registry-Tests mit 112 Tests; `validate --ci` meldete
+  0 Blocker und 0 Hinweise. Gemma APEX ist mit `experts: 36` und `@mini`
+  eingetragen. Die LM-Studio-/llama.cpp-Abnahme bleibt davon unabhaengig offen.
 
 ##### Ausgeschlossene WindowsApps-Installation
 
@@ -538,11 +619,11 @@ gezielt erneut validiert werden.
      gemeinsamen `LocalModelResolver` führen; die Benchmarkauswahl darf nicht
      von einer aktuellen LM-Studio-Serverliste abhängen.
    - [~] `registry_tool.py` so erweitern oder präzisieren, dass der Import von
-     LM-Studio-Testwerten für `context_length`, K-/V-Quantisierung, UKV und
-     MoE-`experts` explizit, nachvollziehbar und feldweise kontrolliert
-     erfolgt. Kontext- und Expertenwerte können bereits gezielt importiert
-     werden; die Gesamtprüfung der Feldhoheit und der noch offenen Gemma-Daten
-     steht aus.
+      LM-Studio-Testwerten für `context_length`, K-/V-Quantisierung, UKV und
+      MoE-`experts` explizit, nachvollziehbar und feldweise kontrolliert
+      erfolgt. Kontext- und Expertenwerte können bereits gezielt importiert
+      werden; die Gesamtpruefung der Feldhoheit fuer K-/V-Quantisierung, UKV
+      und providerabhaengige Werte steht noch aus. Die Gemma-Daten sind geklaert.
    - [~] Providerneutrale Registry-Felder von reinem LM-Studio-Runtimezustand
      trennen. Die Grundgrenze ist dokumentiert, die vollständige Feldmatrix
      für llama.cpp, LM Studio und künftige Provider bleibt zu prüfen. Nicht
