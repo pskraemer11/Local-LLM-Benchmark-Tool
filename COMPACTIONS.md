@@ -1594,3 +1594,24 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 - `src/field_owner.py`: Feldhoheit für `llama_cpp` ergänzt.
 - `tests/`: veraltete Erwartungen und Testisolation korrigiert.
 - `pre_review_checks.ps1`, `.githooks/pre_commit.ps1`, `.githooks/pre_push.ps1`: sichere Temp-Pfade.
+
+=============== Compaction 23.09.2026 / Push abgeschlossen ================
+## Objective
+- Den Regression-Fix und die nachhaltige Windows-Temp-Pfad-Korrektur auf
+  `origin/main` veröffentlichen.
+
+## Work State
+### Completed / Active / Blocked
+- Completed: Commit `dc9070cb` erstellt und erfolgreich nach `origin/main`
+  gepusht. Pre-Commit, vollständige Pytest-Suite, Registry-Validierung, Ruff,
+  GGUF-Abgleich und fokussierter mypy-Check bestanden.
+- Non-blocking: zwei vorhandene LM-Studio-Konfigurationen melden weiterhin
+  `numParallelSessions=1` statt der Projektpolicy 4.
+- Clean: Git-Arbeitsbaum und Remote-Branch sind synchron.
+
+## Next Move
+1. Die pausierten Benchmark-/Kompatibilitätsarbeiten fortsetzen.
+2. Die beiden LM-Studio-Parallelitätswarnungen bei Gelegenheit fachlich prüfen.
+
+## Relevant Files
+- `dc9070cb`: Regressionstests, Feldhoheit und sichere Hook-Temp-Pfade.

@@ -13,6 +13,7 @@ Hinweise:
 | 23.09. | `tests/test_benchmark_config.py`, `tests/test_model_identity.py`, `tests/test_provider_architecture.py`, `tests/test_sampling_research.py`, `src/field_owner.py` | **FIX/TEST:** Sampling-Erwartungen an die aktuelle Registry-SSOT angepasst, `llama_cpp`-Feldhoheit ergänzt, `max_experts` als GGUF-Auto-Fix-Feld abgedeckt, Registry-Testcache isoliert und unbekannte Quantisierung korrekt als `@?` geprüft. |
 | 23.09. | `pre_review_checks.ps1`, `.githooks/pre_commit.ps1`, `.githooks/pre_push.ps1` | **FIX:** Pytest-Basisverzeichnisse liegen jetzt unter dem Windows-System-Temp statt im Repository, damit Hooks und Review-Gates nicht an Workspace-Dateirechten scheitern. |
 | 23.09. | `src/providers/__init__.py` | **LINT:** Provider-Imports in Ruff-konforme Reihenfolge gebracht. |
+| 23.09. | `COMPACTIONS.md` | **CHECKPOINT:** Commit `dc9070cb` mit bestandenen blockierenden Gates nach `origin/main` gepusht; zwei LM-Studio-Parallelitätswarnungen bleiben advisory. |
 
 ## Registry-Synchronisierung in drei Phasen (23.09.2026)
 
