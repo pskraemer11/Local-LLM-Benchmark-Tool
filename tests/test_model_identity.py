@@ -261,6 +261,7 @@ class TestFieldOwnership:
             "arch",
             "architecture_family",
             "file_size_bytes",
+            "max_experts",
         }
 
     def test_config_fields_report_only(self) -> None:

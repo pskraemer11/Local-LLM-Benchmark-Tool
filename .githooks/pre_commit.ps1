@@ -11,7 +11,8 @@ Set-Location -LiteralPath $repoRoot
 
 $env:PYTHONUTF8 = "1"
 $env:PYTHONIOENCODING = "utf-8"
-$commitPytestRoot = Join-Path $repoRoot (".pytest-temp\precommit-{0}" -f [Guid]::NewGuid().ToString("N"))
+$commitPytestParent = [System.IO.Path]::GetTempPath()
+$commitPytestRoot = Join-Path $commitPytestParent ("benchmarks-commit-pytest-{0}-{1}" -f $PID, [Guid]::NewGuid().ToString("N"))
 $commitPytestBase = Join-Path $commitPytestRoot "base"
 New-Item -ItemType Directory -Path $commitPytestRoot -Force | Out-Null
 

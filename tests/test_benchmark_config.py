@@ -75,13 +75,12 @@ class TestRegistryBackedSampling:
         assert "repetition_penalty" not in thinking
 
     def test_granite_registry_block(self):
-        cfg = get_model_config("ibm-granite/granite-4.1-8b", category="coding")
-        assert (cfg["temperature"], cfg["top_p"]) == (0.001, 1.0)
+        cfg = get_model_config("ibm-granite/granite-4.2-8b", category="coding")
+        assert (cfg["temperature"], cfg["top_p"]) == (1.0, 0.95)
         assert cfg["_source"] == "registry-sampling"
 
     def test_gpt_oss_registry_block(self, mocker):
-        registry = dict(bc._load_quant_registry())
-        registry["openai/gpt-oss-20b@mxfp4"] = _gpt_oss_test_entry()
+        registry = {"openai/gpt-oss-20b@mxfp4": _gpt_oss_test_entry()}
         mocker.patch.object(bc, "_load_quant_registry", return_value=registry)
         cfg = get_model_config("openai/gpt-oss-20b", category="math")
         assert (cfg["temperature"], cfg["top_p"]) == (1.0, 1.0)
@@ -119,9 +118,15 @@ class TestRegistryBackedSampling:
 
     def test_variant_suffix_still_matches_row(self):
         # -qat/-ud/-imatrix-Suffixe werden im normalisierten Key gestrippt
-        for key in ("google/gemma-4-12b-it-qat", "unsloth/gemma-4-26b-a4b-it"):
-            cfg = get_model_config(key, category="agentic")
-            assert (cfg["temperature"], cfg["top_p"]) == (1.0, 0.95)
+        cfg = get_model_config("google/gemma-4-12b-it-qat", category="agentic")
+        assert (cfg["temperature"], cfg["top_p"]) == (1.0, 0.95)
+        assert cfg["_source"] == "registry-sampling"
+
+        # The unsloth 26B entry has no sampling profile and therefore falls
+        # back to the agentic category defaults rather than borrowing Gemma's.
+        fallback = get_model_config("unsloth/gemma-4-26b-a4b-it", category="agentic")
+        assert (fallback["temperature"], fallback["top_p"]) == (0.6, 0.95)
+        assert fallback["_source"] == "category-default"
 
     def test_autoround_repack_matches_row(self):
         cfg = get_model_config("intel/qwen3-30b-a3b-instruct-2507-q2ks-mixed-autoround", category="coding")
@@ -153,10 +158,10 @@ class TestRegistrySampling:
         assert (cfg["temperature"], cfg["top_p"]) == (0.6, 0.95)
         assert cfg["_source"] == "registry-sampling"
 
-    def test_registry_glm_46v(self):
+    def test_unresolved_registry_math_uses_category_default(self):
         cfg = get_model_config("zai-org/glm-4.6v-flash", category="math")
-        assert (cfg["temperature"], cfg["top_p"]) == (0.8, 0.6)
-        assert cfg["_source"] == "registry-sampling"
+        assert (cfg["temperature"], cfg["top_p"]) == (0.7, 0.95)
+        assert cfg["_source"] == "category-default"
 
     def test_quant_suffix_matches_registry_block(self):
         cfg = get_model_config("qwen/qwen3-14b@q6_k", category="math")
@@ -213,8 +218,7 @@ class TestThinkingRuns:
         assert cfg["_source"] == "registry-sampling"
 
     def test_thinking_gpt_oss_row(self, mocker):
-        registry = dict(bc._load_quant_registry())
-        registry["openai/gpt-oss-20b@mxfp4"] = _gpt_oss_test_entry()
+        registry = {"openai/gpt-oss-20b@mxfp4": _gpt_oss_test_entry()}
         mocker.patch.object(bc, "_load_quant_registry", return_value=registry)
         cfg = get_model_config("openai/gpt-oss-20b", category="coding", is_thinking_enabled=True)
         assert (cfg["temperature"], cfg["top_p"]) == (1.0, 1.0)
@@ -257,8 +261,8 @@ class TestLmsJsonMerge:
             "enable_thinking": True,
         }
         mocker.patch.object(bc, "_lms_generation_config", return_value=lms)
-        cfg = get_model_config("ibm-granite/granite-4.1-8b", category="coding")
-        assert (cfg["temperature"], cfg["top_p"]) == (0.001, 1.0)  # Registry-Zelle
+        cfg = get_model_config("ibm-granite/granite-4.2-8b", category="coding")
+        assert (cfg["temperature"], cfg["top_p"]) == (1.0, 0.95)  # Registry-Zelle
         assert cfg["top_k"] == 40
         assert cfg["min_p"] == 0.1
         assert cfg["enable_thinking"] is True

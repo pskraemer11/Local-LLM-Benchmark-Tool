@@ -436,8 +436,8 @@ def test_cmd_add_persists_researched_sampling_without_touching_lms_configs(
         research_web=True,
     )
 
-    entry = rt.load_registry(registry_path)["example/example-coder-7b"]
-    assert result["added"] == ["example/example-coder-7b"]
+    entry = rt.load_registry(registry_path)["example/example-coder-7b@?"]
+    assert result["added"] == ["example/example-coder-7b@?"]
     assert entry["sampling"]["coding"]["temperature"] == 0.7
     assert entry["sampling"]["sampling_sources"] == ["https://huggingface.co/example/model"]
 

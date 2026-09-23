@@ -87,6 +87,10 @@ FIELD_OWNERSHIP: dict[str, FieldRule] = {
         "registry", "registry", False,
         description="Provider-spezifische Reasoning-Kanalpolicy, z. B. llama.cpp deepseek",
     ),
+    "llama_cpp": FieldRule(
+        "registry", "registry", False,
+        description="Provider-spezifische llama.cpp-Laufzeitargumente und Overrides",
+    ),
     # ── Registry (menschliche Entscheidung) → Config, nur Pruefung ─
     "blueprint": FieldRule(
         "registry", "config", False, description="Blueprint-Auswahl (menschlich)"

@@ -186,6 +186,7 @@ def test_facade_delegates_model_load_to_non_lms_provider(monkeypatch: pytest.Mon
 def test_model_manager_separates_tabby_api_name_from_registry_key(monkeypatch: pytest.MonkeyPatch) -> None:
     models = [{"key": "google_gemma-4-26b-a4b-it", "model_identifier": "google_gemma-4-26b-a4b-it"}]
     registry = {"unsloth/gemma-4-26b-a4b-it@iq3_s": {}}
+    monkeypatch.setattr(model_manager, "_MODEL_REGISTRY", None)
     monkeypatch.setattr(model_manager, "_load_registry_data", lambda: registry)
 
     resolved = model_manager._attach_registry_identity(models)

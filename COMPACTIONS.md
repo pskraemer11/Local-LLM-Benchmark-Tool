@@ -1558,3 +1558,39 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 - `src/registry_tool.py`: Hub-Quellenauflösung für lokale GGUF-Dateien.
 - `tests/test_registry_tool.py`: Regressionstest für den RNJ-1-Repository-Alias.
 - `doc-git/model_registry.yaml`, `CHANGELOG.md`, `PLANUNG.md`: bereinigter und dokumentierter Projektstand.
+
+=============== Compaction 23.09.2026 / Regression-Fix und Push ================
+## Objective
+- Die im vollständigen Testlauf gefundenen zehn Fehler und der Ruff-Befund
+  wurden behoben und der aktuelle Arbeitsstand wird committed und gepusht.
+
+## Important Details
+- Die Tests erwarteten teilweise veraltete Modelle oder Samplingwerte. Sie
+  verwenden jetzt die aktuelle Registry-SSOT: Granite 4.2, bestätigte bzw.
+  bewusst nicht bestätigte Samplingprofile und den `@?`-Schlüssel für eine
+  unbekannte Quantisierung.
+- `llama_cpp` ist jetzt als Registry-Feld mit eigener Feldhoheitsregel erfasst;
+  `max_experts` bleibt ein automatisch aus GGUF ableitbarer Architekturwert.
+- Der globale `ModelRegistry`-Resolver wird im Provider-Test zurückgesetzt, damit
+  Tests nicht voneinander abhängen.
+- Pytest-Basisverzeichnisse der Review- und Pre-Push-Hooks liegen unter dem
+  Windows-System-Temp und werden dort nach dem Lauf bereinigt. Dadurch wird der
+  Repository-Arbeitsbaum nicht mehr durch Testordner belastet.
+
+## Work State
+### Completed / Active / Blocked
+- Completed: 1.075 Pytest-Tests, Ruff, fokussierter mypy-Check,
+  Registry-Validierung und PowerShell-Syntaxprüfung bestanden.
+- Active: Commit und Push mit den verbindlichen Hooks.
+- Blocked: kein bekannter technischer Blocker; eine separate Review-Verbindung
+  wurde durch den vorherigen Turn-Abbruch nicht abgeschlossen.
+
+## Next Move
+1. Staged-Diff prüfen und Pre-Commit-Hook ausführen.
+2. Commit erstellen und den Pre-Push-Hook mit vollständiger Testsuite ausführen.
+3. Remote-Stand und Arbeitsbaum nach dem Push verifizieren.
+
+## Relevant Files
+- `src/field_owner.py`: Feldhoheit für `llama_cpp` ergänzt.
+- `tests/`: veraltete Erwartungen und Testisolation korrigiert.
+- `pre_review_checks.ps1`, `.githooks/pre_commit.ps1`, `.githooks/pre_push.ps1`: sichere Temp-Pfade.
