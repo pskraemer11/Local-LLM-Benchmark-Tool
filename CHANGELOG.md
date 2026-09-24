@@ -22,6 +22,12 @@ Hinweise:
 | ---- | ------ |
 | 24.09. | `CHANGELOG.md`, `COMPACTIONS.md` | **WORKFLOW:** Refactoring commit `a1c34b17` erstellt; Pre-Commit-Hook mit 140 fokussierten Registry-Tests bestanden. Der Push und sein Pre-Push-Gate folgen unmittelbar. Siehe Compaction `24.09.2026 / 19:41`. |
 
+## Refactoring erfolgreich gepusht (24.09.2026)
+
+| Date | Change |
+| ---- | ------ |
+| 24.09. | `origin/main` | **WORKFLOW:** `75820a10` erfolgreich nach GitHub gepusht. Pre-Push bestand mit 1.086 Tests, Registry-Validierung ohne Blocker, Ruff, GGUF-Abgleich und fokussiertem MyPy; zwei bekannte LM-Studio-Parallelitaetswarnungen bleiben advisory. Siehe Compaction `24.09.2026 / 19:44`. |
+
 ## GitHub-Actions auf v7 aktualisiert (24.09.2026)
 
 | Date | Change |

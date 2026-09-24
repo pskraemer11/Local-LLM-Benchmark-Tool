@@ -1782,3 +1782,39 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 - `CHANGELOG.md`: Verweis auf diesen Commit-/Push-Checkpoint.
 - `COMPACTIONS.md`: Historischer Zustand unmittelbar vor dem Push.
 - `AGENTS.md`: Bewusst erhaltene, nicht zum Refactor gehoerende lokale Aenderung.
+
+=============== Compaction 24.09.2026 / 19:44 ================
+## Objective
+- Den abgeschlossenen Refactor einschliesslich Dokumentations- und
+  Compaction-Nachweis veroeffentlichen.
+
+## Important Details
+- Commit `75820a10` (`refactor: harden model identity synchronization`) ist
+  erfolgreich nach `origin/main` gepusht.
+- Der verbindliche Pre-Push-Hook bestand mit der vollstaendigen isolierten
+  Pytest-Suite (**1.086 passed**), `validate --ci` ohne Blocker, Ruff,
+  GGUF-Abgleich mit 54 geprueften Eintraegen und fokussiertem MyPy fuer die
+  relevanten Push-Dateien.
+- Der Review-Gate meldete nur den bekannten publisherlosen
+  Qwen/ByteShape-Hinweis sowie zwei nicht blockierende LM-Studio-Warnungen
+  (`numParallelSessions=1` statt 4 bei Millie und Gemma).
+- Die separate, bereits vor dem Auftrag vorhandene Korrektur in `AGENTS.md`
+  bleibt lokal uncommittet und wurde nicht gepusht.
+
+## Work State
+### Completed / Active / Blocked
+- Completed: Refactor, Commit, Pre-Commit, Pre-Push und Push nach `origin/main`.
+- Active: kein weiterer Schritt aus dem aktuellen Auftrag.
+- Blocked: kein technischer Blocker; Live-Backend-Tests bleiben bewusst vertagt.
+
+## Next Move
+1. In einem separaten Auftrag kontrollierte Live-Tests mit LM Studio und
+   llama.cpp/`llama-server.exe` ausfuehren.
+2. Den publisherlosen Qwen/ByteShape-Hinweis durch explizite Publisherwahl
+   oder eine dokumentierte Aliasentscheidung bereinigen.
+3. Die beiden LM-Studio-Parallelitaetswarnungen fachlich pruefen.
+
+## Relevant Files
+- `CHANGELOG.md`: Nachweis des erfolgreichen Pushes von `75820a10`.
+- `COMPACTIONS.md`: dieser Nach-Push-Checkpoint.
+- `AGENTS.md`: verbleibende lokale, nicht zum Auftrag gehoerende Aenderung.
