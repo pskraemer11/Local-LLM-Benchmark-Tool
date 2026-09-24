@@ -6,6 +6,20 @@ Hinweise:
 - Stand: 06.08.2026 — umgezogen aus §20 der `doc-git/Architecture, Flow & ChangeLog_en.md` (dort nur noch Verweis).
 - Commit-Hashes beziehen sich auf `main`.
 
+## Architektur-Datenvertrag und deterministischer Abgleich dokumentiert (24.09.2026)
+
+| Date | Change |
+| ---- | ------ |
+| 24.09. | `doc-git/Architecture, Flow & ChangeLog_en.md` | **DOC/ARCHITECTURE:** Datenstruktur und Abgleich jetzt als vier getrennte Ebenen dokumentiert: semantische Registry-Identität, vollständige physische GGUF-Evidenz, transienter LMS-Join und persistierte lokale Laufzeitbindung. Die Dokumentation legt die eindeutige Zuordnung von GGUF, LMS-JSON und Companion-Dateien, die Priorität von `LLAMA_ARG_MODELS_DIR`, die Fail-closed-Ausgänge und die interne/externe MTP-/Draft-Typübersetzung fest. |
+| 24.09. | `AGENTS.md`, `CHANGELOG.md`, `COMPACTIONS.md` | **DOC/WORKFLOW:** Lokale GGUF-Root-Regel, Änderungsnachweis und Compaction auf den aktuellen Arbeitsstand synchronisiert. |
+
+## MTP-/Draft-Bundle-Vertrag korrigiert (24.09.2026)
+
+| Date | Change |
+| ---- | ------ |
+| 24.09. | `src/speculative.py`, `src/assemble_blueprint.py`, `src/registry_tool.py`, `src/model_registry.py`, `src/benchmark_config.py`, `src/local_model_resolver.py` | **FIX/ARCHITECTURE:** Integriertes MTP wird als `type: mtp` mit `mode: integrated`, separates MTP als `type: mtp` mit `mode: separate` und `companions.mtp` geführt. Vollwertige DFlash-/Draft-LLMs werden als `type: draft` mit `companions.draft` geführt; `draft-mtp`/`draft-dflash` bleiben ausschließlich llama.cpp-CLI-Bezeichnungen. Die fehleranfällige größenbasierte MTP-Drafter-Erkennung wurde entfernt. |
+| 24.09. | `tests/`, `doc-git/Architecture, Flow & ChangeLog_en.md`, `README.md` | **TEST/DOC:** Tests und Architekturdefinitionen decken integriertes MTP, separates MTP und separates Draft-LLM getrennt ab; kleine integrierte MTP-Hauptdateien bleiben im Inventory. |
+
 ## Identitaets-, Artefakt-, Quant- und Parametergrenzen refaktoriert (24.09.2026)
 
 | Date | Change |
@@ -15,6 +29,14 @@ Hinweise:
 | 24.09. | `src/registry_tool.py`, `src/local_model_resolver.py`, `src/model_registry.py`, `src/run_benchmarks.py`, `src/custom_benchmark.py`, `src/model_manager.py` | **SYNC:** Runtime and write paths consume shared identity/artifact contracts, shared inventory links, and unique-only normalized indexes; fuzzy/first-wins execution fallbacks were removed. |
 | 24.09. | `tests/test_boundary_contracts.py`, `tests/test_model_identity.py`, `tests/test_benchmark_config.py`, `tests/test_model_registry.py`, `tests/test_registry_tool.py` | **TEST:** Added collision, ambiguity, publisher/variant precedence, quantization, artifact-root, and parameter-binding regression coverage. |
 | 24.09. | `doc-git/Architecture, Flow & ChangeLog_en.md`, `docs/keystone/refactors/2026-09-24-model-identity-synchronization.md` | **DOC:** Documented the phased refactor contract and the official llama.cpp/Hugging Face metadata interoperability reference. Live LM Studio/llama.cpp tests remain a deliberate follow-up. |
+
+## Vollstaendige GGUF-/LM-Studio-Evidenz verknuepft (24.09.2026)
+
+| Date | Change |
+| ---- | ------ |
+| 24.09. | `src/model_identity.py`, `src/local_model_resolver.py`, `src/inventory.py`, `src/registry_tool.py` | **FIX/SYNC:** Local identity evidence now retains the path-derived physical publisher/model base, quantization, and absolute GGUF path; a flattened LM Studio root may be completed by its logical LMS namespace only after a unique join. A per-run `IdentityLink` joins one LMS source row, one JSON config, and one GGUF artifact; LMS paths are checked against the concrete artifact and reused configs are rejected instead of being selected by order. |
+| 24.09. | `src/assemble_blueprint.py`, `src/benchmark_config.py` | **RUNTIME:** Sampling fields plus context length, UKV, `num_parallel`, offload, K/V cache types, and selected experts are retained as one normalized LMS runtime record; ambiguous config candidates no longer fall back to the first file. |
+| 24.09. | `doc-git/model_registry.yaml`, `doc-git/Architecture, Flow & ChangeLog_en.md`, `tests/test_assemble_blueprint.py`, `tests/test_local_model_resolver.py`, `tests/test_model_identity.py`, `tests/test_registry_tool.py` | **DATA/DOC/TEST:** Corrected the installed Qwen identities to `byteshape/qwen3.5-9b@q5_k_s` and `lmstudio-community/qwen/qwen3.5-9b@q6_k`, refreshed their observed file sizes, documented the local effective Registry and bundle roles, and added path, namespace, runtime, and duplicate-config regression tests. |
 
 ## Refactoring-Checkpoint vor Push (24.09.2026)
 

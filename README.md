@@ -512,8 +512,10 @@ Registry. Shared filters exclude, among others:
 - embedding models;
 - OCR, vision, audio, and transcription models;
 - RAG-only or feature-extraction models;
-- MTP drafter companion files, DFlash decoder/draft files, and iMatrix
-  support files.
+- separate MTP sidecars, DFlash draft sidecars, and iMatrix support files.
+  Integrated MTP main GGUFs remain normal model entries; a DFlash sidecar is
+  a full draft LLM but is not a default standalone target while coupled to a
+  larger main model.
 
 For LM Studio vision models, the projector companion should follow LM
 Studio's filename convention and start with `mmproj-` (for example

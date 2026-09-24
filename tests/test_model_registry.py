@@ -74,6 +74,9 @@ def test_model_registry_clips_context_to_native_limit(tmp_path: Path) -> None:
 
 
 def test_model_registry_derives_provider_specific_runtime(tmp_path: Path) -> None:
+    draft_path = tmp_path / "draft" / "dflash-q4_0.gguf"
+    draft_path.parent.mkdir(parents=True)
+    draft_path.write_bytes(b"GGUF draft placeholder")
     registry = {
         "unsloth/gpt-oss-20b-GGUF@q8_0": {
             "context_length": 32768,
@@ -87,6 +90,19 @@ def test_model_registry_derives_provider_specific_runtime(tmp_path: Path) -> Non
             "max_experts": 32,
             "reasoning_format": "deepseek",
             "llama_cpp": {"reasoning_effort": "medium"},
+            "local": {
+                "companions": {"draft": str(draft_path)},
+                "llama_cpp": {
+                    "speculative": {
+                        "type": "draft",
+                        "method": "dflash",
+                        "companion_role": "draft",
+                        "draft_n_max": 3,
+                        "draft_n_min": 0,
+                        "draft_p_min": 0.75,
+                    }
+                },
+            },
         }
     }
     model_registry = ModelRegistry(lambda: registry, template_root=tmp_path)
@@ -112,6 +128,13 @@ def test_model_registry_derives_provider_specific_runtime(tmp_path: Path) -> Non
     assert llama_runtime["reasoning_effort"] == "medium"
     assert llama_runtime["num_experts"] == 32
     assert llama_runtime["expert_override_key"] == "gpt-oss.expert_used_count"
+    assert llama_runtime["spec_type"] == "draft-dflash"
+    assert llama_runtime["spec_kind"] == "draft"
+    assert llama_runtime["spec_method"] == "dflash"
+    assert llama_runtime["draft_model_path"] == str(draft_path)
+    assert llama_runtime["draft_n_max"] == 3
+    assert llama_runtime["draft_n_min"] == 0
+    assert llama_runtime["draft_p_min"] == 0.75
     assert llama_runtime["chat_template_file"] == str(
         tmp_path / "gpt-oss-20b-template_unsloth.jinja"
     )
@@ -138,6 +161,86 @@ def test_model_registry_quant_list_falls_back_safely(tmp_path: Path) -> None:
     assert resolved_list.quant == "q4_k_m"
     assert resolved_empty is not None
     assert resolved_empty.quant is None
+
+
+def test_model_registry_keeps_integrated_mtp_without_draft_path(tmp_path: Path) -> None:
+    registry = {
+        "unsloth/qwen3.6-35b-a3b-mtp@iq2_m": {
+            "local": {
+                "llama_cpp": {
+                    "speculative": {
+                        "type": "mtp",
+                        "mode": "integrated",
+                    }
+                }
+            }
+        }
+    }
+    model_registry = ModelRegistry(lambda: registry, template_root=tmp_path)
+
+    runtime = model_registry.provider_runtime(
+        "unsloth/qwen3.6-35b-a3b-mtp@iq2_m", "llama_cpp"
+    )
+
+    assert runtime["spec_kind"] == "mtp"
+    assert runtime["spec_mode"] == "integrated"
+    assert runtime["spec_type"] == "draft-mtp"
+    assert "draft_model_path" not in runtime
+
+
+def test_model_registry_resolves_separate_mtp_companion(tmp_path: Path) -> None:
+    mtp_path = tmp_path / "mtp-gemma-Q8_0.gguf"
+    mtp_path.write_bytes(b"GGUF placeholder")
+    registry = {
+        "unsloth/gemma-4-12b-it@q6_k": {
+            "local": {
+                "companions": {"mtp": str(mtp_path)},
+                "llama_cpp": {
+                    "speculative": {
+                        "type": "mtp",
+                        "mode": "separate",
+                        "companion_role": "mtp",
+                    }
+                },
+            }
+        }
+    }
+    model_registry = ModelRegistry(lambda: registry, template_root=tmp_path)
+
+    runtime = model_registry.provider_runtime(
+        "unsloth/gemma-4-12b-it@q6_k", "llama_cpp"
+    )
+
+    assert runtime["spec_kind"] == "mtp"
+    assert runtime["spec_mode"] == "separate"
+    assert runtime["spec_type"] == "draft-mtp"
+    assert runtime["draft_model_path"] == str(mtp_path)
+
+
+def test_model_registry_does_not_emit_companion_cli_without_companion_path(tmp_path: Path) -> None:
+    registry = {
+        "gguf-org/muse-glimmer-30b@nvfp4": {
+            "local": {
+                "llama_cpp": {
+                    "speculative": {
+                        "type": "draft",
+                        "method": "dflash",
+                        "companion_role": "draft",
+                    }
+                }
+            }
+        }
+    }
+    model_registry = ModelRegistry(lambda: registry, template_root=tmp_path)
+
+    runtime = model_registry.provider_runtime(
+        "gguf-org/muse-glimmer-30b@nvfp4", "llama_cpp"
+    )
+
+    assert runtime["spec_kind"] == "draft"
+    assert runtime["spec_method"] == "dflash"
+    assert "spec_type" not in runtime
+    assert "draft_model_path" not in runtime
 
 
 def test_model_registry_never_first_wins_on_publisher_collision(tmp_path: Path) -> None:

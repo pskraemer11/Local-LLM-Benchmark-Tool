@@ -25,9 +25,10 @@ from model_identity import (
     decompose_model_identity,
     match_registry_key,
     normalize_lms_model_name,
+    normalize_model_reference,
     normalized_lms_key,
 )
-from quantization import KNOWN_QUANTS, extract_quant_from_text
+from quantization import KNOWN_QUANTS, extract_quant_from_text, normalize_quant
 from utils.terminal import warn
 
 BLACKLIST = [
@@ -53,18 +54,6 @@ BLACKLIST = [
     "f2llm",                # F2LLM-v2-Familie = reine Embedding-Modelle (Feature Extraction, kein Chat; 80M-14B)
     "imatrix",              # Importance Matrix GGUF files (< 200 MB) — companion files, not standalone models
 ]
-
-# MTP drafter models: name contains "mtp" AND size < 1 GB.
-# These are companion files (e.g. for speculative decoding), not standalone models.
-# Regular LLMs with "mtp" in the name but > 1 GB are NOT drafters.
-def is_mtp_drafter(model_name: str, file_size_bytes: int = 0) -> bool:
-    """True if the model is an MTP drafter (companion file, not standalone).
-
-    Rule: name contains "mtp" (case-insensitive) AND size < 1 GB.
-    """
-    if "mtp" not in model_name.lower():
-        return False
-    return file_size_bytes < 1_000_000_000  # < 1 GB
 
 EXCLUDE_KEYWORDS = BLACKLIST
 
@@ -484,7 +473,14 @@ def _lms_generation_config(model_identifier: str) -> dict[str, Any] | None:
     key = _normalized_lms_key(model_identifier)
     if not key:
         return None
-    inp_pub = model_identifier.split("/")[0].lower() if "/" in model_identifier else None
+    requested_base = model_identifier.split("@", 1)[0].strip()
+    requested_publisher, requested_model, requested_quant = decompose_model_identity(requested_base)
+    requested_references = {
+        normalize_model_reference(requested_base),
+        normalize_model_reference(requested_model),
+        normalize_model_reference(f"{requested_publisher}/{requested_model}"),
+    }
+    requested_references.discard("")
 
     def _matches(candidate: str) -> bool:
         if candidate == key:
@@ -497,23 +493,46 @@ def _lms_generation_config(model_identifier: str) -> dict[str, Any] | None:
             return True
         return False
 
-    pub_matches: list[dict[str, Any]] = []
+    exact_matches: list[dict[str, Any]] = []
     fallback_matches: list[dict[str, Any]] = []
     for entry in _lms_index():
         norm_dir = _normalize_lms_model_name(entry["dir_name"])
         norm_file = _normalize_lms_model_name(entry["file_stem"])
-        if _matches(norm_dir) or _matches(norm_file):
-            if inp_pub is not None and entry["publisher"].lower() == inp_pub:
-                pub_matches.append(entry)
-            else:
-                # Kein Publisher-Key oder Publisher weicht ab (z. B. Repack
-                # unter anderem Publisher): als Fallback trotzdem pruefen.
-                fallback_matches.append(entry)
-    # Mehrere Kandidaten (Quant-Varianten): erste Config mit Parametern gewinnt
-    for entry in pub_matches + fallback_matches:
-        out = _lms_params_from_entry(entry)
-        if out:
-            return out
+        entry_references = {
+            normalize_model_reference(entry["dir_name"]),
+            normalize_model_reference(f"{entry['publisher']}/{entry['dir_name']}"),
+            normalize_model_reference(entry["file_stem"]),
+        }
+        if requested_references.intersection(entry_references):
+            exact_matches.append(entry)
+        elif _matches(norm_dir) or _matches(norm_file):
+            fallback_matches.append(entry)
+
+    matches = exact_matches or fallback_matches
+    if requested_quant:
+        def _quant_matches(entry: dict[str, Any]) -> bool:
+            entry_quant = extract_quant_from_text(f"{entry['dir_name']} {entry['file_stem']}")
+            return not entry_quant or normalize_quant(entry_quant) == normalize_quant(requested_quant)
+
+        quant_matches = [
+            entry
+            for entry in matches
+            if _quant_matches(entry)
+        ]
+        if quant_matches:
+            matches = quant_matches
+
+    parameterized = [
+        (str(entry["json_path"]), params)
+        for entry in matches
+        if (params := _lms_params_from_entry(entry))
+    ]
+    # A runtime config is evidence, not a best-effort default.  Never choose
+    # the first variant when more than one JSON file can represent the
+    # requested model; the caller then falls back to the declared Registry
+    # policy instead of importing an arbitrary GUI setting.
+    if len(parameterized) == 1:
+        return parameterized[0][1]
     return None
 
 
@@ -759,14 +778,14 @@ def is_support_file(
 
     - ``mmproj-*``: vision projector files. LM Studio expects this prefix;
       the benchmark filter also rejects legacy names containing ``mmproj``.
-    - ``mtp-*`` or ``*/MTP/*``: MTP draft models (speculative-decoding add-ons,
-      e.g. unsloth's ``mtp-gemma-4-12B-it-Q8_0.gguf``). Legitimate standalone
-      MTP models (``qwen3.6-27b-mtp``, ``...-MTP-...`` in the name) are NOT
-      affected - only the ``mtp-`` filename prefix or an ``MTP`` path segment.
+    - ``mtp-*`` or ``*/MTP/*``: separate MTP support files (for example
+      ``mtp-gemma-4-12B-it-Q8_0.gguf``). Integrated MTP main GGUFs and
+      standalone MTP models are NOT affected - only the support-file prefix or
+      an exact ``MTP`` path segment is used.
     - ``*imatrix*``: Importance Matrix quantization files (< 200 MB), companion
       files to the main model, not standalone.
-    - architecture ending in ``-assistant`` (e.g. ``gemma4-assistant``): MTP
-      drafter architecture reported by LM Studio / GGUF header.
+    - architecture ending in ``-assistant`` (e.g. ``gemma4-assistant``): a
+      non-standalone MTP support artifact reported by LM Studio / GGUF header.
 
     Zentralisiert hier, damit registry_tool.py (add/resolve), model_manager.py
     (get_available_models) und run_benchmarks.py dieselbe Filter-Logik nutzen
@@ -775,9 +794,9 @@ def is_support_file(
     name = os.path.basename(str(path)).lower()
     if "mmproj" in name:
         return True
-    # DFlash decoder/draft GGUFs can be reported by LM Studio as if they were
-    # standalone models. They accompany the actual language model and must
-    # not create a second Registry identity (e.g. muse-glimmer/dflash-q4_0).
+    # DFlash draft GGUFs are full LLMs, but when discovered under the standard
+    # sidecar filename they are a bundle dependency and must not create a
+    # second default Registry identity (e.g. muse-glimmer/dflash-q4_0).
     if name.startswith(("dflash-", "dflash_")):
         return True
     if name.startswith("mtp-"):

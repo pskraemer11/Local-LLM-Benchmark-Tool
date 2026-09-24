@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -20,10 +21,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from field_owner import FIELD_OWNERSHIP, Drift, auto_fix_fields, resolve
 from model_identity import (
+    ArtifactIdentityEvidence,
     MODEL_FAMILIES,
     AmbiguousMatch,
     UniqueMatch,
     build_model_identity,
+    canonicalize_source_identity,
     classify_reasoning_by_family,
     decompose_model_identity,
     family_for_arch,
@@ -32,6 +35,7 @@ from model_identity import (
     normalize_for_config,
     normalize_lms_model_name,
     normalize_model_name,
+    normalize_model_reference,
     normalize_variants,
     normalized_lms_key,
     resolve_registry_match,
@@ -62,6 +66,34 @@ class TestNormalizeModelName:
             normalize_model_name("JetBrains/Mellum2-12B-A2.5B-Thinking-GGUF-MXFP4_MOE")
             == "mellum2-12b-a2-5b-thinking-mxfp4-moe"
         )
+
+
+def test_source_identity_preserves_namespaced_lms_model_key() -> None:
+    assert canonicalize_source_identity(
+        "qwen/qwen3.5-9b",
+        publisher="lmstudio-community",
+        quant="Q6_K",
+    ) == "lmstudio-community/qwen/qwen3.5-9b@q6_k"
+
+
+def test_artifact_identity_evidence_keeps_full_path_and_components(tmp_path: Path) -> None:
+    path = tmp_path / "lmstudio-community" / "qwen" / "qwen3.5-9b" / "model-Q6_K.gguf"
+    evidence = ArtifactIdentityEvidence.from_reference(
+        path,
+        "lmstudio-community/qwen/qwen3.5-9b",
+        "Q6_K",
+    )
+
+    assert evidence.identity == "lmstudio-community/qwen/qwen3.5-9b@q6_k"
+    assert evidence.publisher == "lmstudio-community"
+    assert evidence.model_name == "qwen/qwen3.5-9b"
+    assert evidence.quant == "q6_k"
+    assert evidence.path == path
+    assert evidence.is_complete
+
+
+def test_model_reference_normalization_preserves_namespace_slash() -> None:
+    assert normalize_model_reference("qwen/qwen3.5-9b") == "qwen/qwen3-5-9b"
 
 
 class TestNormalizeForConfig:
@@ -208,6 +240,15 @@ class TestMatchRegistryKey:
         ]
         collisions = find_match_collisions(keys)
         assert collisions["qwen3-5-9b@q5-k-s"] == tuple(keys)
+
+    def test_namespaced_lms_qwen_is_not_collided_with_byteshape_qwen(self) -> None:
+        keys = [
+            "lmstudio-community/qwen/qwen3.5-9b@q6_k",
+            "qwen/qwen3.5-9b@q6_k",
+            "byteshape/qwen3.5-9b@q5_k_s",
+        ]
+
+        assert find_match_collisions(keys) == {}
 
 
 # ─────────────────────────────────────────────────────────────────────

@@ -324,6 +324,148 @@ class TestReadLmsConfigsCaching:
         # Same list object (cached)
         assert r2 is r1
 
+    def test_reads_sampling_and_load_runtime_fields_as_one_config_record(self, tmp_path):
+        cfg_dir = tmp_path / "user-concrete-model-default-config" / "qwen" / "qwen3.5-9b"
+        cfg_dir.mkdir(parents=True)
+        (cfg_dir / "model-Q5_K_S.gguf.json").write_text(
+            json.dumps(
+                {
+                    "operation": {
+                        "fields": [
+                            {"key": "llm.prediction.temperature", "value": 0.7},
+                            {"key": "llm.prediction.topPSampling", "value": 0.95},
+                            {"key": "llm.prediction.topKSampling", "value": {"checked": True, "value": 40}},
+                        ]
+                    },
+                    "load": {
+                        "fields": [
+                            {"key": "llm.load.contextLength", "value": 131072},
+                            {"key": "llm.load.useUnifiedKvCache", "value": True},
+                            {"key": "llm.load.numParallelSessions", "value": 4},
+                        ]
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        ab._LMS_CONFIGS_CACHE.clear()
+        config = read_lms_configs(tmp_path / "user-concrete-model-default-config")[0]
+
+        assert config["sampling"] == {"temperature": 0.7, "top_k": 40, "top_p": 0.95}
+        assert config["context_length"] == 131072
+        assert config["use_unified_kv"] is True
+        assert config["num_parallel"] == 4
+
+    def test_reads_speculative_mtp_and_drafter_fields_as_bundle_runtime(self, tmp_path):
+        cfg_dir = tmp_path / "user-concrete-model-default-config" / "unsloth" / "gemma-4"
+        cfg_dir.mkdir(parents=True)
+        (cfg_dir / "gemma-4-Q6_K.gguf.json").write_text(
+            json.dumps(
+                {
+                    "operation": {"fields": []},
+                    "load": {
+                        "fields": [
+                            {
+                                "key": "llm.load.llama.speculativeDecoding.draftMtpSidecar",
+                                "value": True,
+                            },
+                            {
+                                "key": "llm.load.llama.speculativeDecoding.draftModel",
+                                "value": "unsloth/gemma-4/mtp-gemma-4-Q8_0.gguf",
+                            },
+                            {
+                                "key": "llm.load.llama.speculativeDecoding.draftMaxTokens",
+                                "value": 4,
+                            },
+                            {
+                                "key": "llm.load.llama.speculativeDecoding.draftMinContinueProbability",
+                                "value": 0.75,
+                            },
+                        ]
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        ab._LMS_CONFIGS_CACHE.clear()
+        config = read_lms_configs(tmp_path / "user-concrete-model-default-config")[0]
+
+        assert config["speculative"] == {
+            "type": "mtp",
+            "mode": "separate",
+            "draft_model_reference": "unsloth/gemma-4/mtp-gemma-4-Q8_0.gguf",
+            "draft_n_max": 4,
+            "draft_p_min": 0.75,
+        }
+
+    def test_reads_integrated_mtp_without_companion_path(self, tmp_path):
+        cfg_dir = tmp_path / "user-concrete-model-default-config" / "unsloth" / "qwen3.6"
+        cfg_dir.mkdir(parents=True)
+        (cfg_dir / "qwen3.6-IQ2_M.gguf.json").write_text(
+            json.dumps(
+                {
+                    "operation": {"fields": []},
+                    "load": {
+                        "fields": [
+                            {
+                                "key": "llm.load.llama.speculativeDecoding.draftMtp",
+                                "value": True,
+                            },
+                            {
+                                "key": "llm.load.llama.speculativeDecoding.draftMaxTokens",
+                                "value": 3,
+                            },
+                        ]
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        ab._LMS_CONFIGS_CACHE.clear()
+        config = read_lms_configs(tmp_path / "user-concrete-model-default-config")[0]
+
+        assert config["speculative"] == {
+            "type": "mtp",
+            "mode": "integrated",
+            "draft_n_max": 3,
+        }
+
+    def test_reads_dflash_as_independent_draft_model_not_mtp(self, tmp_path):
+        cfg_dir = tmp_path / "user-concrete-model-default-config" / "gguf-org" / "muse-glimmer"
+        cfg_dir.mkdir(parents=True)
+        (cfg_dir / "muse-glimmer-nvfp4.gguf.json").write_text(
+            json.dumps(
+                {
+                    "operation": {"fields": []},
+                    "load": {
+                        "fields": [
+                            {
+                                "key": "llm.load.llama.speculativeDecoding.draftDflashSidecar",
+                                "value": True,
+                            },
+                            {
+                                "key": "llm.load.llama.speculativeDecoding.draftModel",
+                                "value": "gguf-org/muse-glimmer/dflash-q4_0.gguf",
+                            },
+                        ]
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        ab._LMS_CONFIGS_CACHE.clear()
+        config = read_lms_configs(tmp_path / "user-concrete-model-default-config")[0]
+
+        assert config["speculative"] == {
+            "type": "draft",
+            "method": "dflash",
+            "draft_model_reference": "gguf-org/muse-glimmer/dflash-q4_0.gguf",
+        }
+
     def test_support_configs_are_not_model_configs(self, tmp_path):
         cfg_dir = tmp_path / "user-concrete-model-default-config" / "publisher" / "model"
         cfg_dir.mkdir(parents=True)

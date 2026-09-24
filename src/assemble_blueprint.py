@@ -49,6 +49,7 @@ from model_identity import (
     normalize_model_name,
 )
 from quantization import extract_quant_from_text, normalize_quant
+from speculative import classify_lms_speculative_values
 
 # === Pfade ===
 _SRC_DIR = Path(__file__).parent
@@ -756,6 +757,58 @@ def truncation_from_context(ctx_len: int | None) -> str:
 _LMS_CONFIGS_CACHE: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 _LMS_CONFIGS_TTL_S = 5.0  # Re-scan file system at most every 5 seconds
 
+_LMS_SAMPLING_FIELD_MAP = {
+    "llm.prediction.temperature": "temperature",
+    "llm.prediction.topPSampling": "top_p",
+    "llm.prediction.topKSampling": "top_k",
+    "llm.prediction.minPSampling": "min_p",
+    "llm.prediction.repeatPenalty": "repetition_penalty",
+    "llm.prediction.repetitionPenalty": "repetition_penalty",
+    "llm.prediction.presencePenalty": "presence_penalty",
+    "llm.prediction.frequencyPenalty": "frequency_penalty",
+    "llm.prediction.seed": "seed",
+    "ext.virtualModel.customField.openai.gptOss20b.reasoningEffort": "reasoning_effort",
+}
+
+
+def _unwrap_lms_config_value(value: Any) -> Any:
+    """Return the active scalar from an LM Studio checked-value object."""
+    if isinstance(value, dict) and "checked" in value:
+        if value.get("checked") is not True:
+            return None
+        return value.get("value")
+    return value
+
+
+_LMS_SPECULATIVE_FIELDS = {
+    "llm.load.llama.speculativeDecoding.draftMtp": "draft_mtp",
+    "llm.load.llama.speculativeDecoding.draftSimple": "draft_simple",
+    "llm.load.llama.speculativeDecoding.draftDflashSidecar": "draft_dflash_sidecar",
+    "llm.load.llama.speculativeDecoding.draftDsparkSidecar": "draft_dspark_sidecar",
+    "llm.load.llama.speculativeDecoding.draftMtpSidecar": "draft_mtp_sidecar",
+    "llm.load.llama.speculativeDecoding.draftModel": "draft_model_reference",
+    "llm.load.llama.speculativeDecoding.draftMaxTokens": "draft_n_max",
+    "llm.load.llama.speculativeDecoding.draftMinTokens": "draft_n_min",
+    "llm.load.llama.speculativeDecoding.draftMinContinueProbability": "draft_p_min",
+}
+
+
+def _read_lms_speculative_runtime(fields: list[dict[str, Any]]) -> dict[str, Any]:
+    """Translate LM Studio speculative settings into a backend-neutral record."""
+    values: dict[str, Any] = {}
+    for field in fields:
+        key = field.get("key")
+        if not isinstance(key, str):
+            continue
+        target = _LMS_SPECULATIVE_FIELDS.get(key)
+        if target is None:
+            continue
+        value = _unwrap_lms_config_value(field.get("value"))
+        if value not in (None, ""):
+            values[target] = value
+
+    return cast("dict[str, Any]", classify_lms_speculative_values(values))
+
 
 def read_lms_configs(config_root: Path) -> list[dict[str, Any]]:
     """Read all LM Studio JSON config files, return a list of config dicts.
@@ -801,8 +854,8 @@ def read_lms_configs(config_root: Path) -> list[dict[str, Any]]:
                 continue
 
             for json_path in json_files:
-                # MTP drafter, mmproj and imatrix files are auxiliary runtime
-                # artifacts, not independently benchmarkable model configs.
+                # MTP sidecars, draft sidecars, mmproj and imatrix files are
+                # auxiliary runtime artifacts, not benchmark model configs.
                 if is_support_file(str(json_path)):
                     continue
                 data = None
@@ -820,10 +873,16 @@ def read_lms_configs(config_root: Path) -> list[dict[str, Any]]:
 
                 try:
                     sys_prompt = None
-                    for field in data.get("operation", {}).get("fields", []):
+                    operation_fields = data.get("operation", {}).get("fields", [])
+                    sampling: dict[str, Any] = {}
+                    for field in operation_fields:
                         if field.get("key") == "llm.prediction.systemPrompt":
                             sys_prompt = field.get("value", "")
-                            break
+                        sampling_key = _LMS_SAMPLING_FIELD_MAP.get(field.get("key"))
+                        if sampling_key is not None:
+                            value = _unwrap_lms_config_value(field.get("value"))
+                            if value is not None:
+                                sampling[sampling_key] = value
 
                     ctx_length = None
                     offload = None
@@ -832,7 +891,9 @@ def read_lms_configs(config_root: Path) -> list[dict[str, Any]]:
                     use_unified_kv = None
                     k_cache = None
                     v_cache = None
-                    for field in data.get("load", {}).get("fields", []):
+                    load_fields = data.get("load", {}).get("fields", [])
+                    speculative = _read_lms_speculative_runtime(load_fields)
+                    for field in load_fields:
                         k = field.get("key")
                         value = field.get("value")
                         if k == "llm.load.contextLength":
@@ -876,6 +937,7 @@ def read_lms_configs(config_root: Path) -> list[dict[str, Any]]:
                             "dir_name": model_dir_name,
                             "file_name": json_path.name,
                             "system_prompt": sys_prompt or "",
+                            "sampling": sampling,
                             "context_length": ctx_length,
                             "offload": offload,
                             "num_parallel": num_parallel,
@@ -883,6 +945,7 @@ def read_lms_configs(config_root: Path) -> list[dict[str, Any]]:
                             "use_unified_kv": use_unified_kv,
                             "k_cache": k_cache,
                             "v_cache": v_cache,
+                            "speculative": speculative,
                             "quant": _config_quant(
                                 {"dir_name": model_dir_name, "file_name": json_path.name}
                             ),

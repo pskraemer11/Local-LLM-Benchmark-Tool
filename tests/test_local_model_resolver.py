@@ -11,7 +11,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import model_paths
-from local_model_resolver import LocalModelResolver
+from local_model_resolver import LocalModelResolver, ModelResolutionError
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -20,6 +20,17 @@ if TYPE_CHECKING:
 def _touch(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b"GGUF test placeholder")
+
+
+def test_llama_arg_models_dir_is_the_highest_priority_root(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("GGUF_MODEL_ROOT", str(tmp_path / "legacy"))
+    monkeypatch.setenv("LLAMA_ARG_MODELS_DIR", str(tmp_path / "llama-models"))
+
+    roots = model_paths.configured_gguf_roots()
+    resolver = LocalModelResolver()
+
+    assert roots == (tmp_path / "llama-models",)
+    assert resolver.model_roots == roots
 
 
 def test_resolver_reuses_central_blacklist_and_support_file_filter(tmp_path: Path) -> None:
@@ -38,6 +49,16 @@ def test_resolver_reuses_central_blacklist_and_support_file_filter(tmp_path: Pat
 
 def test_resolver_keeps_standalone_mtp_model(tmp_path: Path) -> None:
     path = tmp_path / "unsloth" / "Qwen3.6-27B-MTP-GGUF" / "model.gguf"
+    _touch(path)
+
+    candidates = LocalModelResolver(tmp_path).candidates()
+
+    assert len(candidates) == 1
+    assert candidates[0].path == path
+
+
+def test_resolver_keeps_small_integrated_mtp_main_model(tmp_path: Path) -> None:
+    path = tmp_path / "publisher" / "small-mtp" / "small-mtp-Q4_K_M.gguf"
     _touch(path)
 
     candidates = LocalModelResolver(tmp_path).candidates()
@@ -95,6 +116,79 @@ def test_resolver_matches_registry_and_exposes_local_path(tmp_path: Path) -> Non
     assert candidates[0].registry_key == "openai/gpt-oss-20b@mxfp4"
     assert candidates[0].display == "GPT-OSS 20B@mxfp4"
     assert candidates[0].path == path
+
+
+def test_resolver_keeps_publisher_separate_from_namespaced_model_name(tmp_path: Path) -> None:
+    path = (
+        tmp_path
+        / "lmstudio-community"
+        / "qwen"
+        / "qwen3.5-9b"
+        / "Qwen3.5-9B-Q6_K.gguf"
+    )
+    _touch(path)
+    registry: dict[str, Any] = {
+        "lmstudio-community/qwen/qwen3.5-9b@q6_k": {},
+        "byteshape/qwen3.5-9b@q5_k_s": {},
+    }
+
+    candidates = LocalModelResolver(tmp_path, registry_loader=lambda: registry).candidates(
+        registry_only=True
+    )
+
+    assert len(candidates) == 1
+    assert candidates[0].model_identifier == "lmstudio-community/qwen/qwen3.5-9b@q6_k"
+    assert candidates[0].identity_evidence.publisher == "lmstudio-community"
+    assert candidates[0].identity_evidence.model_name == "qwen/qwen3.5-9b"
+    assert candidates[0].identity_evidence.path == path
+
+
+def test_resolver_combines_flat_physical_publisher_with_lms_namespace(tmp_path: Path) -> None:
+    path = (
+        tmp_path
+        / "lmstudio-community"
+        / "Qwen3.5-9B-GGUF"
+        / "Qwen3.5-9B-Q6_K.gguf"
+    )
+    _touch(path)
+    registry: dict[str, Any] = {
+        "lmstudio-community/qwen/qwen3.5-9b@q6_k": {},
+        "byteshape/qwen3.5-9b@q5_k_s": {},
+    }
+
+    candidates = LocalModelResolver(tmp_path, registry_loader=lambda: registry).candidates(
+        registry_only=True
+    )
+
+    assert len(candidates) == 1
+    assert candidates[0].registry_key == "lmstudio-community/qwen/qwen3.5-9b@q6_k"
+    assert candidates[0].model_identifier == "lmstudio-community/qwen/qwen3.5-9b@q6_k"
+
+
+def test_resolver_honors_persisted_local_model_binding(tmp_path: Path) -> None:
+    preferred = tmp_path / "publisher" / "model" / "preferred-Q6_K.gguf"
+    duplicate = tmp_path / "publisher" / "model" / "duplicate-Q6_K.gguf"
+    for path in (preferred, duplicate):
+        _touch(path)
+    registry: dict[str, Any] = {
+        "publisher/model@q6_k": {"local": {"model_path": str(preferred)}}
+    }
+
+    resolver = LocalModelResolver(tmp_path, registry_loader=lambda: registry)
+
+    resolved = resolver.resolve("publisher/model@q6_k")
+    assert resolved.path == preferred
+    assert [candidate.path for candidate in resolver.candidates()] == [preferred]
+
+
+def test_resolver_fails_closed_for_stale_persisted_local_model_binding(tmp_path: Path) -> None:
+    stale = tmp_path / "missing" / "model-Q6_K.gguf"
+    registry: dict[str, Any] = {
+        "publisher/model@q6_k": {"local": {"model_path": str(stale)}}
+    }
+
+    with pytest.raises(ModelResolutionError, match="Persistierter lokaler GGUF"):
+        LocalModelResolver(tmp_path, registry_loader=lambda: registry).resolve("publisher/model@q6_k")
 
 
 def test_resolver_normalizes_unsloth_gguf_folder_for_registry_match(tmp_path: Path) -> None:

@@ -1818,3 +1818,50 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 - `CHANGELOG.md`: Nachweis des erfolgreichen Pushes von `75820a10`.
 - `COMPACTIONS.md`: dieser Nach-Push-Checkpoint.
 - `AGENTS.md`: verbleibende lokale, nicht zum Auftrag gehoerende Aenderung.
+
+=============== Compaction 24.09.2026 / 22:13 ================
+## Objective
+- Die Architektur-Dokumentation zur Modellidentitaet, lokalen GGUF-Evidenz,
+  LM-Studio-JSON-Zuordnung und Bundle-Synchronisierung vervollstaendigen und
+  den geprueften Arbeitsstand veroeffentlichen.
+
+## Important Details
+- **Datenvertrag:** `InventorySnapshot` ist der einmalige Read-Snapshot;
+  `IdentityLink` verbindet Registry-Key, `ArtifactIdentityEvidence` und
+  `RuntimeBinding`. LMS publisher/modelKey/selectedVariant bleiben transiente
+  Join-Evidenz und werden nicht als redundante llama.cpp-Identitaet persistiert.
+- **Abgleich:** Vollstaendiger GGUF-Pfad, Pfad-/Dateiname, Quantisierung und
+  GGUF-Header bilden die physische Evidenz. `LLAMA_ARG_MODELS_DIR` hat die
+  hoechste Root-Prioritaet. Null- oder Mehrfachtreffer, veraltete Pfade,
+  wiederverwendete Configs und fehlende Companions bleiben fail-closed.
+- **Bundles:** Integriertes MTP bleibt `type: mtp`/`mode: integrated`,
+  separates MTP nutzt `companions.mtp`, vollwertige Draft-LLMs
+  `companions.draft`; llama.cpp-Namen werden erst am Provider-Rand erzeugt.
+- **Proof vor diesem Checkpoint:** Vollsuite `1117 passed`, Registry-CI ohne
+  Blocker/Hinweise, Ruff fuer die geaenderten Produktionsmodule bestanden;
+  fokussiertes MyPy fuer die neuen Contract-Grenzen bestanden. Die bekannten
+  35 Legacy-Fehler in `registry_tool.py` bleiben dokumentierte technische
+  Schuld und sind kein Grund fuer eine globale Typregel-Lockerung.
+
+## Work State
+### Completed / Active / Blocked
+- Completed: Code-/Datenstruktur-Refactor, Architektur-Dokumentation,
+  Changelog und diese Compaction.
+- Active: staged Diff pruefen, Commit-Hook ausfuehren, danach Push-Hook und
+  Remote-Stand verifizieren.
+- Blocked: kein bekannter technischer Blocker; Live-Tests mit LM Studio und
+  llama.cpp bleiben bewusst ausserhalb dieses Checkpoints.
+
+## Next Move
+1. Den vollstaendigen, fachlich zusammengehoerigen Arbeitsstand nach Diff-
+   Pruefung committen.
+2. Mit den normalen `.githooks/pre-push`-Pruefungen nach `origin/main` pushen.
+3. Commit-SHA, Remote-SHA, Arbeitsbaum und Hook-Ergebnisse berichten.
+
+## Relevant Files
+- `doc-git/Architecture, Flow & ChangeLog_en.md`: erweiterter Daten- und
+  Abgleichsvertrag.
+- `src/inventory.py`, `src/registry_tool.py`, `src/model_identity.py`:
+  Implementierung der Join-Grenzen.
+- `CHANGELOG.md`: Verweis auf diesen Checkpoint.
+- `COMPACTIONS.md`: dieser vor Commit/Push erzeugte Arbeitsstand.

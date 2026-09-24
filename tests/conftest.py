@@ -68,6 +68,7 @@ def isolate_test_environment(monkeypatch: pytest.MonkeyPatch) -> None:
         "UNSLOTH_API_KEY",
         "UNSLOTH_SERVER_API_KEY",
         "UNSLOTH_MODEL_ROOT",
+        "LLAMA_ARG_MODELS_DIR",
         "UNSLOTH_SERVER_EXE",
         "OPENAI_API_KEY",
         "OPENAI_COMPAT_API_KEY",

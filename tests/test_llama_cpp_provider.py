@@ -41,6 +41,9 @@ def test_provider_resolves_local_registry_model_and_builds_cuda_server_command(t
     model_path.write_bytes(b"GGUF")
     executable = tmp_path / "llama-server.exe"
     executable.write_bytes(b"test executable")
+    draft_model_path = tmp_path / "draft" / "gemma-mtp-Q8_0.gguf"
+    draft_model_path.parent.mkdir(parents=True)
+    draft_model_path.write_bytes(b"GGUF draft placeholder")
     registry: dict[str, Any] = {
         "openai/gpt-oss-20b@q8_0": {
             "context_length": 32768,
@@ -67,6 +70,11 @@ def test_provider_resolves_local_registry_model_and_builds_cuda_server_command(t
             "kv_unified": True,
             "num_experts": 32,
             "expert_override_key": "gpt-oss.expert_used_count",
+            "spec_type": "draft-mtp",
+            "draft_model_path": str(draft_model_path),
+            "draft_n_max": 4,
+            "draft_n_min": 0,
+            "draft_p_min": 0.75,
             "reasoning_format": "deepseek",
             "reasoning_budget": 4096,
             "reasoning_effort": "medium",
@@ -91,6 +99,11 @@ def test_provider_resolves_local_registry_model_and_builds_cuda_server_command(t
     assert command[command.index("--reasoning-budget") + 1] == "4096"
     assert command[command.index("--reasoning-effort") + 1] == "medium"
     assert command[command.index("--override-kv") + 1] == "gpt-oss.expert_used_count=int:32"
+    assert command[command.index("--spec-type") + 1] == "draft-mtp"
+    assert command[command.index("--spec-draft-model") + 1] == str(draft_model_path)
+    assert command[command.index("--spec-draft-n-max") + 1] == "4"
+    assert command[command.index("--spec-draft-n-min") + 1] == "0"
+    assert command[command.index("--spec-draft-p-min") + 1] == "0.75"
     assert "--jinja" in command
     assert provider.unload_all() is True
     assert controller.stopped is True

@@ -21,6 +21,7 @@ from ruamel.yaml import YAML
 
 from model_identity import UniqueMatch, resolve_registry_match
 from providers.llama_cpp_args import normalize_cache_type
+from speculative import companion_role, llama_cpp_spec_type, normalize_speculative_profile
 
 RegistryLoader = Callable[[], dict[str, Any]]
 
@@ -208,6 +209,49 @@ class ResolvedRegistryEntry:
                         overrides["expert_override_key"] = (
                             f"{architecture_family.strip()}.expert_used_count"
                         )
+                local = self.entry.get("local")
+                local_llama = local.get("llama_cpp") if isinstance(local, dict) else None
+                speculative = (
+                    local_llama.get("speculative")
+                    if isinstance(local_llama, dict)
+                    else None
+                )
+                companions = local.get("companions") if isinstance(local, dict) else None
+                if isinstance(speculative, dict):
+                    normalized_speculative = normalize_speculative_profile(speculative)
+                    if normalized_speculative:
+                        overrides["spec_kind"] = normalized_speculative["type"]
+                        for field in ("mode", "method"):
+                            if field in normalized_speculative:
+                                overrides[f"spec_{field}"] = normalized_speculative[field]
+                    role = speculative.get("companion_role")
+                    if not isinstance(role, str):
+                        role = companion_role(normalized_speculative)
+                    if role == "draft" and isinstance(companions, dict) and "draft" not in companions:
+                        role = "drafter" if "drafter" in companions else role
+                    draft_path: str | None = None
+                    if isinstance(role, str) and isinstance(companions, dict):
+                        configured_draft_path = companions.get(role)
+                        if isinstance(configured_draft_path, str) and configured_draft_path.strip():
+                            draft_path = configured_draft_path.strip()
+                    backend_spec_type = llama_cpp_spec_type(normalized_speculative)
+                    # Separate MTP and draft profiles are executable only when
+                    # their exact companion path was materialized. Integrated
+                    # MTP has no companion requirement. Missing evidence must
+                    # not produce a broken llama-server command.
+                    if backend_spec_type is not None and (role is None or draft_path is not None):
+                        overrides["spec_type"] = backend_spec_type
+                    if draft_path is not None:
+                        overrides["draft_model_path"] = draft_path
+                    for field in (
+                        "draft_model_path",
+                        "draft_n_max",
+                        "draft_n_min",
+                        "draft_p_min",
+                    ):
+                        value = speculative.get(field)
+                        if value is not None and field not in overrides:
+                            overrides[field] = value
                 for field in (
                     "reasoning_format",
                     "reasoning",

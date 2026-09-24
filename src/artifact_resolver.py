@@ -111,11 +111,17 @@ class ArtifactResolver:
         requested: str,
         *,
         source_paths: tuple[tuple[str, ...], ...] = (),
+        include_support: bool = False,
     ) -> ArtifactResolution:
-        """Resolve an identity; ambiguity is returned instead of first-wins."""
+        """Resolve an identity; ambiguity is returned instead of first-wins.
+
+        Support files remain excluded by default so they cannot become
+        standalone benchmark models. Bundle resolution may opt in when it
+        needs to resolve an explicitly referenced MTP/Drafter companion.
+        """
         if not requested:
             return ArtifactResolution(requested, "not_found", evidence="empty-request")
-        files = self.files()
+        files = self.files(include_support=include_support)
         if source_paths:
             scoped_files: list[tuple[int, Path]] = []
             for root_index, path in files:
@@ -187,6 +193,11 @@ def resolve_artifact(
     *,
     models_root: str | Path | None = None,
     source_paths: tuple[tuple[str, ...], ...] = (),
+    include_support: bool = False,
 ) -> ArtifactResolution:
     """Convenience boundary for callers that need one resolution."""
-    return ArtifactResolver(models_root).resolve(requested, source_paths=source_paths)
+    return ArtifactResolver(models_root).resolve(
+        requested,
+        source_paths=source_paths,
+        include_support=include_support,
+    )

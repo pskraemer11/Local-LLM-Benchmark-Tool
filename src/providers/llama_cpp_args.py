@@ -83,6 +83,29 @@ def build_runtime_args(
 
     args.append("--kv-unified" if _as_bool(runtime.get("kv_unified"), default=True) else "--no-kv-unified")
 
+    # Speculative decoding is a local llama.cpp launch concern.  The Registry
+    # stores the selected mode and resolved companion path under the local
+    # binding; no LM Studio field names leak into this adapter.
+    spec_type = runtime.get("spec_type")
+    if isinstance(spec_type, str) and spec_type.strip():
+        args.extend(["--spec-type", spec_type.strip()])
+    draft_model_path = runtime.get("draft_model_path")
+    if isinstance(draft_model_path, (str, os.PathLike)) and str(draft_model_path).strip():
+        args.extend(["--spec-draft-model", str(draft_model_path)])
+    for runtime_key, option in (
+        ("draft_n_max", "--spec-draft-n-max"),
+        ("draft_n_min", "--spec-draft-n-min"),
+    ):
+        value = runtime.get(runtime_key)
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            args.extend([option, str(value)])
+    draft_p_min = runtime.get("draft_p_min")
+    if isinstance(draft_p_min, (int, float)) and not isinstance(draft_p_min, bool):
+        if 0.0 <= float(draft_p_min) <= 1.0:
+            args.extend(["--spec-draft-p-min", str(draft_p_min)])
+        else:
+            notify(f"Invalid speculative draft probability {draft_p_min!r}; ignoring it.")
+
     for binding in llama_cpp_value_bindings():
         key = binding.registry_field
         option = binding.llama_cpp_flag

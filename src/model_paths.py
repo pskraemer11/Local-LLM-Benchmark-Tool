@@ -16,7 +16,12 @@ LEGACY_GGUF_ROOT = Path.home() / ".lmstudio" / "models"
 
 # GGUF_MODEL_ROOT is provider-neutral.  The other two names predate this
 # module and remain supported for existing Unsloth/LM Studio setups.
-_ROOT_ENV_VARS = ("GGUF_MODEL_ROOT", "UNSLOTH_MODEL_ROOT", "LMSTUDIO_MODELS_DIR")
+_ROOT_ENV_VARS = (
+    "LLAMA_ARG_MODELS_DIR",
+    "GGUF_MODEL_ROOT",
+    "UNSLOTH_MODEL_ROOT",
+    "LMSTUDIO_MODELS_DIR",
+)
 
 
 def _deduplicate_roots(roots: tuple[Path, ...]) -> tuple[Path, ...]:

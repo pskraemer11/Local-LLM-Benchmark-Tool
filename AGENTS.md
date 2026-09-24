@@ -62,6 +62,8 @@
 
 ## Llama.cpp
 - Llama.cpp Projektseite: https://github.com/ggml-org/llama.cpp/
+- `LLAMA_ARG_MODELS_DIR` ist der bevorzugte lokale GGUF-Modellroot und wird
+  vom gemeinsamen Resolver mit höchster Priorität berücksichtigt.
 - HuggingFace Model Card Metadata Interoperability Consideration: https://github.com/ggml-org/llama.cpp/wiki/HuggingFace-Model-Card-Metadata-Interoperability-Consideration
 - Obtaining and quantizing models: https://github.com/ggml-org/llama.cpp/blob/master/docs/models.md
 
@@ -72,7 +74,7 @@
 - `TabbyAPI` (frontend), nur zusammen mit Python-venv in `exllamv3` (backend), siehe: `C:\Users\pskra\Python-Projekte\tabbyAPI` und `C:\Users\pskra\Python-Projekte\exllamav3`
 
 ## Konventionen
-- Compaction: Blöcke **IMMER** hinten in `C:\Users\pskra\Python-Projekte\Inspect-Evals\COMPACTIONS.md` anhängen
+- Compaction: Blöcke **IMMER** hinten in `C:\Users\pskra\Python-Projekte\Benchmarks\COMPACTIONS.md` anhängen
   (Dateiname großgeschrieben, analog CHANGELOG.md; kein Unterordner).
   CHANGELOG = „was", Compaction = „warum/next". Nur per Write/Edit-Tool schreiben.
 

@@ -193,7 +193,6 @@ def test_add_uses_main_gguf_size_not_lm_studio_aggregate(tmp_path, monkeypatch) 
     monkeypatch.setattr(rt, "is_registry_candidate", lambda _model: True)
     monkeypatch.setattr(rt, "is_support_model_record", lambda _model: False)
     monkeypatch.setattr(rt, "is_blacklisted_model_name", lambda _name: False)
-    monkeypatch.setattr(rt, "is_mtp_drafter", lambda *_args: False)
     monkeypatch.setattr(rt, "_is_support_file", lambda *_args: False)
     monkeypatch.setattr(rt, "_find_gguf_relative_path", lambda _path: main_gguf)
     monkeypatch.setattr(rt, "_classify_arch", lambda *_args: "dense")
@@ -1527,18 +1526,18 @@ class TestCmdQuarantineMissing:
 
 
 # ─────────────────────────────────────────────────────────────────────
-# MTP-Drafter / mmproj: Zusatzdateien ≠ eigenständige Modelle
+# MTP-/Draft-/mmproj-Support: Zusatzdateien ≠ eigenständige Standardmodelle
 # ─────────────────────────────────────────────────────────────────────
 
 
 class TestIsSupportFile:
-    """_is_support_file(): mtp-* und mmproj* sind Zusatzdateien,
+    """_is_support_file(): mtp-*, dflash-* und mmproj* sind Zusatzdateien,
     legitime MTP-Modelle (qwen3.6-27b-mtp, ...-MTP-...) nicht."""
 
-    def test_mtp_drafter_prefix_detected(self):
+    def test_separate_mtp_prefix_detected(self):
         assert rt._is_support_file("unsloth/gemma-4-12B-it-qat-GGUF/mtp-gemma-4-12B-it-Q8_0.gguf")
 
-    def test_mtp_drafter_subfolder_detected(self):
+    def test_separate_mtp_subfolder_detected(self):
         assert rt._is_support_file("unsloth/gemma-4-12B-it-qat-GGUF/MTP/mtp-gemma-4-12B-it.gguf")
 
     def test_mmproj_detected(self):
@@ -1563,7 +1562,8 @@ class TestIsSupportFile:
         assert not rt._is_support_file("unsloth/Qwen3.6-27B-MTP-GGUF/model.gguf")
 
     def test_assistant_architecture_detected(self):
-        # MTP-Drafter haben eigene Architektur-Klasse (gemma4-assistant)
+        # Separate MTP-Sidecars haben die eigene Architekturklasse
+        # (gemma4-assistant).
         assert rt._is_support_file("unsloth/gemma-4-12B-it-qat-GGUF/model.gguf", architecture="gemma4-assistant")
 
     def test_plain_architecture_not_detected(self):
@@ -1593,7 +1593,7 @@ class TestIsSupportFile:
 
 
 class TestCmdAddSkipsSupportFiles:
-    """cmd_add(): MTP-Drafter und mmproj werden nicht in die Registry aufgenommen."""
+    """cmd_add(): MTP-/Draft-Support und mmproj bleiben Bundle-Artefakte."""
 
     def test_add_skips_mtp_drafter(self, tmp_path, monkeypatch):
         reg_path = tmp_path / "registry.yaml"
@@ -1621,7 +1621,7 @@ class TestCmdAddSkipsSupportFiles:
         reg = rt.load_registry(reg_path)
         assert "unsloth/gemma-4-12b-it-qat@q4_k_xl" in reg
         assert "unsloth/gemma-4-12b-it-qat@q8_0" not in reg
-        assert any("MTP-Drafter" in msg for _, msg in result["skipped"])
+        assert any("Zusatzdatei" in msg for _, msg in result["skipped"])
 
     def test_add_keeps_standalone_mtp_model(self, tmp_path, monkeypatch):
         reg_path = tmp_path / "registry.yaml"
@@ -1851,6 +1851,348 @@ def test_rekey_registry_to_exact_lms_identity(monkeypatch):
     assert changed == 1
     assert "qwen/qwen2.5-coder-14b-instruct@q6_k" in saved
     assert saved["qwen/qwen2.5-coder-14b-instruct@q6_k"]["blueprint"] == "coding_agent"
+
+
+def test_lms_namespace_is_not_mistaken_for_publisher():
+    model = {
+        "modelKey": "qwen/qwen3.5-9b",
+        "publisher": "lmstudio-community",
+        "quantization": {"name": "Q6_K"},
+    }
+
+    assert rt._canonical_lms_key(model) == "lmstudio-community/qwen/qwen3.5-9b@q6_k"
+
+
+def test_lms_gguf_display_path_uses_parent_model_directory_for_identity():
+    model = {
+        "modelKey": "byteshape/qwen3.5-9b/Qwen3.5-9B-Q5_K_S-5.10bpw.gguf",
+        "publisher": "byteshape",
+        "quantization": {"name": "Q5_K_S"},
+    }
+
+    assert rt._canonical_lms_key(model) == "byteshape/qwen3.5-9b@q5_k_s"
+    assert rt._lms_matches_registry_key(model, "byteshape/qwen3.5-9b@q5_k_s")
+    assert not rt._lms_matches_registry_key(
+        model,
+        "byteshape/qwen3.5-9b/qwen3.5-9b-q5_k_s-5.10bpw@q5_k_s",
+    )
+
+
+def test_lms_gguf_display_path_can_bind_its_publisher_config():
+    config = {
+        "publisher": "byteshape",
+        "dir_name": "qwen3.5-9b",
+        "quant": None,
+    }
+    model = {
+        "modelKey": "byteshape/qwen3.5-9b/Qwen3.5-9B-Q5_K_S-5.10bpw.gguf",
+        "publisher": "byteshape",
+        "quantization": {"name": "Q5_K_S"},
+    }
+
+    assert rt._config_matches_lms_model(config, model)
+
+
+def test_config_matches_lms_model_by_namespaced_model_key_not_config_folder_publisher(tmp_path):
+    config = {
+        "publisher": "qwen",
+        "dir_name": "qwen3.5-9b",
+        "quant": None,
+        "json_path": tmp_path / "qwen3.5-9b.json",
+    }
+    model = {
+        "modelKey": "qwen/qwen3.5-9b",
+        "publisher": "lmstudio-community",
+        "quantization": {"name": "Q6_K"},
+    }
+
+    assert rt._config_matches_lms_model(config, model)
+
+
+def test_identity_link_binds_runtime_config_to_one_gguf_artifact(tmp_path):
+    from local_model_resolver import LocalModelResolver
+
+    artifact_path = (
+        tmp_path
+        / "lmstudio-community"
+        / "qwen"
+        / "qwen3.5-9b"
+        / "Qwen3.5-9B-Q6_K.gguf"
+    )
+    artifact_path.parent.mkdir(parents=True)
+    artifact_path.write_bytes(b"GGUF test placeholder")
+    registry_key = "lmstudio-community/qwen/qwen3.5-9b@q6_k"
+    registry = {registry_key: {}}
+    model = {
+        "modelKey": "qwen/qwen3.5-9b",
+        "publisher": "lmstudio-community",
+        "quantization": {"name": "Q6_K"},
+        "path": str(artifact_path),
+    }
+    config_path = tmp_path / "configs" / "qwen" / "qwen3.5-9b.json"
+    config_path.parent.mkdir(parents=True)
+    config = {
+        "publisher": "qwen",
+        "dir_name": "qwen3.5-9b",
+        "json_path": config_path,
+        "sampling": {"temperature": 0.7, "top_p": 0.95, "top_k": 40},
+        "context_length": 131072,
+        "use_unified_kv": True,
+        "num_parallel": 4,
+        "k_cache": "q8_0",
+        "v_cache": "q5_1",
+    }
+    candidates = LocalModelResolver(tmp_path, registry_loader=lambda: registry).candidates()
+    inventory = rt.RegistryInventory(registry, [model], [model], [config], candidates, True)
+
+    rt._refresh_identity_links(inventory)
+
+    link = inventory.identity_links[registry_key]
+    assert link.artifact_paths == (artifact_path,)
+    assert link.config_paths == (config_path,)
+    assert link.artifact_evidence[0].identity == registry_key
+    runtime = link.runtime_bindings[0]
+    assert runtime.config_path == config_path
+    assert dict(runtime.sampling) == {"temperature": 0.7, "top_k": 40, "top_p": 0.95}
+    assert runtime.context_length == 131072
+    assert runtime.use_unified_kv is True
+    assert runtime.num_parallel == 4
+    assert runtime.k_cache == "q8_0"
+    assert runtime.v_cache == "q5_1"
+
+
+def test_identity_link_joins_logical_lms_snapshot_to_flat_physical_qwen_path(tmp_path):
+    from local_model_resolver import LocalModelResolver
+
+    artifact_path = tmp_path / "lmstudio-community" / "Qwen3.5-9B-GGUF" / "Qwen3.5-9B-Q6_K.gguf"
+    artifact_path.parent.mkdir(parents=True)
+    artifact_path.write_bytes(b"GGUF test placeholder")
+    registry_key = "lmstudio-community/qwen/qwen3.5-9b@q6_k"
+    registry = {registry_key: {}}
+    # This is the shape found in the supplied `lms ls --json` snapshot:
+    # the logical Hub publisher differs from the physical local root.
+    model = {
+        "type": "llm",
+        "modelKey": "qwen/qwen3.5-9b",
+        "publisher": "qwen",
+        "path": "qwen/qwen3.5-9b",
+        "selectedVariant": "qwen/qwen3.5-9b@q6_k",
+        "quantization": {"name": "Q6_K"},
+    }
+    config_path = tmp_path / "configs" / "qwen" / "qwen3.5-9b.json"
+    config_path.parent.mkdir(parents=True)
+    config = {
+        "publisher": "qwen",
+        "dir_name": "qwen3.5-9b",
+        "json_path": config_path,
+        "context_length": 131072,
+    }
+    candidates = LocalModelResolver(tmp_path, registry_loader=lambda: registry).candidates()
+    inventory = rt.RegistryInventory(registry, [model], [model], [config], candidates, True)
+
+    rt._refresh_identity_links(inventory)
+
+    link = inventory.identity_links[registry_key]
+    assert link.artifact_paths == (artifact_path,)
+    assert link.config_paths == (config_path,)
+    assert link.runtime_bindings[0].config_path == config_path
+
+
+def test_materialize_local_binding_persists_main_config_and_mtp_companion(tmp_path, monkeypatch):
+    from local_model_resolver import LocalModelResolver
+
+    main_path = tmp_path / "unsloth" / "gemma-4-12b-it-GGUF" / "gemma-4-12b-it-Q6_K.gguf"
+    companion_path = (
+        tmp_path
+        / "unsloth"
+        / "gemma-4-12b-it-GGUF"
+        / "mtp-gemma-4-12B-it-Q8_0.gguf"
+    )
+    for path in (main_path, companion_path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"GGUF test placeholder")
+    config_path = tmp_path / "configs" / "unsloth" / "gemma-4-12b-it.json"
+    config_path.parent.mkdir(parents=True)
+    registry_key = "unsloth/gemma-4-12b-it@q6_k"
+    registry = {registry_key: {}}
+    model = {
+        "type": "llm",
+        "modelKey": "gemma-4-12b-it",
+        "publisher": "unsloth",
+        "quantization": {"name": "Q6_K"},
+        "path": str(main_path),
+    }
+    config = {
+        "publisher": "unsloth",
+        "dir_name": "gemma-4-12b-it",
+        "json_path": config_path,
+        "context_length": 65536,
+        "speculative": {
+            "type": "mtp",
+            "mode": "separate",
+            "draft_model_reference": "unsloth/gemma-4-12b-it-GGUF/mtp-gemma-4-12B-it-Q8_0.gguf",
+            "draft_n_max": 4,
+            "draft_n_min": 0,
+            "draft_p_min": 0.0,
+        },
+    }
+    candidates = LocalModelResolver(tmp_path, registry_loader=lambda: registry).candidates()
+    inventory = rt.RegistryInventory(registry, [model], [model], [config], candidates, True)
+    monkeypatch.setattr(rt, "MODELS_CACHE", tmp_path)
+    saved: list[dict] = []
+    monkeypatch.setattr(rt, "save_registry", lambda value: saved.append(value))
+
+    rt._refresh_identity_links(inventory)
+    changed = rt._materialize_local_bindings(inventory)
+
+    assert changed > 0
+    local = registry[registry_key]["local"]
+    assert local["model_path"] == str(main_path)
+    assert local["config_path"] == str(config_path)
+    assert local["companions"]["mtp"] == str(companion_path)
+    assert local["llama_cpp"]["speculative"] == {
+        "type": "mtp",
+        "mode": "separate",
+        "companion_role": "mtp",
+        "draft_n_max": 4,
+        "draft_n_min": 0,
+        "draft_p_min": 0.0,
+    }
+    assert saved == [registry]
+
+
+def test_materialize_local_binding_persists_dflash_companion_role(tmp_path, monkeypatch):
+    from local_model_resolver import LocalModelResolver
+
+    main_path = tmp_path / "gguf-org" / "muse-glimmer-30b-gguf" / "muse-glimmer-30b-nvfp4.gguf"
+    drafter_path = tmp_path / "gguf-org" / "muse-glimmer-30b-gguf" / "dflash-q4_0.gguf"
+    for path in (main_path, drafter_path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"GGUF test placeholder")
+    config_path = tmp_path / "configs" / "gguf-org" / "muse-glimmer-30b.json"
+    config_path.parent.mkdir(parents=True)
+    registry_key = "gguf-org/muse-glimmer-30b@nvfp4"
+    registry = {registry_key: {}}
+    model = {
+        "type": "llm",
+        "modelKey": "muse-glimmer-30b",
+        "publisher": "gguf-org",
+        "quantization": {"name": "NVFP4"},
+        "path": str(main_path),
+    }
+    config = {
+        "publisher": "gguf-org",
+        "dir_name": "muse-glimmer-30b-gguf",
+        "json_path": config_path,
+        "speculative": {
+            "type": "draft",
+            "method": "dflash",
+            "draft_model_reference": "gguf-org/muse-glimmer-30b-gguf/dflash-q4_0.gguf",
+            "draft_n_max": 3,
+            "draft_n_min": 0,
+            "draft_p_min": 0.0,
+        },
+    }
+    candidates = LocalModelResolver(tmp_path, registry_loader=lambda: registry).candidates()
+    inventory = rt.RegistryInventory(registry, [model], [model], [config], candidates, True)
+    monkeypatch.setattr(rt, "MODELS_CACHE", tmp_path)
+    monkeypatch.setattr(rt, "save_registry", lambda _value: None)
+
+    rt._refresh_identity_links(inventory)
+    rt._materialize_local_bindings(inventory)
+
+    local = registry[registry_key]["local"]
+    assert local["model_path"] == str(main_path)
+    assert local["companions"]["draft"] == str(drafter_path)
+    assert local["llama_cpp"]["speculative"] == {
+        "type": "draft",
+        "method": "dflash",
+        "companion_role": "draft",
+        "draft_n_max": 3,
+        "draft_n_min": 0,
+        "draft_p_min": 0.0,
+    }
+
+
+def test_identity_link_rejects_lms_path_that_does_not_name_local_artifact(tmp_path):
+    from local_model_resolver import LocalModelResolver
+
+    artifact_path = tmp_path / "lmstudio-community" / "qwen" / "qwen3.5-9b" / "model-Q6_K.gguf"
+    artifact_path.parent.mkdir(parents=True)
+    artifact_path.write_bytes(b"GGUF test placeholder")
+    registry_key = "lmstudio-community/qwen/qwen3.5-9b@q6_k"
+    registry = {registry_key: {}}
+    model = {
+        "modelKey": "qwen/qwen3.5-9b",
+        "publisher": "lmstudio-community",
+        "quantization": {"name": "Q6_K"},
+        "path": str(tmp_path / "another-copy" / "model-Q6_K.gguf"),
+    }
+    config_path = tmp_path / "configs" / "qwen" / "qwen3.5-9b.json"
+    config_path.parent.mkdir(parents=True)
+    config = {
+        "publisher": "qwen",
+        "dir_name": "qwen3.5-9b",
+        "json_path": config_path,
+        "context_length": 131072,
+    }
+    candidates = LocalModelResolver(tmp_path, registry_loader=lambda: registry).candidates()
+    inventory = rt.RegistryInventory(registry, [model], [model], [config], candidates, True)
+
+    rt._refresh_identity_links(inventory)
+
+    link = inventory.identity_links[registry_key]
+    assert link.artifact_paths == (artifact_path,)
+    assert link.config_paths == ()
+    assert link.runtime_bindings[0].config_path is None
+
+
+def test_identity_link_rejects_one_config_reused_by_two_quant_identities(tmp_path):
+    from local_model_resolver import LocalModelResolver
+
+    q5_path = tmp_path / "qwen" / "qwen3.5-9b" / "model-Q5_K_S.gguf"
+    q6_path = tmp_path / "qwen" / "qwen3.5-9b" / "model-Q6_K.gguf"
+    for path in (q5_path, q6_path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"GGUF test placeholder")
+    registry = {
+        "qwen/qwen3.5-9b@q5_k_s": {},
+        "qwen/qwen3.5-9b@q6_k": {},
+    }
+    model_q5 = {
+        "modelKey": "qwen3.5-9b",
+        "publisher": "qwen",
+        "quantization": {"name": "Q5_K_S"},
+        "path": str(q5_path),
+    }
+    model_q6 = {
+        "modelKey": "qwen3.5-9b",
+        "publisher": "qwen",
+        "quantization": {"name": "Q6_K"},
+        "path": str(q6_path),
+    }
+    config_path = tmp_path / "configs" / "qwen" / "qwen3.5-9b.json"
+    config_path.parent.mkdir(parents=True)
+    config = {
+        "publisher": "qwen",
+        "dir_name": "qwen3.5-9b",
+        "json_path": config_path,
+        "context_length": 32768,
+    }
+    candidates = LocalModelResolver(tmp_path, registry_loader=lambda: registry).candidates()
+    inventory = rt.RegistryInventory(
+        registry,
+        [model_q5, model_q6],
+        [model_q5, model_q6],
+        [config],
+        candidates,
+        True,
+    )
+
+    rt._refresh_identity_links(inventory)
+
+    assert inventory.identity_links["qwen/qwen3.5-9b@q5_k_s"].config_paths == ()
+    assert inventory.identity_links["qwen/qwen3.5-9b@q6_k"].config_paths == ()
 
 
 # ─────────────────────────────────────────────────────────────────────

@@ -16,13 +16,22 @@ resolved by iteration order.
    Prefix, suffix, and fuzzy matches are diagnostic evidence, not write/runtime
    decisions.
 3. GGUF facts remain technical evidence, Registry fields remain benchmark
-   policy, and LM Studio JSON remains a backend-local runtime artifact.
+   policy, and LM Studio JSON remains a backend-local runtime source. A local
+   effective Registry may persist the verified absolute main/config/companion
+   paths derived from that source; those paths never change the semantic key.
 4. Quantization spelling is normalized once, while the original source value is
    retained for diagnostics.
 5. Existing public CLI commands and valid unambiguous model selections retain
    their behavior.
 6. Parameter translations are declared centrally and tested at each backend
    boundary.
+7. One Registry entry represents the main LLM GGUF. Integrated MTP is encoded
+   as `type: mtp, mode: integrated`; a separate MTP file is `type: mtp,
+   mode: separate` with `companions.mtp`. A separate draft LLM is `type:
+   draft` with `companions.draft`; it is not an MTP artifact. MTP/DFlash/
+   mmproj/iMatrix bundle files cannot become default standalone model entries.
+8. A stale or ambiguous persisted local binding fails closed; it must never
+   fall back to a similarly named GGUF or the first filesystem match.
 
 ## Smells and affected areas
 
@@ -58,7 +67,9 @@ result so ambiguity cannot be confused with absence.
 Make the existing per-run inventory the single snapshot for Registry, LMS
 records, configs, and GGUF candidates. Add an identity-link contract for
 diagnostics and proposals; do not rescan the filesystem independently in a
-single workflow.
+single workflow. Keep only the verified artifact/config/runtime values in the
+binding; LMS publisher/modelKey/selectedVariant are join inputs, not runtime
+fields.
 
 ### Phase 3 — Declarative quant and parameter contracts
 
@@ -72,7 +83,9 @@ they do not create competing mappings.
 Centralize GGUF discovery and evidence ranking. The resolver returns unique,
 ambiguous, or not-found results with candidate paths and evidence. Exact
 relative paths and explicit Hub sources outrank normalized filename matches;
-fuzzy matches are never accepted for writes or runtime execution.
+fuzzy matches are never accepted for writes or runtime execution. Honor
+`LLAMA_ARG_MODELS_DIR` as the shared highest-priority root. Permit support
+files only for an explicit bundle-companion resolution.
 
 ### Phase 5 — Strict consumer migration
 
@@ -84,8 +97,11 @@ retaining report-only diagnostics.
 ### Phase 6 — Boundary consolidation and documentation
 
 Keep `registry_tool.py` as the stable CLI facade while moving reusable contracts
-into focused modules. Add the official llama.cpp/Hugging Face metadata mapping
-to the architecture documentation. Verify tests, static validation, and
+into focused modules. Persist machine-local effective bindings under `local`,
+including the exact main/config/companion paths and normalized speculative
+profile. Keep Registry vocabulary (`mtp`/`draft`) separate from llama.cpp's
+CLI vocabulary (`draft-mtp`/`draft-dflash`). Add the official llama.cpp/Hugging Face metadata mapping to the
+architecture documentation. Verify tests, static validation, and
 documentation links; live LM Studio/llama.cpp tests remain a separate follow-up.
 
 ## Proof and acceptance
@@ -93,6 +109,12 @@ documentation links; live LM Studio/llama.cpp tests remain a separate follow-up.
 - New tests fail on the pre-refactor exact-collision behavior and pass after
   the change.
 - `registry_tool.py validate --ci` fails closed on normalized exact collisions.
+- A generated local snapshot binds the installed Qwen pair as
+  `byteshape/qwen3.5-9b@q5_k_s` and
+  `lmstudio-community/qwen/qwen3.5-9b@q6_k`; it does not create a fictitious
+  LM Studio Q5 identity.
+- Bundle tests cover integrated MTP, separate MTP, and separate DFlash roles;
+  only the main GGUF is enumerated as an LLM.
 - Focused identity, resolver, Registry, pipeline, and provider tests pass.
 - Full `pytest` and configured Ruff/type checks are run after integration.
 - No live model loading, LM Studio mutation, remote search, commit, or push is

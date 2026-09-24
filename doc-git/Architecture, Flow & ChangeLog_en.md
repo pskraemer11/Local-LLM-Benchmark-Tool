@@ -1,6 +1,6 @@
 # Architecture and User Workflow
 
-Status: 2026-09-22
+Status: 2026-09-24
 Audience: first-time users, maintainers, and reviewers
 Scope: model onboarding, Registry maintenance, prompt assembly, benchmark
 execution, providers, and result data
@@ -214,6 +214,200 @@ candidate paths for diagnostics. `quantization.py`, `inventory.py`, and
 `parameter_bindings.py` are the reusable boundary contracts for quantization
 spelling, per-run source snapshots, and Registry-to-backend parameter names.
 
+### 2.2.1 Identity evidence and LMS runtime linkage
+
+The canonical identity is intentionally smaller than the evidence needed to
+operate one local benchmark run. The required semantic identity is exactly:
+
+~~~text
+publisher + complete model name + quantization
+~~~
+
+The complete model name may contain slashes. The installed Qwen pair makes
+the distinction concrete: `byteshape/qwen3.5-9b@q5_k_s` is the Q5_K_S file
+from Byteshape, while `lmstudio-community/qwen/qwen3.5-9b@q6_k` is the Q6_K
+file stored below the LM Studio Community model root. In the latter identity,
+the first `qwen/` is part of the model name, not a second publisher.
+
+For a local GGUF artifact, the evidence table retains only the additional data
+needed to prove and resolve that identity. The distinction between required
+identity data and transient join data is intentional:
+
+| Evidence | Required for a unique local identity? | Role and persistence |
+| -------- | ------------------------------------ | ------------------- |
+| Registry key: publisher + complete model name + quant | yes | Semantic identity and benchmark selection; persisted as the Registry key |
+| Absolute GGUF path | yes for local execution | Strong physical reference to the exact file passed to `llama-server.exe`; persisted in the machine-local `local.model_path` |
+| Full path components and GGUF filename | yes as physical evidence | Derive/check publisher, namespaced model name, variant markers, and filename quant; retained in the per-run evidence record, not copied into the semantic key |
+| GGUF header facts | yes for technical validation | Immutable architecture and limit evidence such as context and expert bounds; never replaced by an LMS display value |
+| LMS publisher/modelKey/selectedVariant | no for the final llama.cpp binding | Transient join and cross-check evidence only; do not persist as a second identity because LMS publisher metadata is not the physical file owner |
+| Unique LMS JSON config path | only when LMS runtime values are imported | Identifies the source of tested sampling, context, UKV, cache, offload, parallel-session, expert, and speculative settings; persisted as `local.config_path` only after a unique join |
+
+LM Studio data is join evidence, not a second semantic identity. Its
+`publisher`, `modelKey`, `selectedVariant`, and logical path are used only to
+locate the matching JSON config and to cross-check the physical artifact. They
+are not copied into the runtime binding because llama.cpp does not need them.
+The JSON config path and its runtime values remain necessary for importing
+tested values such as sampling parameters, context length, UKV, K/V cache
+types, offload, experts, parallel sessions, and speculative decoding.
+`RuntimeBinding` stores those values only after one LMS row, one exact GGUF,
+and one exact JSON config have been joined. A reported LMS artifact path, when
+present, must name that exact local GGUF; it is not allowed to select a
+different similarly named file. If LMS exposes only a logical Hub key, the
+physical GGUF evidence remains the stronger source and the LMS row may complete
+the join only when the resulting model and quantization are still unique.
+
+#### 2.2.1.1 The per-run data contract
+
+`registry_tool.py` reads one `InventorySnapshot` for a synchronization run.
+The snapshot is an in-memory join table, not another user-maintained Registry:
+
+~~~text
+InventorySnapshot
+├─ registry: semantic Registry entries
+├─ raw_lms_models / lms_models: one LMS inventory snapshot
+├─ configs: parsed LMS JSON configs with their absolute json_path
+├─ gguf_candidates: physical GGUF candidates, loaded lazily
+└─ identity_links[registry_key]
+   ├─ artifact_evidence[]
+   │  ├─ absolute path
+   │  ├─ path-derived source_reference
+   │  └─ publisher / complete model_name / quant
+   └─ runtime_bindings[]
+      ├─ unique config_path, or None when the join is not proven
+      ├─ sampling, context_length, use_unified_kv, num_parallel
+      ├─ offload, K/V cache, and num_experts
+      └─ normalized speculative settings
+~~~
+
+`ArtifactIdentityEvidence` is the physical proof for one concrete GGUF.
+`RuntimeBinding` is the runtime projection of one uniquely matched JSON
+config. `IdentityLink` keeps both projections under the Registry key and is
+the only object allowed to feed local materialization. This prevents an LMS
+row, config, or basename from being reused across two publisher/quantization
+identities merely because it appeared first in an iteration.
+
+The persisted machine-local projection is deliberately smaller than the
+snapshot and contains only values needed for offline execution or audit:
+
+~~~yaml
+publisher/model@quant:
+  local:
+    model_path: D:/LLM-Modelle/models/publisher/model-GGUF/model-Q6_K.gguf
+    config_path: C:/Users/<user>/.lmstudio/.internal/user-concrete-model-default-config/...
+    companions:
+      mtp: D:/LLM-Modelle/models/publisher/model-GGUF/mtp-model-Q8_0.gguf
+      draft: D:/LLM-Modelle/models/publisher/model-GGUF/dflash-q4_0.gguf
+    llama_cpp:
+      speculative:
+        type: mtp
+        mode: separate
+        companion_role: mtp
+        draft_n_max: 4
+        draft_n_min: 0
+        draft_p_min: 0.0
+~~~
+
+The LMS publisher, model key, selected variant, aggregate size, and logical
+display path are deliberately absent from this persisted projection. They are
+useful inputs to the join, but they are neither needed by `llama-server.exe`
+nor authoritative over the exact local GGUF and its header.
+
+#### 2.2.1.2 Deterministic reconciliation sequence
+
+Every discovery, `sync`, `full`, preset export, and direct llama.cpp launch
+must use the following sequence. The sequence is designed so that a different
+directory layout or a second publisher cannot change the selected result by
+iteration order:
+
+~~~text
+read Registry + LMS inventory + JSON configs once
+                 │
+                 ▼
+discover GGUFs under LLAMA_ARG_MODELS_DIR first, then configured fallbacks
+                 │
+                 ▼
+derive full-path/filename evidence and read immutable GGUF header facts
+                 │
+                 ▼
+match exact publisher + complete model name + quantization
+                 │
+       ┌─────────┴─────────┐
+       │ exactly one       │ zero or multiple
+       ▼                   ▼
+cross-check concrete LMS  emit diagnostic; do not choose a first match
+path, if available         and do not import runtime values
+       │
+       ▼
+find exactly one JSON config for that LMS row and claim it exclusively
+       │
+       ▼
+materialize local.model_path, local.config_path, companions, and runtime
+       │
+       ▼
+provider adapter translates the internal profile to llama.cpp CLI flags
+~~~
+
+Support files are excluded from the main-model scan. They are admitted only
+after an explicit, uniquely joined bundle reference: a separate MTP file is a
+`companions.mtp` artifact, while a DFlash draft LLM is a `companions.draft`
+artifact. Integrated MTP remains a property of the single main GGUF and has
+no companion path. Internal types (`mtp` and `draft`) are translated to the
+current llama.cpp option labels only at the provider boundary.
+
+#### 2.2.1.3 Fail-closed reconciliation outcomes
+
+The synchronization report must preserve the reason for a rejected join:
+
+| Outcome | Meaning | Allowed action |
+| ------- | ------- | -------------- |
+| `not_found` | No physical GGUF or no matching config exists | Report; leave the local binding unchanged |
+| `ambiguous` | Several GGUFs/configs match the same request | Report all candidates; never select the first |
+| `identity_collision` | Publisherless or normalized identity maps to multiple Registry keys | Require publisher and quant evidence; do not import |
+| `stale_path` | Persisted or LMS concrete path no longer names the candidate | Fail resolution; do not fall back silently |
+| `config_reused` | One JSON config would be assigned to multiple identities | Keep it diagnostic-only until a unique ownership exists |
+| `companion_missing` | Speculative mode requires an explicit sidecar that cannot be uniquely resolved | Keep the main model usable, but omit broken speculative CLI arguments |
+
+Only the unique path continues to runtime materialization. A warning may be
+non-blocking for a report-only command, but it must never become an implicit
+selection rule for benchmark execution.
+
+`registry_tool.py` creates or refreshes these local bindings from the current
+environment. A configured local path is authoritative: if it becomes stale,
+runtime resolution fails closed instead of selecting another file. CI and
+portable Registry review ignore the `local` section. `LLAMA_ARG_MODELS_DIR`
+is the highest-priority shared GGUF root and therefore participates in the
+same resolver used for discovery, config joins, companion resolution, and
+llama.cpp execution; it is not a second path-resolution implementation.
+
+### 2.2.2 Model bundles and speculative decoding
+
+The Registry contains one default benchmark identity for the main GGUF. A
+separate MTP file, mmproj, and iMatrix file are non-standalone bundle
+artifacts. A DFlash draft GGUF is different: it is a complete LLM that can run
+independently, but when discovered under its standard sidecar name it is
+attached as `companions.draft` and excluded from default main-model
+enumeration. An explicit companion reference from the uniquely joined LMS
+config may resolve any of these bundle artifacts with support-file scanning
+enabled.
+
+The three supported local shapes are:
+
+| Local shape | Registry representation | llama.cpp launch data |
+| ----------- | ----------------------- | ---------------------- |
+| Integrated MTP in the main GGUF | main `model_path`; speculative `type: mtp`, `mode: integrated`; no companion path | `--spec-type draft-mtp` plus the MTP runtime limits |
+| Main GGUF plus separate MTP GGUF | main identity only; `companions.mtp` contains the exact non-standalone path; speculative `type: mtp`, `mode: separate`, `companion_role: mtp` | `--spec-type draft-mtp`, `--spec-draft-model`, and MTP limits |
+| Main GGUF plus separate DFlash draft LLM | main identity only; `companions.draft` contains the exact path; speculative `type: draft`, `method: dflash`, `companion_role: draft` | `--spec-type draft-dflash`, `--spec-draft-model`, and draft limits |
+
+The adapter translates this normalized local profile to current llama.cpp
+server options (`--spec-type`, `--spec-draft-model`,
+`--spec-draft-n-max`, `--spec-draft-n-min`, and `--spec-draft-p-min`). The
+authoritative option semantics are maintained in the official
+[llama.cpp speculative decoding documentation](https://github.com/ggml-org/llama.cpp/blob/master/docs/speculative.md)
+and [server option reference](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md).
+The Hugging Face/llama.cpp metadata naming differences remain a source-level
+mapping concern and are documented by the official
+[metadata interoperability consideration](https://github.com/ggml-org/llama.cpp/wiki/HuggingFace-Model-Card-Metadata-Interoperability-Consideration).
+
 ### 2.3 Registry entry shape
 
 A typical Registry entry contains:
@@ -277,10 +471,13 @@ OCR and embedding models are deliberately excluded. Their local benchmark
 pipelines are not implemented in this repository, so adding them to the
 Registry would create entries that the launcher cannot evaluate correctly.
 
-MTP drafter companions, DFlash decoder/draft files, mmproj files, and iMatrix
-support files are also filtered as auxiliary rather than standalone benchmark
-models. A real standalone model whose name contains mtp remains eligible when
-it is not a small companion file.
+Separate MTP companions, DFlash draft files, mmproj files, and iMatrix support
+files are also filtered as auxiliary rather than standalone benchmark models.
+Integrated MTP main GGUFs and real standalone MTP models remain eligible. A
+DFlash file is a full LLM in its own right, but a standard `dflash-*` sidecar
+is treated as a bundle dependency during default inventory. The LMS `lms ls --json` snapshot is useful
+for logical model and variant metadata, but it does not replace the physical
+GGUF inventory: in particular, it does not expose every companion file.
 
 LM Studio also relies on a naming convention for vision projectors: the
 projector filename should start with `mmproj-` (for example,

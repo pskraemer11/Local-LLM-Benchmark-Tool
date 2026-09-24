@@ -367,13 +367,13 @@ class TestGetAvailableModels:
         assert models[0]["quant"] == ""
 
     def test_filters_mtp_drafter_support_file(self, mocker):
-        """Code-Review 2026-08-03 §F1: MTP-Drafter (mtp-* Pfad oder
-        *-assistant Architektur) wird aus der Modellliste gefiltert,
+        """Code-Review 2026-08-03 §F1: MTP-Sidecars (mtp-* Pfad oder
+        *-assistant Architektur) werden aus der Modellliste gefiltert,
         legitime MTP-Modelle bleiben unberührt."""
         result = MagicMock()
         result.returncode = 0
         result.stdout = json.dumps([
-            # MTP-Drafter: mtp- Präfix + -assistant Architektur
+            # MTP-Sidecar: mtp- Präfix + -assistant Architektur
             {"modelKey": "gemma-4-12b-it-qat@q8_0",
              "displayName": "Mtp Gemma 4 12B Instruct",
              "selectedVariant": "gemma-4-12b-it-qat@q8_0",

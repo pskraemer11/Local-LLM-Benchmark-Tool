@@ -192,52 +192,6 @@ unsloth/qwen3-30b-a3b-instruct-2507@q3_k_s:
   architecture_family: qwen3moe
   max_experts: 128
 
-qwen/qwen3.5-9b@q5_k_s:
-  publisher: qwen
-  hf_url: https://huggingface.co/Qwen/Qwen3.5-9B
-  pub_url: https://qwen.ai
-  quants: Q5_K_S
-  arch: dense
-  sampling:
-    coding:
-      temperature: 0.6
-      top_p: 0.95
-    knowledge:
-      temperature: 1.0
-      top_p: 0.95
-    agentic:
-      temperature: 1.0
-      top_p: 0.95
-    math:
-      temperature: 1.0
-      top_p: 1.0
-      evidence_kind: unresolved
-      reason: Kein allgemeines Profil; Coding-/Math-Fallback kann nicht
-        belastbar bestimmt werden.
-    thinking:
-      enabled: true
-      temperature: 0.6
-      top_p: 0.95
-    sampling_research_status: conflict
-    sampling_researched_at: '2026-09-20T19:44:29+00:00'
-    sampling_sources:
-      - https://huggingface.co/Qwen/Qwen3.5-9B/raw/main/README.md
-  k_cache: q8_0
-  v_cache: q8_0
-  notes: 'Architektur: Qwen3.5 Hybrid Gated Delta Networks combined with sparse Mixture-of-Experts'
-  reasoning: thinking
-  capabilities: coding, vision, text
-  blueprint: reasoning_coding
-  truncation: full
-  context_length: 262144
-  offload: 1.0
-  useUnifiedKvCache: true
-  n_layers: 32
-  hidden_dim: 4096
-  file_size_bytes: 5721438048
-  max_context_length: 262144
-  architecture_family: qwen35
-
 mradermacher/qwen3.6-28b-reap-i1@iq3_s:
   publisher: mradermacher
   hf_url: https://huggingface.co/mradermacher/qwen3.6-28b-reap-i1@iq3_s
@@ -954,8 +908,8 @@ essentialai/rnj-1@q8_0:
   max_context_length: 32768
   quants: Q8_0
 
-qwen/qwen3.5-9b@q6_k:
-  publisher: qwen
+lmstudio-community/qwen/qwen3.5-9b@q6_k:
+  publisher: lmstudio-community
   hf_url: https://huggingface.co/qwen/qwen3.5-9b
   pub_url: https://qwen.ai
   arch: dense
@@ -987,7 +941,7 @@ qwen/qwen3.5-9b@q6_k:
   v_cache: q8_0
   offload: 1.0
   notes: 'Architektur: dense | Vision'
-  file_size_bytes: 7359259040
+  file_size_bytes: 8281142495
   context_length: 262144
   max_context_length: 262144
   useUnifiedKvCache: true
@@ -2382,7 +2336,7 @@ byteshape/qwen3.5-9b@q5_k_s:
   v_cache: q5_1
   offload: 1
   notes: 'Architektur: dense | Vision'
-  file_size_bytes: 5721438048
+  file_size_bytes: 6643142944
   context_length: 262144
   n_layers: 32
   hidden_dim: 4096

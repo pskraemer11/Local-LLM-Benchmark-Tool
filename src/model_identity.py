@@ -16,10 +16,11 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from quantization import KNOWN_QUANTS
+from quantization import KNOWN_QUANTS, normalize_quant
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -45,6 +46,55 @@ class Unmatched:
     """No Registry key matched the requested identity."""
 
     requested: str
+
+
+@dataclass(frozen=True)
+class ArtifactIdentityEvidence:
+    """Identity evidence derived from one concrete local GGUF artifact.
+
+    The semantic identity is deliberately kept small: publisher, complete
+    model name, and quantization.  The full path and the raw path-derived
+    reference stay attached for auditability and for resolving the artifact
+    later, but are not folded into the Registry key.
+    """
+
+    path: Path
+    source_reference: str
+    publisher: str
+    model_name: str
+    quant: str
+
+    @property
+    def identity(self) -> str:
+        """Return the canonical identity represented by this evidence."""
+        return build_model_identity(self.publisher, self.model_name, self.quant)
+
+    @property
+    def is_complete(self) -> bool:
+        """Return whether all three identity components are available."""
+        return bool(self.publisher and self.model_name and self.quant)
+
+    @classmethod
+    def from_reference(cls, path: Path, reference: str, quant: str = "") -> ArtifactIdentityEvidence:
+        """Create evidence from a path-derived publisher/model reference.
+
+        ``reference`` normally comes from the relative model directory, for
+        example ``lmstudio-community/qwen/qwen3.5-9b``.  The first component
+        is the physical publisher; the remainder is the path-derived model
+        name.  A model name may itself contain slashes.  Some LM Studio roots
+        flatten a logical Hub namespace (for example
+        ``lmstudio-community/Qwen3.5-9B-GGUF``), so callers may combine this
+        evidence with an LMS logical key before assigning a Registry identity.
+        """
+        publisher, model_name, embedded_quant = decompose_model_identity(reference)
+        canonical_quant = normalize_quant(quant or embedded_quant)
+        return cls(
+            path=path,
+            source_reference=reference,
+            publisher=publisher,
+            model_name=model_name,
+            quant=canonical_quant,
+        )
 
 
 type RegistryMatch = UniqueMatch | AmbiguousMatch | Unmatched
@@ -87,6 +137,60 @@ def build_model_identity(publisher: str, model_name: str, quant: str = "") -> st
         raise ValueError("model_name must not be empty")
     base = f"{normalized_publisher}/{normalized_model}" if normalized_publisher else normalized_model
     return f"{base}@{normalized_quant}" if normalized_quant else base
+
+
+def canonicalize_source_identity(
+    reference: str,
+    *,
+    publisher: str = "",
+    quant: str = "",
+) -> str:
+    """Build an identity from a source reference and optional owner metadata.
+
+    External sources use different conventions for slashes.  A separately
+    supplied publisher is authoritative: when the first component of
+    ``reference`` is not that publisher, the complete reference is the model
+    name.  This preserves names such as ``qwen/qwen3.5-9b`` from an LM Studio
+    record whose publisher is ``lmstudio-community``.
+
+    Without a separate publisher, the canonical ``publisher/model`` spelling
+    remains supported for paths and Registry keys.
+    """
+    raw = str(reference or "").strip().replace("\\", "/")
+    if not raw:
+        return ""
+    base, _, embedded_quant = raw.partition("@")
+    parsed_publisher, parsed_model, _ = decompose_model_identity(raw)
+    explicit_publisher = str(publisher or "").strip().lower()
+    if explicit_publisher:
+        if parsed_publisher and parsed_publisher == explicit_publisher:
+            model_name = parsed_model
+        else:
+            model_name = base
+        selected_publisher = explicit_publisher
+    else:
+        selected_publisher = parsed_publisher
+        model_name = parsed_model
+    selected_quant = normalize_quant(str(quant or embedded_quant or "").strip())
+    return build_model_identity(selected_publisher, model_name, selected_quant)
+
+
+def normalize_model_reference(value: str) -> str:
+    """Normalize a source model reference without stripping namespace slashes.
+
+    This is intentionally different from ``normalize_model_name``.  It is
+    used to compare an LM Studio config directory reference with an LMS
+    ``modelKey`` while preserving a model namespace such as
+    ``qwen/qwen3.5-9b``.
+    """
+    s = str(value or "").strip().replace("\\", "/").lower()
+    s = re.sub(r"\.gguf$", "", s)
+    s = re.sub(r"[-_](gguf|mxfp4)[-_]", "-", s)
+    s = re.sub(r"-(gguf|mxfp4)$", "", s)
+    s = s.replace(".", "-").replace("_", "-")
+    while "--" in s:
+        s = s.replace("--", "-")
+    return s.strip("/")
 
 
 def normalize_model_name(name: str) -> str:
