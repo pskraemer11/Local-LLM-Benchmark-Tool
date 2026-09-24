@@ -9,15 +9,16 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
+from artifact_resolver import ArtifactResolver
 from benchmark_config import (
     guess_quant_from_filename,
     is_blacklisted_model_name,
     is_mtp_drafter,
     is_support_file,
 )
-from model_identity import match_registry_key, normalize_for_config
+from model_identity import UniqueMatch, resolve_registry_match
 from model_paths import configured_gguf_roots
 
 if TYPE_CHECKING:
@@ -112,39 +113,15 @@ class LocalModelResolver:
     @staticmethod
     def _match_registry(base_id: str, quant: str, registry: dict[str, Any]) -> str | None:
         keys = list(registry)
-        if quant:
-            normalized_base = normalize_for_config(base_id)
-            normalized_quant = LocalModelResolver._normalize_quant(quant)
-            same_base = [
-                key for key in keys if normalize_for_config(key) == normalized_base
-            ]
-            exact_quant = [
-                key
-                for key in same_base
-                if LocalModelResolver._registry_quant(key) == normalized_quant
-            ]
-            if exact_quant:
-                return exact_quant[0]
-            mixed = [
-                key for key in same_base if LocalModelResolver._registry_quant(key) == "mixed"
-            ]
-            if mixed:
-                return mixed[0]
-
-            # Preserve the established publisher/variant aliases, but never
-            # let a flexible base match silently change the local quant.
-            probe = f"{base_id}@{quant.lower()}"
-            matched = match_registry_key(probe, keys)
-            if isinstance(matched, str) and LocalModelResolver._registry_quant(matched) in {
-                normalized_quant,
-                "mixed",
-            }:
-                return matched
+        probe = f"{base_id}@{quant.lower()}" if quant else base_id
+        matched = resolve_registry_match(probe, keys)
+        if not isinstance(matched, UniqueMatch):
             return None
-        matched = match_registry_key(base_id, keys)
-        if isinstance(matched, str):
-            return matched
-        return None
+        if not quant:
+            return cast("str", matched.key)
+        normalized_quant = LocalModelResolver._normalize_quant(quant)
+        registry_quant = LocalModelResolver._registry_quant(matched.key)
+        return matched.key if registry_quant in {normalized_quant, "mixed"} else None
 
     @staticmethod
     def _normalize_quant(quant: str) -> str:
@@ -173,13 +150,9 @@ class LocalModelResolver:
         registry = self._registry()
         by_path: dict[str, LocalModelCandidate] = {}
         by_identifier: dict[str, str] = {}
-        paths: list[tuple[int, Path]] = []
-        for root_index, root in enumerate(existing_roots):
-            try:
-                paths.extend((root_index, path) for path in root.rglob("*.gguf"))
-            except OSError:
-                continue
-        paths.sort(key=lambda item: (item[0], str(item[1]).casefold()))
+        resolver = ArtifactResolver()
+        resolver.model_roots = self.model_roots
+        paths = resolver.files()
 
         for _, path in paths:
             if not path.is_file():

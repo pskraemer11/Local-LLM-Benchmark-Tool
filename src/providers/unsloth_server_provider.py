@@ -7,10 +7,11 @@ import subprocess
 import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from benchmark_config import is_blacklisted_model_name
 from local_model_resolver import LocalModelResolver, ModelResolutionError
+from providers.llama_cpp_args import normalize_cache_type
 from utils.terminal import warn
 
 from .base import HttpProvider, ProviderCapabilities
@@ -22,8 +23,6 @@ ProcessFactory = Callable[..., Any]
 # override says otherwise. Throughput matters more here than minimal VRAM.
 _DEFAULT_SERVER_PARALLEL = 4
 _DEFAULT_GPU_LAYERS = "all"
-_SUPPORTED_CACHE_TYPES = frozenset({"f32", "f16", "bf16", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_0", "q5_1"})
-_CACHE_TYPE_ALIASES = {"fp16": "f16", "float16": "f16", "q4_nl": "iq4_nl"}
 
 
 class _ServerController:
@@ -252,11 +251,7 @@ class UnslothServerProvider(HttpProvider):
 
     @staticmethod
     def _normalize_cache_type(value: Any) -> str | None:
-        if not isinstance(value, str):
-            return None
-        normalized = value.strip().casefold().replace("-", "_")
-        normalized = _CACHE_TYPE_ALIASES.get(normalized, normalized)
-        return normalized if normalized in _SUPPORTED_CACHE_TYPES else None
+        return cast("str | None", normalize_cache_type(value))
 
     def _command(self, model_identifier: str, model_path: Path) -> list[str]:
         return [

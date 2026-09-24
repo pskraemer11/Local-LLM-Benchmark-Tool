@@ -38,7 +38,7 @@ import re
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from ruamel.yaml import YAML
 
@@ -48,6 +48,7 @@ from model_identity import (
     normalize_for_config,
     normalize_model_name,
 )
+from quantization import extract_quant_from_text, normalize_quant
 
 # === Pfade ===
 _SRC_DIR = Path(__file__).parent
@@ -98,15 +99,9 @@ _VARIANT_SUFFIXES = (
 )
 
 
-_CONFIG_QUANT_RE = re.compile(
-    r"(?<![a-z0-9])(?:iq\d+(?:[_-](?:xxs|xs|s|m|l|nl|0|1|2))?(?:[_-]i)?|q\d+(?:[_-](?:k(?:[_-](?:s|m|l))?|g\d+|s|m|l|0|1|2))?(?:[_-]i)?|mxfp4|nvfp4|fp16|f16|mini)(?![a-z0-9])",
-    re.IGNORECASE,
-)
-
-
 def _normalize_config_quant(value: str) -> str:
     """Normalize a quant marker from an LM Studio path for identity matching."""
-    return value.strip().lower().replace("-", "_")
+    return cast("str", normalize_quant(value))
 
 
 def _config_quant(config: dict[str, Any]) -> str | None:
@@ -115,8 +110,7 @@ def _config_quant(config: dict[str, Any]) -> str | None:
     if explicit:
         return _normalize_config_quant(str(explicit))
     text = " ".join(str(config.get(field, "")) for field in ("dir_name", "file_name"))
-    matches = _CONFIG_QUANT_RE.findall(text)
-    return _normalize_config_quant(matches[-1]) if matches else None
+    return cast("str | None", extract_quant_from_text(text))
 
 
 def _registry_publisher(registry_key: str) -> str:

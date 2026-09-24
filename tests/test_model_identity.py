@@ -21,16 +21,20 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from field_owner import FIELD_OWNERSHIP, Drift, auto_fix_fields, resolve
 from model_identity import (
     MODEL_FAMILIES,
+    AmbiguousMatch,
+    UniqueMatch,
     build_model_identity,
     classify_reasoning_by_family,
     decompose_model_identity,
     family_for_arch,
+    find_match_collisions,
     match_registry_key,
     normalize_for_config,
     normalize_lms_model_name,
     normalize_model_name,
     normalize_variants,
     normalized_lms_key,
+    resolve_registry_match,
 )
 
 # ─────────────────────────────────────────────────────────────────────
@@ -162,6 +166,48 @@ class TestMatchRegistryKey:
     def test_empty_inputs(self) -> None:
         assert match_registry_key("", _REGISTRY_KEYS) is None
         assert match_registry_key("glm-4.7-flash", []) is None
+
+    def test_explicit_publisher_wins_over_publisherless_collision(self) -> None:
+        keys = [
+            "qwen/qwen3.5-9b@q5_k_s",
+            "byteshape/qwen3.5-9b@q5_k_s",
+        ]
+        result = resolve_registry_match("byteshape/qwen3.5-9b@q5_k_s", keys)
+        assert isinstance(result, UniqueMatch)
+        assert result.key == "byteshape/qwen3.5-9b@q5_k_s"
+
+    def test_publisherless_collision_is_ambiguous_not_first_wins(self) -> None:
+        keys = [
+            "qwen/qwen3.5-9b@q5_k_s",
+            "byteshape/qwen3.5-9b@q5_k_s",
+        ]
+        result = resolve_registry_match("qwen3.5-9b@q5_k_s", keys)
+        assert isinstance(result, AmbiguousMatch)
+        assert result.candidates == tuple(keys)
+        assert match_registry_key("qwen3.5-9b@q5_k_s", keys) is None
+
+    def test_specific_variant_is_resolved_without_first_wins(self) -> None:
+        keys = [
+            "unsloth/gemma-4-12b-it@q6_k",
+            "freedomaisvr/gemma-4-12b-it-qat@nvfp4",
+        ]
+        result = resolve_registry_match("google/gemma-4-12b-it-qat", keys)
+        assert isinstance(result, UniqueMatch)
+        assert result.key == "freedomaisvr/gemma-4-12b-it-qat@nvfp4"
+        assert result.stage == "publisherless-variant-base"
+
+        explicit = resolve_registry_match("unsloth/gemma-4-12b-it-qat", keys)
+        assert isinstance(explicit, UniqueMatch)
+        assert explicit.key == "unsloth/gemma-4-12b-it@q6_k"
+        assert explicit.stage == "publisher-aware-base"
+
+    def test_collision_report_uses_normalized_match_namespace(self) -> None:
+        keys = [
+            "qwen/qwen3.5-9b@q5_k_s",
+            "byteshape/qwen3.5-9b@q5_k_s",
+        ]
+        collisions = find_match_collisions(keys)
+        assert collisions["qwen3-5-9b@q5-k-s"] == tuple(keys)
 
 
 # ─────────────────────────────────────────────────────────────────────

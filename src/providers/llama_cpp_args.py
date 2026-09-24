@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING, Any
 
+from parameter_bindings import llama_cpp_value_bindings, parameter_binding
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
     from pathlib import Path
@@ -49,8 +51,14 @@ def build_runtime_args(
     args: list[str] = []
 
     context_length = runtime.get("context_length")
-    if isinstance(context_length, int) and context_length > 0:
-        args.extend(["--ctx-size", str(context_length)])
+    context_binding = parameter_binding("context_length")
+    if (
+        isinstance(context_length, int)
+        and context_length > 0
+        and context_binding is not None
+        and context_binding.llama_cpp_flag is not None
+    ):
+        args.extend([context_binding.llama_cpp_flag, str(context_length)])
 
     parallel = env.get("LLAMA_CPP_PARALLEL") or runtime.get("parallel") or env.get(
         "LLAMA_CPP_MAX_PARALLEL"
@@ -64,18 +72,22 @@ def build_runtime_args(
         parallel_value = DEFAULT_SERVER_PARALLEL
     args.extend(["--parallel", str(parallel_value)])
 
-    for key, option in (("cache_type_k", "--cache-type-k"), ("cache_type_v", "--cache-type-v")):
+    cache_bindings = (
+        ("cache_type_k", parameter_binding("k_cache")),
+        ("cache_type_v", parameter_binding("v_cache")),
+    )
+    for key, binding in cache_bindings:
         value = normalize_cache_type(runtime.get(key))
-        if value is not None:
-            args.extend([option, value])
+        if value is not None and binding is not None and binding.llama_cpp_flag is not None:
+            args.extend([binding.llama_cpp_flag, value])
 
     args.append("--kv-unified" if _as_bool(runtime.get("kv_unified"), default=True) else "--no-kv-unified")
 
-    for key, option in (
-        ("batch_size", "--batch-size"),
-        ("ubatch_size", "--ubatch-size"),
-        ("reasoning_budget", "--reasoning-budget"),
-    ):
+    for binding in llama_cpp_value_bindings():
+        key = binding.registry_field
+        option = binding.llama_cpp_flag
+        if option is None or key not in {"batch_size", "ubatch_size", "reasoning_budget"}:
+            continue
         value = runtime.get(key)
         if isinstance(value, (int, str)) and str(value).strip():
             try:
@@ -83,11 +95,11 @@ def build_runtime_args(
             except (TypeError, ValueError):
                 notify(f"Invalid llama.cpp value {key}={value!r}; ignoring it.")
 
-    for key, option in (
-        ("gpu_layers", "--gpu-layers"),
-        ("reasoning_effort", "--reasoning-effort"),
-        ("chat_template_file", "--chat-template-file"),
-    ):
+    for binding in llama_cpp_value_bindings():
+        key = binding.registry_field
+        option = binding.llama_cpp_flag
+        if option is None or key not in {"gpu_layers", "reasoning_effort", "chat_template_file"}:
+            continue
         value = runtime.get(key)
         if isinstance(value, (int, str)) and str(value).strip():
             args.extend([option, str(value).strip()])

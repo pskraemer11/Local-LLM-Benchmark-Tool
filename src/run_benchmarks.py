@@ -59,7 +59,6 @@ _sys.path.insert(0, _SRC_DIR)
 
 import argparse
 import atexit
-import glob
 import json
 import os
 import random
@@ -76,7 +75,7 @@ import psutil
 
 import csv_writer as csv_writer
 import model_manager as _model_manager
-from model_paths import configured_gguf_roots
+from artifact_resolver import ArtifactResolver
 
 if TYPE_CHECKING:
     from providers.base import ProviderContext
@@ -149,9 +148,9 @@ def _is_reasoning_model(model_identifier: str) -> bool:
     Falls back to False with a warning if no registry data.
     """
     try:
-        from assemble_blueprint import normalize_model_name
+        from model_identity import normalize_match_identity
         registry, rnorm = _load_registry_for_context()
-        normalized_key = normalize_model_name(model_identifier)
+        normalized_key = normalize_match_identity(model_identifier)
         base_key = normalized_key.split("@")[0]
         matched_key = rnorm.get(normalized_key) or rnorm.get(base_key)
         if matched_key:
@@ -171,9 +170,9 @@ def _is_reasoning_model(model_identifier: str) -> bool:
 def _check_reasoning_registry(model_identifier: str) -> bool | None:
     """Tri-state: True (thinking), False (instruct), None (missing/unknown)."""
     try:
-        from assemble_blueprint import normalize_model_name
+        from model_identity import normalize_match_identity
         registry, rnorm = _load_registry_for_context()
-        normalized_key = normalize_model_name(model_identifier)
+        normalized_key = normalize_match_identity(model_identifier)
         base_key = normalized_key.split("@")[0]
         matched_key = rnorm.get(normalized_key) or rnorm.get(base_key)
         if matched_key:
@@ -220,24 +219,9 @@ _GGUF_EOS_CACHE: dict[str, str | None] = {}
 _GGUF_EOS_LOCK = threading.Lock()
 
 def _resolve_model_gguf_path(model_identifier: str) -> str | None:
-    """Find the model's GGUF file under the LM Studio models cache.
-
-    Substring match on the normalised identifier suffix (like
-    registry_tool._resolve_model_path_multi, but self-contained).
-    """
-    suffix = model_identifier.split("/", 1)[1] if "/" in model_identifier else model_identifier
-    suffix_norm = suffix.replace("_", "").replace("-", "").replace("@", "").lower()
-    for models_root in configured_gguf_roots():
-        if not os.path.isdir(models_root):
-            continue
-        for g in sorted(glob.glob(os.path.join(str(models_root), "**", "*.gguf"), recursive=True)):
-            g_base = os.path.basename(g).lower()
-            if "mmproj" in g_base or g_base.startswith("mtp-"):
-                continue
-            g_norm = os.path.basename(g).replace("_", "").replace("-", "").lower()
-            if suffix_norm and suffix_norm in g_norm:
-                return g
-    return None
+    """Find one unique GGUF through the shared artifact resolver."""
+    resolved = ArtifactResolver().resolve(model_identifier)
+    return str(resolved.path) if resolved.is_unique else None
 
 
 def _get_model_eos_string(model_identifier: str) -> str | None:
@@ -548,7 +532,7 @@ def _load_registry_for_context() -> tuple[dict[str, Any], dict[str, str]]:
 
     from pathlib import Path
 
-    from assemble_blueprint import normalize_model_name
+    from model_identity import unique_normalized_index
 
     rpath = Path(__file__).resolve().parent.parent / "doc-git" / "model_registry.yaml"
     if not rpath.exists():
@@ -569,18 +553,10 @@ def _load_registry_for_context() -> tuple[dict[str, Any], dict[str, str]]:
         _REGISTRY_NORM = {}
         return _REGISTRY_DATA, _REGISTRY_NORM
 
-    norm = {}
-    for key, entry in data.items():
-        if isinstance(entry, dict):
-            normalized_key = normalize_model_name(key)
-            norm[normalized_key] = key
-            # Basis-Variante (ohne @quant) registrieren, damit Modell-IDs
-            # ohne Quant-Suffix (z.B. "zai-org/glm-4.6v-flash") auf den
-            # Registry-Key auflösen. Basis gewinnt nicht gegen einen
-            # exakten @quant-Treffer, da norm[normalized_key] zuerst
-            # gesetzt und hier nicht überschrieben wird, solange der
-            # @quant-Key dieselbe Iterationsreihenfolge hat.
-            norm.setdefault(normalized_key.split("@")[0], key)
+    valid_keys = [key for key, entry in data.items() if isinstance(entry, dict)]
+    norm = unique_normalized_index(valid_keys)
+    for base_key, registry_key in unique_normalized_index(valid_keys, include_quant=False).items():
+        norm.setdefault(base_key, registry_key)
     _REGISTRY_DATA = data
     _REGISTRY_NORM = norm
     return _REGISTRY_DATA, _REGISTRY_NORM
@@ -593,11 +569,11 @@ def _get_safe_context(model_identifier: str) -> int | None:
       1. model_registry.yaml entry matching via normalized name
       2. SAFE_CONTEXT_FALLBACK hardcoded dict
     """
-    from assemble_blueprint import normalize_model_name
+    from model_identity import normalize_match_identity
 
     # 1. Try registry
     registry, rnorm = _load_registry_for_context()
-    normalized_key = normalize_model_name(model_identifier)
+    normalized_key = normalize_match_identity(model_identifier)
     base_key = normalized_key.split("@")[0]
     matched_key = rnorm.get(normalized_key) or rnorm.get(base_key)
     if matched_key:
@@ -608,7 +584,7 @@ def _get_safe_context(model_identifier: str) -> int | None:
 
     # 2. Try fallback (exact normalized match)
     for pattern, ctx in SAFE_CONTEXT_FALLBACK.items():
-        if normalize_model_name(pattern) == normalized_key:
+        if normalize_match_identity(pattern) == normalized_key:
             return ctx
 
     # 3. Try substring fallback matching (for patterns that are prefixes)
@@ -2080,9 +2056,9 @@ def _start_proxy_if_needed(models: list[AvailableModelInfo], benchmarks: list[Be
 def _check_registry_for_model(model_identifier: str, model_display: str) -> bool | None:
     """Registry-Prüfungen (7 Checks). Gibt is_reasoning zurück oder None (skip)."""
     try:
-        from assemble_blueprint import normalize_model_name
+        from model_identity import normalize_match_identity
         registry, rnorm = _load_registry_for_context()
-        normalized_key = normalize_model_name(model_identifier)
+        normalized_key = normalize_match_identity(model_identifier)
         base_key = normalized_key.split("@")[0]
 
         if normalized_key not in rnorm and base_key not in rnorm:

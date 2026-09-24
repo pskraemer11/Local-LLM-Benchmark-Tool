@@ -80,7 +80,6 @@ import sys
 import tempfile
 import time
 from dataclasses import dataclass
-from dataclasses import field as dataclass_field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -90,6 +89,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 import psutil
+
+from artifact_resolver import ArtifactResolver
 
 _SRC_DIR = Path(__file__).resolve().parent
 # Make `src` importable regardless of how the tool is invoked
@@ -103,22 +104,6 @@ if TYPE_CHECKING:
 PROJECT_ROOT = _SRC_DIR.parent
 REGISTRY_PATH = PROJECT_ROOT / "doc-git" / "model_registry.yaml"
 CONFIG_ROOT = Path.home() / ".lmstudio" / ".internal" / "user-concrete-model-default-config"
-
-
-@dataclass
-class RegistryInventory:
-    """One read-only snapshot shared by registry reporting and synchronization."""
-
-    registry: dict[str, Any]
-    raw_lms_models: list[dict[str, Any]]
-    lms_models: list[dict[str, Any]]
-    configs: list[dict[str, Any]]
-    gguf_candidates: list[Any]
-    gguf_candidates_loaded: bool = False
-    gguf_header_cache: dict[
-        tuple[str, int, int],
-        tuple[tuple[int | None, int | None, bool | None, int | None, int | None], str | None],
-    ] = dataclass_field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -174,10 +159,21 @@ from benchmark_config import (
 from benchmark_config import (
     USE_UNIFIED_KV_CACHE_THRESHOLD_GB as _USE_UNIFIED_KV_CACHE_THRESHOLD_GB,  # noqa: F401 - re-export for tests
 )
-from model_identity import build_model_identity, decompose_model_identity, normalize_variants
+from inventory import IdentityLink, InventorySnapshot
+from model_identity import (
+    UniqueMatch,
+    build_model_identity,
+    decompose_model_identity,
+    find_match_collisions,
+    normalize_registry_identity,
+    normalize_variants,
+    resolve_registry_match,
+)
 from model_paths import configured_gguf_roots
 from model_registry import ModelRegistry
+from parameter_bindings import config_sync_fields
 from providers.llama_cpp_args import build_server_command
+from quantization import KNOWN_QUANTS, extract_quant_from_text
 from sampling_research import (
     RESEARCH_STATUSES,
     compact_sampling_block,
@@ -185,6 +181,10 @@ from sampling_research import (
     research_sampling_report,
     validate_sampling_block,
 )
+
+
+class RegistryInventory(InventorySnapshot):  # type: ignore[misc]
+    """Backward-compatible runtime name for the shared inventory snapshot."""
 
 _DEFAULT_RESEARCH_SAMPLING = research_sampling
 
@@ -438,7 +438,27 @@ def _collect_registry_inventory() -> RegistryInventory:
     raw_lms_models = _run_lms_ls()
     lms_models = _benchmark_lms_models(raw_lms_models)
     configs = read_lms_configs(CONFIG_ROOT)
-    return RegistryInventory(registry, raw_lms_models, lms_models, configs, [])
+    snapshot = RegistryInventory(registry, raw_lms_models, lms_models, configs, [])
+    registry_keys = sorted(
+        [(normalize_model_name(key), key) for key, value in registry.items() if isinstance(value, dict)],
+        key=lambda item: -len(item[0]),
+    )
+    for registry_key in registry:
+        linked_configs = tuple(
+            Path(config["json_path"])
+            for config in configs
+            if find_registry_key_for_config(
+                normalize_model_name(config.get("dir_name", "")), registry_keys, config=config
+            )
+            == registry_key
+        )
+        linked_lms = tuple(
+            str(model.get("modelKey") or "")
+            for model in lms_models
+            if _lms_matches_registry_key(model, registry_key)
+        )
+        snapshot.with_identity_link(IdentityLink(registry_key, linked_lms, linked_configs))
+    return snapshot
 
 
 def _ensure_gguf_inventory(inventory: RegistryInventory) -> list[Any]:
@@ -472,6 +492,21 @@ def _ensure_gguf_inventory(inventory: RegistryInventory) -> list[Any]:
     inventory.gguf_candidates = sorted(
         candidates_by_path.values(), key=lambda candidate: str(candidate.path).casefold()
     )
+    for registry_key, link in inventory.identity_links.items():
+        artifact_paths = tuple(
+            candidate.path
+            for candidate in inventory.gguf_candidates
+            if candidate.registry_key == registry_key
+        )
+        inventory.with_identity_link(
+            IdentityLink(
+                registry_key,
+                link.lms_model_keys,
+                link.config_paths,
+                artifact_paths,
+                link.hf_urls,
+            )
+        )
     inventory.gguf_candidates_loaded = True
     return inventory.gguf_candidates
 
@@ -652,12 +687,10 @@ def _find_gguf_for_key(key: str) -> Path | None:
 
     Returns the Path or None if not found.
     """
-    from model_identity import normalize_model_name
-    base = normalize_model_name(key).split("@")[0]
-    for g in _get_all_ggufs():
-        if g.is_file() and base.replace("-", "_") in g.name.replace("-", "_"):
-            return g
-    return None
+    resolver = ArtifactResolver()
+    resolver.model_roots = _gguf_roots()
+    result = resolver.resolve(key)
+    return result.path if result.is_unique else None
 
 
 _GGUF_FILE_CACHE: list[Path] | None = None
@@ -670,37 +703,16 @@ def _get_all_ggufs() -> list[Path]:
     roots = _gguf_roots()
     root_key = tuple(str(root).casefold() for root in roots)
     if _GGUF_FILE_CACHE is None or _GGUF_FILE_CACHE_ROOTS != root_key:
-        files: list[Path] = []
-        for root in roots:
-            if root.is_dir():
-                files.extend(root.rglob("*.gguf"))
-        _GGUF_FILE_CACHE = sorted(files, key=lambda item: str(item).casefold())
+        resolver = ArtifactResolver()
+        resolver.model_roots = roots
+        _GGUF_FILE_CACHE = [path for _root_index, path in resolver.files(include_support=True)]
         _GGUF_FILE_CACHE_ROOTS = root_key
     return _GGUF_FILE_CACHE
-
-
-def _norm(s: str) -> str:
-    """Lower-case, strip ``.gguf``, replace ``-``/``_``/``\\``/``/``/``@`` with space."""
-    s = (
-        s.lower()
-        .replace(".gguf", "")
-        .replace("-", " ")
-        .replace("_", " ")
-        .replace("\\", " ")
-        .replace("/", " ")
-        .replace("@", " ")
-    )
-    return " ".join(s.split())
 
 
 # Zentralisiert in benchmark_config.py (Code-Review 2026-08-03 §F1):
 # wird identisch von model_manager.get_available_models() genutzt.
 _is_support_file = is_support_file
-
-
-def _significant_words(s: str) -> set[str]:
-    """Split *s* into lower-case words, keep only ≥3-char tokens."""
-    return {w for w in _norm(s).split() if len(w) >= 3}
 
 
 def _resolve_hub_source_gguf(key: str, entry: dict[str, Any]) -> Path | None:
@@ -714,7 +726,6 @@ def _resolve_hub_source_gguf(key: str, entry: dict[str, Any]) -> Path | None:
     if hub_model is None or "@" not in key:
         return None
     _hub_path, metadata = hub_model
-    requested_quant = key.rsplit("@", 1)[1].strip().casefold().replace("-", "_")
     source_paths: list[tuple[str, ...]] = []
     bases = metadata.get("base", [])
     if not isinstance(bases, list):
@@ -740,27 +751,20 @@ def _resolve_hub_source_gguf(key: str, entry: dict[str, Any]) -> Path | None:
                 if all(part and part not in {".", ".."} and "/" not in part and "\\" not in part for part in parts):
                     source_paths.append(parts)
 
-    for root in _gguf_roots():
-        for source_parts in dict.fromkeys(source_paths):
-            source_dir = root.joinpath(*source_parts)
-            if not source_dir.is_dir():
-                continue
-            for candidate in sorted(source_dir.rglob("*.gguf"), key=lambda path: str(path).casefold()):
-                if not candidate.is_file() or _is_support_file(candidate):
-                    continue
-                candidate_quant = _gguf_quant_from_header(str(candidate))
-                if candidate_quant and candidate_quant.casefold().replace("-", "_") == requested_quant:
-                    return candidate
-    return None
+    resolver = ArtifactResolver()
+    resolver.model_roots = _gguf_roots()
+    resolved = resolver.resolve(key, source_paths=tuple(dict.fromkeys(source_paths)))
+    return resolved.path if resolved.is_unique else None
 
 
 def _resolve_model_path_multi(key: str, entry: dict[str, Any] | None = None) -> str:
-    """Resolve GGUF path — exact substring match first, then word-match fallback.
+    """Resolve a GGUF path through the shared fail-closed artifact resolver.
 
     1. Exact ``GGUF root / key`` — library-level path from LM Studio.
-    2. Substring match (normalised key suffix in normalised GGUF path).
-    3. Word-match fallback (at least 2 significant words in common).
-    Returns ``""`` if nothing suitable is found.
+    2. Explicit Hub source mapping, when available.
+    3. Unique normalized filename match.
+    Ambiguous and fuzzy matches return ``""`` instead of selecting a first
+    path; diagnostics can inspect ``ArtifactResolution.candidates``.
     """
     candidate = _find_gguf_relative_path(key)
     if candidate is not None:
@@ -770,29 +774,10 @@ def _resolve_model_path_multi(key: str, entry: dict[str, Any] | None = None) -> 
         if hub_candidate is not None:
             return str(hub_candidate)
 
-    suffix = key.split("/", 1)[1] if "/" in key else key
-    sn = _norm(suffix)
-
-    # 2) Substring match
-    for g in _get_all_ggufs():
-        if _is_support_file(g):
-            continue
-        if sn in _norm(str(g)):
-            return str(g)
-
-    # 3) Word-match fallback — require ≥ 2 significant words in common
-    sw = _significant_words(suffix)
-    if len(sw) < 2:
-        return ""
-    best: tuple[int, str] = (0, "")
-    for g in _get_all_ggufs():
-        if _is_support_file(g):
-            continue
-        gw = _significant_words(str(g))
-        match = len(sw & gw)
-        if match >= 2 and match > best[0]:
-            best = (match, str(g))
-    return best[1]
+    resolver = ArtifactResolver()
+    resolver.model_roots = _gguf_roots()
+    resolved = resolver.resolve(key)
+    return str(resolved.path) if resolved.is_unique else ""
 
 
 def _preset_value(value: Any) -> str:
@@ -1103,10 +1088,10 @@ def _quant_variant(key: str) -> str:
 
 
 def _resolve_exact(reg_key: str, lms_path_map: dict[str, str]) -> str:
-    """Exact-only path resolution (library-level, lms map, substring).
+    """Resolve one exact LMS/artifact identity without fuzzy fallback.
 
-    Deliberately **no** word-match fallback: only identical files may
-    end up in the same duplicate-collapse group.
+    Deliberately no substring or word-match fallback: only a unique artifact
+    may end up in the same duplicate-collapse group.
     """
     candidate = _find_gguf_relative_path(reg_key)
     if candidate is not None:
@@ -1115,18 +1100,6 @@ def _resolve_exact(reg_key: str, lms_path_map: dict[str, str]) -> str:
         mp = lms_path_map.get(probe, "")
         if mp and os.path.isfile(mp):
             return mp
-    if "/" in reg_key:
-        suffix = reg_key.split("/", 1)[1].lower()
-        for probe in (suffix, normalize_model_name(suffix)):
-            mp = lms_path_map.get(probe, "")
-            if mp and os.path.isfile(mp):
-                return mp
-    sn = _norm(reg_key.split("/", 1)[1] if "/" in reg_key else reg_key)
-    for g in _get_all_ggufs():
-        if _is_support_file(g):
-            continue
-        if sn in _norm(str(g)):
-            return str(g)
     return ""
 
 
@@ -1590,24 +1563,35 @@ def cmd_add(
         if "@" not in canonical:
             canonical = f"{canonical}@?"
         canonical_base = canonical.split("@", 1)[0]
-        sk = normalize_model_name(canonical)
+        sk = normalize_registry_identity(canonical)
         # Exact match (including @quant) — always a duplicate
-        if sk in (normalize_model_name(k) for k in reg):
+        exact_match = resolve_registry_match(canonical, list(reg))
+        if isinstance(exact_match, UniqueMatch) and normalize_registry_identity(exact_match.key) == sk:
             skipped.append((mk, "bereits vorhanden"))
             continue
         # Base entry (without @quant) when a @quant variant already exists,
         # e.g. skip "model" if "model@q3_k_s" exists. Multiple @quant variants
         # (@q3_k_s, @q6_k) should coexist. @? variants filtered by is_support_file.
         if "@" not in sk:
-            if any("@" in k and normalize_model_name(k).split("@")[0] == sk for k in reg):
+            if any(
+                "@" in k and normalize_registry_identity(k, include_quant=False) == sk
+                for k in reg
+            ):
                 skipped.append((mk, "bereits vorhanden (Quant-Variante existiert)"))
                 continue
         else:
             # @quant variant: remove existing base entry (without @) if present.
             # The base entry is ambiguous; the @quant entry is specific and has a
             # unique file_size_bytes.
-            base_key = sk.split("@")[0]
-            base_entry = next((k for k in reg if normalize_model_name(k) == base_key), None)
+            base_key = normalize_registry_identity(canonical, include_quant=False)
+            base_entry = next(
+                (
+                    k
+                    for k in reg
+                    if "@" not in k and normalize_registry_identity(k, include_quant=False) == base_key
+                ),
+                None,
+            )
             if base_entry is not None:
                 print(f"  [CLEANUP] Entferne Base-Eintrag '{base_key}' (ersetzt durch {mk})")
                 del reg[base_entry]
@@ -2153,20 +2137,7 @@ def cmd_sync_from_configs(
     configs = inventory.configs if inventory is not None else read_lms_configs(CONFIG_ROOT)
     print(f"  -> {len(configs)} Config-Dateien gefunden")
     print(f"[3] Registry-Einträge mit Configs abgleichen ({'Schreibmodus' if write else 'Melde-Modus'}) ...")
-    fields_to_sync: tuple[tuple[str, str], ...]
-    if write_context:
-        fields_to_sync = (("context_length", "context_length"),)
-    elif write_experts:
-        fields_to_sync = (("experts", "num_experts"),)
-    else:
-        fields_to_sync = (
-            ("offload", "offload"),
-            ("useUnifiedKvCache", "use_unified_kv"),
-            ("context_length", "context_length"),
-            ("k_cache", "k_cache"),
-            ("v_cache", "v_cache"),
-            ("experts", "num_experts"),
-        )
+    fields_to_sync = config_sync_fields(context_only=write_context, experts_only=write_experts)
     proposals, skipped, conflicts = _build_config_sync_proposal(
         reg, configs, installed_models, fields_to_sync
     )
@@ -2351,11 +2322,12 @@ def _lms_record_for_registry_key(
     registry_key: str,
     models: list[dict[str, Any]],
 ) -> dict[str, Any] | None:
-    """Find an eligible LMS record by base identity and, for variants, quant."""
+    """Find one eligible LMS record; return ``None`` for ambiguity."""
     registry_aliases = _identity_aliases(registry_key)
     # ``@?`` is the explicit unknown-quant placeholder and therefore matches
     # an LMS base record whose quantization metadata is absent.
     has_quant = _registry_quant(registry_key) is not None
+    matches: list[dict[str, Any]] = []
     for model in models:
         if not is_registry_candidate(model):
             continue
@@ -2372,8 +2344,10 @@ def _lms_record_for_registry_key(
                 registry_aliases_to_compare = {alias for alias in registry_aliases if "@" not in alias}
                 identity_aliases = {alias for alias in identity_aliases if "@" not in alias}
             if registry_aliases_to_compare.intersection(identity_aliases):
-                return model
-    return None
+                if model not in matches:
+                    matches.append(model)
+                break
+    return matches[0] if len(matches) == 1 else None
 
 
 def _lms_matches_registry_key(model: dict[str, Any], registry_key: str) -> bool:
@@ -2692,12 +2666,7 @@ _REASONING_TOKEN_RE = re.compile(
 )
 
 
-_KNOWN_QUANTS = (
-    "q1_0", "q2_k", "q2_g64", "q3_k_s", "q3_k_m", "q3_k_l", "q4_0", "q4_k_s", "q4_k_m",
-    "q5_0", "q5_k_s", "q5_k_m", "q6_k", "q8_0_i", "q8_0", "iq2_xxs", "iq2_xs", "iq2_s",
-    "iq2_m", "iq3_xxs", "iq3_xs", "iq3_s", "iq3_m", "iq4_xs", "iq4_nl",
-    "q2_k_s", "q3_k_xs", "q4_k_xl", "mxfp4", "fp16", "f16", "mini",
-)
+_KNOWN_QUANTS = KNOWN_QUANTS
 
 
 def _gguf_quant_from_header(gguf_path: str) -> str | None:
@@ -2712,11 +2681,9 @@ def _gguf_quant_from_header(gguf_path: str) -> str | None:
     fname = os.path.basename(gguf_path).lower()
     fname = fname.removesuffix(".gguf")
 
-    # Try to find a known quant suffix in the filename
-    for quant in _KNOWN_QUANTS:
-        if quant in fname:
-            # Return in uppercase convention
-            return quant.upper()
+    quant = extract_quant_from_text(fname)
+    if quant:
+        return quant.upper()
 
     # Fallback: try to extract after the last hyphen if it looks like a quant
     parts = fname.rsplit("-", 1)
@@ -2766,13 +2733,11 @@ def _gguf_roots() -> tuple[Path, ...]:
 
 
 def _find_gguf_relative_path(relative_path: str | Path) -> Path | None:
-    """Find an LMS-relative path in primary-first root order."""
-    candidate = Path(relative_path)
-    for root in _gguf_roots():
-        path = root / candidate
-        if path.is_file():
-            return path
-    return None
+    """Find one unique explicit GGUF path through the shared resolver."""
+    resolver = ArtifactResolver()
+    resolver.model_roots = _gguf_roots()
+    result = resolver.resolve(str(relative_path))
+    return result.path if result.is_unique else None
 
 # ── GGUF expert_count check (for MoE detection) ───────────────────
 # Cache: model_path -> bool (has experts / MoE)
@@ -2837,7 +2802,7 @@ def cmd_fill_arch(
     print("[2] LM Studio-Modelle scannen ...")
     if lms_models is None:
         lms_models = inventory.lms_models if inventory is not None else _benchmark_lms_models(_run_lms_ls())
-    unique: dict[str, str] = {}
+    paths_by_base: dict[str, set[str]] = {}
     for m in lms_models:
         rp = m.get("path", "")
         if not rp:
@@ -2848,8 +2813,12 @@ def cmd_fill_arch(
         full_path = str(full_path)
         key = normalize_model_name(m.get("modelKey", "")).lower()
         base = key.split("@")[0]
-        if base not in unique:
-            unique[base] = full_path
+        paths_by_base.setdefault(base, set()).add(full_path)
+    unique = {
+        base: next(iter(paths))
+        for base, paths in paths_by_base.items()
+        if len(paths) == 1
+    }
     print(f"  -> {len(unique)} einzigartige Modelle (von {len(lms_models)} GGUF-Dateien)")
 
     print("[3] GGUF-Header parallel lesen oder aus gemeinsamem Snapshot beziehen ...")
@@ -2879,16 +2848,7 @@ def cmd_fill_arch(
 
         # Always try to fill max_context_length (even if n_layers/hidden_dim already set)
         if entry.get("max_context_length") is None:
-            normalized_key = normalize_model_name(key)
-            found = gguf_arch.get(normalized_key)
-            if not found:
-                base = normalized_key.split("@")[0]
-                found = gguf_arch.get(base)
-            if not found:
-                for gk, gv in gguf_arch.items():
-                    if normalized_key in gk or gk in normalized_key:
-                        found = gv
-                        break
+            found = _find_gguf_arch_for_key(key, gguf_arch)
             if found and found[3] is not None:
                 entry["max_context_length"] = int(found[3])
                 reasoning_updated += 1  # reuse counter
@@ -2897,16 +2857,7 @@ def cmd_fill_arch(
             skipped_has += 1
             continue
 
-        normalized_key = normalize_model_name(key)
-        found = gguf_arch.get(normalized_key)
-        if not found:
-            base = normalized_key.split("@")[0]
-            found = gguf_arch.get(base)
-        if not found:
-            for gk, gv in gguf_arch.items():
-                if normalized_key in gk or gk in normalized_key:
-                    found = gv
-                    break
+        found = _find_gguf_arch_for_key(key, gguf_arch)
         if found:
             entry["n_layers"] = int(found[0])
             entry["hidden_dim"] = int(found[1])
@@ -2919,16 +2870,7 @@ def cmd_fill_arch(
 
         # Update reasoning field from GGUF header (skips if already explicitly set)
         if entry.get("reasoning") is None:
-            normalized_key = normalize_model_name(key)
-            found = gguf_arch.get(normalized_key)
-            if not found:
-                base = normalized_key.split("@")[0]
-                found = gguf_arch.get(base)
-            if not found:
-                for gk, gv in gguf_arch.items():
-                    if normalized_key in gk or gk in normalized_key:
-                        found = gv
-                        break
+            found = _find_gguf_arch_for_key(key, gguf_arch)
             if found and found[2] is not None:
                 entry["reasoning"] = "thinking" if found[2] else "instruct"
                 reasoning_updated += 1
@@ -2964,8 +2906,8 @@ def cmd_fill_quant(lms_models: list[dict[str, Any]] | None = None) -> None:
         return
 
     # Build lookup: normalized base key -> GGUF path
-    lms_by_base: dict[str, str] = {}
-    lms_pub_base: dict[str, str] = {}
+    lms_paths_by_base: dict[str, set[str]] = {}
+    lms_publishers_by_base: dict[str, set[str]] = {}
     for m in lms_models:
         mk = str(m.get("modelKey", "")).lower()
         rp = m.get("path", "")
@@ -2976,10 +2918,19 @@ def cmd_fill_quant(lms_models: list[dict[str, Any]] | None = None) -> None:
             continue
         full_path = str(full_path)
         base = normalize_model_name(mk).split("@")[0]
-        if base not in lms_by_base:
-            lms_by_base[base] = full_path
-            pub = str(m.get("publisher", "")).strip().lower()
-            lms_pub_base[base] = pub
+        lms_paths_by_base.setdefault(base, set()).add(full_path)
+        pub = str(m.get("publisher", "")).strip().lower()
+        lms_publishers_by_base.setdefault(base, set()).add(pub)
+    lms_by_base = {
+        base: next(iter(paths))
+        for base, paths in lms_paths_by_base.items()
+        if len(paths) == 1
+    }
+    lms_pub_base = {
+        base: next(iter(publishers))
+        for base, publishers in lms_publishers_by_base.items()
+        if len(publishers) == 1
+    }
 
     updated = 0
     for key in list(reg.keys()):
@@ -3027,16 +2978,11 @@ def cmd_fill_quant(lms_models: list[dict[str, Any]] | None = None) -> None:
 def _find_gguf_arch_for_key(reg_key: str, gguf_arch: dict[str, tuple[int, int, bool | None, int | None]]) -> (
     tuple[int, int, bool | None, int | None] | None
 ):
-    """GGUF-Architektur zu einem Registry-Key finden (Exact → @strip → Fuzzy)."""
+    """Find GGUF architecture facts without selecting an ambiguous file."""
     normalized_key = normalize_model_name(reg_key)
     found = gguf_arch.get(normalized_key)
     if not found:
         found = gguf_arch.get(normalized_key.split("@")[0])
-    if not found:
-        for gk, gv in gguf_arch.items():
-            if normalized_key in gk or gk in normalized_key:
-                found = gv
-                break
     return found
 
 
@@ -3064,7 +3010,7 @@ def cmd_sync_from_gguf(
     print("[2] LM Studio-Modelle scannen ...")
     if lms_models is None:
         lms_models = inventory.lms_models if inventory is not None else _benchmark_lms_models(_run_lms_ls())
-    unique: dict[str, str] = {}
+    paths_by_base: dict[str, set[str]] = {}
     for m in lms_models:
         rp = m.get("path", "")
         if not rp:
@@ -3077,8 +3023,12 @@ def cmd_sync_from_gguf(
             continue
         key = normalize_model_name(m.get("modelKey", "")).lower()
         base = key.split("@")[0]
-        if base not in unique:
-            unique[base] = full_path
+        paths_by_base.setdefault(base, set()).add(full_path)
+    unique = {
+        base: next(iter(paths))
+        for base, paths in paths_by_base.items()
+        if len(paths) == 1
+    }
     print(f"  -> {len(unique)} einzigartige Modelle (von {len(lms_models)} GGUF-Dateien)")
 
     print("[3] GGUF-Header parallel lesen oder aus gemeinsamem Snapshot beziehen ...")
@@ -3243,11 +3193,6 @@ def cmd_fill_reasoning(
         if not found_base:
             base = normalized_key.split("@")[0]
             found_base = unique.get(base)
-        if not found_base:
-            for ubase in unique:
-                if normalized_key in ubase or ubase in normalized_key:
-                    found_base = ubase
-                    break
         if found_base and found_base in gguf_reasoning:
             entry["reasoning"] = "thinking" if gguf_reasoning[found_base] else "instruct"
             updated += 1
@@ -3693,6 +3638,8 @@ def cmd_validate(verbose: bool = False, repro: bool = False, ci: bool = False) -
         "missing_blueprint": [],
         "sampling_invalid": [],
         "sampling_research_status_invalid": [],
+        "identity_collision": [],
+        "publisherless_identity_ambiguity": [],
         "registry_no_config": [],
         "reasoning_arch_mismatch": [],
         "config_context_drift": [],
@@ -3703,6 +3650,23 @@ def cmd_validate(verbose: bool = False, repro: bool = False, ci: bool = False) -
         "config_context_too_small": [],
         "gguf_header_drift": [],
     }
+
+    # Canonical publisher/model/quant identities must be unique.  The
+    # publisher-stripped namespace is retained only as a diagnostic because
+    # two explicitly published Registry entries may legitimately share a base
+    # model name; all runtime consumers must fail closed for that ambiguity.
+    canonical_groups: dict[str, list[str]] = {}
+    for model_key in reg:
+        canonical_groups.setdefault(normalize_registry_identity(model_key), []).append(model_key)
+    for normalized, candidates in canonical_groups.items():
+        if len(candidates) > 1:
+            errors["identity_collision"].append(
+                f"{normalized}: mehrere kanonische Registry-Keys {', '.join(candidates)}"
+            )
+    for normalized, candidates in find_match_collisions(list(reg)).items():
+        errors["publisherless_identity_ambiguity"].append(
+            f"{normalized}: publisherlose Eingabe ist mehrdeutig: {', '.join(candidates)}"
+        )
 
     # ── Check 1: template references existent .jinja file ─────────
     # Explicit registry files are intentional provider/model-specific
@@ -3994,6 +3958,7 @@ _VALIDATION_ADVISORY_CHECKS = frozenset(
         "config_context_drift",
         "config_context_too_small",
         "config_np_ukv_drift",
+        "publisherless_identity_ambiguity",
     }
 )
 

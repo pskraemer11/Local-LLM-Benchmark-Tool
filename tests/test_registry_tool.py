@@ -511,6 +511,31 @@ class TestHeadlessValidation:
 
         assert not any(errors.values())
 
+    def test_ci_reports_canonical_identity_collision_as_blocker(self):
+        registry = {
+            "publisher/model@q4_k_m": {
+                "arch": "dense",
+                "reasoning": "instruct",
+                "capabilities": ["text"],
+                "blueprint": "default_chat",
+            },
+            "publisher/model@q4-k-m": {
+                "arch": "dense",
+                "reasoning": "instruct",
+                "capabilities": ["text"],
+                "blueprint": "default_chat",
+            },
+        }
+        with (
+            patch.object(rt, "load_registry", return_value=registry),
+            patch.object(rt, "read_lms_configs", side_effect=AssertionError("CI must be headless")),
+            patch.object(rt, "_gguf_drift_errors", side_effect=AssertionError("CI must skip GGUF scans")),
+        ):
+            errors = rt.cmd_validate(ci=True)
+
+        assert errors["identity_collision"]
+        assert "identity_collision" in rt._blocking_validation_errors(errors)
+
 
 class TestGuiConfigRegistrySync:
     """GUI tuning can be imported explicitly without weakening Registry SSOT."""

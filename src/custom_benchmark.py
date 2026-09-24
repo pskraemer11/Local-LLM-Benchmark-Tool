@@ -131,23 +131,22 @@ def _model_supports_reasoning(model_identifier: str) -> bool | None:
     if _REGISTRY_REASONING_CACHE is None:
         _REGISTRY_REASONING_CACHE = {}
         try:
-            from assemble_blueprint import normalize_model_name
+            from model_identity import unique_normalized_index
             from registry_tool import load_registry
             data = load_registry()
-            for key, entry in data.items():
-                if isinstance(entry, dict) and "reasoning" in entry:
-                    nk = normalize_model_name(key)
-                    _REGISTRY_REASONING_CACHE[nk] = entry["reasoning"]
-                    # Basis-Key (ohne @quant) mit abbilden, damit auch
-                    # Quant-less Anfragen wie der LMS modelKey auf Mischquants
-                    # (Registry '@mixed') und reguläre Quants matchen. Analog
-                    # zum Launcher-Fix _load_registry_for_context (13.08.).
-                    _REGISTRY_REASONING_CACHE.setdefault(nk.split("@")[0], entry["reasoning"])
+            reasoning_keys = [
+                key for key, entry in data.items()
+                if isinstance(entry, dict) and "reasoning" in entry
+            ]
+            exact_index = unique_normalized_index(reasoning_keys)
+            base_index = unique_normalized_index(reasoning_keys, include_quant=False)
+            for normalized, key in {**base_index, **exact_index}.items():
+                _REGISTRY_REASONING_CACHE[normalized] = data[key]["reasoning"]
         except (OSError, KeyError, ValueError):
             pass
     try:
-        from assemble_blueprint import normalize_model_name
-        normalized_key = normalize_model_name(model_identifier)
+        from model_identity import normalize_match_identity
+        normalized_key = normalize_match_identity(model_identifier)
     except (ImportError, AttributeError):
         normalized_key = model_identifier.lower().replace("-", "_").replace(" ", "_")
     cached = _REGISTRY_REASONING_CACHE.get(normalized_key) if normalized_key else None

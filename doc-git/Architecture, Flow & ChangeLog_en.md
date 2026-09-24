@@ -106,7 +106,8 @@ The model router preset is an explicit derived artifact at
 `C:\Users\<user>\.config\llama.cpp\preset.ini`. It is selected with
 `--models-preset` or `LLAMA_ARG_MODELS_PRESET`. Its `[*]` section contains
 shared preset defaults; named sections contain model-specific server options.
-The Registry remains the authoritative source for model identity, benchmark
+
+The SSOT-Registry remains the authoritative source for model identity, benchmark
 policy, context/KV settings, templates, reasoning behavior, and sampling
 evidence. The public `registry_tool.py preset` command translates that policy
 into the preset; it does not make the preset authoritative. The older
@@ -134,11 +135,27 @@ stop conditions, and reasoning format are request or model-policy decisions;
 they do not belong in a generic hardware baseline. The separate LM Studio
 JSON configuration remains an LM Studio-only runtime artifact.
 
+### 2.1.3 Hugging Face and GGUF metadata interoperability
+
+The authoritative reference for metadata naming between Hugging Face model
+cards and GGUF files is the official llama.cpp note
+[HuggingFace Model Card Metadata Interoperability Consideration](https://github.com/ggml-org/llama.cpp/wiki/HuggingFace-Model-Card-Metadata-Interoperability-Consideration).
+It describes correspondences such as `model_name` to `general.name`,
+`base_model`/`base_model_sources` to `general.base_model.*`, and model-card
+`tags`/`language` to the corresponding GGUF general metadata.
+
+This reference is a metadata interoperability contract, not a complete runtime
+parameter mapping. LM Studio JSON fields, Registry policy fields, and
+llama.cpp command-line flags remain separate adapter contracts. The Registry
+therefore stores the canonical `publisher/model@quant` identity and benchmark
+policy, while adapters preserve source-specific names and report missing or
+ambiguous evidence rather than guessing.
+
 The current build accepts the relevant settings as CLI options but rejects
 `mmap` when it appears in a models preset. The generated preset therefore
 does not put `mmap` in `[*]` until the installed preset parser supports it.
 
-### 2.1.3 Field authority during synchronization
+### 2.1.4 Field authority during synchronization
 
 The Registry is not a copy of every local file. It stores reviewed benchmark
 policy and the selected runtime values consumed by providers. Synchronization
@@ -188,6 +205,14 @@ by its counterpart `decompose_model_identity()`. Both helpers operate on the
 same three components—publisher, model base name, and quantization—so callers
 do not maintain separate parsing or formatting rules for the
 `publisher/model@quant` Registry key.
+
+Resolution is fail-closed. `resolve_registry_match()` returns a typed
+`UniqueMatch`, `AmbiguousMatch`, or `Unmatched` result; the compatibility helper
+`match_registry_key()` returns a key only for the unique state. The shared
+`ArtifactResolver` applies the same rule to local GGUF files and retains all
+candidate paths for diagnostics. `quantization.py`, `inventory.py`, and
+`parameter_bindings.py` are the reusable boundary contracts for quantization
+spelling, per-run source snapshots, and Registry-to-backend parameter names.
 
 ### 2.3 Registry entry shape
 
@@ -277,6 +302,7 @@ py -3.12 src\registry_tool.py full
 py -3.12 src\registry_tool.py validate
 py -3.12 src\registry_tool.py preset "C:\Users\<user>\.config\llama.cpp\preset.ini" --merge-existing
 py -3.12 src\registry_tool.py quarantine-missing
+py -3.12 src\registry_tool.py preset
 ~~~
 
 `status` is read-only. `sync` uses a shared model/config inventory and prints

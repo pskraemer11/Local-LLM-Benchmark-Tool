@@ -16,8 +16,38 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from quantization import KNOWN_QUANTS
+
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+
+@dataclass(frozen=True)
+class UniqueMatch:
+    """A unique Registry match and the matching strategy that produced it."""
+
+    requested: str
+    key: str
+    stage: str
+
+
+@dataclass(frozen=True)
+class AmbiguousMatch:
+    """A match that must not be resolved by iteration order."""
+
+    requested: str
+    candidates: tuple[str, ...]
+    stage: str
+
+
+@dataclass(frozen=True)
+class Unmatched:
+    """No Registry key matched the requested identity."""
+
+    requested: str
+
+
+type RegistryMatch = UniqueMatch | AmbiguousMatch | Unmatched
 
 # ── Normalisierung (exakt wie assemble_blueprint.normalize_model_name) ──
 
@@ -80,27 +110,109 @@ def normalize_model_name(name: str) -> str:
     return s
 
 
+def _normalize_identity_component(value: str) -> str:
+    """Normalize one publisher/model component without stripping its owner."""
+    s = str(value or "").strip().lower()
+    s = re.sub(r"\.gguf$", "", s)
+    s = re.sub(r"-(gguf|mxfp4)$", "", s)
+    s = re.sub(r"[-_](gguf|mxfp4)[-_]", "-", s)
+    s = s.replace(".", "-").replace("_", "-")
+    while "--" in s:
+        s = s.replace("--", "-")
+    return s.strip("-")
+
+
+def normalize_registry_identity(key: str, *, include_quant: bool = True) -> str:
+    """Normalize a Registry identity while preserving the publisher prefix.
+
+    ``normalize_model_name`` is intentionally publisher-agnostic for legacy
+    filename matching.  Runtime identity matching must first use this
+    publisher-aware form so two publishers cannot shadow each other.
+    """
+    publisher, model, quant = decompose_model_identity(key)
+    normalized_model = (
+        _normalize_identity_component(model)
+        if include_quant
+        else normalize_for_config(model)
+    )
+    normalized = build_model_identity(
+        _normalize_identity_component(publisher),
+        normalized_model,
+        _normalize_identity_component(quant) if include_quant else "",
+    )
+    return normalized
+
+
+def normalize_registry_base_identity(key: str) -> str:
+    """Normalize a publisher-aware base while preserving model variants.
+
+    This removes only the ``@quant`` component.  Variant markers such as
+    ``-qat`` remain part of the base so a specific variant can beat a broader
+    variant-stripped fallback without relying on registry iteration order.
+    """
+    publisher, model, _ = decompose_model_identity(key)
+    return build_model_identity(
+        _normalize_identity_component(publisher),
+        _normalize_identity_component(model),
+    )
+
+
+def normalize_match_base_identity(key: str) -> str:
+    """Normalize a publisherless base while preserving model variants."""
+    return normalize_model_name(key).split("@", 1)[0]
+
+
+def normalize_match_identity(key: str, *, include_quant: bool = True) -> str:
+    """Normalize the historical publisher-stripped matching namespace."""
+    normalized = normalize_model_name(key)
+    if not include_quant:
+        normalized = normalized.split("@", 1)[0]
+    return normalized
+
+
+def unique_normalized_index(keys: list[str], *, include_quant: bool = True) -> dict[str, str]:
+    """Build a first-safe index containing only unique normalized identities."""
+    grouped: dict[str, list[str]] = {}
+    for key in keys:
+        normalized = normalize_match_identity(key, include_quant=include_quant)
+        grouped.setdefault(normalized, []).append(key)
+    return {
+        normalized: candidates[0]
+        for normalized, candidates in grouped.items()
+        if len(candidates) == 1
+    }
+
+
+def find_match_collisions(keys: list[str]) -> dict[str, tuple[str, ...]]:
+    """Return publisher-stripped exact collisions used by legacy matchers.
+
+    The publisher-aware resolver remains able to select an explicitly named
+    publisher.  The collision is nevertheless a Registry data-quality error:
+    publisherless LMS/path inputs cannot identify one of these keys safely.
+    """
+    grouped: dict[str, list[str]] = {}
+    for key in keys:
+        normalized = normalize_match_identity(key)
+        grouped.setdefault(normalized, []).append(key)
+    return {
+        normalized: tuple(candidates)
+        for normalized, candidates in grouped.items()
+        if len(candidates) > 1
+    }
+
+
 _VARIANT_SUFFIXES = (
     "-ud",          # Unsloth distilled
     "-qat",         # Quantization-aware training variant: wird "qat" geschrieben, nicht "quat"!
     "-imatrix",     # Importance-matrix quant
 )
 
-_QUANT_DIR_SUFFIXES = (
-    "-mxfp4", "-nvfp4", "-bf16", "-fp16", "-f16", "-gguf", "-mxpr4",
-    # 2-teilige K/0-Quants (Ordner-Namen, z.B. "...-GGUF-Q4_K")
-    "-q1-0", "-q2-k", "-q3-k", "-q4-0", "-q4-k", "-q5-0", "-q5-k", "-q6-k", "-q8-0",
-    # 3-teilige K-Quants (z.B. "...-GGUF-Q4_K_M", "-Q3_K_S") - JetBrains-Naming
-    "-q2-k-s", "-q2-k-m", "-q2-k-l",
-    "-q3-k-s", "-q3-k-m", "-q3-k-l",
-    "-q4-k-s", "-q4-k-m", "-q4-k-l",
-    "-q5-k-s", "-q5-k-m", "-q5-k-l",
-    "-q6-k-s", "-q6-k-m", "-q6-k-l",
-    # iQ-Quants (IQ1_S ... IQ5_2)
-    "-iq1-s", "-iq1-m", "-iq2-s", "-iq2-xs", "-iq2-xxs",
-    "-iq3-s", "-iq3-xs", "-iq3-xxs",
-    "-iq4-s", "-iq4-xs", "-iq4-nl",
-    "-iq5-0", "-iq5-1", "-iq5-2",
+_QUANT_DIR_SUFFIXES = tuple(
+    sorted(
+        {f"-{quant.replace('_', '-')}" for quant in KNOWN_QUANTS} | {"-gguf"},
+        key=len,
+        reverse=True,
+    )
 )
 
 
@@ -282,36 +394,87 @@ def classify_reasoning_by_family(model_name: str, arch: str) -> str | None:
 
 
 # ── Deterministisches Registry-Matching ─────────────────────────────
-# Reihenfolge: Exact -> Publisher-stripped Exact -> Praefix/Suffix ->
-# @quant-stripped Exact (broad). Kein Substring-Fuzzy.
+# Reihenfolge: Publisher-aware Exact -> Publisherless Exact (nur eindeutig) ->
+# Publisher-aware Base -> Publisherless Base (nur eindeutig) -> Prefix/Suffix.
+# Kein Substring-Fuzzy und kein First-Wins.
 
 
-def match_registry_key(name: str, keys: list[str]) -> str | None:
+def resolve_registry_match(name: str, keys: list[str]) -> RegistryMatch:
     """Deterministischer 1:1-Match eines Namens gegen Registry-Keys.
 
     Reihenfolge:
       1. Exact (normalized, inkl. @quant)
       2. Exact (normalize_for_config - @quant/varianten gestrippt)
       3. Praefix/Suffix-Exact (key ist Praefix/Suffix des Namens oder umgekehrt)
-    Kein Substring-Fuzzy. Rueckgabe: Registry-Key oder None.
+    Kein Substring-Fuzzy und kein First-Wins. Die Rueckgabe unterscheidet
+    explizit zwischen eindeutigem, mehrdeutigem und nicht vorhandenem Treffer;
+    ``match_registry_key`` bietet fuer alte Aufrufer weiterhin die schmalere
+    ``key | None``-Sicht.
     """
     if not name or not keys:
+        return Unmatched(name)
+
+    def unique_stage(normalized: str, normalizer: Callable[[str], str], stage: str) -> RegistryMatch | None:
+        candidates = tuple(key for key in keys if normalizer(key) == normalized)
+        if len(candidates) == 1:
+            return UniqueMatch(name, candidates[0], stage)
+        if len(candidates) > 1:
+            return AmbiguousMatch(name, candidates, stage)
         return None
-    norm = normalize_model_name(name)
+
+    # Explicit publisher/model/quant identity is authoritative.
+    normalized_identity = normalize_registry_identity(name)
+    exact = unique_stage(normalized_identity, normalize_registry_identity, "publisher-aware-exact")
+    if exact is not None:
+        return exact
+
+    # Publisherless exact matching remains supported only when it is unique.
+    norm = normalize_match_identity(name)
+    publisherless_exact = unique_stage(norm, normalize_match_identity, "publisherless-exact")
+    if publisherless_exact is not None:
+        return publisherless_exact
+
+    # Remove only quantization first. This preserves discriminating markers
+    # such as ``-qat`` and can safely resolve a unique repack/variant even if
+    # the requested publisher is an alias not present in the Registry.
+    variant_identity = normalize_registry_base_identity(name)
+    variant_explicit = unique_stage(
+        variant_identity,
+        normalize_registry_base_identity,
+        "publisher-aware-variant-base",
+    )
+    if variant_explicit is not None:
+        return variant_explicit
+
+    # Finally allow the historical broad base fallback, including known
+    # ``-qat``/``-ud``/``-imatrix`` aliases, but only when it is unique.
+    broad_identity = normalize_registry_identity(name, include_quant=False)
+    broad_explicit = unique_stage(
+        broad_identity,
+        lambda key: normalize_registry_identity(key, include_quant=False),
+        "publisher-aware-base",
+    )
+    if broad_explicit is not None:
+        return broad_explicit
+
+    # If the requested publisher is an alias, a specific variant can still be
+    # safe when it is unique across publishers. This must come after the
+    # publisher-aware broad stage so an explicit publisher always wins.
+    variant = normalize_match_base_identity(name)
+    variant_match = unique_stage(variant, normalize_match_base_identity, "publisherless-variant-base")
+    if variant_match is not None:
+        return variant_match
+
     broad = normalize_for_config(name)
-
-    exact = {normalize_model_name(k) for k in keys}
-    if norm in exact:
-        return _first_key_with(norm, keys, normalize_model_name)
-
-    broad_keys = {normalize_for_config(k) for k in keys}
-    if broad in broad_keys:
-        return _first_key_with(broad, keys, normalize_for_config)
+    broad_match = unique_stage(broad, normalize_for_config, "publisherless-base")
+    if broad_match is not None:
+        return broad_match
 
     # Praefix/Suffix nur bei EINDEUTIGEM Treffer (sonst None - Aufrufer meldet).
     # Beispiel: "GLM-4.7-Flash-REAP-23B-A3B-Q4_K_S" darf nicht auf "glm-4.7-flash"
     # matchen, wenn es auch einen REAP-Key gibt.
     prefix_suffix: list[str] = []
+    norm = normalize_model_name(name)
     for k in keys:
         kn = normalize_model_name(k)
         if norm.startswith(kn + "-") or kn.startswith(norm + "-"):
@@ -319,12 +482,13 @@ def match_registry_key(name: str, keys: list[str]) -> str | None:
         elif norm.endswith("-" + kn) or kn.endswith("-" + norm):
             prefix_suffix.append(k)
     if len(prefix_suffix) == 1:
-        return prefix_suffix[0]
-    return None
+        return UniqueMatch(name, prefix_suffix[0], "prefix-suffix")
+    if len(prefix_suffix) > 1:
+        return AmbiguousMatch(name, tuple(prefix_suffix), "prefix-suffix")
+    return Unmatched(name)
 
 
-def _first_key_with(norm_key: str, keys: list[str], normalize: Callable[[str], str]) -> str | None:
-    for k in keys:
-        if normalize(k) == norm_key:
-            return k
-    return None
+def match_registry_key(name: str, keys: list[str]) -> str | None:
+    """Compatibility wrapper returning a key only for a unique match."""
+    result = resolve_registry_match(name, keys)
+    return result.key if isinstance(result, UniqueMatch) else None

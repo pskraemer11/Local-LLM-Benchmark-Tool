@@ -211,10 +211,12 @@ class TestThinkingRuns:
             assert (cfg["temperature"], cfg["top_p"]) == (0.6, 0.95)
 
     def test_thinking_model_with_table_row(self):
-        # Gemma-4: dokumentierte Ausnahme 1.0/0.95 statt flat 0.6/0.95.
-        # Liegt in der Registry als sampling:-Block vor (SSOT).
+        # Die explizite -qat-Variante wird jetzt deterministisch auf den
+        # eindeutigen QAT-Registry-Key aufgeloest; dessen bestaetigtes Coding-
+        # Profil ist 0.6/0.95. Ein unsloth-Basismodell ohne -qat bleibt bei
+        # 1.0/0.95 (siehe TestRegistrySampling).
         cfg = get_model_config("google/gemma-4-12b-it-qat", category="coding", is_thinking_enabled=True)
-        assert (cfg["temperature"], cfg["top_p"]) == (1.0, 0.95)
+        assert (cfg["temperature"], cfg["top_p"]) == (0.6, 0.95)
         assert cfg["_source"] == "registry-sampling"
 
     def test_thinking_gpt_oss_row(self, mocker):

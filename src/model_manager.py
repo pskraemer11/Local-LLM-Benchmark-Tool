@@ -445,14 +445,18 @@ def _load_registry_data() -> dict[str, Any]:
 
 def _registry_display_overrides() -> dict[str, str]:
     """Load model_registry.yaml and return {normalized_key: display_name}."""
-    from assemble_blueprint import normalize_model_name
+    from model_identity import unique_normalized_index
     data = _load_registry_data()
-    overrides = {}
-    for key, entry in data.items():
-        if isinstance(entry, dict) and "display_name" in entry:
-            display_name = entry["display_name"]
-            if isinstance(display_name, str):
-                overrides[normalize_model_name(key)] = display_name
+    display_entries = {
+        key: entry
+        for key, entry in data.items()
+        if isinstance(entry, dict) and isinstance(entry.get("display_name"), str)
+    }
+    overrides: dict[str, str] = {}
+    for normalized, key in unique_normalized_index(list(display_entries)).items():
+        display_name = display_entries[key].get("display_name")
+        if isinstance(display_name, str):
+            overrides[normalized] = display_name
     return overrides
 
 

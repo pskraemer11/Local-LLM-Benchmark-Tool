@@ -1656,3 +1656,129 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 - `.github/workflows/ci.yml`, `.github/workflows/review.yml`: aktualisierte
   Actions-Versionen und vollständige SHA-Verweise.
 - `CHANGELOG.md`: Eintrag zum Upgrade mit Verweis auf diese Compaction.
+
+=============== Compaction 24.09.2026 / 18:24 ================
+## Objective
+- Die in der letzten Chat-Antwort geplante Refaktorierung der Modellidentitaet,
+  Pfad-/Artefaktaufloesung, Quantisierung, Parameterabbildung und
+  Synchronisationsgrenzen stufenweise in den Phasen 0 bis 6 umsetzen und die
+  Dokumentationsentscheidung fuer den llama.cpp-/Hugging-Face-Link aus Punkt 13
+  abschliessen.
+
+## Important Details
+- **Phase 0/1 — Identity:** `resolve_registry_match()` liefert jetzt typed
+  `UniqueMatch`, `AmbiguousMatch` oder `Unmatched`. Publisher-aware Exact-
+  Matching kommt zuerst; publisherlose und Varianten-Fallbacks sind nur bei
+  Eindeutigkeit zulaessig. `match_registry_key()` bleibt als kompatibler
+  `key | None`-Adapter erhalten. Normalisierte exakte Kollisionen sind in
+  `validate --ci` blockierend; eine publisherlose Qwen/ByteShape-Kollision
+  bleibt als bewusst sichtbarer Hinweis bestehen.
+- **Phase 2 — Inventory:** `InventorySnapshot` und `IdentityLink` in
+  `src/inventory.py` bilden Registry, LM-Studio-Records, Configs und GGUF-
+  Kandidaten als gemeinsamen Lauf-Snapshot ab. `registry_tool.py` behaelt den
+  kompatiblen Laufzeitnamen `RegistryInventory`.
+- **Phase 3 — Contracts:** `src/quantization.py` ist die gemeinsame
+  Quantisierungsvokabel fuer Key-, Datei- und Config-Varianten.
+  `src/parameter_bindings.py` beschreibt kanonische Registry-Felder und ihre
+  LM-Studio-/llama.cpp-Namen; Provider-Adapter verwenden diese Tabelle.
+- **Phase 4/5 — Artifacts and consumers:** `ArtifactResolver` in
+  `src/artifact_resolver.py` zentralisiert GGUF-Discovery, Root-Prioritaet,
+  Hub-Layout, Quantisierung und Ambiguitaetsbehandlung. Registry-Reader,
+  Config-Sync, lokale Modellauflistung, Preset-/Runtime-Pfade und Display-
+  Overrides verwenden unique-only Regeln; first-wins und fuzzy Runtime-
+  Fallbacks wurden entfernt.
+- **Phase 6 — Facade and documentation:** `registry_tool.py` bleibt als
+  stabile CLI-Fassade bestehen; wiederverwendbare Grenzen liegen in fokussierten
+  Modulen. `doc-git/Architecture, Flow & ChangeLog_en.md` verweist auf die
+  offizielle [HuggingFace Model Card Metadata Interoperability
+  Consideration](https://github.com/ggml-org/llama.cpp/wiki/HuggingFace-Model-Card-Metadata-Interoperability-Consideration).
+  Die Entscheidung ist bewusst dort dokumentiert, weil der Link Metadaten-
+  Interoperabilitaet beschreibt, nicht die vollstaendige Runtime-Parameter-
+  Abbildung. `LOCAL-LLM-ENVIRONMENT.md` bleibt die zentrale Hardware-/Backend-
+  Faktenquelle und wird nicht mit Projektarchitektur vermischt.
+- **Data safety:** `doc-git/model_registry.yaml` und lokale LM-Studio-
+  Artefakte wurden nicht automatisch umgeschrieben. Mehrdeutige Evidenz bleibt
+  sichtbar und fail-closed.
+
+## Verification
+- `py -3.12 -m pytest -q`: **1.086 passed**.
+- Fokussierte Identity-/Boundary-/Registry-Suite: **211 passed**.
+- `py -3.12 -m ruff check .`: **passed**.
+- `py -3.12 -m compileall -q src tests`: **passed**.
+- `py -3.12 src\\registry_tool.py validate --ci`: **0 blocking problems,
+  1 advisory publisherless ambiguity**.
+- Isolierter MyPy-Check der neuen bzw. unmittelbar betroffenen Contract-
+  Module: **passed**. Der projektweite `mypy src`-Lauf bleibt mit 110 bereits
+  konzentrierten Legacy-/Bestandsfehlern in `custom_benchmark.py`,
+  `run_benchmarks.py` und Teilen von `registry_tool.py` offen; dieser Turn
+  erweitert diesen Befund nicht um Fehler in den neuen Contract-Modulen.
+- Live-Tests mit LM Studio, llama-server/llama.cpp, echter GGUF-Ladung und
+  externen Webquellen wurden wie vom Nutzer gewuenscht **nicht** ausgefuehrt.
+- Kein Commit und kein Push.
+
+## Work State
+### Completed / Active / Blocked
+- Completed: Phasen 0 bis 6, Regressionstests, Architektur-Dokumentation,
+  offizieller Link, CHANGELOG-Eintrag und diese Compaction.
+- Active: Arbeitsbaum enthaelt die fokussierten Refaktorierungs- und
+  Dokumentationsaenderungen; vorhandene uncommittete Nutzerkorrekturen in
+  `AGENTS.md` und der Architekturdatei bleiben erhalten.
+- Deferred: Live-Backend-Tests sowie die nachgelagerte fachliche Klaerung des
+  publisherlosen Qwen/ByteShape-Hinweises.
+
+## Next Move
+1. Live-Tests mit kontrollierten LM-Studio-/llama.cpp-Fixtures und echten
+   Modellpfaden separat ausfuehren.
+2. Den verbleibenden publisherlosen Qwen/ByteShape-Hinweis durch explizite
+   Publisher-Identitaeten oder eine dokumentierte Aliasentscheidung bereinigen.
+3. Erst danach Staging, Hooks, Commit und gegebenenfalls Push vorbereiten.
+
+## Relevant Files
+- `src/model_identity.py`, `src/artifact_resolver.py`, `src/inventory.py`:
+  Identitaets-, Artefakt- und Lauf-Snapshot-Vertraege.
+- `src/quantization.py`, `src/parameter_bindings.py`:
+  zentrale Quant-/Parameter-Schnittstellen.
+- `src/registry_tool.py`, `src/local_model_resolver.py`,
+  `src/model_registry.py`, `src/run_benchmarks.py`:
+  migrierte Consumers und CLI-Fassade.
+- `docs/keystone/refactors/2026-09-24-model-identity-synchronization.md`:
+  Phasenplan, Invarianten, Beweis- und Rollback-Regeln.
+- `doc-git/Architecture, Flow & ChangeLog_en.md`, `CHANGELOG.md`:
+  Architektur-/Interoperabilitaetsentscheidung und Aenderungsnachweis.
+
+=============== Compaction 24.09.2026 / 19:41 ================
+## Objective
+- Den abgeschlossenen Identity-/Artifact-/Parameter-Refactor in einem
+  nachvollziehbaren Commit sichern und nach erfolgreichem Pre-Push-Gate auf
+  `origin/main` veroeffentlichen.
+
+## Important Details
+- **Commit scope:** `a1c34b17` (`refactor: harden model identity
+  synchronization`) enthaelt die 24 fachlich zum Refactor gehoerenden Dateien,
+  einschliesslich der neuen Contract-Module, Tests, Architektur-Dokumentation,
+  CHANGELOG und der vorherigen Compaction.
+- **Preserved user change:** Die bereits vor diesem Auftrag vorhandene,
+  separate Korrektur in `AGENTS.md` bleibt bewusst uncommittet und wird nicht
+  durch den Refactor-Commit vereinnahmt.
+- **Pre-Commit:** Der Hook meldete alle staged Checks bestanden und fuehrte die
+  fokussierte Registry-Suite mit 140 bestandenen Tests aus.
+- **Next gate:** Der Push erfolgt ohne `--no-verify`; der konfigurierte
+  `.githooks/pre-push`-Hook muss Review-Checks und den fokussierten MyPy-Scope
+  erfolgreich abschliessen.
+
+## Work State
+### Completed / Active / Blocked
+- Completed: Refactor-Commit erstellt und Pre-Commit-Gate bestanden.
+- Active: Commit amendieren um diesen Checkpoint und anschliessend Push mit
+  Pre-Push-Gate.
+- Blocked: kein bekannter technischer Blocker.
+
+## Next Move
+1. Checkpoint-Dateien in den noch nicht veroeffentlichten Commit aufnehmen.
+2. `git push` mit dem normalen Pre-Push-Hook ausfuehren.
+3. Remote-Commit, Arbeitsbaum und den erhaltenen Hook-/Push-Status verifizieren.
+
+## Relevant Files
+- `CHANGELOG.md`: Verweis auf diesen Commit-/Push-Checkpoint.
+- `COMPACTIONS.md`: Historischer Zustand unmittelbar vor dem Push.
+- `AGENTS.md`: Bewusst erhaltene, nicht zum Refactor gehoerende lokale Aenderung.

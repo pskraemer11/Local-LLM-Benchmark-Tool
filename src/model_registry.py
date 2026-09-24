@@ -15,11 +15,12 @@ import copy
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from ruamel.yaml import YAML
 
-from model_identity import match_registry_key
+from model_identity import UniqueMatch, resolve_registry_match
+from providers.llama_cpp_args import normalize_cache_type
 
 RegistryLoader = Callable[[], dict[str, Any]]
 
@@ -34,10 +35,6 @@ _TABBYAPI_CACHE_MODES = {
     "q6": "6,6",
     "q4": "4,4",
 }
-_SUPPORTED_CACHE_TYPES = frozenset({"f32", "f16", "bf16", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_0", "q5_1"})
-_CACHE_TYPE_ALIASES = {"fp16": "f16", "float16": "f16", "q4_nl": "iq4_nl"}
-
-
 def load_registry(path: Path | None = None) -> dict[str, Any]:
     """Load ``model_registry.yaml`` as a plain mapping."""
     registry_path = path or _DEFAULT_REGISTRY_PATH
@@ -244,11 +241,7 @@ class ResolvedRegistryEntry:
 
     @staticmethod
     def _normalize_cache_type(value: Any) -> str | None:
-        if not isinstance(value, str):
-            return None
-        normalized = value.strip().casefold().replace("-", "_")
-        normalized = _CACHE_TYPE_ALIASES.get(normalized, normalized)
-        return normalized if normalized in _SUPPORTED_CACHE_TYPES else None
+        return cast("str | None", normalize_cache_type(value))
 
 
 class ModelRegistry:
@@ -273,11 +266,12 @@ class ModelRegistry:
         if not data:
             return None
         keys = list(data)
-        registry_key = match_registry_key(model_key, keys)
-        if registry_key is None and "/" not in model_key and "_" in model_key:
-            registry_key = match_registry_key(model_key.replace("_", "/", 1), keys)
-        if registry_key is None:
+        result = resolve_registry_match(model_key, keys)
+        if not isinstance(result, UniqueMatch) and "/" not in model_key and "_" in model_key:
+            result = resolve_registry_match(model_key.replace("_", "/", 1), keys)
+        if not isinstance(result, UniqueMatch):
             return None
+        registry_key = result.key
         entry = data.get(registry_key)
         if not isinstance(entry, dict):
             return None

@@ -27,6 +27,7 @@ from model_identity import (
     normalize_lms_model_name,
     normalized_lms_key,
 )
+from quantization import KNOWN_QUANTS, extract_quant_from_text
 from utils.terminal import warn
 
 BLACKLIST = [
@@ -212,18 +213,7 @@ GPTOSS_REASONING_BUDGET = 4096
 # No static map needed — extract directly from the key.
 # Fallback: read from GGUF filename (Source of Truth).
 
-_KNOWN_QUANTS = (
-    "q1_0", "q2_k", "q2_k_s", "q3_k_xs", "q3_k_s", "q3_k_m", "q3_k_l",
-    "q4_0", "q4_1", "q4_k_s", "q4_k_m", "q4_k_xl",
-    "q5_0", "q5_1", "q5_k_s", "q5_k_m",
-    "q6_k", "q8_0_i", "q8_0", "q8_1",
-    "iq1_s", "iq1_m",
-    "iq2_xxs", "iq2_xs", "iq2_s", "iq2_m",
-    "iq3_xxs", "iq3_xs", "iq3_s", "iq3_m", "iq3_nl",
-    "iq4_xs", "iq4_nl",
-    "mxfp4", "mxpr4", "fp16", "f16",
-    "bf16",
-)
+_KNOWN_QUANTS = KNOWN_QUANTS
 
 
 def extract_quant_from_key(model_key: str) -> str:
@@ -244,9 +234,9 @@ def guess_quant_from_filename(filename: str) -> str:
     Uses known quant patterns. Returns quant in UPPERCASE or "".
     """
     name = filename.lower().removesuffix(".gguf")
-    for quant in _KNOWN_QUANTS:
-        if quant.replace("_", "-") in name or quant in name:
-            return quant.upper()
+    quant = extract_quant_from_text(name)
+    if quant:
+        return str(quant).upper()
     # Fallback: last hyphen-separated part if it looks like a quant
     parts = name.rsplit("-", 1)
     if len(parts) == 2 and parts[1] and parts[1][0] in ("q", "i", "f", "m", "b"):

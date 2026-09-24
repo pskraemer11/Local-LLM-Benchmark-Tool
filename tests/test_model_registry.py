@@ -138,3 +138,18 @@ def test_model_registry_quant_list_falls_back_safely(tmp_path: Path) -> None:
     assert resolved_list.quant == "q4_k_m"
     assert resolved_empty is not None
     assert resolved_empty.quant is None
+
+
+def test_model_registry_never_first_wins_on_publisher_collision(tmp_path: Path) -> None:
+    registry = {
+        "qwen/qwen3.5-9b@q5_k_s": {"context_length": 8192},
+        "byteshape/qwen3.5-9b@q5_k_s": {"context_length": 16384},
+    }
+    model_registry = ModelRegistry(lambda: registry, template_root=tmp_path)
+
+    explicit = model_registry.resolve("byteshape/qwen3.5-9b@q5_k_s")
+    publisherless = model_registry.resolve("qwen3.5-9b@q5_k_s")
+
+    assert explicit is not None
+    assert explicit.registry_key == "byteshape/qwen3.5-9b@q5_k_s"
+    assert publisherless is None

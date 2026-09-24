@@ -6,6 +6,22 @@ Hinweise:
 - Stand: 06.08.2026 — umgezogen aus §20 der `doc-git/Architecture, Flow & ChangeLog_en.md` (dort nur noch Verweis).
 - Commit-Hashes beziehen sich auf `main`.
 
+## Identitaets-, Artefakt-, Quant- und Parametergrenzen refaktoriert (24.09.2026)
+
+| Date | Change |
+| ---- | ------ |
+| 24.09. | `src/model_identity.py`, `src/artifact_resolver.py`, `src/inventory.py` | **FIX/REFACTOR:** Typed, fail-closed resolution for publisher/model/quant identities and GGUF artifacts. Exact normalized collisions are blocking validation errors; ambiguous publisherless or filesystem matches no longer select the first candidate. |
+| 24.09. | `src/quantization.py`, `src/parameter_bindings.py`, `src/providers/llama_cpp_args.py`, `src/providers/unsloth_server_provider.py` | **SCHEMA:** Central quantization vocabulary and declarative Registry-to-LM-Studio/llama.cpp parameter bindings replace divergent local tables. |
+| 24.09. | `src/registry_tool.py`, `src/local_model_resolver.py`, `src/model_registry.py`, `src/run_benchmarks.py`, `src/custom_benchmark.py`, `src/model_manager.py` | **SYNC:** Runtime and write paths consume shared identity/artifact contracts, shared inventory links, and unique-only normalized indexes; fuzzy/first-wins execution fallbacks were removed. |
+| 24.09. | `tests/test_boundary_contracts.py`, `tests/test_model_identity.py`, `tests/test_benchmark_config.py`, `tests/test_model_registry.py`, `tests/test_registry_tool.py` | **TEST:** Added collision, ambiguity, publisher/variant precedence, quantization, artifact-root, and parameter-binding regression coverage. |
+| 24.09. | `doc-git/Architecture, Flow & ChangeLog_en.md`, `docs/keystone/refactors/2026-09-24-model-identity-synchronization.md` | **DOC:** Documented the phased refactor contract and the official llama.cpp/Hugging Face metadata interoperability reference. Live LM Studio/llama.cpp tests remain a deliberate follow-up. |
+
+## Refactoring-Checkpoint vor Push (24.09.2026)
+
+| Date | Change |
+| ---- | ------ |
+| 24.09. | `CHANGELOG.md`, `COMPACTIONS.md` | **WORKFLOW:** Refactoring commit `a1c34b17` erstellt; Pre-Commit-Hook mit 140 fokussierten Registry-Tests bestanden. Der Push und sein Pre-Push-Gate folgen unmittelbar. Siehe Compaction `24.09.2026 / 19:41`. |
+
 ## GitHub-Actions auf v7 aktualisiert (24.09.2026)
 
 | Date | Change |
