@@ -10,7 +10,7 @@ Hinweise:
 
 | Date | Change |
 | ---- | ------ |
-| 24.09. | `.github/workflows/ci.yml`, `.github/workflows/review.yml` | **SECURITY/CI:** `actions/checkout` auf v7.0.1 und `actions/setup-python` auf v7.0.0 mit vollständigen Commit-SHAs aktualisiert. |
+| 24.09. | `.github/workflows/ci.yml`, `.github/workflows/review.yml` | **SECURITY/CI:** `actions/checkout` auf v7.0.1 und `actions/setup-python` auf v7.0.0 mit vollständigen Commit-SHAs aktualisiert. Siehe Compaction `24.09.2026 / 16:24`. |
 
 ## GitHub-Actions auf feste Commit-SHAs gestellt (24.09.2026)
 

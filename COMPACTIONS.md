@@ -1615,3 +1615,44 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 
 ## Relevant Files
 - `dc9070cb`: Regressionstests, Feldhoheit und sichere Hook-Temp-Pfade.
+
+=============== Compaction 24.09.2026 / 16:24 ================
+## Objective
+- Die GitHub-Actions-Abhängigkeiten `checkout` und `setup-python` sicher auf
+  die gewünschten v7-Versionen aktualisieren und den Remote-Lauf verifizieren.
+
+## Important Details
+- **SHA-Pinning:** `actions/checkout` steht auf v7.0.1 mit Commit-SHA
+  `3d3c42e5aac5ba805825da76410c181273ba90b1`; `actions/setup-python` auf
+  v7.0.0 mit `5fda3b95a4ea91299a34e894583c3862153e4b97`. Dieselben exakten
+  SHAs wurden der GitHub-Allowlist hinzugefügt; die SHA-Pflicht blieb aktiv.
+- **Push-Zugang:** Der zuerst verwendete `GITHUB_TOKEN` hatte nicht den nötigen
+  Workflow-Zugriff. Der erfolgreiche Push nutzte einmalig den vorhandenen
+  `gh`-Credential-Helper, ohne gespeicherte Zugangsdaten oder Git-Konfiguration
+  dauerhaft zu ändern.
+- **Abnahme:** GitHub Actions liefen erfolgreich: CI `35978068448` und
+  Pre-Review `35978068485`. Lokal bestanden 1.075 Tests, Registry-Validierung,
+  Ruff, GGUF-Abgleich und der fokussierte mypy-Check.
+
+## Work State
+### Completed / Active / Blocked
+- Completed: Commit `bc899e303f92109ec911986d29b6e26fc2056c6f`
+  (`ci: upgrade GitHub Actions to v7 SHA pins`) ist auf `origin/main`.
+- Completed: lokaler `main`-Branch und `origin/main` waren synchron; beide
+  genannten GitHub-Läufe waren erfolgreich.
+- Non-blocking: der globale mypy-Lauf meldete einen informativen Befund; zwei
+  LM-Studio-Konfigurationen melden weiterhin `numParallelSessions` ungleich 4.
+- Preserve: `AGENTS.md` hatte bei dieser Compaction bereits eine separate,
+  uncommittete Nutzerkorrektur. Sie gehört nicht zum Actions-Upgrade und wird
+  in diesem Commit ausgespart.
+
+## Next Move
+1. Bei der nächsten regulären Prüfung die zwei LM-Studio-Parallelitätsmeldungen
+   fachlich einordnen.
+2. Die pausierten Benchmark- und Backend-Kompatibilitätsarbeiten nach Priorität
+   wieder aufnehmen.
+
+## Relevant Files
+- `.github/workflows/ci.yml`, `.github/workflows/review.yml`: aktualisierte
+  Actions-Versionen und vollständige SHA-Verweise.
+- `CHANGELOG.md`: Eintrag zum Upgrade mit Verweis auf diese Compaction.
