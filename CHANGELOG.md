@@ -6,6 +6,12 @@ Hinweise:
 - Stand: 06.08.2026 — umgezogen aus §20 der `doc-git/Architecture, Flow & ChangeLog_en.md` (dort nur noch Verweis).
 - Commit-Hashes beziehen sich auf `main`.
 
+## GitHub-Actions auf v7 aktualisiert (24.09.2026)
+
+| Date | Change |
+| ---- | ------ |
+| 24.09. | `.github/workflows/ci.yml`, `.github/workflows/review.yml` | **SECURITY/CI:** `actions/checkout` auf v7.0.1 und `actions/setup-python` auf v7.0.0 mit vollständigen Commit-SHAs aktualisiert. |
+
 ## GitHub-Actions auf feste Commit-SHAs gestellt (24.09.2026)
 
 | Date | Change |
