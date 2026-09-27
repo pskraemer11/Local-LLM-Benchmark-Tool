@@ -38,6 +38,7 @@ run.example.yaml
 run_lint.ps1
 
 # LM Studio / Nutzer-spezifisch
+doc-git/model_registry.yaml
 lmstudio_model-list*.json
 lmstudio_model-list*.txt
 model-list.json

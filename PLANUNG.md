@@ -1,28 +1,35 @@
 # Planung: Prozessisolation, direkte llama.cpp-Migration und Benchmark-Abnahme
 
-Status: 2026-09-23. Prioritaet: reproduzierbare Backend-Abnahme und Score-Kompatibilitaet.
+Status: 2026-09-27. Prioritaet: reproduzierbare Backend-Abnahme und Score-Kompatibilitaet.
 
 ## Aktueller Gesamtstatus
 
 Die direkte llama.cpp-Integration ist technisch weitgehend umgesetzt und mit
-lokalen Server-Smokes, vier Pipeline-Smokes und einem sequenziellen
-Mehrmodelllauf geprüft. Die fachliche Abnahme ist noch nicht abgeschlossen.
-Insbesondere stehen der LM-Studio-/llama.cpp-Kompatibilitaetsvergleich, der
-separate GLM-Streamingvergleich, die Qualitaetsauswertung und die offenen
-Worker-/Manifest-Vergleiche noch aus.
+lokalen Server-Smokes, vier Pipeline-Smokes, einem sequenziellen Mehrmodelllauf
+und einem identischen Backend-/Streamingvergleich geprüft. Die fachliche
+Qualitaetsabnahme bleibt fuer groessere Samples offen; der SampleSize-1-Lauf
+ist als technisches Gate bewertet.
 
 - `[x]` Produktives lokales Backend: `C:\Program Files\llama.cpp\llama-server.exe`.
 - `[x]` Registry als fachliche Quelle; `config.ini` und `preset.ini` als
   Runtime-/Exportebenen getrennt.
 - `[x]` Direkter Provider- und Runnerpfad einschliesslich Lifecycle und
   `SampleSize`-abhaengiger Parallelitaetsregel.
-- `[~]` Kompatibilitaet, Modell-Templates, Warnungen und fachliche Scores sind
-  noch nicht vollstaendig abgenommen.
+- `[x]` Kompatibilitaet, Modell-Templates, Structured Output und Streaming sind
+  fuer den dokumentierten Qwen-/GLM-Livefall technisch abgenommen.
+- `[~]` Die SampleSize-1-Scores sind fachlich eingeordnet, aber keine
+  Qualitaetsbaseline; DS1000 zeigt zusaetzliche Harness-/Extraktionsfehler.
 - `[~]` Der fruehere LM-Studio-SampleSize-5-Lauf ist gesichert bzw. pausiert;
   er wird erst nach der direkten Backend-Abnahme fortgesetzt oder neu geplant.
 - `[x]` Gemma APEX ist mit dem live getesteten Wert `experts: 36` und dem
   Registry-Schluessel `mudler/gemma-4-26b-a4b-it-apex@mini` erfasst;
   `registry_tool.py validate --ci` meldete danach 0 Blocker und 0 Hinweise.
+- `[x]` Beide LFM2.5-8B-A1B-Registryeintraege sind mit `experts: 16` und dem
+  gemeinsamen DSpark-Sidecar synchronisiert; llama.cpp bestand den SampleSize-1-
+  Lauf mit allen vier Pipelines fuer beide Varianten.
+- `[~]` Der entsprechende LM-Studio-Live-Smoke ist noch offen: aktuell ist kein
+  Modell geladen, und `lms load` bietet keinen DSpark-Schalter. Fuer den Test
+  muss das Modell in der LM-Studio-GUI mit DSpark geladen sein.
 
 ## Naechste Schritte
 
@@ -104,6 +111,101 @@ Validierung bestanden ebenfalls.
 In dieser Datei bedeutet `[x]` abgeschlossen, `[~]` teilweise erledigt,
 bewusst zurueckgestellt oder noch mit einer offenen Teilabnahme und `[ ]`
 offen.
+
+### Neue Aufgabe (27.09.2026): fail-closed Modell-, Config- und Companion-Zuordnung
+
+**Status:** Implementierung, Regressionen und SampleSize-1-Abnahme abgeschlossen.
+Ziel ist, dass eine angeforderte Modellvariante,
+ihre LM-Studio-JSON-Runtimewerte und optionale MTP-/Draft-Hilfsdatei zur
+Laufzeit nicht stillschweigend durch eine andere Variante oder Datei ersetzt
+werden. Die Registry wird lokal erzeugt und bleibt aus Git ausgeschlossen;
+absolute lokale Pfade sind gueltige Join-Evidenz, aber keine portablen Repo-Daten.
+
+#### Problemumfang
+
+1. **Explizite Quantisierung:** Der Benchmarkresolver kann nach einem
+   erfolglosen exakten Treffer noch auf die normalisierte Modellbasis
+   zurueckfallen. Bei mehreren Quantisierungen kann so trotz einer Anfrage wie
+   `publisher/model@Q5_K_M` eine andere verfuegbare Quantisierung ausgewaehlt
+   werden.
+2. **Deklariertes GGUF/JSON-Paar:** Ein gespeichertes `local.model_path` /
+   `local.config_path`-Paar wird anhand des exakten Config-Pfads und der
+   Quantisierung geprueft, aber nicht in jedem Pfad auch auf gleichen GGUF-
+   Dateinamen und dasselbe Modellpaket. Eine gleich quantisierte JSON-Datei
+   eines anderen Modells darf keine Sampling-, Kontext- oder Speculative-
+   Einstellungen liefern.
+3. **Companion zur Laufzeit:** Ein beim Sync aufgeloester MTP-/Draft-Pfad kann
+   spaeter veraltet oder unpassend sein. Vor dem Start fehlen ein verbindlicher
+   Existenzcheck und eine typgerechte Kompatibilitaetspruefung zum Haupt-GGUF.
+
+#### Lösungsvorschlag
+
+- Eine **zentrale fail-closed Aufloesung** fuer konkrete Modellidentitaeten
+  verwenden. Ist in der Anfrage eine bekannte, konkrete Quantisierung
+  angegeben, muss der Treffer dieselbe normalisierte Quantisierung haben;
+  ein quantisierungsfreier Fallback ist dann verboten. Ein publisher- oder
+  quantisierungsloser Alias darf nur bei genau einem konkreten Treffer
+  aufgeloest werden. `@?` bleibt unbekannte Evidenz und wird nicht als
+  Erlaubnis verstanden, eine beliebige Quantisierung zu waehlen.
+- Fuer ein deklariertes GGUF/JSON-Paar dieselbe Artefakt-Identitaetspruefung
+  wie fuer automatisch gefundene Configs erzwingen: konkrete GGUF-Datei,
+  Modellpaket/Pfadkomponenten und Quantisierung muessen zusammenpassen. Die
+  absolute Pfadbindung bleibt dabei erhalten. Ein stale oder inkonsistentes
+  deklariertes Paar erzeugt einen sichtbaren Konflikt und darf weder durch
+  Fuzzy-Suche noch durch eine Config desselben Quant-Typs ersetzt werden.
+  Eine generische Modell-Config waere nur mit einem eigenen expliziten Scope
+  und einer eindeutigen Einzelmodell-Zuordnung zulaessig.
+- Companion-Validierung als gemeinsame Bundle-Grenze fuer Registry-Sync,
+  `validate`, Preset-Export und llama.cpp-Laufzeit einfuehren. Sie prueft vor
+  jedem Start, dass Haupt- und Hilfs-GGUF existieren, die gespeicherte lokale
+  Pfadbindung noch stimmt und `role`/`type`/`method` zusammenpassen:
+  integriertes MTP benoetigt keine Datei; separates MTP benoetigt einen
+  MTP-Sidecar; einfache Draft-Modelle sowie DFlash/DFlash2/DSpark benoetigen
+  den jeweils erklaerten Draft-Helper und llama.cpp-Aufrufmodus. Dateigroesse
+  darf keine Rollen- oder Kompatibilitaetsentscheidung ersetzen.
+- Kompatibilitaet typabhaengig beurteilen: Modellfamilie und Versionslinie
+  muessen belegt uebereinstimmen; Parameter-/Architekturkompatibilitaet wird
+  aus GGUF-Headern bzw. einer expliziten, validierten Pairing-Deklaration
+  abgeleitet. Bei spezialisierten DFlash-/DSpark-Helfern wird keine pauschale
+  Gleichheit ihrer Parameterzahl mit dem Hauptmodell unterstellt. Fehlt
+  belastbare Evidenz, bleibt die Kombination ungeladen und wird mit beiden
+  Registry-Identitaeten und dem Konfliktgrund gemeldet.
+
+#### Umsetzung und Abnahme
+
+1. [x] **Quant-Aufloesung:** Explizite bekannte Quantisierungen treffen nur
+   dieselbe normalisierte Registry-Quantisierung. Ein fehlender exakter
+   Quant-Treffer faellt nicht auf eine andere Variante zurueck; ein Alias wird
+   nur bei genau einem Treffer akzeptiert.
+2. [x] **Config-Bindung:** Deklarierte und automatisch gefundene GGUF/JSON-Paare
+   verwenden denselben Datei-/Paket-/Quant-Check. Ein generisches Modell-JSON
+   ist nur mit `local.config_scope: model` erlaubt und muss genau einem
+   Registry-Eintrag gehoeren. Fehlende oder widerspruechliche Pfade werden
+   weder fuzzy ersetzt noch stillschweigend ignoriert.
+3. [x] **Bundle-Kompatibilitaet:** Die gemeinsame typisierte GGUF-Pruefung wird
+   beim Sync, in `validate`, beim llama.cpp-Preset-Export und unmittelbar vor
+   dem Runtime-Start verwendet. Sie prueft Datei, GGUF-Header, Companion-Rolle,
+   Methode und vorhandene Modellfamilien-/Versions-/Groessenhinweise; fehlende
+   oder widerspruechliche Evidenz blockiert die spekulative Laufzeitbindung.
+   Positive Regressionen decken gemeinsam verwendete Helper ab; negative
+   Regressionen decken fehlende, falsche und inkompatible Sidecars ab.
+4. [x] **Variant-B-Manifest:** Format v2 verlangt die Task-IDs fuer alle vier
+   Pipelines und erforderliche Quell-Hashes. Jede Pipeline bestaetigt nach dem
+   Lauf, dass sie exakt die manifestierten Aufgaben ausgefuehrt hat; fehlende
+   Ausgaben oder abweichende IDs lassen die Abnahme fehlschlagen.
+5. [x] **Tests:** Negative und positive Resolver-, Pairing-, Companion- und
+   Manifestregressionen sowie Registry-/Provider-Vertragstests sind ergaenzt.
+   Fokussierte Regressionen bestanden; die integrierte Suite bestand mit
+   1.184 Tests. Ruff fuer die geaenderten Produktionsmodule und
+   `registry_tool.py validate --ci` bestanden (0 Blocker, 0 Hinweise).
+6. [x] **Lokale Abnahme (27.09.2026):** `unsloth/lfm2.5-8b-a1b@mxfp4`
+   (`llama.cpp`, `draft-dspark`, SampleSize 1, Seed 42) lief mit Variant-B-v2
+   durch alle vier Pipelines. Bestaetigte Aufgaben-IDs: DS1000 `161`, EvalPlus
+   `HumanEval/163`, LM-Eval `doc:0`, Agentic `TC-15`. Die Smoke-Scores waren
+   0/0/0/100 Prozent; sie sind ausschliesslich technische Laufnachweise und
+   keine Qualitaetsbaseline. Der Launcher entlud seinen Server anschliessend;
+   der reservierte Port 18089 war frei und der gemessene GPU-Speicher lag bei
+   306 MiB.
 
 ## Leitentscheidung
 
@@ -365,8 +467,9 @@ Benchmarkpfads.
 3. [~] GLM-4.7-Flash wurde im direkten, nicht gestreamten API-Pfad mit den
    Reasoning-Formaten geprüft. Der LM-Studio-Vergleich, die REAP-Abgrenzung
    und der separate Streamingtest bleiben Teil der offenen Abnahme.
-4. [ ] Für alle verwendeten Code-Benchmarks ein Task-Manifest erzeugen und die
-   Worker-Kompatibilität mit identischen Aufgaben prüfen.
+4. [x] Für die vier Pipeline-Typen ist ein Variant-B-Manifest mit Seed 42,
+   SampleSize 1 und je einem repräsentativen Benchmark erzeugt. Die Worker-
+   und Providerläufe akzeptieren nur noch diesen vollständigen Abgleichvertrag.
 5. [x] Die Gemma-Registrykorrektur ist uebernommen. Der letzte Pre-Commit-
    Prueflauf meldete `registry_tool.py validate --ci`: 0 Blocker, 0 Hinweise;
    die fokussierte Registry-Suite bestand mit 112 Tests. Eine weitergehende
@@ -429,13 +532,20 @@ Benchmarkpfads.
 4. [x] Pro Pipeline einen SampleSize-1-Lauf ausführen.
 5. [x] Einen sequenziellen Mehrmodelllauf mit Modellauswahl, Seed, Sampling,
    Kontext, Version, GGUF-Pfad und Logs archivieren.
-6. [ ] Einen systematischen LM-Studio-/llama.cpp-Kompatibilitätsvergleich mit
-   identischem Modell, Template, Sampling und Request durchführen und
-   Unterschiede bei Stop, Reasoning, Structured Output und Tokenisierung
-   getrennt ausweisen.
-7. [ ] Die Warnungen und Fehler getrennt nach Launcher, Pipeline,
-   llama.cpp-Server, Modellarchitektur und Chat-Template klassifizieren und
-   eine Entscheidung zu verbleibenden Tokenizerwarnungen dokumentieren.
+6. [~] Variant B ist mit einer Modellvariante je Backend vollständig über die
+   vier Pipelines gelaufen: llama.cpp mit externem MTP und externem DFlash-
+   Drafter, LM Studio mit Qwen3.5 Q6_K. Identischer Modell-/Template-A/B-Lauf
+   und SampleSize-1-Bewertung sind dokumentiert. Der DS1000-Follow-up zeigt
+   noch einen backend-spezifischen Qwen-Ausgabefehler unter LM Studio und einen
+   fachlichen Generierungsfehler unter llama.cpp; dessen Ursache ist offen.
+7. [x] Die aktuellen Warnungen sind nach Launcher, Pipeline, llama.cpp-
+   Server, Modellarchitektur und Chat-Template klassifiziert. CLI-Argumente
+   sind verbindlich; effektives UKV wird über `--kv-unified` protokolliert;
+   parallele GPU-Nutzung ist kein zulässiges Setup. Die verbleibenden
+   Modellwarnungen (`special_eot_id`) sind für Muse-Glimmer reproduziert und
+   ohne `special_eom_id`-Meldung dokumentiert. GLM Structured Output wurde
+   separat unter LM Studio und llama.cpp live geprüft; der lokale llama.cpp-
+   Schema-Pfad bleibt für den getesteten GGUF-Lauf fachlich nicht bestanden.
 8. [ ] Erst nach bestandener technischer und fachlicher Verifikation den
    direkten SampleSize-5- beziehungsweise vollständigen Modelllauf starten.
 
@@ -453,9 +563,8 @@ Benchmarkpfads.
 - Alle vier Benchmark-Pipelines bestehen den SampleSize-1-Smoke.
 
 Die technischen Kriterien sind damit weitgehend erfüllt. Die fachliche
-Abnahme bleibt offen, solange der LM-Studio-Vergleich, der GLM-Streamingtest,
-die Warnungsanalyse, die Worker-/Manifest-Vergleiche und eine mehrmodellige
-Qualitätsauswertung fehlen.
+Abnahme bleibt offen, solange der identische Modell-/Template-A/B-Vergleich,
+der GLM-Streamingtest und eine mehrmodellige Qualitätsauswertung fehlen.
 
 Die derzeit geprüfte llama.cpp-Installation ist:
 
@@ -508,6 +617,56 @@ Wert muss konfigurierbar bleiben.
   die fokussierten Registry-Tests mit 112 Tests; `validate --ci` meldete
   0 Blocker und 0 Hinweise. Gemma APEX ist mit `experts: 36` und `@mini`
   eingetragen. Die LM-Studio-/llama.cpp-Abnahme bleibt davon unabhaengig offen.
+
+##### Verifikationsergebnisse 25.09.2026
+
+- Variant B liegt als lokales Artefakt
+  `ergebnisse/benchmark-comparison-manifest.json` vor: DS1000 (Custom),
+  HumanEval+ (EvalPlus), ARC-Challenge (LM-Eval) und Agentic. Der Runner
+  verweigert unvollständige Pipeline-Abdeckung, abweichenden Seed/SampleSize
+  und geänderte Quell-Hashes.
+- Der direkte llama.cpp-Lifecycle-Smoke wurde mit
+  `unsloth/gemma-4-12b-it@q6_k` plus externem MTP und mit
+  `kookiesxy/muse-glimmer-30b-ternary-quants@iq1_s` plus externem DFlash-
+  Drafter durchgeführt. Die effektiven CLI-Argumente enthielten jeweils den
+  korrekten `--spec-type`, die konkrete Companion-Datei und
+  `draft_n_max/min/p_min`; beide Läufe beendeten alle vier Pipelines.
+- Der LM-Studio-Lauf verwendete `qwen/qwen3.5-9b@q6_k` und beendete ebenfalls
+  alle vier Pipelines mit demselben Manifest. Dabei wurde ein Resolverfehler
+  sichtbar und behoben: Die namespaced LMS-Variante wird jetzt auf
+  `lmstudio-community/qwen/qwen3.5-9b@q6_k` gebunden und nicht auf die
+  separate `byteshape/qwen3.5-9b@q5_k_s`-Datei. Die Custom-Pipeline erzeugte
+  danach nur noch eine Q6_K-Zeile.
+- CLI-Warnungen über `LLAMA_ARG_N_PARALLEL` und
+  `LLAMA_ARG_KV_UNIFIED` sind erwartetes Verhalten: Die expliziten CLI-Werte
+  sind die verbindliche Ebene; der effektive Start wird mit `--parallel` und
+  `--kv-unified` protokolliert. `--webui/--no-webui` wird nicht mehr erzeugt;
+  der Provider verwendet `--no-ui`. Ein WebUI-Update erfolgt durch Austausch
+  der llama.cpp-Binary, nicht über `lms`.
+- Für neue direkte Serverstarts wird `LMS_OpenAI_AUTH_TOKEN` als
+  `LLAMA_API_KEY` an den llama.cpp-Prozess bzw. als Bearer-Header an den
+  LM-Studio-Client weitergegeben; der Wert wird weder Kommandozeile noch Log
+  oder Manifest hinzugefügt. Der nachgerüstete Port-8082-Smoke meldete keine
+  neue `security: no API key`-Warnung. Ältere append-only Logs enthalten die
+  historische Warnung und dürfen nicht als Nachweis für den neuen Start
+  gelesen werden.
+- Die CUDA-Meldung zur Shared-Object-Initialisierung tritt nur beim
+  unzulässigen parallelen LM-Studio-/llama.cpp-Betrieb auf. Sequentialisierung
+  mit `LLAMA_CPP_PARALLEL=1` und `--unload-between` ist daher Teil des
+  freigegebenen Testsetups; die Gemma-/Muse-Läufe liefern dafür fehlerfreie
+  Sequenzbelege.
+- Muse-Glimmer reproduziert in Haupt- und DFlash-GGUF die Meldung
+  `special_eot_id is not in special_eog_ids`; eine `special_eom_id`-Meldung
+  wurde nicht beobachtet. Der frühere PEG-/Lazy-Grammar-Fehler ist im
+  append-only Log reproduziert. Nach der Korrektur (`reasoning-format none`
+  und deaktivierter strikter JSON-Grammatik für Muse) lief der vollständige
+  Variant-B-Smoke ohne PEG-500er. Der GLM-spezifische LM-Studio-/Lazy-Grammar-
+  Fall ist noch nicht als eigener Livefall abgenommen.
+- Ein eigenständiger `lms ps --json`-Aufruf beendet sich mit Exit 0 und
+  leerer Prozessliste. `cli-pref.json` enthält ausschließlich
+  `lastLoadedModels`, UI-Warnflags und `fetchModelCatalog`; Runtime-, Sampling-,
+  UKV- oder Pfadbindungen gehen dort nicht verloren. Ein erneuter
+  cli-pref-EPERM konnte in diesem Lauf nicht reproduziert werden.
 
 ##### Ausgeschlossene WindowsApps-Installation
 
@@ -643,9 +802,11 @@ gezielt erneut validiert werden.
      Alle vier Pipelines beendeten den Lauf; DS1000 und HumanEval+ erzielten
      im Einzelfall 0 %, ARC-Challenge 0 und Agentic 0. Der Lauf ist damit ein
      Lifecycle-/API-Smoke, kein Qualitätsbaseline.
-   - [ ] Einen LM-Studio/llama.cpp-Vergleich nur als Backend-Kompatibilitäts-
-     test durchführen; Unterschiede bei Template, Stop-Parsing, Reasoning,
-     Structured Output, Tokenisierung und Serverversion separat ausweisen.
+   - [x] Einen LM-Studio/llama.cpp-Vergleich nur als Backend-Kompatibilitäts-
+     test durchführen; der sequenzielle technische Probe-Lauf und der
+     identische Modell-/Template-Livevergleich mit gleichen Requests sind
+     dokumentiert. Variant B deckt je eine Pipeline ab und lief auf beiden
+     Backends mit demselben Manifest.
    - [~] Für GLM-4.7 einen nicht gestreamten A/B-Test mit `--reasoning-format auto`,
      `deepseek`, `deepseek-legacy` und `none` durchführen und jeweils
      finales JSON bzw. Code sowie Reasoning-Metadaten prüfen; dieser Teil ist
@@ -653,17 +814,27 @@ gezielt erneut validiert werden.
    - [x] Danach den technischen Mehrmodelllauf sequenziell über `llama-server.exe`
      ausführen. Für jedes Modell werden Startargumente, Serverversion, GGUF-
      Pfad, Registry-Schlüssel, stdout, stderr und Serverlog archiviert.
-   - [ ] Fehler und Warnungen getrennt nach Launcher, Pipeline, llama.cpp-
-     Server, Modellarchitektur und Chat-Template analysieren; dabei die
-     `special_eot_id`-/`special_eom_id`-Warnungen fachlich einordnen.
+   - [x] Fehler und Warnungen sind getrennt nach Launcher, Pipeline, llama.cpp-
+     Server, Modellarchitektur und Chat-Template klassifiziert; CLI-Argumente
+     sind die verbindliche Ebene, UKV wird als effektives CLI-Flag protokolliert,
+     LM Studio wird mit `LMS_OpenAI_AUTH_TOKEN` authentifiziert, und parallele
+     LM-Studio/llama.cpp-GPU-Nutzung ist kein zulässiges Testsetup. Muse-Glimmer
+     reproduziert `special_eot_id` in Haupt- und DFlash-GGUF, aber keine
+     `special_eom_id`-Meldung. Der frühere PEG-/Lazy-Grammar-Fehler ist im
+     append-only Log reproduziert und nach `reasoning-format none` sowie
+     deaktivierter strikter JSON-Grammatik im vollständigen Smoke behoben.
+     GLM JSON-Structured-Output und Streaming sind als separate Livefälle
+     unter LM Studio sowie llama.cpp geprüft; das Ergebnis und die Grenzen des
+     strikten llama.cpp-Schema-Pfads sind dokumentiert.
 
 6. **Abnahme und laufende Pflege**
 
    - [x] Provider-, Registry- und Runner-Tests mit einer Fake-`llama-server`
      bzw. HTTP-Testdoppelung ohne echte VRAM-Last ausführen.
    - [x] Einen echten lokalen Server-Smoke mit der installierten Binary und
-     einem lokalen GGUF durchführen. Der vollständige Einmodell-Pipeline-Smoke
-     und der technische sequenzielle Mehrmodelllauf sind abgeschlossen.
+     einem lokalen GGUF durchführen. Der vollständige Einmodell-Pipeline-Smoke,
+     der externe MTP-/Drafter-Smoke und der technische sequenzielle Mehrmodell-
+     lauf sind abgeschlossen.
    - [ ] Nach jedem llama.cpp-Update `--version`, `--help`, `llama-bench`,
      einen Modell-Smoke und die Registry-/Template-Tests wiederholen.
    - [x] Die Zielarchitektur in `doc-git/Architecture, Flow & ChangeLog_en.md`
@@ -688,21 +859,103 @@ gezielt erneut validiert werden.
 
 ### Benchmark- und Qualitaetsverifikation
 
-- [ ] Task-Manifeste fuer die tatsaechlich verwendeten Code-Benchmark-Datensaetze erzeugen und auffaellige Aufgaben vor dem naechsten Referenzlauf bewerten.
-- [ ] SampleSize-1-Smoke der Workerpfade ausfuehren; der bereits erfolgreiche
+- [x] Task-Manifeste fuer die tatsaechlich verwendeten Code-Benchmark-Datensaetze erzeugen und auffaellige Aufgaben vor dem naechsten Referenzlauf bewerten. Das Manifest `ergebnisse\\task_manifest.json` enthaelt DS1000 (887 Aufgaben) und CoderEval (12 Aufgaben), beide mit SHA-256 und ohne Injection-Warnungen.
+- [x] SampleSize-1-Smoke der Workerpfade ausfuehren; der bereits erfolgreiche
   direkte llama.cpp-Pipeline-Smoke ersetzt diese Worker-Abnahme nicht.
-- [ ] Gepaarte Kompatibilitaetslaeufe vor/nach der Import-Blockaden-Entfernung mit identischem Manifest ausfuehren.
-- [ ] Manifest- und Worker-Funktionen mit Ruff, Python-3.12-Syntaxcheck und fokussierten Pytest-Tests verifizieren.
+- [x] Variant-B-Manifestvertrag implementieren: `src/comparison_manifest.py`
+  und `src/prepare_comparison_manifest.py` erfassen DS1000, HumanEval+,
+  ARC-Challenge und Agentic mit Auswahl-IDs/Task-Limit, Seed, Quellenhashes
+  und Paketversionen. `run_benchmarks.py --comparison-manifest` erzwingt die
+  Abdeckung aller vier Pipelines.
+- [x] Variant-B mit dem externen Gemma-MTP-Bundle und dem externen
+  Muse-DFlash-Bundle sequentiell live ausführen; Companion-Pfad, Spec-Type,
+  Draft-Limits, Reasoning-/Structured-Output-Modus und effektive CLI-Werte
+  archivieren.
+- [x] Einen sequenziellen LM-Studio/llama.cpp-Kompatibilitaetsvergleich mit
+  identischem Modell, System-/Userprompt, Sampling, Seed, Kontext und Request
+  ausfuehren. Der Qwen-Lauf ist in
+  `doc-git\\Developer-Docs\\Backend-Compatibility-and-SampleSize-1-Verification_2026-09-25.md`
+  dokumentiert.
+- [x] GLM-4.7 unter LM Studio mit JSON-Schema-Structured-Output sowie im
+  OpenAI-kompatiblen und nativen REST-Streamingpfad pruefen; der GLM-
+  Streamingvergleich mit llama.cpp ist ebenfalls dokumentiert.
+- [x] Manifest- und Worker-Funktionen mit Ruff, Python-3.12-Syntaxcheck und fokussierten Pytest-Tests verifizieren (42 Tests bestanden).
+- [~] Die fachliche Bedeutung der SampleSize-1-Scores bewerten und technische
+  Smoke-Scores von Qualitaetswerten trennen. Die Bewertung verwirft DS1000-
+  Nullen mit Harness-/Extraktionsfehlern als Qualitaetsbaseline; der neue
+  gleiche-Sample-Qwen-Vergleich zeigt zusaetzlich backendabhaengige
+  Reasoning-/Generierungsausgaenge, die noch fachlich geklaert werden muessen.
+- [~] DS1000-Qwen-Folgepruefung: LM Studio endete trotz `thinking=False` und
+  `max_tokens=8192` reasoning-only; llama.cpp lieferte finalen, aber am
+  Harness scheiternden Code. Reasoning Budget Message und LMS-Templatepfad
+  kontrolliert isolieren, bevor die Nullwertung als Modellqualitaet gilt.
 - [ ] Die fachliche Qualitaet ueber mehrere geeignete Modelle und die
   Kategorien Coding, Math und Agentic mit festgelegten Sampling- und
-  Reasoningprofilen auswerten; technische Smoke-Scores nicht als
-  Qualitaetsbaseline verwenden.
+  Reasoningprofilen auswerten; dafuer ist ein groesseres Sample erforderlich.
 - [ ] Den strengen mypy-Bestand systematisch bereinigen. Die zuletzt bekannte
   Groesse lag bei 105 Meldungen; vor dem Abbau den aktuellen Scope neu
   erfassen und die Fehler in fokussierten Gruppen beheben.
 - [ ] Nach Abschluss die Ergebnisse, die Entscheidung zur Score-Neutralitaet
   und die Abgrenzung zum pausierten SampleSize-5-Lauf in `ergebnisse/`
   dokumentieren.
+
+#### Verifikationsstand 2026-09-25
+
+- Manifest-Lauf: `py -3.12 src\\prepare_task_manifests.py --input DS1000=simple_evals\\data_science.jsonl --input CoderEval=simple_evals\\codereval_selfcontained.jsonl --output ergebnisse\\task_manifest.json`; 887 bzw. 12 Aufgaben, 0 Warnungen.
+- Worker-SampleSize-1: direkter llama.cpp-Server auf Port 8081, Modell `lmstudio-community/qwen/qwen3.5-9b@q6_k`, Seed 42; DS1000, CoderEval, HumanEval+ und MBPP+ liefen durch. Die vier Ergebnisse sind technische Lifecycle-/Worker-Smokes und keine Qualitaetsbaseline.
+- Backend-Probe: gleicher Qwen3.5-Q6_K-GGUF, Prompt, Sampling, Seed und 32K-Kontext in LM Studio und llama.cpp; beide lieferten `COMPAT_OK`, Reasoning-Tokenisierung und Laufzeit unterschieden sich. Die GPU wurde sequenziell verwendet.
+- Identischer A/B-Lauf erweitert: expliziter Systemprompt, `max_tokens=1024`,
+  Non-Streaming und OpenAI-SSE lieferten unter beiden Backends `COMPAT_OK` mit
+  `finish_reason=stop`. Ein Vorlauf mit 256 Tokens zeigte, dass Qwen das
+  Budget vollstaendig fuer Reasoning verbrauchen kann.
+- GLM-Livefall: LM Studio lieferte unter `response_format=json_schema` ein
+  parsebares und schema-konformes JSON ohne Lazy-Grammar-Fehler. Der native
+  LM-Studio-Stream lief von `chat.start` bis `chat.end`; der OpenAI-SSE-
+  Vergleich mit llama.cpp lieferte in beiden Modi `GLM_STREAM_OK`.
+- Fachliche Score-Bewertung: Qwen 3/4, Gemma-MTP 2/4 und Muse-DFlash 0/4
+  sind bei `sample_size=1` nur technische Einzelbeobachtungen. Die DS1000-
+  Nullen enthalten Harness-/Extraktionsfehler und werden nicht als
+  Modellqualitaet interpretiert.
+- DS1000-Follow-up mit Qwen3.5 Q6_K, Seed 42 und `max_tokens=8192`: LM Studio
+  erreichte im Stream das Ausgabelimit ohne finalen Content und lieferte auch
+  im vor der Retry-Korrektur ausgefuehrten Non-Streaming-Retry nur Reasoning
+  (Score 0, 163.1 s). llama.cpp lieferte finalen Code ohne Reasoning (Score 0),
+  der am Harness mit Matrixform 5x5 statt 3x5 scheiterte (1.21 s). Die lokale
+  LMS-JSON enthaelt einen Coding-Systemprompt, aber weder `reasoning_effort`
+  noch `preserve-thinking`/`reasoning-budget-message`; das GUI-Feld kann daher
+  ausserhalb dieser JSON liegen. Die Ursache ist nicht abschliessend isoliert.
+- DS1000-Requestpfad: ein identischer Non-Streaming-Retry wird nun
+  uebersprungen, wenn der Stream bereits abgeschnitten ist oder das
+  Ausgabelimit erreicht hat; nicht abgeschnittene leere Streams behalten den
+  einmaligen Fallback. Fokustest deckt beide Faelle ab.
+- SampleSize 5 bleibt pausiert, bis die technische Evidenz und die offene Warnungs-/Kompatibilitaetsbewertung fachlich abgenommen sind.
+
+#### Verifikationsstand 2026-09-26
+
+- `registry_tool.py sync --import-lms-settings` hat fuer
+  `unsloth/lfm2.5-8b-a1b@mxfp4` und `liquidai/lfm2.5-8b-a1b@q6_k` jeweils
+  `experts: 16` sowie DSpark mit demselben externen Helper uebernommen. Die
+  explizite LMS-Auswahl `draftDsparkSidecar` ist massgeblich; die GGUF-
+  Architekturmetadaten des Helpers bestimmen nicht die Laufzeitmethode.
+- Beide Varianten liefen sequenziell mit llama.cpp, SampleSize 1, Seed 42,
+  Parallelitaet 1 und temporaerem Kontext 16K durch Custom/DS1000, EvalPlus/
+  HumanEval+, LM-Eval/ARC-Challenge und Agentic. Die effektiven Serverlogs
+  bestaetigen `draft-dspark`, den gemeinsamen Sidecar-Pfad sowie
+  `n_max=3`, `n_min=0`, `p_min=0`; der Preset-Export setzt fuer beide
+  `lfm2moe.expert_used_count=int:16`.
+- Die Einzel-Scores beider Varianten waren DS1000 0, HumanEval+ 0,
+  ARC-Challenge 0 und Agentic 1. Diese vier Einzelaufgaben sind ausschliesslich
+  technische Smoke-Belege und keine Qualitaetsbewertung.
+- Die LM-Studio-Livepruefung bleibt offen. `lms ps` meldete keinen aktiven
+  Modellprozess; `lms load --help` bietet Draft-Simple und MTP, aber keinen
+  DSpark-Load-Schalter. Der API-/GUI-Lauf muss daher mit einem in der GUI
+  geladenen DSpark-Modell fortgesetzt werden.
+- Beim IdentityLink-Testlauf wurde ausserdem die Dateievidenz vereinigt:
+  ein widerspruechlicher LMS-Dateipfad verhindert weiterhin den Config-/Runtime-
+  Join, loescht aber nicht mehr eine unabhaengig eindeutige Registry-GGUF- oder
+  konkrete LMS-Pfadevidenz. Verifikation: Registry- und Speculative-Suite
+  177 Tests bestanden, Ruff sauber, `validate --ci` mit 0 Blockern und
+  0 Hinweisen.
 
 ### Abgeschlossener Plan: konfigurierbarer GGUF-Modellroot
 

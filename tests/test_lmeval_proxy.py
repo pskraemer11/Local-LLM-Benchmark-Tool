@@ -27,13 +27,20 @@ class _UpstreamHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         length = int(self.headers.get("Content-Length", "0"))
-        self.rfile.read(length)
-        body = json.dumps({
-            "id": "chatcmpl-test",
-            "choices": [{"message": {"content": "proxy-ok"}}],
-        }).encode()
+        request_body = json.loads(self.rfile.read(length))
+        auth_forwarded = self.headers.get("Authorization") == "Bearer proxy-test-token"
+        if request_body.get("stream"):
+            body = f"data: {json.dumps({'auth_forwarded': auth_forwarded})}\n\n".encode()
+            content_type = "text/event-stream"
+        else:
+            body = json.dumps({
+                "id": "chatcmpl-test",
+                "auth_forwarded": auth_forwarded,
+                "choices": [{"message": {"content": "proxy-ok"}}],
+            }).encode()
+            content_type = "application/json"
         self.send_response(200)
-        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -83,6 +90,34 @@ def test_proxy_forwards_allowed_routes_and_rejects_arbitrary_post() -> None:
         with pytest.raises(HTTPError) as exc_info:
             urlopen(forbidden)
         assert exc_info.value.code == 404
+    finally:
+        proxy_server.shutdown()
+        proxy_server.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+        proxy_thread.join(timeout=2)
+        upstream_thread.join(timeout=2)
+
+
+def test_proxy_forwards_authorization_for_streaming_and_non_streaming() -> None:
+    upstream = HTTPServer(("127.0.0.1", 0), _UpstreamHandler)
+    proxy_server = proxy.BoundedThreadingHTTPServer(("127.0.0.1", 0), proxy.ProxyHandler)
+    proxy.ProxyHandler.upstream = f"http://127.0.0.1:{upstream.server_port}"
+    upstream_thread = _serve(upstream)
+    proxy_thread = _serve(proxy_server)
+    try:
+        for stream in (False, True):
+            request = Request(
+                f"http://127.0.0.1:{proxy_server.server_port}/v1/chat/completions",
+                data=json.dumps({"model": "smoke-model", "messages": [], "stream": stream}).encode(),
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": "Bearer proxy-test-token",
+                },
+                method="POST",
+            )
+            response = urlopen(request).read()
+            assert b'"auth_forwarded": true' in response or b'"auth_forwarded":true' in response
     finally:
         proxy_server.shutdown()
         proxy_server.server_close()

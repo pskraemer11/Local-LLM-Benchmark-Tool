@@ -140,6 +140,18 @@ For the complete maintenance and validation workflow:
 py -3.12 .\src\registry_tool.py full
 ~~~
 
+The normal `full` command previews assembled system prompts. After reviewing
+the preview, write them only through the shared physical-GGUF/JSON identity
+join with:
+
+~~~powershell
+py -3.12 .\src\registry_tool.py full --write-prompts
+~~~
+
+This explicit write mode updates only uniquely matched LM Studio configs. It
+does not choose the first fuzzy match when publisher, model namespace, or
+quantization evidence is ambiguous.
+
 After explicitly importing tested LM Studio settings, update the local
 llama.cpp router preset while preserving its global defaults and manual
 sections:
@@ -274,6 +286,12 @@ built-in defaults
 
 The exact preset precedence is handled by llama.cpp: named model options
 override `[*]`, and explicit outer CLI options have the highest priority.
+The final explicit CLI is the binding ownership layer: the direct provider
+logs the effective `--parallel`, `--kv-unified`/`--no-kv-unified`, context,
+reasoning, and speculative-decoding values before starting the server. The
+current provider emits `--no-ui`; `--no-webui` is only a deprecated alias.
+OpenAI-compatible LM Studio requests use `LMS_OpenAI_AUTH_TOKEN` as a Bearer
+token when configured.
 Sampling, structured output, seed, stop conditions, and reasoning format are
 request or model-policy decisions; they must not be inferred from a generic
 hardware `config.ini` default.
@@ -456,8 +474,9 @@ preview-only, and the separate GLM config patch is not run.
 `pipeline full` spelling; both accept the same options. The quarantine report
 and prompt assembly are previews. To apply those actions explicitly, run
 `py -3.12 .\src\registry_tool.py quarantine-missing --apply` after reviewing
-the proposed removals, or run `py -3.12 .\src\assemble_blueprint.py assemble`
-to write assembled system prompts. LM Studio settings remain report-only
+the proposed removals, or run `py -3.12 .\src\registry_tool.py full
+--write-prompts` to write assembled system prompts through the exact
+Registry/GGUF/JSON IdentityLink table. LM Studio settings remain report-only
 unless imported with `py -3.12 .\src\registry_tool.py sync --import-lms-settings`
 (or `full --import-lms-settings`).
 
@@ -598,6 +617,22 @@ runtime artifacts.
 | Benchmark datasets     | simple_evals\, lm-eval, EvalPlus, tool-eval-bench              | Tasks and scenarios                                  |
 | Run specifications     | local run*.yaml files                                          | Reproducible run selections                          |
 | Results                | ergebnisse\                                                    | Per-task CSVs, summaries, logs, and reports          |
+
+`doc-git/model_registry.yaml` is a machine-local generated file and is always
+ignored by Git; it is not downloaded from the repository. On a fresh setup,
+run `py -3.12 .\src\registry_tool.py full` to create/populate it from the
+available GGUF inventory (and LM Studio inventory/configs when installed).
+The preferred GGUF root is `LLAMA_ARG_MODELS_DIR`. A setup without LM Studio
+can still bootstrap model identities and local GGUF bindings; runtime values
+normally imported from LM Studio JSON must then be supplied locally by the
+user. A Registry entry may retain absolute `local.model_path` and
+`local.config_path` values because the complete Registry stays on that machine.
+
+The sync stores a JSON config path only after proving its association with the
+exact GGUF. File-specific `*.gguf.json` pairing is the default. A shared,
+quantization-independent model config requires explicit
+`local.config_scope: model` and may belong to only one Registry entry; stale or
+ambiguous pairs fail closed.
 
 The canonical model identity is:
 

@@ -18,7 +18,7 @@ from urllib.parse import urlsplit
 
 from benchmark_config import is_blacklisted_model_name
 from local_model_resolver import LocalModelResolver, ModelResolutionError
-from utils.terminal import warn
+from utils.terminal import info, warn
 
 from .base import HttpProvider, ProviderCapabilities
 from .llama_cpp_args import build_server_command
@@ -39,7 +39,13 @@ class _ServerController:
     def is_running(self) -> bool:
         return self.process is not None and self.process.poll() is None
 
-    def start(self, command: list[str], log_path: Path, timeout: int) -> bool:
+    def start(
+        self,
+        command: list[str],
+        log_path: Path,
+        timeout: int,
+        environment: Mapping[str, str] | None = None,
+    ) -> bool:
         if self.is_running():
             return False
         log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -50,6 +56,7 @@ class _ServerController:
                 stdin=subprocess.DEVNULL,
                 stdout=log_file,
                 stderr=subprocess.STDOUT,
+                env=dict(environment) if environment is not None else None,
                 creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
             )
         except (OSError, subprocess.SubprocessError):
@@ -119,7 +126,9 @@ class LlamaCppProvider(HttpProvider):
         process_factory: ProcessFactory | None = None,
         controller: _ServerController | None = None,
     ) -> None:
-        super().__init__(base_url)
+        auth_token = os.environ.get("LMS_OpenAI_AUTH_TOKEN") or os.environ.get("LMS_OPENAI_AUTH_TOKEN")
+        headers = {"Authorization": f"Bearer {auth_token}"} if auth_token else None
+        super().__init__(base_url, headers=headers)
         self._resolver = LocalModelResolver(model_root, registry_loader=registry_loader)
         self._executable = Path(executable or os.environ.get("LLAMA_CPP_SERVER_EXE") or _DEFAULT_EXECUTABLE)
         self._runtime_loader = runtime_loader
@@ -234,7 +243,15 @@ class LlamaCppProvider(HttpProvider):
             warn(f"llama-server.exe nicht gefunden: {self._executable}")
             return False, None
         log_path = self._log_path(candidate.model_identifier)
-        if not self._controller.start(self._command(candidate.model_identifier, candidate.path), log_path, self._start_timeout):
+        command = self._command(candidate.model_identifier, candidate.path)
+        process_environment = os.environ.copy()
+        if auth_token := (os.environ.get("LMS_OpenAI_AUTH_TOKEN") or os.environ.get("LMS_OPENAI_AUTH_TOKEN")):
+            # llama-server supports LLAMA_API_KEY as an environment-backed
+            # equivalent of --api-key.  Keep the secret out of the command
+            # manifest and startup log while securing the local endpoint.
+            process_environment["LLAMA_API_KEY"] = auth_token
+        info(f"Effective llama.cpp CLI: {subprocess.list2cmdline(command)}")
+        if not self._controller.start(command, log_path, self._start_timeout, process_environment):
             warn(f"llama-server konnte nicht gestartet werden. Log: {log_path}")
             return False, None
         self._controller.model_identifier = candidate.model_identifier

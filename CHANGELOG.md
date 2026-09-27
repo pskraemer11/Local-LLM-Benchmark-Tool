@@ -6,6 +6,36 @@ Hinweise:
 - Stand: 06.08.2026 — umgezogen aus §20 der `doc-git/Architecture, Flow & ChangeLog_en.md` (dort nur noch Verweis).
 - Commit-Hashes beziehen sich auf `main`.
 
+## Registry lokalisiert, Manifest- und Bundle-Zuordnung abgesichert (27.09.2026)
+
+| Date   | Area                           | Change                                                                                                                                                                                                 |
+| ------ | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 27.09. | Registry / `.gitignore`        | **DATA:** Lokale Registry aus dem Index entfernt und dauerhaft ignoriert; historische GitHub-Refs geprueft, keine getrackten Versionen mit absoluten User-Pfaden gefunden.                             |
+| 27.09. | Manifest / Runtime bundles     | **FIX/TEST:** Variant-B-v2 bindet `selected_ids`, Quell-Hashes und reale Pipeline-Ausgaben; gemeinsame GGUF/JSON- und Companion-Pruefung gilt bei Sync, Validierung, Export und llama.cpp-Start.       |
+| 27.09. | PLANUNG / Architektur / README | **DOC:** Registry-Lifecycle, `config_scope: model`, fail-closed Companion-Regeln und Manifest-Abnahme dokumentiert; SampleSize-1-Smoke bestanden. Siehe Compaction 27.09.2026.                         |
+| 27.09. | LFM2.5-8B DSpark / Variant B   | **VERIFY:** Vier SampleSize-1-Pipelines mit manifestierten Aufgaben-IDs durchlaufen; technischer Smoke ohne Aussagekraft als Score-Qualitaetsbaseline.                                                 |
+
+## LFM2.5-8B DSpark-Abgleich und Smoke-Tests (26.09.2026)
+
+| Date   | Area                      | Change                                                                                                                                                                                                |
+| ------ | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 26.09. | Registry / lokales Preset | **SYNC:** Beide LFM2.5-8B-A1B-Varianten haben 16 Experten, denselben DSpark-Sidecar und `draft-dspark`. Die explizite LM-Studio-Auswahl bestimmt die Methode; die GGUF-Architektur des Helpers nicht. |
+| 26.09. | llama.cpp                 | **VERIFY:** Beide Varianten absolvierten SampleSize 1 durch alle vier Pipelines; Logs bestaetigen Helper-Pfad, `draft-dspark` und Draft-Limits. Smoke-Scores sind keine Qualitaetsbaseline.           |
+| 26.09. | Registry-Sync / Tests     | **FIX/TEST:** GGUF-Dateievidenz bleibt bei widerspruechlichem LMS-Pfad erhalten, waehrend der Runtime-Config-Join fail-closed bleibt. Fokussierte Registry-/Speculative-Suite: 177 Tests bestanden.   |
+| 26.09. | LM-Studio-Smoke           | **OPEN:** Der CLI-Loadpfad hat keinen DSpark-Schalter; aktuell ist kein Modell geladen. Der API-Smoke wartet auf ein GUI-geladenes DSpark-Modell.                                                     |
+| 26.09. | Review / Compaction       | **CHECKPOINT:** Vollgate: 1.162 Tests, Registry, Ruff und GGUF-Check bestanden. Commit/Push angehalten, bis die offenen Identitaets-/Manifestbefunde und die Veroeffentlichung lokaler absoluter Registry-Pfade geklaert sind; siehe Compaction 26.09.2026 / 15:42. |
+
+## Backend-Abnahme und DS1000-Ausgabeanalyse erweitert (25.09.2026)
+
+| Date | Change |
+| ---- | ------ |
+| 25.09. | `src/benchmark_config.py`, `tests/test_benchmark_config.py` | **RUNTIME:** Thinking-Modelle erhalten standardmaessig `max_tokens=8192`; ein expliziter modellbezogener Registrywert bleibt vorrangig. |
+| 25.09. | `src/custom_benchmark.py`, `tests/test_custom_benchmark_io.py` | **FIX/DIAGNOSTICS:** DS1000-Coding-Prompts fuer Thinking-Modelle praezisieren die erwarteten Ausgabevariablen; reasoning-only und prompt-echo Ergebnisse werden getrennt ausgewiesen. Ein nicht abgeschnittener leerer Stream darf einmal non-streaming wiederholt werden; bei erreichtem Ausgabelimit wird der identische teure Retry uebersprungen und die Trunkierung erhalten. |
+| 25.09. | `src/quantization.py`, `src/registry_tool.py`, `src/inventory.py`, `doc-git/model_registry.yaml` | **SYNC:** Q6_K_L bleibt als eigene Quantisierung unterscheidbar. Exakt belegte Qwen-/GLM-Configs wurden mit Inventory-Pfaden verknuepft; `registry_tool.py validate --ci` endet mit 0 Blockern und 0 Hinweisen. |
+| 25.09. | `src/speculative.py`, `src/benchmark_config.py`, `src/registry_tool.py`, Tests, Architektur-Doku | **SYNC/CLASSIFICATION:** Drafter (`draft-simple`), DFlash/DFlash2 (`draft-dflash`), DSpark (`draft-dspark`) und integriertes/separates MTP werden algorithmus- und artefaktbasiert getrennt. DFlash/DSpark werden per GGUF-Architektur `dflash` als Sidecars erkannt; Größenwerte klassifizieren keine Rollen. Verwaiste konkrete Config-Pfade dürfen nur durch einen eindeutigen Modell-/Quant-/GGUF-/Config-Join ersetzt werden. |
+| 25.09. | `src/registry_tool.py`, `tests/test_registry_tool.py`, `doc-git/Architecture, Flow & ChangeLog_en.md` | **PRESET/SPECULATION:** Der llama.cpp-Preset-Export übernimmt nun aufgelöste per-Modell-Optionen für integriertes/separates MTP sowie Drafter/DFlash/DSpark (`spec-type`, optionale Helper-Datei und Draft-Grenzwerte). Embedding-Modelle sind unabhängig lauffähige Hauptmodelle, aber mangels Embedding-Pipeline keine Chat-Benchmark-Ziele. |
+| 25.09. | `doc-git/Developer-Docs/Backend-Compatibility-and-SampleSize-1-Verification_2026-09-25.md`, `PLANUNG.md` | **VERIFY:** GLM-4.7 Structured Output und Streaming, SampleSize-1-Bewertung und Qwen3.5-Diagnose sind dokumentiert. Der direkte llama.cpp-GLM-Test bestand mit JSON-Object-Output, waehrend der strenge Schema-Pfad fuer den getesteten lokalen Lauf kein schema-konformes Ergebnis lieferte. Der gleiche DS1000-Qwen-Sample erzeugte unter LM Studio nur Reasoning, unter llama.cpp finalen, aber fachlich falschen Code; SampleSize 5 bleibt deshalb pausiert. |
+
 ## Architektur-Datenvertrag und deterministischer Abgleich dokumentiert (24.09.2026)
 
 | Date | Change |

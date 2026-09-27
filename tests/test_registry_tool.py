@@ -26,12 +26,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 import assemble_blueprint as ab
 import registry_tool as rt
 from registry_tool import (
-    _classify_arch,
-    _max_ctx_from_vram,
     _KV_BYTES,
+    _LEGACY_MODEL_GB_THRESHOLD_GB,
     _USABLE_VRAM_GB,
     _USE_UNIFIED_KV_CACHE_THRESHOLD_GB,
-    _LEGACY_MODEL_GB_THRESHOLD_GB,
+    _classify_arch,
+    _max_ctx_from_vram,
 )
 
 
@@ -53,7 +53,7 @@ def test_help_describes_registry_tool_surface() -> None:
     assert "model_registry.yaml" in help_text
     assert "Tested runtime evidence; import is opt-in" in help_text
     assert "only missing" in help_text
-    assert "assemble_blueprint.py assemble" in help_text
+    assert "full --write-prompts" in help_text
     assert "sync --refresh-sampling" in help_text
     assert "may take several minutes" in help_text
     assert "max_context_length" in help_text
@@ -139,7 +139,12 @@ def test_full_public_command_and_pipeline_alias_share_the_same_options(monkeypat
     assert calls == [
         (
             ("full",),
-            {"ignore_drift": True, "refresh_sampling": True, "import_lms_settings": True},
+            {
+                "ignore_drift": True,
+                "refresh_sampling": True,
+                "import_lms_settings": True,
+                "write_prompts": False,
+            },
         )
     ]
 
@@ -265,6 +270,138 @@ def test_build_llama_preset_uses_local_gguf_and_provider_runtime(tmp_path: Path,
     assert "reasoning-format = deepseek" in content
     assert "override-kv = gpt-oss.expert_used_count=int:32" in content
     assert skipped == ["publisher/missing@q4_k_m"]
+
+
+def test_build_llama_preset_exports_speculative_profiles_and_companions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    models_root = tmp_path / "models"
+    paths = {
+        name: models_root / "publisher" / name / f"{name}.gguf"
+        for name in ("integrated-mtp", "separate-mtp", "mtp-sidecar", "dflash-target", "dflash-helper")
+    }
+    for path in paths.values():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"GGUF fixture")
+    monkeypatch.setattr(rt, "MODELS_CACHE", models_root)
+    registry = {
+        "publisher/integrated-mtp@q4_k_m": {
+            "local": {
+                "model_path": str(paths["integrated-mtp"]),
+                "llama_cpp": {
+                    "speculative": {
+                        "type": "mtp",
+                        "mode": "integrated",
+                        "draft_n_max": 3,
+                        "draft_n_min": 0,
+                        "draft_p_min": 0.0,
+                    }
+                },
+            }
+        },
+        "publisher/separate-mtp@q4_k_m": {
+            "local": {
+                "model_path": str(paths["separate-mtp"]),
+                "companions": {"mtp": str(paths["mtp-sidecar"])},
+                "llama_cpp": {
+                    "speculative": {
+                        "type": "mtp",
+                        "mode": "separate",
+                        "companion_role": "mtp",
+                        "draft_n_max": 4,
+                        "draft_n_min": 1,
+                        "draft_p_min": 0.75,
+                    }
+                },
+            }
+        },
+        "publisher/dflash@q4_k_m": {
+            "local": {
+                "model_path": str(paths["dflash-target"]),
+                "companions": {"draft": str(paths["dflash-helper"])},
+                "llama_cpp": {
+                    "speculative": {
+                        "type": "draft",
+                        "method": "dflash",
+                        "companion_role": "draft",
+                        "draft_n_max": 3,
+                        "draft_n_min": 0,
+                        "draft_p_min": 0.5,
+                    }
+                },
+            }
+        },
+    }
+
+    content, skipped = rt.build_llama_preset(registry)
+
+    assert skipped == []
+    integrated = content.split("[publisher/integrated-mtp@q4_k_m]", 1)[1].split("\n\n", 1)[0]
+    assert "spec-type = draft-mtp" in integrated
+    assert "spec-draft-n-max = 3" in integrated
+    assert "spec-draft-model =" not in integrated
+    assert "spec-type = draft-mtp" in content
+    assert f"spec-draft-model = {paths['mtp-sidecar']}" in content
+    assert "spec-draft-n-max = 4" in content
+    assert "spec-draft-n-min = 1" in content
+    assert "spec-draft-p-min = 0.75" in content
+    assert "spec-type = draft-dflash" in content
+    assert f"spec-draft-model = {paths['dflash-helper']}" in content
+
+
+def test_build_llama_preset_skips_incompatible_companion_bundle(tmp_path: Path, monkeypatch) -> None:
+    models_root = tmp_path / "models"
+    main = models_root / "unsloth" / "qwen3.6-27b-GGUF" / "qwen3.6-27b-Q6_K.gguf"
+    helper = models_root / "unsloth" / "qwen3.8-27b-GGUF" / "qwen3.8-27b-dflash2-Q8_0.gguf"
+    for path in (main, helper):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"GGUF fixture")
+    monkeypatch.setattr(rt, "MODELS_CACHE", models_root)
+    registry = {
+        "unsloth/qwen3.6-27b@q6_k": {
+            "local": {
+                "model_path": str(main),
+                "companions": {"draft": str(helper)},
+                "llama_cpp": {
+                    "speculative": {"type": "draft", "method": "dflash", "companion_role": "draft"}
+                },
+            }
+        }
+    }
+
+    content, skipped = rt.build_llama_preset(registry)
+
+    assert "[unsloth/qwen3.6-27b@q6_k]" not in content
+    assert len(skipped) == 1
+    assert "Qwen generation mismatch" in skipped[0]
+
+
+def test_local_bundle_validation_reports_companion_mismatch_and_accepts_fix(tmp_path):
+    main = tmp_path / "models" / "unsloth" / "qwen3.6-27b-GGUF" / "qwen3.6-27b-Q6_K.gguf"
+    wrong = tmp_path / "models" / "unsloth" / "qwen3.8-27b-GGUF" / "qwen3.8-27b-dflash2-Q8_0.gguf"
+    matching = tmp_path / "models" / "unsloth" / "qwen3.6-27b-GGUF" / "qwen3.6-27b-dflash2-Q8_0.gguf"
+    config = tmp_path / "configs" / "unsloth" / "qwen3.6-27b-GGUF" / "qwen3.6-27b-Q6_K.gguf.json"
+    for path in (main, wrong, matching, config):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"GGUF fixture")
+    entry = {
+        "local": {
+            "model_path": str(main),
+            "config_path": str(config),
+            "companions": {"draft": str(wrong)},
+            "llama_cpp": {
+                "speculative": {"type": "draft", "method": "dflash", "companion_role": "draft"}
+            },
+        }
+    }
+    registry = {"unsloth/qwen3.6-27b@q6_k": entry}
+
+    errors = rt._registry_local_bundle_errors(registry)
+    assert errors["config"] == []
+    assert any("Qwen generation mismatch" in message for message in errors["companion"])
+
+    entry["local"]["companions"]["draft"] = str(matching)
+    assert rt._registry_local_bundle_errors(registry) == {"config": [], "companion": []}
 
 
 def test_build_llama_preset_resolves_lm_studio_hub_repository_alias(
@@ -535,6 +672,33 @@ class TestHeadlessValidation:
         assert errors["identity_collision"]
         assert "identity_collision" in rt._blocking_validation_errors(errors)
 
+    def test_deepseek_r1_distill_reasoning_overrides_qwen2_base_architecture(self):
+        registry = {
+            "roleplaiapp/deepseek-r1-distill-qwen-32b@q2_k": {
+                "arch": "dense",
+                "architecture_family": "qwen2",
+                "reasoning": "thinking",
+                "capabilities": ["text"],
+                "blueprint": "reasoning_assistant",
+            },
+            "publisher/qwen2-base@q4_k_m": {
+                "arch": "dense",
+                "architecture_family": "qwen2",
+                "reasoning": "thinking",
+                "capabilities": ["text"],
+                "blueprint": "default_chat",
+            },
+        }
+        with (
+            patch.object(rt, "load_registry", return_value=registry),
+            patch.object(rt, "read_lms_configs", side_effect=AssertionError("CI must be headless")),
+            patch.object(rt, "_gguf_drift_errors", side_effect=AssertionError("CI must skip GGUF scans")),
+        ):
+            errors = rt.cmd_validate(ci=True)
+
+        assert len(errors["reasoning_arch_mismatch"]) == 1
+        assert errors["reasoning_arch_mismatch"][0].startswith("publisher/qwen2-base@q4_k_m:")
+
 
 class TestGuiConfigRegistrySync:
     """GUI tuning can be imported explicitly without weakening Registry SSOT."""
@@ -639,6 +803,92 @@ class TestGuiConfigRegistrySync:
         assert entry["k_cache"] == "q8_0"
         assert entry["v_cache"] == "q8_0"
         save_registry.assert_called_once_with(registry)
+
+    def test_import_mode_reads_loaded_lms_expert_value_when_json_omits_it(self, tmp_path, capsys):
+        registry, registry_path, configs = self._registry_and_configs(tmp_path)
+        entry = registry["publisher/model@q4_k_m"]
+        entry.update({"arch": "moe", "max_experts": 32})
+        with (
+            patch.object(rt, "REGISTRY_PATH", registry_path),
+            patch.object(rt, "load_registry", return_value=registry),
+            patch.object(rt, "read_lms_configs", return_value=configs),
+            patch.object(
+                rt,
+                "_read_lms_loaded_models",
+                return_value={
+                    "models": [
+                        {
+                            "key": "publisher/model",
+                            "publisher": "publisher",
+                            "quantization": {"name": "Q4_K_M"},
+                            "loaded_instances": [
+                                {"id": "loaded-model", "config": {"num_experts": 24}}
+                            ],
+                        }
+                    ]
+                },
+            ),
+            patch.object(rt, "save_registry") as save_registry,
+        ):
+            rt.cmd_sync_from_configs(write=True)
+
+        assert entry["experts"] == 24
+        assert "LM Studio native API loaded instance" in capsys.readouterr().out
+        save_registry.assert_called_once_with(registry)
+
+    def test_live_lms_expert_conflict_is_not_imported(self, tmp_path, capsys):
+        registry, registry_path, configs = self._registry_and_configs(tmp_path)
+        entry = registry["publisher/model@q4_k_m"]
+        entry.update({"arch": "moe", "max_experts": 16})
+        with (
+            patch.object(rt, "REGISTRY_PATH", registry_path),
+            patch.object(rt, "load_registry", return_value=registry),
+            patch.object(rt, "read_lms_configs", return_value=configs),
+            patch.object(
+                rt,
+                "_read_lms_loaded_models",
+                return_value={
+                    "models": [
+                        {
+                            "key": "publisher/model",
+                            "publisher": "publisher",
+                            "quantization": {"name": "Q4_K_M"},
+                            "loaded_instances": [
+                                {"id": "loaded-model", "config": {"num_experts": 24}}
+                            ],
+                        }
+                    ]
+                },
+            ),
+            patch.object(rt, "save_registry") as save_registry,
+        ):
+            rt.cmd_sync_from_configs(write=True)
+
+        assert "experts" not in entry
+        assert "exceeds GGUF-owned max_experts=16" in capsys.readouterr().out
+        save_registry.assert_called_once_with(registry)
+
+    def test_loaded_lms_expert_instances_with_disagreement_are_ambiguous(self):
+        registry = {"publisher/model@q4_k_m": {"arch": "moe"}}
+        values, conflicts = rt._loaded_lms_expert_values(
+            registry,
+            {
+                "models": [
+                    {
+                        "key": "publisher/model",
+                        "publisher": "publisher",
+                        "quantization": {"name": "Q4_K_M"},
+                        "loaded_instances": [
+                            {"config": {"num_experts": 16}},
+                            {"config": {"num_experts": 24}},
+                        ],
+                    }
+                ]
+            },
+        )
+
+        assert values == {}
+        assert conflicts == {"publisher/model@q4_k_m": (16, 24)}
 
     def test_report_mode_detects_kv_quantization_drift(self, tmp_path, capsys):
         registry, registry_path, configs = self._registry_and_configs(tmp_path)
@@ -1546,6 +1796,27 @@ class TestIsSupportFile:
     def test_dflash_support_file_detected(self):
         assert rt._is_support_file("gguf-org/muse-glimmer-30b-gguf/dflash-q4_0.gguf")
 
+    def test_dflash2_architecture_is_support_file_independent_of_filename(self):
+        assert rt._is_support_file(
+            "ProCreations/Ternary-Bonsai-2-27B-DFlash2/Bonsai-2-27B-DFlash2-Q8_0.gguf",
+            architecture="dflash",
+        )
+
+    def test_dspark_architecture_is_support_file_independent_of_filename(self):
+        assert rt._is_support_file(
+            "prism-ml/Ternary-Bonsai-27B-gguf/Ternary-Bonsai-27B-dspark-Q4_1.gguf",
+            architecture="dspark",
+        )
+
+    def test_dflash_and_dspark_names_are_filtered_without_header_metadata(self):
+        assert rt._is_support_file(
+            "Alittlehammmer/Qwen3.6-35B-A3B-DFlash-GGUF-llama.cpp/"
+            "Qwen3.6-35B-A3B-DFlash-Q6_K.gguf"
+        )
+        assert rt._is_support_file(
+            "prism-ml/Ternary-Bonsai-27B-gguf/Ternary-Bonsai-27B-dspark-Q4_1.gguf"
+        )
+
     def test_standalone_mtp_model_not_detected(self):
         # Eigenständige MTP-Modelle sind KEINE Zusatzdateien
         assert not rt._is_support_file("unsloth/Qwen3.6-27B-MTP-GGUF/Qwen3.6-27B-UD-IQ3_XXS.gguf")
@@ -1570,6 +1841,13 @@ class TestIsSupportFile:
         # Normale Modelle (gemma4, qwen3moe, ...) sind keine Zusatzdateien
         assert not rt._is_support_file("unsloth/gemma-4-12B-it-qat-GGUF/model.gguf", architecture="gemma4")
         assert not rt._is_support_file("unsloth/qwen3.6-27b-mtp/model.gguf", architecture="qwen35")
+        # No global size cutoff: compact OCR/embedding models remain main
+        # artifacts unless their type or metadata identifies a sidecar.
+        assert not rt._is_support_file("Keyven/german-ocr-3.1/german-ocr-3.1-Q8_0.gguf")
+        assert not rt._is_support_file(
+            "nomic-ai/nomic-embed-text-v1.5/model-Q4_K_M.gguf",
+            architecture="nomic-bert",
+        )
 
     def test_mmproj_model_record_is_detected_without_path(self):
         # LM Studio may expose only modelKey/displayName for an inventory row.
@@ -1578,6 +1856,18 @@ class TestIsSupportFile:
                 "modelKey": "llmsforall/millie-35b-a3b-mmproj.gguf",
                 "displayName": "Millie 35B A3B Mmproj",
                 "architecture": "clip",
+            }
+        )
+
+    def test_dspark_catalog_record_is_detected_as_support_model(self):
+        assert rt.is_support_model_record(
+            {
+                "modelKey": "ternary-bonsai-27b@q4_1",
+                "path": (
+                    "prism-ml/Ternary-Bonsai-27B-gguf/"
+                    "Ternary-Bonsai-27B-dspark-Q4_1.gguf"
+                ),
+                "architecture": "dspark",
             }
         )
 
@@ -1909,6 +2199,146 @@ def test_config_matches_lms_model_by_namespaced_model_key_not_config_folder_publ
     assert rt._config_matches_lms_model(config, model)
 
 
+def test_config_matching_prefers_concrete_gguf_json_over_logical_model_json(tmp_path):
+    artifact_path = tmp_path / "models" / "lmstudio-community" / "Qwen3.5-9B-GGUF" / "Qwen3.5-9B-Q6_K.gguf"
+    artifact_path.parent.mkdir(parents=True)
+    artifact_path.write_bytes(b"GGUF fixture")
+    logical_config = {
+        "publisher": "qwen",
+        "dir_name": "qwen3.5-9b",
+        "json_path": tmp_path / "configs" / "qwen" / "qwen3.5-9b.json",
+    }
+    concrete_config = {
+        "publisher": "lmstudio-community",
+        "dir_name": "Qwen3.5-9B-GGUF",
+        "json_path": tmp_path / "configs" / "lmstudio-community" / "Qwen3.5-9B-GGUF" / "Qwen3.5-9B-Q6_K.gguf.json",
+    }
+    Path(concrete_config["json_path"]).parent.mkdir(parents=True)
+    Path(concrete_config["json_path"]).write_text("{}", encoding="utf-8")
+
+    assert not rt._config_matches_artifact(logical_config, artifact_path)
+    assert rt._config_matches_artifact(concrete_config, artifact_path)
+
+
+def test_physical_gguf_evidence_suppresses_logical_lms_auto_add(tmp_path):
+    from types import SimpleNamespace
+
+    from model_identity import ArtifactIdentityEvidence
+
+    artifact_path = tmp_path / "lmstudio-community" / "Qwen3.5-9B-GGUF" / "Qwen3.5-9B-Q6_K.gguf"
+    evidence = ArtifactIdentityEvidence.from_reference(
+        artifact_path,
+        "lmstudio-community/Qwen3.5-9B-GGUF",
+        "Q6_K",
+    )
+    candidate = SimpleNamespace(
+        registry_key="lmstudio-community/qwen/qwen3.5-9b@q6_k",
+        identity_evidence=evidence,
+        path=artifact_path,
+    )
+    model = {
+        "modelKey": "qwen/qwen3.5-9b",
+        "publisher": "qwen",
+        "path": "qwen/qwen3.5-9b",
+        "selectedVariant": "qwen/qwen3.5-9b@q6_k",
+        "quantization": {"name": "Q6_K"},
+    }
+
+    assert rt._physical_registry_matches_lms_model(
+        model,
+        [candidate],
+        {"lmstudio-community/qwen/qwen3.5-9b@q6_k"},
+    ) == ("lmstudio-community/qwen/qwen3.5-9b@q6_k",)
+
+
+def test_compare_uses_unique_physical_evidence_for_lms_publisher_alias(tmp_path):
+    from types import SimpleNamespace
+
+    from model_identity import ArtifactIdentityEvidence
+
+    artifact_path = tmp_path / "lmstudio-community" / "Qwen3.5-9B-GGUF" / "Qwen3.5-9B-Q6_K.gguf"
+    registry_key = "lmstudio-community/qwen/qwen3.5-9b@q6_k"
+    model = {
+        "modelKey": "qwen/qwen3.5-9b",
+        "publisher": "qwen",
+        "path": "qwen/qwen3.5-9b",
+        "selectedVariant": "qwen/qwen3.5-9b@q6_k",
+        "quantization": {"name": "Q6_K"},
+    }
+    candidate = SimpleNamespace(
+        registry_key=registry_key,
+        identity_evidence=ArtifactIdentityEvidence.from_reference(
+            artifact_path,
+            "lmstudio-community/Qwen3.5-9B-GGUF",
+            "Q6_K",
+        ),
+        path=artifact_path,
+    )
+    inventory = rt.RegistryInventory(
+        {registry_key: {}},
+        [model],
+        [model],
+        [],
+        [candidate],
+        True,
+    )
+
+    report = rt.cmd_compare(inventory)
+
+    assert report["new"] == 0
+    assert report["missing"] == 0
+
+
+def test_identity_link_does_not_replace_stale_config_with_logical_model_config(tmp_path, monkeypatch):
+    from local_model_resolver import LocalModelResolver
+
+    artifact_path = tmp_path / "lmstudio-community" / "Qwen3.5-9B-GGUF" / "Qwen3.5-9B-Q6_K.gguf"
+    artifact_path.parent.mkdir(parents=True)
+    artifact_path.write_bytes(b"GGUF test placeholder")
+    config_path = tmp_path / "configs" / "qwen" / "qwen3.5-9b.json"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text("{}", encoding="utf-8")
+    stale_config_path = tmp_path / "configs" / "lmstudio-community" / "old-Q6_K.gguf.json"
+    registry_key = "lmstudio-community/qwen/qwen3.5-9b@q6_k"
+    registry = {
+        registry_key: {
+            "local": {
+                "model_path": str(artifact_path),
+                "config_path": str(stale_config_path),
+            }
+        }
+    }
+    model = {
+        "type": "llm",
+        "modelKey": "qwen/qwen3.5-9b",
+        "publisher": "qwen",
+        "path": "qwen/qwen3.5-9b",
+        "selectedVariant": "qwen/qwen3.5-9b@q6_k",
+        "quantization": {"name": "Q6_K"},
+    }
+    config = {
+        "publisher": "qwen",
+        "dir_name": "qwen3.5-9b",
+        "json_path": config_path,
+        "quant": None,
+        "context_length": 262144,
+    }
+    candidates = LocalModelResolver(tmp_path, registry_loader=lambda: registry).candidates()
+    inventory = rt.RegistryInventory(registry, [model], [model], [config], candidates, True)
+    monkeypatch.setattr(rt, "save_registry", lambda _registry: None)
+
+    rt._refresh_identity_links(inventory)
+    link = inventory.identity_links[registry_key]
+    assert link.config_paths == ()
+
+    rt._materialize_local_bindings(inventory)
+
+    assert registry[registry_key]["local"]["config_path"] == str(stale_config_path)
+
+    report = rt.cmd_compare(inventory)
+    assert report["orphan"] == 1
+
+
 def test_identity_link_binds_runtime_config_to_one_gguf_artifact(tmp_path):
     from local_model_resolver import LocalModelResolver
 
@@ -1929,8 +2359,11 @@ def test_identity_link_binds_runtime_config_to_one_gguf_artifact(tmp_path):
         "quantization": {"name": "Q6_K"},
         "path": str(artifact_path),
     }
-    config_path = tmp_path / "configs" / "qwen" / "qwen3.5-9b.json"
+    config_path = (
+        tmp_path / "configs" / "qwen" / "qwen3.5-9b" / "Qwen3.5-9B-Q6_K.gguf.json"
+    )
     config_path.parent.mkdir(parents=True)
+    config_path.write_text("{}", encoding="utf-8")
     config = {
         "publisher": "qwen",
         "dir_name": "qwen3.5-9b",
@@ -1961,6 +2394,238 @@ def test_identity_link_binds_runtime_config_to_one_gguf_artifact(tmp_path):
     assert runtime.v_cache == "q5_1"
 
 
+def test_canonical_lms_identity_recovers_quant_from_path_when_selected_variant_is_unknown():
+    model = {
+        "modelKey": "ternary-bonsai-27b",
+        "publisher": "prism-ml",
+        "selectedVariant": "ternary-bonsai-27b@?",
+        "path": (
+            "prism-ml/Ternary-Bonsai-27B-gguf/"
+            "Ternary-Bonsai-27B-Q2_g64.gguf"
+        ),
+    }
+
+    assert rt._canonical_lms_key(model) == "prism-ml/ternary-bonsai-27b@q2_g64"
+
+
+def test_identity_link_uses_unique_concrete_lms_path_when_package_name_differs(tmp_path):
+    from local_model_resolver import LocalModelResolver
+
+    artifact_path = (
+        tmp_path
+        / "mradermacher"
+        / "Muse-Glimmer-30B-Heretic-Abliterated-BF16-i1-GGUF"
+        / "Muse-Glimmer-30B-Heretic-Abliterated-BF16.i1-IQ3_M.gguf"
+    )
+    artifact_path.parent.mkdir(parents=True)
+    artifact_path.write_bytes(b"GGUF test placeholder")
+    registry_key = "mradermacher/muse-glimmer-30b-heretic-abliterated-i1@iq3_m"
+    registry = {registry_key: {}}
+    model = {
+        "modelKey": "mradermacher/muse-glimmer-30b-heretic-abliterated-i1",
+        "publisher": "mradermacher",
+        "quantization": {"name": "IQ3_M"},
+        "selectedVariant": registry_key,
+        "path": (
+            "mradermacher/Muse-Glimmer-30B-Heretic-Abliterated-BF16-i1-GGUF/"
+            "Muse-Glimmer-30B-Heretic-Abliterated-BF16.i1-IQ3_M.gguf"
+        ),
+    }
+    config_path = (
+        tmp_path
+        / "configs"
+        / "mradermacher"
+        / "Muse-Glimmer-30B-Heretic-Abliterated-BF16-i1-GGUF"
+        / "Muse-Glimmer-30B-Heretic-Abliterated-BF16.i1-IQ3_M.gguf.json"
+    )
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text("{}", encoding="utf-8")
+    config = {
+        "publisher": "mradermacher",
+        "dir_name": "Muse-Glimmer-30B-Heretic-Abliterated-BF16-i1-GGUF",
+        "file_name": config_path.name,
+        "json_path": config_path,
+        "speculative": {"type": "draft", "method": "dflash"},
+    }
+    candidates = LocalModelResolver(tmp_path, registry_loader=lambda: registry).candidates()
+    assert len(candidates) == 1
+    assert candidates[0].registry_key is None
+    inventory = rt.RegistryInventory(registry, [model], [model], [config], candidates, True)
+
+    rt._refresh_identity_links(inventory)
+
+    link = inventory.identity_links[registry_key]
+    assert link.artifact_paths == (artifact_path,)
+    assert link.config_paths == (config_path,)
+    assert link.artifact_evidence[0].identity != registry_key
+    assert link.runtime_bindings[0].speculative == (("method", "dflash"), ("type", "draft"))
+
+
+def test_identity_link_does_not_use_logical_path_for_mismatched_artifact(tmp_path):
+    from local_model_resolver import LocalModelResolver
+
+    artifact_path = (
+        tmp_path
+        / "mradermacher"
+        / "Muse-Glimmer-30B-Heretic-Abliterated-BF16-i1-GGUF"
+        / "Muse-Glimmer-30B-Heretic-Abliterated-BF16.i1-IQ3_M.gguf"
+    )
+    artifact_path.parent.mkdir(parents=True)
+    artifact_path.write_bytes(b"GGUF test placeholder")
+    registry_key = "mradermacher/muse-glimmer-30b-heretic-abliterated-i1@iq3_m"
+    registry = {registry_key: {}}
+    model = {
+        "modelKey": "mradermacher/muse-glimmer-30b-heretic-abliterated-i1",
+        "publisher": "mradermacher",
+        "quantization": {"name": "IQ3_M"},
+        "path": "mradermacher/muse-glimmer-30b-heretic-abliterated-i1",
+    }
+    config = {
+        "publisher": "mradermacher",
+        "dir_name": artifact_path.parent.name,
+        "file_name": f"{artifact_path.name}.json",
+        "json_path": tmp_path / "configs" / "m.json",
+    }
+    candidates = LocalModelResolver(tmp_path, registry_loader=lambda: registry).candidates()
+    inventory = rt.RegistryInventory(registry, [model], [model], [config], candidates, True)
+
+    rt._refresh_identity_links(inventory)
+
+    link = inventory.identity_links[registry_key]
+    assert link.artifact_paths == ()
+    assert link.config_paths == ()
+
+
+def test_identity_link_uses_persisted_local_model_config_pair_without_live_model(monkeypatch):
+    artifact_path = Path("D:/models/bartowski/GLM-4.6V-Flash-GGUF/GLM-4.6V-Flash-Q6_K_L.gguf")
+    config_path = Path(
+        "C:/lms-config/bartowski/GLM-4.6V-Flash-GGUF/GLM-4.6V-Flash-Q6_K_L.gguf.json"
+    )
+    monkeypatch.setattr(Path, "is_file", lambda _path: True)
+    monkeypatch.setattr("artifact_bundle._has_gguf_magic", lambda _path: True)
+    registry_key = "bartowski/zai-org_glm-4.6v-flash@q6_k_l"
+    registry = {
+        registry_key: {
+            "local": {
+                "model_path": str(artifact_path),
+                "config_path": str(config_path),
+            }
+        }
+    }
+    config = {
+        "publisher": "bartowski",
+        "dir_name": "GLM-4.6V-Flash-GGUF",
+        "file_name": "GLM-4.6V-Flash-Q6_K_L.gguf.json",
+        "quant": "q6_k_l",
+        "json_path": config_path,
+        "context_length": 32768,
+        "use_unified_kv": True,
+        "num_parallel": 4,
+    }
+    inventory = rt.RegistryInventory(registry, [], [], [config], [], False)
+
+    rt._refresh_identity_links(inventory)
+
+    link = inventory.identity_links[registry_key]
+    assert link.artifact_paths == ()
+    assert link.config_paths == (config_path,)
+    assert link.runtime_bindings[0].config_path == config_path
+    assert link.runtime_bindings[0].context_length == 32768
+    assert link.runtime_bindings[0].use_unified_kv is True
+    assert link.runtime_bindings[0].num_parallel == 4
+
+
+def test_identity_link_allows_explicit_unique_model_scoped_config_pair(tmp_path):
+    from pathlib import Path
+
+    from registry_tool import RegistryInventory, _refresh_identity_links
+
+    main_path = tmp_path / "models" / "lmstudio-community" / "Qwen3.5-9B-GGUF" / "Qwen3.5-9B-Q6_K.gguf"
+    config_path = tmp_path / "configs" / "qwen" / "qwen3.5-9b.json"
+    main_path.parent.mkdir(parents=True)
+    config_path.parent.mkdir(parents=True)
+    main_path.write_bytes(b"GGUF fixture")
+    config_path.write_text("{}", encoding="utf-8")
+    registry_key = "lmstudio-community/qwen/qwen3.5-9b@q6_k"
+    registry = {
+        registry_key: {
+            "local": {
+                "model_path": str(main_path),
+                "config_path": str(config_path),
+                "config_scope": "model",
+            }
+        }
+    }
+    config = {
+        "publisher": "qwen",
+        "dir_name": "qwen3.5-9b",
+        "json_path": config_path,
+        "context_length": 131072,
+    }
+    inventory = RegistryInventory(registry, [], [], [config], [], False)
+
+    _refresh_identity_links(inventory)
+
+    link = inventory.identity_links[registry_key]
+    assert link.config_paths == (Path(config_path),)
+    assert link.runtime_bindings[0].config_scope == "model"
+    assert link.runtime_bindings[0].context_length == 131072
+
+
+def test_model_scoped_config_must_have_one_registry_owner(tmp_path):
+    from registry_tool import _registry_local_bundle_errors
+
+    config_path = tmp_path / "configs" / "qwen" / "qwen3.5-9b.json"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text("{}", encoding="utf-8")
+    registry = {}
+    for quant in ("Q6_K", "Q8_0"):
+        main_path = tmp_path / "models" / "publisher" / "Qwen3.5-9B-GGUF" / f"Qwen3.5-9B-{quant}.gguf"
+        main_path.parent.mkdir(parents=True, exist_ok=True)
+        main_path.write_bytes(b"GGUF fixture")
+        key = f"publisher/qwen3.5-9b@{quant.casefold()}"
+        registry[key] = {
+            "local": {
+                "model_path": str(main_path),
+                "config_path": str(config_path),
+                "config_scope": "model",
+            }
+        }
+
+    errors = _registry_local_bundle_errors(registry)
+
+    assert len(errors["config"]) == 2
+    assert all("assigned to multiple Registry entries" in message for message in errors["config"])
+
+
+def test_identity_link_rejects_mismatched_persisted_local_config_path(monkeypatch):
+    artifact_path = Path("D:/models/lmstudio-community/Qwen-GGUF/Qwen-Q6_K.gguf")
+    wrong_config = Path("C:/configs/lmstudio-community/Qwen-GGUF/Qwen-Q5_K.gguf.json")
+    monkeypatch.setattr(Path, "is_file", lambda _path: True)
+    registry_key = "lmstudio-community/qwen/model@q6_k"
+    registry = {
+        registry_key: {
+            "local": {
+                "model_path": str(artifact_path),
+                "config_path": str(wrong_config),
+            }
+        }
+    }
+    config = {
+        "publisher": "lmstudio-community",
+        "dir_name": "Qwen-GGUF",
+        "file_name": wrong_config.name,
+        "quant": "Q5_K",
+        "json_path": wrong_config,
+        "context_length": 32768,
+    }
+    inventory = rt.RegistryInventory(registry, [], [], [config], [], False)
+
+    rt._refresh_identity_links(inventory)
+
+    assert inventory.identity_links[registry_key].config_paths == ()
+
+
 def test_identity_link_joins_logical_lms_snapshot_to_flat_physical_qwen_path(tmp_path):
     from local_model_resolver import LocalModelResolver
 
@@ -1979,8 +2644,15 @@ def test_identity_link_joins_logical_lms_snapshot_to_flat_physical_qwen_path(tmp
         "selectedVariant": "qwen/qwen3.5-9b@q6_k",
         "quantization": {"name": "Q6_K"},
     }
-    config_path = tmp_path / "configs" / "qwen" / "qwen3.5-9b.json"
+    config_path = (
+        tmp_path
+        / "configs"
+        / "lmstudio-community"
+        / "Qwen3.5-9B-GGUF"
+        / "Qwen3.5-9B-Q6_K.gguf.json"
+    )
     config_path.parent.mkdir(parents=True)
+    config_path.write_text("{}", encoding="utf-8")
     config = {
         "publisher": "qwen",
         "dir_name": "qwen3.5-9b",
@@ -1998,6 +2670,50 @@ def test_identity_link_joins_logical_lms_snapshot_to_flat_physical_qwen_path(tmp
     assert link.runtime_bindings[0].config_path == config_path
 
 
+def test_identity_link_prefers_flat_physical_config_for_flat_qwen_path(tmp_path):
+    from local_model_resolver import LocalModelResolver
+
+    artifact_path = tmp_path / "lmstudio-community" / "Qwen3.5-9B-GGUF" / "Qwen3.5-9B-Q6_K.gguf"
+    artifact_path.parent.mkdir(parents=True)
+    artifact_path.write_bytes(b"GGUF test placeholder")
+    registry_key = "lmstudio-community/qwen/qwen3.5-9b@q6_k"
+    registry = {registry_key: {}}
+    model = {
+        "type": "llm",
+        "modelKey": "qwen/qwen3.5-9b",
+        "publisher": "qwen",
+        "path": "qwen/qwen3.5-9b",
+        "selectedVariant": "qwen/qwen3.5-9b@q6_k",
+        "quantization": {"name": "Q6_K"},
+    }
+    logical_path = tmp_path / "configs" / "qwen" / "qwen3.5-9b.json"
+    concrete_path = (
+        tmp_path
+        / "configs"
+        / "lmstudio-community"
+        / "Qwen3.5-9B-GGUF"
+        / "Qwen3.5-9B-Q6_K.gguf.json"
+    )
+    for path in (logical_path, concrete_path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+    logical_path.write_text("{}", encoding="utf-8")
+    concrete_path.write_text("{}", encoding="utf-8")
+    configs = [
+        {"publisher": "qwen", "dir_name": "qwen3.5-9b", "json_path": logical_path},
+        {
+            "publisher": "lmstudio-community",
+            "dir_name": "Qwen3.5-9B-GGUF",
+            "json_path": concrete_path,
+        },
+    ]
+    candidates = LocalModelResolver(tmp_path, registry_loader=lambda: registry).candidates()
+    inventory = rt.RegistryInventory(registry, [model], [model], configs, candidates, True)
+
+    rt._refresh_identity_links(inventory)
+
+    assert inventory.identity_links[registry_key].config_paths == (concrete_path,)
+
+
 def test_materialize_local_binding_persists_main_config_and_mtp_companion(tmp_path, monkeypatch):
     from local_model_resolver import LocalModelResolver
 
@@ -2011,8 +2727,15 @@ def test_materialize_local_binding_persists_main_config_and_mtp_companion(tmp_pa
     for path in (main_path, companion_path):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"GGUF test placeholder")
-    config_path = tmp_path / "configs" / "unsloth" / "gemma-4-12b-it.json"
+    config_path = (
+        tmp_path
+        / "configs"
+        / "unsloth"
+        / "gemma-4-12b-it-GGUF"
+        / "gemma-4-12b-it-Q6_K.gguf.json"
+    )
     config_path.parent.mkdir(parents=True)
+    config_path.write_text("{}", encoding="utf-8")
     registry_key = "unsloth/gemma-4-12b-it@q6_k"
     registry = {registry_key: {}}
     model = {
@@ -2069,8 +2792,15 @@ def test_materialize_local_binding_persists_dflash_companion_role(tmp_path, monk
     for path in (main_path, drafter_path):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"GGUF test placeholder")
-    config_path = tmp_path / "configs" / "gguf-org" / "muse-glimmer-30b.json"
+    config_path = (
+        tmp_path
+        / "configs"
+        / "gguf-org"
+        / "muse-glimmer-30b-gguf"
+        / "muse-glimmer-30b-nvfp4.gguf.json"
+    )
     config_path.parent.mkdir(parents=True)
+    config_path.write_text("{}", encoding="utf-8")
     registry_key = "gguf-org/muse-glimmer-30b@nvfp4"
     registry = {registry_key: {}}
     model = {
@@ -2112,6 +2842,53 @@ def test_materialize_local_binding_persists_dflash_companion_role(tmp_path, monk
         "draft_n_min": 0,
         "draft_p_min": 0.0,
     }
+
+
+def test_sync_does_not_persist_incompatible_dflash_companion(tmp_path, monkeypatch):
+    from local_model_resolver import LocalModelResolver
+
+    main_path = tmp_path / "unsloth" / "qwen3.6-27b-GGUF" / "qwen3.6-27b-Q6_K.gguf"
+    wrong_helper = tmp_path / "unsloth" / "qwen3.8-27b-GGUF" / "qwen3.8-27b-dflash2-Q8_0.gguf"
+    config_path = (
+        tmp_path
+        / "configs"
+        / "unsloth"
+        / "qwen3.6-27b-GGUF"
+        / "qwen3.6-27b-Q6_K.gguf.json"
+    )
+    for path in (main_path, wrong_helper, config_path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"GGUF fixture")
+    registry_key = "unsloth/qwen3.6-27b@q6_k"
+    registry = {registry_key: {}}
+    model = {
+        "modelKey": "qwen3.6-27b",
+        "publisher": "unsloth",
+        "quantization": {"name": "Q6_K"},
+        "path": str(main_path),
+    }
+    config = {
+        "publisher": "unsloth",
+        "dir_name": "qwen3.6-27b-GGUF",
+        "json_path": config_path,
+        "speculative": {
+            "type": "draft",
+            "method": "dflash",
+            "draft_model_reference": str(wrong_helper),
+        },
+    }
+    candidates = LocalModelResolver(tmp_path, registry_loader=lambda: registry).candidates()
+    inventory = rt.RegistryInventory(registry, [model], [model], [config], candidates, True)
+    monkeypatch.setattr(rt, "MODELS_CACHE", tmp_path)
+    monkeypatch.setattr(rt, "_resolve_local_companion", lambda _reference: wrong_helper)
+    monkeypatch.setattr(rt, "save_registry", lambda _value: None)
+
+    rt._refresh_identity_links(inventory)
+    rt._materialize_local_bindings(inventory)
+
+    assert "draft" not in registry[registry_key]["local"].get("companions", {})
+    errors = rt._registry_local_bundle_errors(registry)
+    assert any("required draft companion path is not configured" in message for message in errors["companion"])
 
 
 def test_identity_link_rejects_lms_path_that_does_not_name_local_artifact(tmp_path):
@@ -2372,7 +3149,7 @@ class TestPipelineDriftExitCode:
             calls.append(("quarantine", dry_run))
             return 0
 
-        def record_assemble(*, preview_only=False):
+        def record_assemble(*, preview_only=False, identity_links=None):
             calls.append(("assemble", preview_only))
 
         def record_templates(*_args, **_kwargs):
@@ -2399,9 +3176,9 @@ class TestPipelineDriftExitCode:
         assert calls == [("quarantine", True), ("templates",), ("assemble", True)]
         output = capsys.readouterr().out
         assert "py -3.12 .\\src\\registry_tool.py quarantine-missing --apply" in output
-        assert "py -3.12 .\\src\\assemble_blueprint.py assemble" in output
+        assert "py -3.12 .\\src\\registry_tool.py full --write-prompts" in output
         assert output.index("quarantine-missing --apply") < output.index("Prompt-Assembly")
-        assert output.index("Prompt-Assembly") < output.index("assemble_blueprint.py assemble")
+        assert output.index("Prompt-Assembly") < output.index("registry_tool.py full --write-prompts")
         if import_lms_settings:
             assert "LM-Studio-Werte wurden nur berichtet" not in output
         else:

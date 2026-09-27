@@ -151,7 +151,7 @@ BENCHMARK_CATEGORY_DEFAULTS = {
 BENCHMARK_THINKING_DEFAULTS = {
     "temperature": 0.6,
     "top_p": 0.95,
-    "max_tokens": 4096,
+    "max_tokens": 8192,
     "enable_thinking": True,
 }
 
@@ -628,6 +628,10 @@ def get_model_config(model_identifier: str, category: str = "coding", is_thinkin
     """
     cat = category if category in BENCHMARK_CATEGORY_DEFAULTS else "coding"
     key_lower = model_identifier.lower() if model_identifier else ""
+    registry_entry = _registry_entry(model_identifier)
+    registry_declares_thinking = (
+        registry_entry is not None and registry_entry.get("reasoning") == "thinking"
+    )
     # Thinking-Lauf + Reasoning-Modell: pauschale Thinking-Defaults (0.6/0.95)
     # statt der Kategorie-Defaults (Research 06.08.2026). Der Registry-Block
     # schlaegt auch hier (dokumentierte Ausnahmen: GPT-OSS 1.0/1.0,
@@ -661,6 +665,13 @@ def get_model_config(model_identifier: str, category: str = "coding", is_thinkin
     # Registry cell already owns temperature/top_p above.
     for key, value in _registry_sampling_params(model_identifier, cat, prefer_thinking=is_thinking_model).items():
         config[key] = value
+    # A model classified as a Thinking model needs enough total completion
+    # budget for reasoning plus its final answer, even when a benchmark
+    # category intentionally disables the template's thinking switch. A
+    # model-specific benchmark_runtime policy below remains the explicit
+    # override.
+    if registry_declares_thinking or is_thinking_model:
+        config["max_tokens"] = 8192
     # Blueprint-SSOT: stop_strings + reasoning_parsing aus blueprint_definitions.yaml
     # (Refactor 14.08. - Registry-`template:`-Feld ist veraltet).
     bp_features = _blueprint_features(model_identifier)
@@ -778,6 +789,10 @@ def is_support_file(
 
     - ``mmproj-*``: vision projector files. LM Studio expects this prefix;
       the benchmark filter also rejects legacy names containing ``mmproj``.
+    - GGUF architecture ``dflash`` or ``dspark``: speculative-decoding
+      sidecars, including DFlash2/DSpark variants, independent of filename or
+      size. Some DSpark GGUFs use the generic ``dflash`` architecture; LM
+      Studio's selected speculative mode remains the method source of truth.
     - ``mtp-*`` or ``*/MTP/*``: separate MTP support files (for example
       ``mtp-gemma-4-12B-it-Q8_0.gguf``). Integrated MTP main GGUFs and
       standalone MTP models are NOT affected - only the support-file prefix or
@@ -794,10 +809,9 @@ def is_support_file(
     name = os.path.basename(str(path)).lower()
     if "mmproj" in name:
         return True
-    # DFlash draft GGUFs are full LLMs, but when discovered under the standard
-    # sidecar filename they are a bundle dependency and must not create a
-    # second default Registry identity (e.g. muse-glimmer/dflash-q4_0).
-    if name.startswith(("dflash-", "dflash_")):
+    # Sidecar filenames are also excluded for direct GGUF discovery, where
+    # the LMS-provided architecture field is unavailable.
+    if "dflash" in name or "dspark" in name:
         return True
     if name.startswith("mtp-"):
         return True
@@ -807,7 +821,7 @@ def is_support_file(
     if any(seg.lower() == "mtp" for seg in parts):
         return True
     arch = architecture.lower().strip()
-    return arch.endswith("-assistant")
+    return arch in {"dflash", "dspark"} or arch.endswith("-assistant")
 
 
 def is_support_model_record(model: dict[str, Any]) -> bool:

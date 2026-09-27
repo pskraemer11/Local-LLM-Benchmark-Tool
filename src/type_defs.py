@@ -109,6 +109,7 @@ class PipelineResult(TypedDict):
     score: float | None
     thinking: bool
     samples: NotRequired[str]
+    selected_ids: NotRequired[list[str]]
 
 
 class SandboxResult(TypedDict):

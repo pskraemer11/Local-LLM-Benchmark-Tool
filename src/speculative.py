@@ -31,6 +31,16 @@ def _reference(profile: Mapping[str, Any]) -> str:
     return ""
 
 
+def _draft_method_from_reference(reference: str) -> str:
+    """Infer the explicit helper algorithm when legacy data stores only its path."""
+    normalized = reference.casefold()
+    if "dspark" in normalized:
+        return "dspark"
+    if "dflash" in normalized:
+        return "dflash"
+    return "simple"
+
+
 def normalize_speculative_profile(profile: Mapping[str, Any]) -> dict[str, Any]:
     """Normalize legacy and current speculative profiles.
 
@@ -52,8 +62,10 @@ def normalize_speculative_profile(profile: Mapping[str, Any]) -> dict[str, Any]:
     elif raw_type in {"draft", "draft-dflash", "draft-dspark", "draft-simple"}:
         if not method and raw_type.startswith("draft-"):
             method = raw_type.removeprefix("draft-")
+        if method in {"drafter", "draft", "standard"}:
+            method = "simple"
         if method not in {"dflash", "dspark", "simple"}:
-            method = "dflash" if "dflash" in reference.casefold() else "simple"
+            method = _draft_method_from_reference(reference)
         normalized = {"type": "draft", "method": method}
     else:
         return {}
@@ -79,7 +91,7 @@ def classify_lms_speculative_values(values: Mapping[str, Any]) -> dict[str, Any]
         reference = str(values["draft_model_reference"]).casefold()
         profile = {
             "type": "draft",
-            "method": "dflash" if "dflash" in reference else "simple",
+            "method": _draft_method_from_reference(reference),
         }
     else:
         profile = {}

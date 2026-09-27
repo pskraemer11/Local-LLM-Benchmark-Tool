@@ -52,6 +52,8 @@ def test_artifact_resolver_prefers_explicit_publisher_directory(tmp_path: Path) 
 
 def test_quantization_vocabulary_covers_new_markers() -> None:
     assert normalize_quant("Q4-K-M") == "q4_k_m"
+    assert normalize_quant("Q6_K_L") == "q6_k_l"
+    assert extract_quant_from_text("model-Q6_K_L.gguf") == "q6_k_l"
     assert extract_quant_from_text("gemma-4-12b-QAT-NVFP4-GGUF") == "nvfp4"
     assert extract_quant_from_text("gemma-4-26b-it-mini.gguf") == "mini"
 

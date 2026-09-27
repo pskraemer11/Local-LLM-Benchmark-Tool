@@ -16,11 +16,23 @@ def test_normalize_base_url_adds_v1_once() -> None:
 
 
 def test_build_payload_is_shared_and_json_mode_is_explicit() -> None:
-    spec = RequestSpec("p", max_tokens=17, temperature=0.7, top_p=1.0, seed=9, response_format="json")
+    spec = RequestSpec(
+        "p",
+        max_tokens=17,
+        temperature=0.7,
+        top_p=1.0,
+        seed=9,
+        response_format="json",
+        system_prompt="s",
+    )
     payload = build_payload("model", spec, stream=True)
     assert payload["stream"] is True
     assert payload["max_tokens"] == 17
     assert payload["response_format"] == {"type": "json_object"}
+    assert payload["messages"] == [
+        {"role": "system", "content": "s"},
+        {"role": "user", "content": "p"},
+    ]
 
 
 def test_parse_sse_lines_preserves_reasoning_and_content() -> None:

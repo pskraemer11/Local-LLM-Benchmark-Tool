@@ -16,12 +16,14 @@ class RuntimeBinding:
     """Runtime data joined to one exact local model artifact.
 
     Publisher/model keys and LMS-reported paths are join evidence used while
-    building the inventory. They are deliberately not repeated here: the
-    Registry identity and the concrete artifact evidence already carry the
-    authoritative identity and GGUF path.
+    building the inventory. A strict live join or an exact persisted local
+    Registry path pair can establish the relation. They are deliberately not
+    repeated here: the Registry identity and its local artifact record already
+    carry the authoritative identity and GGUF path.
     """
 
     config_path: Path | None = None
+    config_scope: str | None = None
     sampling: tuple[tuple[str, Any], ...] = ()
     context_length: int | float | None = None
     use_unified_kv: bool | None = None
@@ -37,10 +39,10 @@ class RuntimeBinding:
 class IdentityLink:
     """Evidence linking one identity to its local and LMS boundary records.
 
-    Absolute paths are retained here as the verified join result.  The local
-    Registry may materialize the same paths under ``local`` because this
-    Registry is an effective machine-local catalog; the link table remains
-    the pre-persistence proof that the binding was unique.
+    Absolute config paths are retained here as the verified join result. The
+    join may be proven from live LMS/GGUF evidence or the exact
+    ``local.model_path`` / ``local.config_path`` pair in this effective,
+    machine-local Registry.
     """
 
     registry_key: str

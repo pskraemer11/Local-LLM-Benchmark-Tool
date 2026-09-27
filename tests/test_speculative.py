@@ -49,6 +49,47 @@ def test_dflash_is_a_draft_llm_not_mtp() -> None:
     assert llama_cpp_spec_type(profile) == "draft-dflash"
 
 
+def test_drafter_reference_defaults_to_simple_method() -> None:
+    profile = classify_lms_speculative_values(
+        {"draft_model_reference": "publisher/small-compatible-model-Q4_K_M.gguf"}
+    )
+
+    assert profile["type"] == "draft"
+    assert profile["method"] == "simple"
+    assert llama_cpp_spec_type(profile) == "draft-simple"
+
+
+def test_dspark_reference_is_not_downgraded_to_generic_drafter() -> None:
+    profile = classify_lms_speculative_values(
+        {"draft_model_reference": "publisher/target-DSpark2-Q4_K_M.gguf"}
+    )
+
+    assert profile["type"] == "draft"
+    assert profile["method"] == "dspark"
+    assert llama_cpp_spec_type(profile) == "draft-dspark"
+
+
+def test_explicit_lms_dspark_selection_overrides_helper_architecture_label() -> None:
+    profile = classify_lms_speculative_values(
+        {
+            "draft_dspark_sidecar": True,
+            "draft_model_reference": "LiquidAI/LFM2.5-8B-A1B-DSpark-Q8_0.gguf",
+            "helper_architecture": "dflash",
+        }
+    )
+
+    assert profile["type"] == "draft"
+    assert profile["method"] == "dspark"
+    assert llama_cpp_spec_type(profile) == "draft-dspark"
+
+
+def test_drafter_method_alias_normalizes_to_simple() -> None:
+    assert normalize_speculative_profile({"type": "draft", "method": "drafter"}) == {
+        "type": "draft",
+        "method": "simple",
+    }
+
+
 def test_legacy_cli_labels_are_normalized_without_becoming_registry_types() -> None:
     assert normalize_speculative_profile({"type": "draft-mtp"}) == {
         "type": "mtp",

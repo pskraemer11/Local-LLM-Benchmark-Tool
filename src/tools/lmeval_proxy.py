@@ -219,7 +219,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         """Forward request and return response directly."""
         request_data = json.dumps(openai_body).encode("utf-8")
         status, resp_headers, resp_body = _proxy_upstream(
-            self.upstream, "/v1/chat/completions", {"Content-Type": "application/json"},
+            self.upstream, "/v1/chat/completions", dict(self.headers),
             request_data
         )
         self._send_response(status, resp_headers, resp_body)
@@ -227,10 +227,13 @@ class ProxyHandler(BaseHTTPRequestHandler):
     def _handle_streaming(self, openai_body: dict[str, Any]) -> None:
         """Forward streaming request and pass through SSE events."""
         request_data = json.dumps(openai_body).encode("utf-8")
+        request_headers = {"Content-Type": "application/json"}
+        if authorization := self.headers.get("Authorization"):
+            request_headers["Authorization"] = authorization
         req = Request(
             _upstream_url(self.upstream, "/v1/chat/completions"),
             data=request_data,
-            headers={"Content-Type": "application/json"},
+            headers=request_headers,
             method="POST"
         )
 

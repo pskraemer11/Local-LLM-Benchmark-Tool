@@ -8,6 +8,7 @@ from typing import Any
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
+from model_registry import ModelRegistry
 from providers.llama_cpp_provider import LlamaCppProvider
 
 
@@ -21,9 +22,16 @@ class FakeController:
     def is_running(self) -> bool:
         return self.process is not None
 
-    def start(self, command: list[str], log_path: Any, timeout: int) -> bool:
+    def start(
+        self,
+        command: list[str],
+        log_path: Any,
+        timeout: int,
+        environment: dict[str, str] | None = None,
+    ) -> bool:
         del log_path, timeout
         self.commands.append(command)
+        self.environment = environment or {}
         self.process = object()
         return True
 
@@ -36,6 +44,7 @@ class FakeController:
 
 
 def test_provider_resolves_local_registry_model_and_builds_cuda_server_command(tmp_path: Any, monkeypatch: Any) -> None:
+    monkeypatch.setenv("LMS_OpenAI_AUTH_TOKEN", "test-token")
     model_path = tmp_path / "openai" / "gpt-oss-20b" / "gpt-oss-20b-Q8_0.gguf"
     model_path.parent.mkdir(parents=True)
     model_path.write_bytes(b"GGUF")
@@ -92,6 +101,8 @@ def test_provider_resolves_local_registry_model_and_builds_cuda_server_command(t
     assert command[command.index("--model") + 1] == str(model_path)
     assert "--offline" in command
     assert command[command.index("--port") + 1] == "18081"
+    assert "--no-ui" in command
+    assert "--no-webui" not in command
     assert command[command.index("--ctx-size") + 1] == "32768"
     assert command[command.index("--cache-type-k") + 1] == "q8_0"
     assert command[command.index("--cache-type-v") + 1] == "iq4_nl"
@@ -105,6 +116,7 @@ def test_provider_resolves_local_registry_model_and_builds_cuda_server_command(t
     assert command[command.index("--spec-draft-n-min") + 1] == "0"
     assert command[command.index("--spec-draft-p-min") + 1] == "0.75"
     assert "--jinja" in command
+    assert controller.environment.get("LLAMA_API_KEY") == "test-token"
     assert provider.unload_all() is True
     assert controller.stopped is True
 
@@ -125,3 +137,49 @@ def test_provider_lists_registry_eligible_local_ggufs(tmp_path: Any) -> None:
     assert len(models) == 1
     assert models[0]["registry_key"] == "publisher/model@q4_k_m"
     assert models[0]["model_path"] == str(model_path)
+
+
+def test_incompatible_registry_companion_fails_before_server_start(tmp_path: Any, monkeypatch: Any) -> None:
+    main_path = tmp_path / "unsloth" / "qwen3.6-27b-GGUF" / "qwen3.6-27b-Q6_K.gguf"
+    helper_path = tmp_path / "unsloth" / "qwen3.8-27b-GGUF" / "qwen3.8-27b-dflash2-Q8_0.gguf"
+    for path in (main_path, helper_path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"GGUF fixture")
+    executable = tmp_path / "llama-server.exe"
+    executable.write_bytes(b"test executable")
+    registry: dict[str, Any] = {
+        "unsloth/qwen3.6-27b@q6_k": {
+            "local": {
+                "model_path": str(main_path),
+                "companions": {"draft": str(helper_path)},
+                "llama_cpp": {
+                    "speculative": {
+                        "type": "draft",
+                        "method": "dflash",
+                        "companion_role": "draft",
+                    }
+                },
+            }
+        }
+    }
+    controller = FakeController()
+    provider = LlamaCppProvider(
+        "http://127.0.0.1:18083/v1",
+        model_root=tmp_path,
+        executable=executable,
+        registry_loader=lambda: registry,
+        runtime_loader=lambda model: ModelRegistry(lambda: registry).provider_runtime(
+            model, "llama_cpp"
+        ),
+        controller=controller,
+    )
+    monkeypatch.setattr(provider, "_external_server_reachable", lambda: False)
+
+    try:
+        provider.load_model("unsloth/qwen3.6-27b@q6_k")
+    except ValueError as exc:
+        assert "Qwen generation mismatch" in str(exc)
+    else:
+        raise AssertionError("incompatible companion must block llama-server startup")
+
+    assert controller.commands == []

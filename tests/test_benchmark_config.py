@@ -203,7 +203,17 @@ class TestThinkingRuns:
         )
         assert (cfg["temperature"], cfg["top_p"]) == (0.6, 0.95)
         assert cfg["enable_thinking"] is True
+        assert cfg["max_tokens"] == 8192
         assert cfg["_source"] == "thinking-default"
+
+    def test_registry_thinking_model_defaults_to_8192_even_without_forcing_thinking(self):
+        cfg = get_model_config(
+            "lmstudio-community/qwen/qwen3.5-9b@q6_k",
+            category="coding",
+            is_thinking_enabled=False,
+        )
+        assert cfg["enable_thinking"] is False
+        assert cfg["max_tokens"] == 8192
 
     def test_thinking_flat_applies_to_all_categories(self):
         for cat in ("coding", "knowledge", "agentic", "math"):

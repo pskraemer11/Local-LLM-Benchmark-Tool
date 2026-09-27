@@ -19,6 +19,7 @@ import assemble_blueprint as ab
 from assemble_blueprint import (
     classify_capabilities,
     classify_reasoning,
+    configs_for_registry_key,
     extract_params,
     find_config_for_registry_key,
     find_registry_matches_for_config,
@@ -792,7 +793,6 @@ class TestFindConfigForRegistryKey:
             "freedomaisvr/gemma-4-12b-it-qat@nvfp4", configs
         )
         assert match == configs[0]
-
     def test_reverse_qat_nvfp4_directory_matches_registry_variant(self):
         registry = sorted(
             [
@@ -840,6 +840,37 @@ class TestFindConfigForRegistryKey:
         )
 
         assert match == configs[1]
+
+
+def test_identity_link_paths_override_legacy_fuzzy_config_matching(tmp_path):
+    registry_key = "lmstudio-community/qwen/qwen3.5-9b@q6_k"
+    exact_path = tmp_path / "lmstudio-community" / "Qwen3.5-9B-Q6_K.gguf.json"
+    misleading_path = tmp_path / "qwen" / "qwen3.5-9b.json"
+    exact = {
+        "publisher": "lmstudio-community",
+        "dir_name": "Qwen3.5-9B-GGUF",
+        "file_name": exact_path.name,
+        "json_path": exact_path,
+    }
+    misleading = {
+        "publisher": "qwen",
+        "dir_name": "qwen3.5-9b",
+        "file_name": misleading_path.name,
+        "json_path": misleading_path,
+    }
+
+    from inventory import IdentityLink, RuntimeBinding
+
+    link = IdentityLink(
+        registry_key=registry_key,
+        runtime_bindings=(RuntimeBinding(config_path=exact_path),),
+    )
+
+    assert configs_for_registry_key(
+        registry_key,
+        [misleading, exact],
+        {registry_key: link},
+    ) == [exact]
 
 
 # =========================================================================

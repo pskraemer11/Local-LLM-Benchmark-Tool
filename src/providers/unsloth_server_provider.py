@@ -265,7 +265,7 @@ class UnslothServerProvider(HttpProvider):
             self._server_port(),
             "--alias",
             model_identifier,
-            "--no-webui",
+            "--no-ui",
             *self._runtime_args(model_identifier),
         ]
 

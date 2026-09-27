@@ -179,6 +179,6 @@ def build_server_command(
         str(port),
         "--alias",
         model_identifier,
-        "--no-webui",
+        "--no-ui",
         *build_runtime_args(runtime, environment=environment, warning=warning),
     ]

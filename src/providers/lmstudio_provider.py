@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
-from benchmark_config import is_blacklisted_model_name, is_support_model_record
+from benchmark_config import (
+    guess_quant_from_filename,
+    is_blacklisted_model_name,
+    is_support_model_record,
+)
 from utils.terminal import error, info, ok, warn
 
 from .base import HttpProvider, ProviderCapabilities
@@ -49,7 +54,9 @@ class LMStudioProvider(HttpProvider):
         sleep_fn: Callable[[float], None] | None = None,
         subprocess_run: SubprocessRun | None = None,
     ) -> None:
-        super().__init__(base_url)
+        auth_token = os.environ.get("LMS_OpenAI_AUTH_TOKEN") or os.environ.get("LMS_OPENAI_AUTH_TOKEN")
+        headers = {"Authorization": f"Bearer {auth_token}"} if auth_token else None
+        super().__init__(base_url, headers=headers)
         self.cli_timeout = cli_timeout
         self.rest_base_url = base_url[:-3] if base_url.endswith("/v1") else base_url
         self._rest_request = rest_request
@@ -117,18 +124,36 @@ class LMStudioProvider(HttpProvider):
                 continue
             quant = item.get("quantization", {}) or {}
             quant_name = quant.get("name", "") if isinstance(quant, dict) else ""
+            quant_name = str(quant_name or "").strip()
+            if quant_name.casefold() in {"?", "unknown", "none"}:
+                quant_name = ""
             selected_variant = item.get("selectedVariant") or ""
-            unique_key = selected_variant if selected_variant and selected_variant != base_key else (
-                f"{base_key}@{quant_name}"
-                if quant_name and not base_key.lower().endswith(f"@{quant_name.lower()}")
-                else base_key
-            )
-            if not quant_name and base_key.endswith("@?"):
-                filename = (item.get("path") or "").replace("\\", "/").rsplit("/", 1)[-1]
-                if filename.lower().endswith(".gguf"):
-                    stem = filename[:-5]
-                    if "-" in stem:
-                        quant_name = stem.rsplit("-", 1)[-1]
+            selected_variant = str(selected_variant).strip()
+            selected_quant = selected_variant.rsplit("@", 1)[1] if "@" in selected_variant else ""
+            if selected_quant.casefold() not in {"", "?", "unknown", "none"}:
+                # A concrete selected variant is more specific than a stale or
+                # absent quantization field in lms ls --json.
+                quant_name = selected_quant
+            if not quant_name:
+                filename = str(item.get("path") or "").replace("\\", "/").rsplit("/", 1)[-1]
+                quant_name = guess_quant_from_filename(filename)
+
+            has_concrete_variant = bool(selected_variant) and not selected_variant.casefold().endswith("@?")
+            if has_concrete_variant and selected_variant != base_key:
+                unique_key = selected_variant
+            else:
+                # LM Studio can expose a placeholder modelKey/selectedVariant
+                # such as ``model@?`` while its concrete GGUF path contains
+                # the authoritative quant. Never turn only the last filename
+                # token (e.g. ``g64``) into an identity.
+                identity_base = str(base_key)
+                if identity_base.casefold().endswith("@?"):
+                    identity_base = identity_base[:-2]
+                unique_key = (
+                    identity_base
+                    if not quant_name or identity_base.casefold().endswith(f"@{quant_name}".casefold())
+                    else f"{identity_base}@{quant_name}"
+                )
             raw_display = item.get("displayName", base_key)
             display = raw_display if isinstance(raw_display, str) else str(base_key)
             if quant_name:
@@ -202,6 +227,13 @@ class LMStudioProvider(HttpProvider):
             return False
 
     def current_model(self) -> dict[str, Any] | None:
+        native_data = self._native_request("/api/v1/models")
+        if isinstance(native_data, dict) and isinstance(native_data.get("models"), list):
+            # This endpoint owns loaded_instances. An empty native result is
+            # authoritative too; do not let a stale ``lms ps`` row resurrect
+            # a model that the server has already unloaded.
+            return self._current_model_from_native_api(native_data)
+
         data = self._run_lms("ps", "--json")
         if not data:
             return None
@@ -216,6 +248,79 @@ class LMStudioProvider(HttpProvider):
             }
         except (KeyError, TypeError, IndexError):
             return None
+
+    def _current_model_from_native_api(self, data: dict[str, Any]) -> dict[str, Any] | None:
+        """Read LMS's authoritative loaded-instance API.
+
+        The CLI can return an empty process list while the REST API still has
+        an active instance. Treating that as unloaded made the benchmark
+        launcher load the same model a second time after an inference task.
+        """
+        rows = data.get("models", [])
+        if not isinstance(rows, list):
+            return None
+
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            instances = row.get("loaded_instances", [])
+            if not isinstance(instances, list) or not instances:
+                continue
+            instance = next(
+                (candidate for candidate in reversed(instances) if isinstance(candidate, dict)),
+                None,
+            )
+            if instance is None:
+                continue
+
+            api_key = str(row.get("key") or "")
+            model_identifier = self._registry_identity_for_native_model(row, api_key)
+            return {
+                "identifier": str(instance.get("id") or api_key),
+                "model_identifier": model_identifier,
+                "display_name": str(row.get("display_name") or api_key),
+                "status": "loaded",
+                "context_length": row.get("context_length") or row.get("max_context_length"),
+            }
+        return None
+
+    def _registry_identity_for_native_model(self, native_model: dict[str, Any], api_key: str) -> str:
+        """Resolve the loaded LMS row to its full Registry identity when possible."""
+        publisher = str(native_model.get("publisher") or "")
+        quantization = native_model.get("quantization")
+        quant = str(quantization.get("name") or "") if isinstance(quantization, dict) else ""
+        try:
+            from model_identity import UniqueMatch, canonicalize_source_identity, resolve_registry_match
+
+            registry = self._registry_loader() if self._registry_loader else {}
+            canonical = canonicalize_source_identity(api_key, publisher=publisher, quant=quant)
+            resolved = resolve_registry_match(canonical, list(registry)) if registry else None
+            if isinstance(resolved, UniqueMatch):
+                return resolved.key
+        except (ImportError, TypeError, ValueError):
+            registry = {}
+            canonical = api_key
+
+        installed_models = self.list_models()
+        matched_model = next(
+            (
+                model
+                for model in installed_models
+                if str(model.get("model_identifier") or "").casefold() == api_key.casefold()
+            ),
+            None,
+        )
+        if matched_model is None:
+            return canonical
+
+        reference = str(matched_model.get("key") or api_key)
+        publisher = str(matched_model.get("publisher") or publisher)
+        try:
+            canonical = canonicalize_source_identity(reference, publisher=publisher)
+            resolved = resolve_registry_match(canonical, list(registry)) if registry else None
+            return resolved.key if isinstance(resolved, UniqueMatch) else canonical
+        except (ImportError, TypeError, ValueError):
+            return reference
 
     def has_assembled_system_prompt(self, model_identifier: str) -> bool | None:
         """Check whether the LM Studio JSON config already contains a prompt."""

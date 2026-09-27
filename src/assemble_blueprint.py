@@ -36,6 +36,7 @@ write path.
 import json
 import re
 import sys
+from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
@@ -152,6 +153,43 @@ def find_all_configs_for_registry_key(
 ) -> list[dict[str, Any]]:
     """Like find_config_for_registry_key but returns ALL matching configs."""
     return _find_all_configs_for_registry_key(registry_key, configs)
+
+
+def configs_for_registry_key(
+    registry_key: str,
+    configs: list[dict[str, Any]],
+    identity_links: Mapping[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Return configs proven to belong to one Registry identity.
+
+    When the registry synchronizer provides its per-run identity table, its
+    exact absolute config paths are authoritative.  An empty path set is a
+    deliberate fail-closed result and must not fall back to fuzzy matching.
+    The legacy matcher remains available when callers do not have a shared
+    inventory, for example in isolated unit tests and compatibility tooling.
+    """
+    if identity_links is not None and registry_key in identity_links:
+        link = identity_links[registry_key]
+        linked_paths = {
+            _canonical_config_path(path)
+            for path in getattr(link, "config_paths", ())
+        }
+        return [
+            config
+            for config in configs
+            if _canonical_config_path(config.get("json_path")) in linked_paths
+        ]
+    return find_all_configs_for_registry_key(registry_key, configs)
+
+
+def _canonical_config_path(value: Any) -> str:
+    """Normalize a config path for exact per-run identity joins."""
+    if not value:
+        return ""
+    try:
+        return str(Path(value).resolve(strict=False)).casefold()
+    except (OSError, TypeError, ValueError):
+        return str(value).replace("\\", "/").casefold()
 
 
 def _config_quant_match_variants(value: str) -> set[str]:
@@ -755,6 +793,11 @@ def truncation_from_context(ctx_len: int | None) -> str:
 
 
 _LMS_CONFIGS_CACHE: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+
+
+def clear_lms_config_cache(config_root: Path | None = None) -> None:
+    """Drop the short-lived config snapshot after an external write."""
+    _LMS_CONFIGS_CACHE.pop(str(config_root or CONFIG_ROOT), None)
 _LMS_CONFIGS_TTL_S = 5.0  # Re-scan file system at most every 5 seconds
 
 _LMS_SAMPLING_FIELD_MAP = {
@@ -1258,7 +1301,10 @@ def create_blueprint_definitions() -> None:
     print(f"[OK] Created {BLUEPRINT_PATH} with {len(blueprints)} blueprints and {len(modules)} modules")
 
 
-def assemble_prompts(preview_only: bool = False) -> None:
+def assemble_prompts(
+    preview_only: bool = False,
+    identity_links: Mapping[str, Any] | None = None,
+) -> None:
     """Phase 3: Generate system prompts from blueprints and write to JSON configs."""
     # Read registry
     yaml_ruamel = YAML()
@@ -1324,7 +1370,7 @@ def assemble_prompts(preview_only: bool = False) -> None:
         # rules stay identical to registry/config synchronization and validation.
         candidates = [
             (str(info.get("publisher", "")), info)
-            for info in find_all_configs_for_registry_key(model_name, lms_configs)
+            for info in configs_for_registry_key(model_name, lms_configs, identity_links)
         ]
 
         if not candidates:
@@ -1342,6 +1388,7 @@ def assemble_prompts(preview_only: bool = False) -> None:
             if pub_match:
                 candidates = pub_match
 
+        stats["assembled"] += 1
         if preview_only:
             old_prompt = candidates[0][1].get("system_prompt", "")
             old_len = len(old_prompt)
@@ -1418,9 +1465,11 @@ def assemble_prompts(preview_only: bool = False) -> None:
                     print(f"[ERROR] {model_name} ({pub}): {e}")
                     stats["errors"] += 1
 
-            stats["assembled"] += 1
             stats["total_configs_written"] += written
             print(f"[OK] {model_name}: {bp_name}/{truncation} -> {written} config(s) ({len(assembled_prompt)} chars)")
+
+    if not preview_only:
+        clear_lms_config_cache()
 
     print(f"\n{'=' * 60}")
     print(

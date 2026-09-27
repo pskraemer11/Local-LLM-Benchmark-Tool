@@ -1,7 +1,9 @@
-import json
 import io
+import json
 import os
 import sys
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -12,7 +14,6 @@ import run_benchmarks as rb
 from run_benchmarks import (
     ALL_BENCHMARKS,
     API_BASE,
-    SAFE_CONTEXT_FALLBACK as SAFE_CONTEXT,
     _build_lmeval_cmd,
     _ensure_model_still_loaded,
     _get_evaluation_parameters,
@@ -28,9 +29,108 @@ from run_benchmarks import (
     _model_short_name,
     _parse_subset_score,
     _resolve_num_parallel,
+    _verify_lmeval_sample_log,
     resolve_benchmarks,
     resolve_models,
 )
+from run_benchmarks import (
+    SAFE_CONTEXT_FALLBACK as SAFE_CONTEXT,
+)
+
+
+def test_provider_child_environment_sets_tool_eval_api_key(monkeypatch):
+    monkeypatch.delenv("LMS_OPENAI_AUTH_TOKEN", raising=False)
+    monkeypatch.setenv("LMS_OpenAI_AUTH_TOKEN", "local-test-token")
+    context = SimpleNamespace(name="llama_cpp", base_url="http://127.0.0.1:8081/v1")
+
+    child_env = rb._provider_child_environment(context)
+
+    assert child_env["OPENAI_API_KEY"] == "local-test-token"
+    assert child_env["LLM_API_KEY"] == "local-test-token"
+    assert child_env["TOOL_EVAL_API_KEY"] == "local-test-token"
+
+
+class TestCustomComparisonManifest:
+    @staticmethod
+    def _run_custom(
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        stdout: str,
+    ) -> tuple[MagicMock, SimpleNamespace]:
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+        (data_dir / "data_science.jsonl").write_text("{}\n", encoding="utf-8")
+        monkeypatch.setattr(rb, "DATA_DIR", str(data_dir))
+        monkeypatch.setattr(rb, "_provider_child_environment", lambda _context: {})
+        process = MagicMock(returncode=0, stdout=stdout, stderr="")
+        context = SimpleNamespace(name="llama_cpp", base_url="http://127.0.0.1:18089/v1")
+        return process, context
+
+    def test_custom_manifest_execution_ids_are_returned_to_launcher(self, monkeypatch, tmp_path):
+        selected = ["161"]
+        process, context = self._run_custom(
+            monkeypatch,
+            tmp_path,
+            '[MANIFEST_TASK_IDS] ["161"]\nAverage score: 0%\n',
+        )
+        with patch.object(rb.subprocess, "run", return_value=process):
+            result = rb.run_custom_benchmark(
+                {"key": "publisher/model@q4_k_m", "registry_key": "publisher/model@q4_k_m", "display": "Model"},
+                {"name": "DS1000", "file": "data_science.jsonl", "category": "coding"},
+                sample_size=1,
+                selected_task_ids=selected,
+                provider_context=context,
+            )
+
+        assert result is not None
+        assert result["selected_ids"] == selected
+
+    def test_custom_manifest_rejects_different_subprocess_task_ids(self, monkeypatch, tmp_path):
+        process, context = self._run_custom(
+            monkeypatch,
+            tmp_path,
+            '[MANIFEST_TASK_IDS] ["other"]\nAverage score: 100%\n',
+        )
+        with patch.object(rb.subprocess, "run", return_value=process):
+            with pytest.raises(ValueError, match="did not confirm"):
+                rb.run_custom_benchmark(
+                    {"key": "publisher/model@q4_k_m", "registry_key": "publisher/model@q4_k_m", "display": "Model"},
+                    {"name": "DS1000", "file": "data_science.jsonl", "category": "coding"},
+                    sample_size=1,
+                    selected_task_ids=["161"],
+                    provider_context=context,
+                )
+
+
+def test_launcher_unloads_model_when_manifest_execution_fails(monkeypatch):
+    args = SimpleNamespace(thinking=False)
+    model = {"key": "publisher/model@q4_k_m", "display": "Model"}
+    provider_context = SimpleNamespace(
+        name="llama_cpp",
+        base_url="http://127.0.0.1:18089/v1",
+        capabilities=SimpleNamespace(can_unload_models=True),
+    )
+    monkeypatch.setattr(rb, "_parse_args", lambda: (args, None))
+    monkeypatch.setattr(rb, "_acquire_single_instance_lock", lambda: None)
+    monkeypatch.setattr(rb, "get_provider_context", lambda: provider_context)
+    monkeypatch.setattr(rb, "get_available_models", lambda **_kwargs: [model])
+    monkeypatch.setattr(rb, "_resolve_models", lambda _args, available: available)
+    monkeypatch.setattr(rb, "_resolve_benchmarks", lambda _args: [{"name": "DS1000"}])
+    monkeypatch.setattr(rb, "_validate_comparison_manifest_for_run", lambda *_args: {"pipelines": {}})
+    monkeypatch.setattr(rb, "_start_proxy_if_needed", lambda *_args: None)
+    monkeypatch.setattr(rb, "_check_registry_for_model", lambda *_args: False)
+    monkeypatch.setattr(rb, "_load_model", lambda *_args: "publisher/model@q4_k_m")
+    monkeypatch.setattr(rb, "_run_benchmarks_for_model", lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError("manifest mismatch")))
+    stop_proxy = MagicMock()
+    unload = MagicMock(return_value=True)
+    monkeypatch.setattr(rb, "_stop_lmeval_proxy", stop_proxy)
+    monkeypatch.setattr(rb, "unload_all", unload)
+
+    with pytest.raises(ValueError, match="manifest mismatch"):
+        rb.main()
+
+    stop_proxy.assert_called_once_with()
+    unload.assert_called_once_with()
 
 
 def _patch_gpt_oss_registry(mocker):
@@ -843,6 +943,79 @@ class TestRunAgentic:
 
         assert _selected(calls[0]) == _selected(calls[1])
         assert _selected(calls[0]) != _selected(calls[2])
+
+    def test_manifest_selection_is_passed_and_verified_against_result(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(rb, "RESULTS_DIR", str(tmp_path))
+        selected = [rb.TOOL_EVAL_SCENARIO_IDS[0]]
+        fake_proc = MagicMock()
+        fake_proc.returncode = 0
+        fake_proc.stdout = io.StringIO("")
+        fake_proc.stderr = io.StringIO("")
+
+        def _fake_popen(cmd, *args, **kwargs):
+            json_path = cmd[cmd.index("--json-file") + 1]
+            with open(json_path, "w", encoding="utf-8") as handle:
+                json.dump(
+                    {"scores": {"scenario_results": [{"scenario_id": selected[0], "score": 100}]}},
+                    handle,
+                )
+            return fake_proc
+
+        with patch.object(rb.subprocess, "Popen", side_effect=_fake_popen) as popen:
+            result = rb.run_agentic(
+                {"key": "manifest-model", "display": "Manifest Model"},
+                limit=1,
+                seed=7,
+                selected_task_ids=selected,
+            )
+
+        command = popen.call_args.args[0]
+        scenario_index = command.index("--scenarios")
+        assert command[scenario_index + 1] == selected[0]
+        assert result["selected_ids"] == selected
+
+    def test_manifest_selection_rejects_different_executed_scenario(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(rb, "RESULTS_DIR", str(tmp_path))
+        selected = [rb.TOOL_EVAL_SCENARIO_IDS[0]]
+        different = rb.TOOL_EVAL_SCENARIO_IDS[1]
+        fake_proc = MagicMock()
+        fake_proc.returncode = 0
+        fake_proc.stdout = io.StringIO("")
+        fake_proc.stderr = io.StringIO("")
+
+        def _fake_popen(cmd, *args, **kwargs):
+            json_path = cmd[cmd.index("--json-file") + 1]
+            with open(json_path, "w", encoding="utf-8") as handle:
+                json.dump(
+                    {"scores": {"scenario_results": [{"scenario_id": different, "score": 100}]}},
+                    handle,
+                )
+            return fake_proc
+
+        with patch.object(rb.subprocess, "Popen", side_effect=_fake_popen):
+            with pytest.raises(ValueError, match="did not verify"):
+                rb.run_agentic(
+                    {"key": "manifest-model", "display": "Manifest Model"},
+                    limit=1,
+                    seed=7,
+                    selected_task_ids=selected,
+                )
+
+
+def test_lmeval_manifest_ids_are_verified_from_fresh_sample_log(tmp_path):
+    task_name = "arc_challenge_chat"
+    sample_log = tmp_path / f"samples_{task_name}_2026-09-27.jsonl"
+    sample_log.write_text(
+        '{"doc_id": 0, "resps": []}\n{"doc_id": 1, "resps": []}\n',
+        encoding="utf-8",
+    )
+
+    assert _verify_lmeval_sample_log(str(tmp_path), task_name, ["doc:0", "doc:1"]) == [
+        "doc:0",
+        "doc:1",
+    ]
+    with pytest.raises(ValueError, match="differ from comparison manifest"):
+        _verify_lmeval_sample_log(str(tmp_path), task_name, ["doc:1", "doc:0"])
 
 
 # ======================================================================

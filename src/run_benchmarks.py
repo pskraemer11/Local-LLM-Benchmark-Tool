@@ -69,6 +69,7 @@ import threading
 import time
 import warnings
 from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import psutil
@@ -105,6 +106,7 @@ from benchmark_config import (
     TOOL_EVAL_SCENARIO_IDS,
     get_model_config,
 )
+from comparison_manifest import load_comparison_manifest, validate_comparison_manifest
 from model_manager import (
     configure_provider,
     get_available_models,
@@ -771,6 +773,30 @@ def select_benchmarks_interactive() -> list[dict[str, Any]] | None:
 # parallel benchmarking is added, wrap mutations with a threading.Lock.
 IS_THINKING_ENABLED = False
 
+
+def _local_openai_auth_token() -> str | None:
+    """Return the configured local OpenAI-compatible token without logging it."""
+    return os.environ.get("LMS_OpenAI_AUTH_TOKEN") or os.environ.get("LMS_OPENAI_AUTH_TOKEN")
+
+
+def _provider_child_environment(provider_context: ProviderContext) -> dict[str, str]:
+    """Build a child-process environment with the local API token wired through.
+
+    LM Studio deliberately accepts an arbitrary value when API authentication is
+    enabled.  The project nevertheless uses the explicit user-owned token so
+    LM Studio, evalplus, lm-eval, and tool-eval all exercise the same auth path.
+    """
+    child_env = {**os.environ, "LLM_PROVIDER": provider_context.name,
+                 "LLM_API_BASE": provider_context.base_url,
+                 "PYTHONIOENCODING": "utf-8"}
+    token = _local_openai_auth_token()
+    if token:
+        child_env["OPENAI_API_KEY"] = token
+        child_env["LLM_API_KEY"] = token
+        # tool-eval-bench reads its credential from this dedicated variable.
+        child_env["TOOL_EVAL_API_KEY"] = token
+    return child_env
+
 def _derive_category(bench_name: str) -> str:
     """Map a benchmark name to its config category ("coding", "math", ...)."""
     bench_name_lower = (bench_name or "").lower()
@@ -1015,6 +1041,7 @@ def run_custom_benchmark(
     is_structured_output_disabled: bool = False,
     should_keep_response: bool = False,
     provider_context: ProviderContext | None = None,
+    selected_task_ids: list[str] | None = None,
 ) -> PipelineResult | None:
     model_identifier = model_info.get("registry_key", model_info["key"])
     model_display = model_info["display"]
@@ -1034,6 +1061,8 @@ def run_custom_benchmark(
     ]
     if seed is not None:
         cmd.extend(["--seed", str(seed)])
+    if selected_task_ids is not None:
+        cmd.extend(["--selected-task-ids", json.dumps(selected_task_ids, ensure_ascii=False)])
     # Qwen3.5 compatibility: enable systemless prompt embedding
     if _is_qwen3_5_model(model_identifier):
         cmd.append("--qwen-prompt")
@@ -1058,12 +1087,7 @@ def run_custom_benchmark(
         cmd.append("--keep-response")
     t0 = time.time()
     context = provider_context or get_provider_context()
-    child_env = {
-        **os.environ,
-        "LLM_PROVIDER": context.name,
-        "LLM_API_BASE": context.base_url,
-        "PYTHONIOENCODING": "utf-8",
-    }
+    child_env = _provider_child_environment(context)
     result = subprocess.run(
         cmd,
         capture_output=True,
@@ -1085,6 +1109,23 @@ def run_custom_benchmark(
     stderr_text = result.stderr or ""
     if output.strip():
         print(output)
+    executed_ids: list[str] | None = None
+    if selected_task_ids is not None:
+        marker = next(
+            (line[len("[MANIFEST_TASK_IDS] "):]
+             for line in full_output.splitlines()
+             if line.startswith("[MANIFEST_TASK_IDS] ")),
+            None,
+        )
+        try:
+            executed_ids = json.loads(marker) if marker is not None else None
+        except json.JSONDecodeError:
+            executed_ids = None
+        if executed_ids != selected_task_ids:
+            raise ValueError(
+                "custom pipeline did not confirm the comparison-manifest task IDs: "
+                f"expected={selected_task_ids}, actual={executed_ids}"
+            )
     # Channel-Error Auto-Fallback: if the subprozess reports a LM Studio
     # Channel-Error (structured-output + lazy-grammar conflict, see Server-Log
     # 12.07.2026 L58671/L94468), transparently retry once with
@@ -1097,7 +1138,8 @@ def run_custom_benchmark(
         return run_custom_benchmark(model_info, bench, sample_size=sample_size,
                                    seed=seed, is_structured_output_disabled=True,
                                    should_keep_response=should_keep_response,
-                                   provider_context=context)
+                                   provider_context=context,
+                                   selected_task_ids=selected_task_ids)
     if result.returncode != 0:
         print(f"  [ERROR] Returncode {result.returncode}")
         print(stderr_text[-500:])
@@ -1109,9 +1151,17 @@ def run_custom_benchmark(
         if m:
             score = float(m.group(1)) / 100.0
     print(f"  [OK] {bench['name']} done ({elapsed:.0f}s)")
-    return {"pipeline": "custom", "bench": bench["name"], "category": bench.get("category", ""),
-            "model": model_display,
-            "score": score, "thinking": IS_THINKING_ENABLED}
+    pipeline_result: PipelineResult = {
+        "pipeline": "custom",
+        "bench": bench["name"],
+        "category": bench.get("category", ""),
+        "model": model_display,
+        "score": score,
+        "thinking": IS_THINKING_ENABLED,
+    }
+    if executed_ids is not None:
+        pipeline_result["selected_ids"] = executed_ids
+    return pipeline_result
 
 
 # ── Pipeline 2/4: EvalPlus (HumanEval+, MBPP+) ────────────────
@@ -1152,6 +1202,7 @@ def run_evalplus(
     is_reasoning_model: bool = False,
     num_parallel: int = 1,
     provider_context: ProviderContext | None = None,
+    selected_task_ids: list[str] | None = None,
 ) -> PipelineResult | None:
     # Some models (e.g. DeepSeek Coder) generate regex patterns like "\d+"
     # instead of r"\d+", causing SyntaxWarning spam from Python 3.12+.
@@ -1184,8 +1235,16 @@ def run_evalplus(
     task_ids = sorted(all_tasks.keys(), key=lambda k: int(k.split("/")[1]))
     rng = random.Random(seed) if seed is not None else random
     n_select = min(sample_size, len(task_ids))
-    selected_ids = set(rng.sample(task_ids, n_select))
-    filtered_tasks = {k: v for k, v in all_tasks.items() if k in selected_ids}
+    if selected_task_ids is None:
+        selected = rng.sample(task_ids, n_select)
+    else:
+        if len(selected_task_ids) > sample_size or len(set(selected_task_ids)) != len(selected_task_ids):
+            raise ValueError("comparison manifest EvalPlus selected_ids are duplicate or exceed sample_size")
+        missing_ids = [task_id for task_id in selected_task_ids if task_id not in all_tasks]
+        if missing_ids:
+            raise ValueError(f"comparison manifest EvalPlus task IDs are absent from {dataset}: {missing_ids}")
+        selected = selected_task_ids
+    filtered_tasks = {task_id: all_tasks[task_id] for task_id in selected}
 
     print(f"  [codegen] {dataset}: {len(filtered_tasks)}/{len(all_tasks)} tasks (seed={seed})")
     t0 = time.time()
@@ -1202,6 +1261,12 @@ def run_evalplus(
     gen_temp = float(evaluation_parameters.get("temperature", 0.0))
     print(f"  {_evaluation_summary(model_identifier, _derive_category(dataset))}")
     context = provider_context or get_provider_context()
+    token = _local_openai_auth_token()
+    if token:
+        # evalplus constructs its OpenAI client in-process and reads the
+        # conventional environment variables at construction time.
+        os.environ["OPENAI_API_KEY"] = token
+        os.environ["LLM_API_KEY"] = token
     model_obj = make_model(
         model=EVALPLUS_SENTINEL_MODEL,
         backend="openai",
@@ -1372,11 +1437,28 @@ def run_evalplus(
                 score = float(m.group(1))
     if r2.returncode != 0:
         print(f"  [WARN] evaluate stderr: {r2.stderr[-300:]}")
+    if selected_task_ids is not None:
+        actual_ids: list[str] = []
+        with open(samples_path, encoding="utf-8") as samples_file:
+            for line_number, line in enumerate(samples_file, 1):
+                if not line.strip():
+                    continue
+                sample_record = json.loads(line)
+                if not isinstance(sample_record, dict) or not isinstance(sample_record.get("task_id"), str):
+                    raise ValueError(f"EvalPlus sample row {line_number} has no stable task_id")
+                actual_ids.append(sample_record["task_id"])
+        expected_ids = list(filtered_tasks)
+        if len(actual_ids) != len(expected_ids) or set(actual_ids) != set(expected_ids):
+            raise ValueError(
+                "EvalPlus generated task IDs differ from comparison manifest: "
+                f"expected={expected_ids}, actual={actual_ids}"
+            )
     elapsed = time.time() - t0
     print(f"  [OK] {bench['name']} done ({elapsed:.0f}s)")
     return {"pipeline": "evalplus", "bench": bench["name"], "category": bench.get("category", ""),
             "model": model_display,
-            "samples": samples_path, "score": score, "thinking": IS_THINKING_ENABLED}
+            "samples": samples_path, "score": score, "thinking": IS_THINKING_ENABLED,
+            "selected_ids": list(filtered_tasks)}
 
 
 # ── Pipeline 3/4: LM-Eval (ARC, HellaSwag, TruthfulQA, MATH-500, BBH) ─
@@ -1384,6 +1466,39 @@ def run_evalplus(
 # For MMLU-Pro there is a separate modified function (see below),
 # which stratifies the benchmark across 14 subset tasks.
 # Returns: dict with pipeline="lmeval", score (0-1).
+def _verify_lmeval_sample_log(
+    output_dir: str,
+    task_name: str,
+    expected_doc_ids: list[str],
+) -> list[str]:
+    """Fail unless lm-eval logged exactly the doc indices bound by Variant B."""
+    sample_files = [
+        os.path.join(directory, name)
+        for directory, _subdirs, names in os.walk(output_dir)
+        for name in names
+        if name.startswith(f"samples_{task_name}_") and name.endswith(".jsonl")
+    ]
+    if len(sample_files) != 1:
+        raise ValueError(
+            f"comparison manifest expected one fresh lm_eval sample log; found {len(sample_files)}"
+        )
+    actual_doc_ids: list[str] = []
+    with open(sample_files[0], encoding="utf-8") as samples_file:
+        for line_number, line in enumerate(samples_file, 1):
+            if not line.strip():
+                continue
+            sample_record = json.loads(line)
+            if not isinstance(sample_record, dict) or "doc_id" not in sample_record:
+                raise ValueError(f"lm_eval sample log row {line_number} has no doc_id")
+            actual_doc_ids.append(f"doc:{sample_record['doc_id']}")
+    if actual_doc_ids != expected_doc_ids:
+        raise ValueError(
+            "lm_eval executed document IDs differ from comparison manifest: "
+            f"expected={expected_doc_ids}, actual={actual_doc_ids}"
+        )
+    return actual_doc_ids
+
+
 def run_lmeval(
     model_info: AvailableModelInfo,
     bench: BenchmarkDef,
@@ -1391,6 +1506,7 @@ def run_lmeval(
     is_reasoning_model: bool = False,
     num_parallel: int = 1,
     provider_context: ProviderContext | None = None,
+    selected_doc_ids: list[str] | None = None,
 ) -> PipelineResult | None:
     model_identifier = model_info.get("registry_key", model_info["key"])
     model_display = model_info["display"]
@@ -1399,7 +1515,8 @@ def run_lmeval(
     api_model = model_info.get("_api_model") or model_info.get("variant") or model_identifier
     task_name = bench["task"]
     safe = model_identifier.replace("/", "_").replace("\\", "_")
-    output_dir = os.path.join(RESULTS_DIR, f"lmeval_{safe}")
+    run_suffix = f"_{time.time_ns()}" if selected_doc_ids is not None else ""
+    output_dir = os.path.join(RESULTS_DIR, f"lmeval_{safe}{run_suffix}")
     os.makedirs(output_dir, exist_ok=True)
 
     print(f"\n  >>> LM-Eval: {bench['name']} / {model_display}")
@@ -1479,7 +1596,7 @@ def run_lmeval(
         print(f"  [CFG] Custom task YAML: {yaml_path}")
         cmd.extend(["--include_path", os.path.dirname(yaml_path)])
 
-    lm_env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+    lm_env = _provider_child_environment(context)
     limit_scale = max(1.0, limit / 5.0)
     lmeval_base = PIPELINE_TIMEOUTS["lmeval_base"]
     base_timeout = (lmeval_base * 2 if is_reasoning_model else lmeval_base) * limit_scale
@@ -1592,9 +1709,13 @@ def run_lmeval(
     except (OSError, json.JSONDecodeError, KeyError, ValueError) as e:
         print(f"  [WARN] lm_eval score parsing: {e}")
 
-    return {"pipeline": "lmeval", "bench": bench["name"], "category": bench.get("category", ""),
-            "model": model_display,
-            "score": score, "thinking": IS_THINKING_ENABLED}
+    result: PipelineResult = {"pipeline": "lmeval", "bench": bench["name"], "category": bench.get("category", ""),
+                              "model": model_display,
+                              "score": score, "thinking": IS_THINKING_ENABLED}
+    if selected_doc_ids is not None:
+        actual_doc_ids = _verify_lmeval_sample_log(output_dir, task_name, selected_doc_ids)
+        result["selected_ids"] = actual_doc_ids
+    return result
 
 
 # ── MMLU-Pro (ARCHIVIERT 12.07.2026) ──
@@ -1618,6 +1739,7 @@ def run_agentic(
     mode: str = "random",
     seed: int | None = None,
     provider_context: ProviderContext | None = None,
+    selected_task_ids: list[str] | None = None,
 ) -> PipelineResult | None:
     """Agentic: tool-eval-bench with sample_size scenarios.
 
@@ -1631,7 +1753,16 @@ def run_agentic(
         print(f"      [WARN] Unknown agentic mode '{mode}' -> 'random'")
     all_ids = AGENTIC_SAFETY_SCENARIO_IDS if mode == "safety" else TOOL_EVAL_SCENARIO_IDS
     rng = random.Random(seed)
-    selected = rng.sample(all_ids, min(limit, len(all_ids)))
+    if selected_task_ids is None:
+        selected = rng.sample(all_ids, min(limit, len(all_ids)))
+    else:
+        if (
+            len(selected_task_ids) > limit
+            or len(set(selected_task_ids)) != len(selected_task_ids)
+            or any(task_id not in all_ids for task_id in selected_task_ids)
+        ):
+            raise ValueError("comparison manifest Agentic selected_ids are invalid for the selected mode")
+        selected = selected_task_ids
 
     model_identifier = model_info.get("registry_key", model_info["key"])
     model_display = model_info["display"]
@@ -1659,8 +1790,10 @@ def run_agentic(
 
     scenario_timeout = PIPELINE_TIMEOUTS["agentic_scenario"]
     total_timeout = limit * scenario_timeout + 600  # 10 min buffer
-    lm_env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+    lm_env = _provider_child_environment(context)
     score = None
+    data: dict[str, Any] = {}
+    run_succeeded = False
     stdout_lines: list[str] = []
     stderr_lines: list[str] = []
     try:
@@ -1701,6 +1834,7 @@ def run_agentic(
         elapsed = time.time() - t0
         if proc.returncode == 0:
             ok(f"Agentic done ({elapsed:.0f}s)")
+            run_succeeded = True
         else:
             warn(f"tool-eval-bench returncode={proc.returncode}")
             if stderr_lines:
@@ -1728,9 +1862,24 @@ def run_agentic(
         elapsed = time.time() - t0
         warn(f"Agentic ERROR: {e}")
 
+    if selected_task_ids is not None:
+        scores_meta = data.get("scores", {}) if isinstance(data, dict) else {}
+        scenario_results = scores_meta.get("scenario_results", []) if isinstance(scores_meta, dict) else []
+        actual_ids = [
+            row.get("scenario_id")
+            for row in scenario_results
+            if isinstance(row, dict) and isinstance(row.get("scenario_id"), str)
+        ] if isinstance(scenario_results, list) else []
+        if not run_succeeded or len(actual_ids) != len(selected) or set(actual_ids) != set(selected):
+            raise ValueError(
+                "Agentic run did not verify the comparison-manifest scenario IDs: "
+                f"expected={selected}, actual={actual_ids}, succeeded={run_succeeded}"
+            )
+
     return {"pipeline": "agentic", "bench": "Agentic", "category": "agentic",
             "model": model_display,
-            "score": score, "thinking": IS_THINKING_ENABLED}
+            "score": score, "thinking": IS_THINKING_ENABLED,
+            "selected_ids": list(selected)}
 
 
 def save_summary_csv(results: list[dict[str, Any]], model_info: dict[str, Any] | None = None,
@@ -1767,6 +1916,7 @@ RUN_SPEC_DEST_MAP = {
     "no_structured_output": "no_structured_output", "no-structured-output": "no_structured_output",
     "unload_between": "unload_between", "unload-between": "unload_between",
     "keep_response": "keep_response", "keep-response": "keep_response",
+    "comparison_manifest": "comparison_manifest", "comparison-manifest": "comparison_manifest",
 }
 
 # YAML-Schlüssel, die Listen erlauben (Liste -> Komma-String).
@@ -1783,6 +1933,7 @@ RUN_SPEC_PARSER_DEFAULTS: dict[str, Any] = {
     "sample_size": 20, "model": None, "benchmarks": None, "seed": None,
     "thinking": False, "agentic_mode": "random", "exclude_benchmarks": None,
     "no_structured_output": False, "unload_between": False, "keep_response": False,
+    "comparison_manifest": None,
 }
 
 
@@ -1909,9 +2060,9 @@ def _run_spec_yaml() -> Any:
 # Argument-Definitionen, geteilt zwischen Haupt- und Probe-Parser.
 _LAUNCHER_ARG_SPECS: list[tuple[tuple[str, ...], dict[str, Any]]] = [
     (("--provider",), {"type": str, "default": None,
-                       "help": "Inference backend (e.g. llama_cpp or lmstudio; default: environment)"}),
+                       "help": "Inference backend (llama_cpp, lmstudio, ...); default $env:LLM_PROVIDER"}),
     (("--api-base",), {"type": str, "default": None,
-                       "help": "OpenAI-compatible provider base URL (overrides the provider default)"}),
+                       "help": "OpenAI-compatible provider base URL; default $env:LLM_API_BASE"}),
     (("--sample-size", "-s"), {"type": int, "default": 20,
                                "help": "Tasks per benchmark (default: 20)"}),
     (("--model", "-m"), {"type": str, "default": None,
@@ -1933,6 +2084,8 @@ _LAUNCHER_ARG_SPECS: list[tuple[tuple[str, ...], dict[str, Any]]] = [
                                      "Use if KV-cache/GPU memory degradation occurs."}),
     (("--keep-response",), {"action": "store_true",
                             "help": "Write the full LLM response to per-task CSVs (default: truncated to 200 chars, see W1 in Code-Review_2026-07-12.md)"}),
+    (("--comparison-manifest",), {"type": str, "default": None,
+                                   "help": "Require a Variant-B manifest covering one benchmark from each pipeline"}),
 ]
 
 
@@ -2040,6 +2193,30 @@ def _resolve_benchmarks(args: Any) -> list[BenchmarkDef]:
             sys.exit(1)
     print(f"  Benchmarks: {', '.join(b['name'] for b in benchmarks)}")
     return benchmarks
+
+
+def _validate_comparison_manifest_for_run(
+    args: Any,
+    benchmarks: list[BenchmarkDef],
+) -> dict[str, Any] | None:
+    """Fail closed when Variant-B coverage or source evidence is incomplete."""
+    if not args.comparison_manifest:
+        return None
+    manifest = load_comparison_manifest(Path(args.comparison_manifest))
+    errors = validate_comparison_manifest(
+        manifest,
+        [str(bench["name"]) for bench in benchmarks],
+        sample_size=args.sample_size,
+        seed=args.seed,
+        project_root=Path(PROJECT_ROOT),
+    )
+    if errors:
+        print("[ERROR] Comparison manifest rejected:")
+        for message in errors:
+            print(f"  - {message}")
+        sys.exit(2)
+    print(f"  Comparison manifest: Variant B accepted ({args.comparison_manifest})")
+    return manifest
 
 
 def _start_proxy_if_needed(models: list[AvailableModelInfo], benchmarks: list[BenchmarkDef]) -> None:
@@ -2170,6 +2347,7 @@ def _run_benchmarks_for_model(
     is_reasoning_model: bool,
     all_summary: list[dict],
     provider_context: ProviderContext | None = None,
+    comparison_manifest: dict[str, Any] | None = None,
 ) -> list[dict]:
     """Benchmark-Dispatch: Custom/EvalPlus/LM-Eval/Agentic für ein Modell."""
     context = provider_context or get_provider_context()
@@ -2186,12 +2364,35 @@ def _run_benchmarks_for_model(
         return model_results
 
     for bidx, bench in enumerate(benchmarks):
+        bname = bench["name"]
+        pipeline_entries = comparison_manifest.get("pipelines", {}) if comparison_manifest else {}
+        pipeline_for_benchmark = next(
+            (
+                pipeline
+                for pipeline, entry in pipeline_entries.items()
+                if isinstance(entry, dict)
+                and str(entry.get("benchmark", "")).casefold() == bname.casefold()
+            ),
+            None,
+        ) if isinstance(pipeline_entries, dict) else None
+        expected_ids: list[str] | None = None
+        if pipeline_for_benchmark is not None:
+            entry = pipeline_entries[pipeline_for_benchmark]
+            selected = entry.get("selected_ids")
+            if not isinstance(selected, list) or any(not isinstance(item, str) for item in selected):
+                raise ValueError(
+                    f"comparison manifest has invalid selected_ids for {pipeline_for_benchmark}"
+                )
+            expected_ids = selected
+
         if args.unload_between and bidx > 0:
             print("  [INFO] Unloading/reloading model between benchmarks...")
             unload_all()
             time.sleep(2)
             ok, api_model = load_model(model_load_key)
             if not ok:
+                if expected_ids is not None:
+                    raise RuntimeError(f"could not reload model before manifest benchmark {bench['name']}")
                 print(f"  [ERROR] Reload before {bench['name']} failed. Skipping.")
                 continue
             print("  [INFO] Waiting for API re-initialization...")
@@ -2199,7 +2400,6 @@ def _run_benchmarks_for_model(
                 print("  [WARN] Model readiness check timed out - continuing anyway")
             model_info["_api_model"] = api_model
 
-        bname = bench["name"]
         ep_names = {b["name"] for b in EVALPLUS_BENCHMARKS}
         lmeval_names = {b["name"] for b in LMEVAL_BENCHMARKS}
         agentic_names = {b["name"] for b in AGENTIC_BENCHMARKS}
@@ -2213,32 +2413,47 @@ def _run_benchmarks_for_model(
                 result = run_agentic(model_info, limit=args.sample_size,
                                      mode=getattr(args, "agentic_mode", "random"),
                                      seed=args.seed,
-                                     provider_context=context)
+                                     provider_context=context,
+                                     selected_task_ids=expected_ids)
             elif bname in ep_names:
                 result = run_evalplus(model_info, bench, sample_size=args.sample_size,
                                       seed=args.seed, is_reasoning_model=is_reasoning_model,
-                                      num_parallel=np, provider_context=context)
+                                      num_parallel=np, provider_context=context,
+                                      selected_task_ids=expected_ids)
             elif bname in lmeval_names:
                 per_limit = max(bench.get("min_limit", 0), args.sample_size)
                 result = run_lmeval(model_info, bench, limit=per_limit,
                                     is_reasoning_model=is_reasoning_model, num_parallel=np,
-                                    provider_context=context)
+                                    provider_context=context,
+                                    selected_doc_ids=expected_ids)
 
             else:
                 result = run_custom_benchmark(model_info, bench, sample_size=args.sample_size,
                                               seed=args.seed, is_structured_output_disabled=args.no_structured_output,
                                               should_keep_response=args.keep_response,
-                                              provider_context=context)
+                                              provider_context=context,
+                                              selected_task_ids=expected_ids)
 
             if result:
+                if expected_ids is not None and result.get("selected_ids") != expected_ids:
+                    raise ValueError(
+                        f"{bname} result is not bound to manifest task IDs: "
+                        f"expected={expected_ids}, actual={result.get('selected_ids')}"
+                    )
                 model_results.append(result)
                 all_summary.append(result)
+            elif expected_ids is not None:
+                raise ValueError(f"{bname} did not produce a result for its comparison-manifest selection")
 
             _ensure_model_still_loaded(model_info["key"], model_load_key, bench_name=bname,
                                        provider_context=context)
         except subprocess.TimeoutExpired:
+            if expected_ids is not None:
+                raise
             print(f"  [ERROR] {bench['name']} timeout (expired)")
         except (subprocess.SubprocessError, OSError, ValueError, TypeError, KeyError) as e:
+            if expected_ids is not None:
+                raise
             print(f"  [ERROR] {bench['name']}: {e}")
 
     return model_results
@@ -2298,6 +2513,7 @@ def main() -> None:
     available = get_available_models(exclude_keywords=EXCLUDE_KEYWORDS, registry_only=True)
     models = _resolve_models(args, available)
     benchmarks = _resolve_benchmarks(args)
+    comparison_manifest = _validate_comparison_manifest_for_run(args, benchmarks)
     _start_proxy_if_needed(models, benchmarks)
 
     all_summary: list[dict] = []
@@ -2309,6 +2525,8 @@ def main() -> None:
 
         is_reasoning_model = _check_registry_for_model(model_identifier, model_display)
         if is_reasoning_model is None:
+            if comparison_manifest is not None:
+                sys.exit(2)
             continue
 
         print(f"\n{'=' * 60}")
@@ -2322,17 +2540,30 @@ def main() -> None:
         api_model = _load_model(model_info, model_load_key, args)
         if api_model is None:
             print("  [ERROR] Loading failed. Skipping.")
+            if comparison_manifest is not None:
+                sys.exit(2)
             continue
 
-        model_results = _run_benchmarks_for_model(
-            model_info,
-            benchmarks,
-            args,
-            is_reasoning_model,
-            all_summary,
-            provider_context=provider_context,
-        )
-        _write_intermediate_summary(model_results, model_info, args)
+        try:
+            model_results = _run_benchmarks_for_model(
+                model_info,
+                benchmarks,
+                args,
+                is_reasoning_model,
+                all_summary,
+                provider_context=provider_context,
+                comparison_manifest=comparison_manifest,
+            )
+            _write_intermediate_summary(model_results, model_info, args)
+        except BaseException:
+            # A fail-closed manifest check or user interruption must not leave
+            # a process-owned llama-server holding VRAM after the launcher exits.
+            try:
+                _stop_lmeval_proxy()
+            finally:
+                if provider_context.capabilities.can_unload_models:
+                    unload_all()
+            raise
 
     _stop_lmeval_proxy()
     _print_final_summary(all_summary)

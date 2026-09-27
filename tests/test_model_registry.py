@@ -6,6 +6,8 @@ import os
 import sys
 from typing import TYPE_CHECKING
 
+import pytest
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from model_registry import ModelRegistry
@@ -74,6 +76,8 @@ def test_model_registry_clips_context_to_native_limit(tmp_path: Path) -> None:
 
 
 def test_model_registry_derives_provider_specific_runtime(tmp_path: Path) -> None:
+    main_path = tmp_path / "gpt-oss-20b-Q8_0.gguf"
+    main_path.write_bytes(b"GGUF main placeholder")
     draft_path = tmp_path / "draft" / "dflash-q4_0.gguf"
     draft_path.parent.mkdir(parents=True)
     draft_path.write_bytes(b"GGUF draft placeholder")
@@ -91,6 +95,7 @@ def test_model_registry_derives_provider_specific_runtime(tmp_path: Path) -> Non
             "reasoning_format": "deepseek",
             "llama_cpp": {"reasoning_effort": "medium"},
             "local": {
+                "model_path": str(main_path),
                 "companions": {"draft": str(draft_path)},
                 "llama_cpp": {
                     "speculative": {
@@ -143,6 +148,19 @@ def test_model_registry_derives_provider_specific_runtime(tmp_path: Path) -> Non
     )["num_experts"] == 32
 
 
+def test_instruct_runtime_disables_automatic_reasoning_parser(tmp_path: Path) -> None:
+    registry = {
+        "kookiesxy/muse-glimmer-30b@iq1_s": {
+            "reasoning": "instruct",
+            "architecture_family": "muse-glimmer",
+        }
+    }
+    runtime = ModelRegistry(lambda: registry, template_root=tmp_path).provider_runtime(
+        "kookiesxy/muse-glimmer-30b@iq1_s", "llama_cpp"
+    )
+    assert runtime["reasoning_format"] == "none"
+
+
 def test_model_registry_quant_list_falls_back_safely(tmp_path: Path) -> None:
     registry = {
         "example/model@q4_k_m": {
@@ -189,11 +207,14 @@ def test_model_registry_keeps_integrated_mtp_without_draft_path(tmp_path: Path) 
 
 
 def test_model_registry_resolves_separate_mtp_companion(tmp_path: Path) -> None:
+    main_path = tmp_path / "gemma-4-12b-it-Q6_K.gguf"
+    main_path.write_bytes(b"GGUF main placeholder")
     mtp_path = tmp_path / "mtp-gemma-Q8_0.gguf"
     mtp_path.write_bytes(b"GGUF placeholder")
     registry = {
         "unsloth/gemma-4-12b-it@q6_k": {
             "local": {
+                "model_path": str(main_path),
                 "companions": {"mtp": str(mtp_path)},
                 "llama_cpp": {
                     "speculative": {
@@ -217,7 +238,7 @@ def test_model_registry_resolves_separate_mtp_companion(tmp_path: Path) -> None:
     assert runtime["draft_model_path"] == str(mtp_path)
 
 
-def test_model_registry_does_not_emit_companion_cli_without_companion_path(tmp_path: Path) -> None:
+def test_model_registry_rejects_companion_cli_without_companion_path(tmp_path: Path) -> None:
     registry = {
         "gguf-org/muse-glimmer-30b@nvfp4": {
             "local": {
@@ -233,14 +254,34 @@ def test_model_registry_does_not_emit_companion_cli_without_companion_path(tmp_p
     }
     model_registry = ModelRegistry(lambda: registry, template_root=tmp_path)
 
-    runtime = model_registry.provider_runtime(
-        "gguf-org/muse-glimmer-30b@nvfp4", "llama_cpp"
-    )
+    with pytest.raises(ValueError, match="invalid speculative bundle"):
+        model_registry.provider_runtime("gguf-org/muse-glimmer-30b@nvfp4", "llama_cpp")
 
-    assert runtime["spec_kind"] == "draft"
-    assert runtime["spec_method"] == "dflash"
-    assert "spec_type" not in runtime
-    assert "draft_model_path" not in runtime
+
+def test_model_registry_rejects_incompatible_dflash_companion(tmp_path: Path) -> None:
+    main_path = tmp_path / "qwen3.6-27b-Q6_K.gguf"
+    helper_path = tmp_path / "qwen3.8-27b-dflash2-Q8_0.gguf"
+    main_path.write_bytes(b"GGUF main")
+    helper_path.write_bytes(b"GGUF helper")
+    registry = {
+        "unsloth/qwen3.6-27b@q6_k": {
+            "local": {
+                "model_path": str(main_path),
+                "companions": {"draft": str(helper_path)},
+                "llama_cpp": {
+                    "speculative": {
+                        "type": "draft",
+                        "method": "dflash",
+                        "companion_role": "draft",
+                    }
+                },
+            }
+        }
+    }
+    model_registry = ModelRegistry(lambda: registry, template_root=tmp_path)
+
+    with pytest.raises(ValueError, match="Qwen generation mismatch"):
+        model_registry.provider_runtime("unsloth/qwen3.6-27b@q6_k", "llama_cpp")
 
 
 def test_model_registry_never_first_wins_on_publisher_collision(tmp_path: Path) -> None:

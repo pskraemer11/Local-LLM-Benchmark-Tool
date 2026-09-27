@@ -133,6 +133,10 @@ FIELD_OWNERSHIP: dict[str, FieldRule] = {
         description="Immutable GGUF architectural expert maximum",
     ),
     "custom_template": FieldRule("registry", "registry", False),
+    "local": FieldRule(
+        "registry", "registry", False,
+        description="Maschinenlokale GGUF-/LM-Studio-Config- und Companion-Bindings; registry_tool materialisiert nur eindeutig belegte Pfade",
+    ),
 }
 
 

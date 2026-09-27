@@ -1864,4 +1864,131 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 - `src/inventory.py`, `src/registry_tool.py`, `src/model_identity.py`:
   Implementierung der Join-Grenzen.
 - `CHANGELOG.md`: Verweis auf diesen Checkpoint.
+
+=============== Compaction 27.09.2026 / fail-closed bindings ===============
+## Objective
+- Die Registry bleibt lokal und wird nicht mehr vom GitHub-Repository verteilt;
+  Variant-B-Manifeste, Quant-Aufloesung, GGUF/JSON-Zuordnung und Companion-
+  Bindungen muessen an tatsaechlich ausgefuehrte, vorhandene Artefakte gebunden
+  sein.
+
+## Important Details
+- `doc-git/model_registry.yaml` wurde aus dem Git-Index entfernt; die lokale
+  Datei ist weiterhin vorhanden und durch `.gitignore` ignoriert. Die
+  erreichbaren GitHub-Refs/Versionen wurden auf absolute User-Pfade geprueft;
+  keine veroeffentlichte Version mit solchen Pfaden wurde gefunden, daher war
+  kein destruktives Umschreiben der Git-Historie erforderlich.
+- Explizite Quantisierung ist nun fail-closed. Ein GGUF/JSON-Paar muss denselben
+  Datei-/Paket-/Quant-Bezug nachweisen; ein generisches Config-Modell benoetigt
+  `local.config_scope: model` und genau einen Registry-Eigentuemer.
+- Gemeinsame Bundle-Pruefung deckt Sync, Validierung, Preset-Export und
+  llama.cpp-Laufzeit ab. Haupt-/Companion-Datei, GGUF-Header, Rolle, Methode und
+  belegte Familien-/Versionshinweise werden vor Bindung geprueft.
+- Variant-B-v2 verlangt Tasks aus allen vier Pipelines und Quell-Hashes; die
+  tatsaechlich zurueckgegebenen Ergebnis-IDs werden gegen die im Manifest
+  gewaehlt IDs validiert.
+- Verifikation: volle Suite `1184 passed`; `registry_tool.py validate --ci`
+  sowie Ruff fuer geaenderte Produktionsmodule bestanden. SampleSize-1-
+  llama.cpp-Smoke fuer `unsloth/lfm2.5-8b-a1b@mxfp4` lief mit `draft-dspark`
+  durch DS1000, EvalPlus, LM-Eval und Agentic. Scores (0/0/0/100) sind nur
+  technischer Ausfuehrungsnachweis. Port 18089 war danach frei; GPU-Belegung
+  306 MiB.
+- Der Prozess-lokale `LLM_PROVIDER=lmstudio` war fuer Tests erforderlich, weil
+  der persistente Userwert einen llama-server-Pfad statt eines symbolischen
+  Providers enthaelt; keine dauerhafte Umgebungsvariable wurde geaendert.
+- Security-Diff-Sweep fand keine absoluten User-Pfade in hinzugefuegten Zeilen;
+  zwei generische `token = _local_openai_auth_token()`-Stellen waren
+  Pattern-Scanner-False-Positives, keine Credentials. Der vollstaendige
+  Security-Plugin-Scan war nicht verfuegbar (TAC nicht erteilt).
+- Review Gate bleibt **PENDING**: fuer diesen Architektur-/Datenvertrag liegt
+  noch keine unabhaengige Review-Evidenz vor. Lokaler Commit kann nach Hook-
+  Pruefung erfolgen; kein Push, bis unabhaengige Review den Diff bestaetigt.
+  Ausserdem bleiben `AGENTS.md`, die erzeugten Review-Artefakte, die
+  Model-Parameters-Tabelle sowie zwei untracked Scratch-Verzeichnisse bewusst
+  unstaged und unangetastet.
+
+## Next Move
+1. `.githooks/pre-commit.ps1`/Commit-Hook bestehen lassen und lokalen Commit
+   erstellen.
+2. Unabhaengige Review fuer den staged Diff anfordern; BLOCKER/NON-BLOCKER
+   Befunde dokumentieren und erst nach Review-Freigabe den Push-Hook und Push
+   ausfuehren.
+
+## Relevant Files
+- `src/comparison_manifest.py`, `src/run_benchmarks.py`: v2-Manifestbindung.
+- `src/artifact_bundle.py`, `src/registry_tool.py`, `src/model_registry.py`:
+  Config-/Companion-Identitaet und fail-closed Preflight.
+- `src/custom_benchmark.py`: exakte quantisierte Modellauswahl.
+- `tests/test_artifact_bundle.py`, `tests/test_comparison_manifest.py` und
+  geaenderte Resolver-/Provider-Tests: positive und negative Regressionen.
+- `PLANUNG.md`, `README.md`, `doc-git/Architecture, Flow & ChangeLog_en.md`:
+  Entscheidung und Betriebsvertrag; `CHANGELOG.md`: konkrete Aenderungen.
 - `COMPACTIONS.md`: dieser vor Commit/Push erzeugte Arbeitsstand.
+
+=============== Compaction 26.09.2026 / 15:42 ================
+## Objective
+- Den bereits angeforderten Arbeitsstand nach Review kompaktiert und fuer
+  Commit/Push vorbereitet. Veroeffentlichung bleibt bis zur Klaerung der
+  unabhaengigen Review-Blocker angehalten.
+
+## Important Details
+- **Gate-Ergebnis:** `pre_review_checks.ps1` mit prozesslokalem
+  `LLM_PROVIDER=lmstudio`: Registry 0 Blocker/0 Hinweise, Ruff sauber,
+  GGUF-Abgleich 0 Abweichungen (56 Eintraege), 1.162/1.162 Tests bestanden.
+  Vollbaum-mypy meldet 1 informativen Fehler; Advisory meldet zwei LMS-Configs
+  mit `numParallelSessions=1` statt 4. LM-Studio-Smoke fuer die LFM-DSpark-
+  Modelle bleibt mangels GUI-geladenem Modell offen.
+- **Testisolation:** Zwei veraltete `model_manager`-Tests wurden angepasst:
+  vollstaendige quantifizierte MTP-Hauptmodell-ID erwarten; fuer den CLI-Fallback
+  die native LMS-API als nicht verfuegbar mocken; Readiness-Test verlangt den
+  Chat-Completions-Aufruf, auch wenn vorher die Modellliste abgefragt wird.
+- **Provider-Umgebung:** Der persistente lokale `LLM_PROVIDER`-Wert ist ein
+  llama-server-Dateipfad, waehrend die Laufzeit einen symbolischen Namen
+  erwartet. Nichts dauerhaft geaendert; Gate/Tests liefen mit einem
+  prozesslokalen gueltigen Provider-Wert.
+- **Review-Blocker vor Shipping:** (1) Variant-B-Manifest prueft Pipeline,
+  Benchmark, Seed/SampleSize und teils Hashes, bindet `selected_ids` aber nicht
+  an die tatsaechlich gelaufenen Tasks; ausserdem werden fehlende Hashes
+  akzeptiert. (2) Ein Modellrequest mit expliziter Quantisierung kann im
+  Benchmarkresolver noch auf eine andere Quantisierung derselben Basisfamilie
+  zurueckfallen. (3) Eine explizit deklarierte GGUF/JSON-Paarung prueft Pfad
+  und Quantisierung, nicht sicher die Modellidentitaet. (4) Companion-Pfade
+  werden nicht vor Laufzeit auf Existenz und typgerechte Familien-/Groessen-
+  kompatibilitaet geprueft. Diese Punkte betreffen vorher vereinbarte
+  Manifest-, Identitaets- und Companion-Invarianten.
+- **Veroeffentlichungsentscheidung offen:** Die versionierte Registry enthaelt
+  absolute, installationsspezifische lokale GGUF-/JSON-Pfade. Das passt zur
+  zuvor beschriebenen lokalen Runtime-Registry, ist aber nicht portabel und
+  wuerde mit dem Push den lokalen Pfadbaum offenlegen. Vor Push klaeren, ob
+  diese Felder in einen lokalen ignorierten Overlay gehoeren oder bewusst in
+  GitHub verbleiben sollen.
+- Es wurde nichts gestaged, committet oder gepusht. Scratch-Testordner blieben
+  unangetastet. Die gestartete Review war read-only und meldete keine
+  credential-aehnlichen Secrets.
+
+## Work State
+### Completed / Active / Blocked
+- Completed: Vollgate und fokussierte Tests; YAML-Trailing-Whitespace wurde
+  mechanisch entfernt, der geparste YAML-Inhalt ist vor/nachher identisch.
+- Active: Nutzerentscheidung bzw. fokussierte Behebung der vier technischen
+  Review-Befunde und der Versions-/Overlay-Entscheidung fuer absolute Pfade.
+- Blocked: Commit/Push gemaess Review-Gate; keine externe Veroeffentlichung,
+  solange kritische Korrektheitsbefunde offen sind.
+
+## Next Move
+1. Die vier technischen Befunde im bestehenden Scope beheben oder mit
+   konkreten kompensierenden Checks begruendet akzeptieren.
+2. Festlegen, ob installationsspezifische Pfade aus der versionierten Registry
+   entfernt und lokal gehalten werden oder bewusst publiziert werden.
+3. Review und Vollgate erneut laufen lassen, dann scoped stage/diff pruefen,
+   Hook-Commit und Push-Hook ausfuehren, Remote-SHA/CI verifizieren.
+
+## Relevant Files
+- `src/comparison_manifest.py`, `src/run_benchmarks.py`: Manifest-Validierung
+  und fehlende Bindung an die Taskauswahl.
+- `src/custom_benchmark.py`: explizite Modell-/Quant-Aufloesung.
+- `src/registry_tool.py`, `src/model_registry.py`: GGUF/JSON- und Companion-
+  Bindungen.
+- `doc-git/model_registry.yaml`: lokale absolute Pfade und Bundle-Daten.
+- `tests/test_model_manager.py`: zwei Korrekturen an Testvertrag/Isolation.
+- `CHANGELOG.md`: Verweis auf diesen Checkpoint.

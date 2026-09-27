@@ -251,6 +251,8 @@ class TestThinkingCodeOnlyPrompts:
         p = cb._make_datascience_prompt("task", "entry")
         assert "```python" not in p
         assert p.startswith("Complete the following Python code.")
+        assert "do not repeat the provided imports or input setup" in p
+        assert "define the output variable(s) requested" in p
 
     def test_datascience_code_only_adds_suffix(self):
         p = cb._make_datascience_prompt("task", "", code_only=True)
@@ -272,3 +274,92 @@ class TestThinkingCodeOnlyPrompts:
         p = cb._make_codereval_prompt("task", "my_fn", code_only=True)
         assert "my_fn" in p
         assert p.index("my_fn") < p.index("```python")
+
+
+class TestDS1000OutputDiagnostics:
+    def test_reasoning_only_stream_retries_non_stream_and_recovers_final_content(self, mocker):
+        mocker.patch.object(cb, "get_api_base", return_value="http://127.0.0.1:1234/v1")
+        mocker.patch.object(
+            cb,
+            "_stream_chat_completion",
+            return_value=("", 0.5, 10, 30, 20.0, 30, False, None, None),
+        )
+        non_stream = mocker.patch.object(
+            cb,
+            "_non_streaming_fallback",
+            return_value=("b = np.eye(4)", 100, 40, 10, False),
+        )
+
+        result = cb.generate_answer(
+            cb.GenerationConfig(
+                prompt="complete the task",
+                model_identifier="qwen/qwen3.5-9b",
+                max_tokens=8192,
+            )
+        )
+
+        assert result[0] == "b = np.eye(4)"
+        assert result[2:4] == (110, 70)
+        assert result[5] == 40
+        assert result[6] is False
+        assert result[7] is None
+        assert "non-stream retry recovered the answer" in (result[8] or "")
+        non_stream.assert_called_once()
+
+    def test_truncated_reasoning_only_stream_does_not_repeat_full_generation(self, mocker):
+        mocker.patch.object(cb, "get_api_base", return_value="http://127.0.0.1:1234/v1")
+        mocker.patch.object(
+            cb,
+            "_stream_chat_completion",
+            return_value=("", 80.0, 10, 8192, 102.4, 5000, True, None, None),
+        )
+        non_stream = mocker.patch.object(cb, "_non_streaming_fallback")
+
+        result = cb.generate_answer(
+            cb.GenerationConfig(
+                prompt="complete the task",
+                model_identifier="qwen/qwen3.5-9b",
+                max_tokens=8192,
+            )
+        )
+
+        assert result[0] == ""
+        assert result[1:4] == (80.0, 10, 8192)
+        assert result[5] == 5000
+        assert result[6] is True
+        assert result[7] is None
+        assert "retry skipped" in (result[8] or "")
+        non_stream.assert_not_called()
+
+    def test_detects_a_completion_that_echoes_the_task_prompt(self):
+        prompt = "Complete the following Python code. " + ("task context " * 20)
+        assert cb._is_prompt_echo(prompt + " extra repeated text", prompt)
+
+    def test_does_not_misclassify_a_short_or_distinct_answer_as_prompt_echo(self):
+        prompt = "Complete the following Python code. " + ("task context " * 20)
+        assert not cb._is_prompt_echo("b = np.eye(4)", prompt)
+        assert not cb._is_prompt_echo(prompt[:80], prompt)
+
+    def test_marks_reasoning_only_response_without_exporting_reasoning(self, mocker):
+        mocker.patch.object(cb, "generate_answer", return_value=("", 0.5, 20, 100, 10, 70, False, None, None))
+        mocker.patch.object(cb, "get_provider_name", return_value="lmstudio")
+        mocker.patch.object(cb, "_can_use_structured_output", return_value=False)
+
+        result = cb._call_and_evaluate(
+            "complete this task",
+            {"temperature": 0.2, "top_p": 1.0, "max_tokens": 8192},
+            "example/unknown",
+            "",
+            [],
+            "",
+            "",
+        )
+
+        assert result["output_status"] == "thinking_only"
+        assert result["score"] == 0.0
+        assert "only a reasoning channel" in result["score_detail"]
+        assert result["response"] == ""
+
+
+def test_muse_glimmer_disables_structured_output_grammar() -> None:
+    assert cb._can_use_structured_output("kookiesxy/muse-glimmer-30b-ternary-quants@iq1_s") is False

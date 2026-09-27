@@ -17,11 +17,14 @@ checks prompt and runtime drift.
       show LM Studio tuning differences as field-level proposals.
 
   py -3.12 .\src\registry_tool.py sync --import-lms-settings
-      Also import valid, unambiguous LM Studio settings into the Registry.
-      Values beyond GGUF context/expert limits are rejected as conflicts.
+      Also import valid, unambiguous LM Studio JSON settings and loaded native
+      API expert counts into the Registry. Values beyond GGUF limits are rejected.
 
   py -3.12 .\src\registry_tool.py full
       Run synchronization, prompt-template maintenance, preview, and checks.
+
+  py -3.12 .\src\registry_tool.py full --write-prompts
+      Additionally write assembled system prompts to uniquely joined configs.
 
   py -3.12 .\src\registry_tool.py preset <path> --merge-existing
       Export Registry runtime values into a llama.cpp preset, preserving
@@ -32,8 +35,9 @@ checks prompt and runtime drift.
       requires the explicit --apply option.
 
 `full` writes only missing LM Studio `promptTemplate` fields and runs prompt
-assembly as a preview. It does not write assembled system prompts. For those,
-run `assemble_blueprint.py assemble` explicitly. `pipeline full` remains a
+assembly as a preview. It does not write assembled system prompts by default.
+After reviewing the preview, `full --write-prompts` writes them atomically and
+only through the shared per-run IdentityLink table. `pipeline full` remains a
 compatibility spelling of `full`; both use the same workflow and options.
 
 2. SOURCE OF TRUTH AND WRITE BOUNDARIES
@@ -58,7 +62,7 @@ are excluded.
   validate [--ci]       Validate Registry, GGUF facts, templates, and ownership.
   preset <path>         Generate a derived llama.cpp preset INI.
   advanced --help       Show specialist maintenance commands.
-  assemble_blueprint.py assemble   Explicitly write assembled LM Studio prompts.
+  full --write-prompts             Explicitly write joined LM Studio prompts.
 
 The earlier command names remain available directly and through `advanced`
 for compatibility. The public workflow above is the recommended interface.
@@ -84,6 +88,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
+from urllib.request import Request, urlopen
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -126,12 +131,15 @@ y.preserve_quotes = True
 y.indent(mapping=2, sequence=4, offset=2)
 
 # ── assemble_blueprint helpers ─────────────────────────────────────
+from artifact_bundle import validate_companion_binding, validate_config_gguf_pair
 from assemble_blueprint import (
     _ARCH_REASONING_MAP,
     _registry_quant,
     assemble_prompts,
     blueprint_features,
     classify_registry,
+    clear_lms_config_cache,
+    configs_for_registry_key,
     find_all_configs_for_registry_key,
     find_config_for_registry_key,
     find_registry_key_for_config,
@@ -198,6 +206,8 @@ _DEFAULT_RESEARCH_SAMPLING = research_sampling
 def load_registry(path: Path | None = None) -> dict[str, RegistryEntry]:
     if path is None:
         path = REGISTRY_PATH
+    if not path.is_file():
+        return {}
     with open(path, encoding="utf-8") as f:
         return y.load(f) or {}
 
@@ -450,10 +460,11 @@ def _collect_registry_inventory() -> RegistryInventory:
 def _refresh_identity_links(inventory: RegistryInventory) -> None:
     """Rebuild the per-run identity table from all available evidence.
 
-    A config is linked to a Registry key only when the active LMS model and a
-    single local GGUF candidate agree on the complete identity.  This keeps
-    runtime settings usable without allowing a publisherless or path-only
-    heuristic to import values into the wrong Registry entry.
+    A config is linked either by a unique live LMS/GGUF/config join or by the
+    exact local GGUF/config path pair already persisted in this machine-local
+    Registry.  The latter is important for unloaded models and for LMS rows
+    whose logical Hub publisher differs from the local GGUF publisher.  A
+    basename-only or publisherless match is never sufficient.
     """
     registry_keys = sorted(
         [key for key, value in inventory.registry.items() if isinstance(value, dict)],
@@ -475,6 +486,30 @@ def _refresh_identity_links(inventory: RegistryInventory) -> None:
             if isinstance(match, UniqueMatch):
                 artifact_by_key.setdefault(match.key, []).append(candidate)
 
+    local_artifact_owners: dict[str, set[str]] = {}
+    for registry_key, entry in inventory.registry.items():
+        local = entry.get("local") if isinstance(entry, dict) else None
+        model_path = local.get("model_path") if isinstance(local, dict) else None
+        if isinstance(model_path, (str, os.PathLike)) and str(model_path).strip():
+            local_artifact_owners.setdefault(_path_identity(model_path), set()).add(registry_key)
+
+    persisted_config_owners: dict[str, set[str]] = {}
+    for registry_key, entry in inventory.registry.items():
+        if not isinstance(entry, dict):
+            continue
+        declared, model_path, matches = _registry_local_config_matches(
+            registry_key, entry, inventory.configs
+        )
+        if (
+            declared
+            and model_path is not None
+            and local_artifact_owners.get(_path_identity(model_path)) == {registry_key}
+            and len(matches) == 1
+        ):
+            config_path = matches[0].get("json_path")
+            if config_path:
+                persisted_config_owners.setdefault(_path_identity(config_path), set()).add(registry_key)
+
     joined: dict[
         str,
         tuple[
@@ -482,10 +517,12 @@ def _refresh_identity_links(inventory: RegistryInventory) -> None:
             tuple[Any, ...],
             tuple[Any, ...],
             tuple[dict[str, Any], ...],
+            bool,
         ],
     ] = {}
     config_owners: dict[str, set[str]] = {}
     for registry_key in registry_keys:
+        entry = inventory.registry[registry_key]
         linked_models = tuple(
             model
             for model in inventory.lms_models
@@ -504,47 +541,100 @@ def _refresh_identity_links(inventory: RegistryInventory) -> None:
                 model
                 for model in inventory.lms_models
                 if _lms_logical_model_matches_registry_key(model, registry_key)
-            )
+        )
         linked_artifacts = identity_artifacts
         if len(linked_models) == 1:
-            # The LMS-reported artifact path is stronger than a basename or
-            # publisher match.  If LMS exposes it, require the exact local
-            # candidate path (absolute or suffix-relative) to agree.
-            linked_artifacts = tuple(
+            # A concrete LMS GGUF path can join a Registry identity even when
+            # the physical package directory spells the model differently
+            # (for example a derived Muse variant or an MTP-labeled package).
+            # Require exactly one path match; never use this fallback for a
+            # logical Hub key or basename-only evidence.
+            path_matches = tuple(
                 candidate
-                for candidate in identity_artifacts
+                for candidate in candidates
                 if _lms_path_matches_candidate(linked_models[0], candidate.path)
             )
+            if _lms_has_concrete_artifact_path(linked_models[0]):
+                linked_artifacts = path_matches
+            else:
+                # Without a concrete LMS path, identity-derived candidates
+                # remain the only admissible evidence.
+                linked_artifacts = tuple(
+                    candidate
+                    for candidate in identity_artifacts
+                    if _lms_path_matches_candidate(linked_models[0], candidate.path)
+                )
+        local_path_declared, local_model_path, local_config_matches = (
+            _registry_local_config_matches(registry_key, entry, inventory.configs)
+        )
+        local_artifact_is_unique = (
+            local_model_path is not None
+            and local_artifact_owners.get(_path_identity(local_model_path)) == {registry_key}
+        )
+        persisted_local_binding = (
+            local_path_declared
+            and local_artifact_is_unique
+            and len(local_config_matches) == 1
+        )
         matching_configs: tuple[dict[str, Any], ...] = ()
-        if len(linked_models) == 1 and len(linked_artifacts) == 1:
-            matching_configs = tuple(
+        if local_path_declared:
+            # A declared local path pair is explicit identity evidence. If it
+            # is stale, mismatched, or reused, fail closed instead of falling
+            # through to a looser name-based match or silently replacing it.
+            matching_configs = (
+                local_config_matches
+                if persisted_local_binding
+                and persisted_config_owners.get(
+                    _path_identity(local_config_matches[0].get("json_path") or "")
+                ) == {registry_key}
+                else ()
+            )
+        elif len(linked_artifacts) == 1:
+            artifact_config_matches = tuple(
                 config
                 for config in inventory.configs
-                if _config_matches_lms_model(config, linked_models[0])
+                if _config_matches_artifact(config, linked_artifacts[0].path)
+                and persisted_config_owners.get(_path_identity(config.get("json_path") or ""))
+                in (None, {registry_key})
             )
+            matching_configs = artifact_config_matches
         joined[registry_key] = (
             linked_models,
             identity_artifacts,
             linked_artifacts,
             matching_configs,
+            persisted_local_binding,
         )
         if len(matching_configs) == 1:
             config_path = str(matching_configs[0].get("json_path") or "")
             if config_path:
-                config_owners.setdefault(config_path.casefold(), set()).add(registry_key)
+                config_owners.setdefault(_path_identity(config_path), set()).add(registry_key)
 
     inventory.identity_links.clear()
     for registry_key in registry_keys:
-        linked_models, identity_artifacts, linked_artifacts, matching_configs = joined[registry_key]
+        (
+            linked_models,
+            identity_artifacts,
+            linked_artifacts,
+            matching_configs,
+            persisted_local_binding,
+        ) = joined[registry_key]
         runtime_records: list[RuntimeBinding] = []
-        if len(linked_models) == 1:
-            # Runtime imports require a one-to-one LMS-model/GGUF/config link.
-            # Zero, multiple, or globally reused configs remain diagnostics
-            # only. A single JSON file must not feed two quant/publisher keys.
+        if persisted_local_binding:
+            config = matching_configs[0]
+            if config_owners.get(_path_identity(str(config.get("json_path") or ""))) != {registry_key}:
+                config = None
+            runtime_records.append(_build_runtime_binding(config))
+        elif len(linked_artifacts) == 1:
+            # Dynamic imports require a one-to-one LMS-model/GGUF/config link.
+            # A physical GGUF identity can establish the join without a live
+            # LMS inventory; this is the bootstrap path for users who have
+            # local GGUFs/configs but no installed LM Studio runtime. Zero,
+            # multiple, or globally reused configs remain diagnostics only.
             artifact = linked_artifacts[0] if len(linked_artifacts) == 1 else None
             config = matching_configs[0] if len(matching_configs) == 1 and artifact else None
             if config is not None:
-                config_path = str(config.get("json_path") or "").casefold()
+                config_path = _path_identity(str(config.get("json_path") or ""))
                 if config_owners.get(config_path) != {registry_key}:
                     config = None
             runtime_records.append(
@@ -560,8 +650,15 @@ def _refresh_identity_links(inventory: RegistryInventory) -> None:
             IdentityLink(
                 registry_key=registry_key,
                 runtime_bindings=tuple(runtime_records),
+                # Keep independently proven Registry-path and concrete LMS-
+                # path evidence; a mismatch blocks config/runtime joins but
+                # must not erase the other source's valid artifact evidence.
                 artifact_evidence=tuple(
-                    candidate.identity_evidence for candidate in identity_artifacts
+                    candidate.identity_evidence
+                    for candidate in {
+                        _path_identity(candidate.path): candidate
+                        for candidate in (*identity_artifacts, *linked_artifacts)
+                    }.values()
                 ),
                 hf_urls=tuple(
                     str(model.get("hf_url") or "")
@@ -606,6 +703,12 @@ def _lms_path_matches_candidate(model: dict[str, Any], artifact_path: Path) -> b
     return artifact_identity == source_identity or artifact_identity.endswith(f"/{source_identity}")
 
 
+def _lms_has_concrete_artifact_path(model: dict[str, Any]) -> bool:
+    """Return whether the LMS row provides an absolute path or GGUF filename."""
+    source = str(model.get("path") or model.get("modelPath") or "").strip()
+    return bool(source) and (Path(source).is_absolute() or source.casefold().endswith(".gguf"))
+
+
 def _lms_logical_model_matches_registry_key(model: dict[str, Any], registry_key: str) -> bool:
     """Match an LMS logical model to a physical Registry identity uniquely.
 
@@ -621,6 +724,134 @@ def _lms_logical_model_matches_registry_key(model: dict[str, Any], registry_key:
     if lms_quant != registry_quant:
         return False
     return str(normalize_for_config(lms_model)) == str(normalize_for_config(registry_model))
+
+
+def _config_matches_artifact(config: dict[str, Any], artifact_path: Path) -> bool:
+    """Return whether a JSON config names the concrete GGUF artifact.
+
+    LM Studio may keep both a logical model config (``publisher/model.json``)
+    and a file-specific config (``publisher/model-GGUF/model-Q6_K.gguf.json``).
+    The latter is the only safe source for runtime values when several GGUF
+    variants share one logical model.  Compare the concrete filename and the
+    two trailing directory components (publisher and model package), while
+    deliberately ignoring the unrelated config/model root drives.
+    """
+    json_path = config.get("json_path")
+    return bool(json_path) and not validate_config_gguf_pair(artifact_path, str(json_path))
+
+
+def _registry_local_config_matches(
+    registry_key: str,
+    entry: dict[str, Any],
+    configs: list[dict[str, Any]],
+) -> tuple[bool, Path | None, tuple[dict[str, Any], ...]]:
+    """Resolve a concrete config from the Registry's persisted local path pair.
+
+    The local Registry is generated for this installation, so its absolute
+    ``model_path`` and ``config_path`` are first-class join evidence. A
+    file-specific JSON config must name the same GGUF filename/package. If the
+    Registry declares either path but the pair is stale or inconsistent, the
+    caller must fail closed rather than pick a fuzzy alternative.
+    """
+    local = entry.get("local")
+    if not isinstance(local, dict):
+        return False, None, ()
+    raw_model_path = local.get("model_path")
+    raw_config_path = local.get("config_path")
+    raw_config_scope = local.get("config_scope", "gguf")
+    model_declared = isinstance(raw_model_path, (str, os.PathLike)) and bool(str(raw_model_path).strip())
+    config_declared = isinstance(raw_config_path, (str, os.PathLike)) and bool(str(raw_config_path).strip())
+    if not model_declared and not config_declared:
+        return False, None, ()
+    if not model_declared:
+        return True, None, ()
+
+    model_path = Path(str(raw_model_path))
+    try:
+        if not model_path.is_file():
+            return True, None, ()
+    except OSError:
+        return True, None, ()
+
+    if config_declared:
+        config_path = Path(str(raw_config_path))
+        try:
+            if not config_path.is_file():
+                return True, model_path, ()
+        except OSError:
+            return True, model_path, ()
+        registry_quant = _registry_quant(registry_key)
+        artifact_quant = extract_quant_from_text(model_path.name)
+        pair_errors = validate_config_gguf_pair(
+            model_path,
+            config_path,
+            scope=str(raw_config_scope),
+        )
+        if pair_errors:
+            return True, model_path, ()
+        candidates: list[dict[str, Any]] = []
+        for config in configs:
+            if _path_identity(config.get("json_path") or "") != _path_identity(config_path):
+                continue
+            config_quant = config.get("quant") or extract_quant_from_text(
+                f"{config.get('dir_name', '')} {config.get('file_name', '')}"
+            )
+            config_quant = str(config_quant) if config_quant else None
+            if registry_quant and artifact_quant and normalize_quant(registry_quant) != normalize_quant(artifact_quant):
+                continue
+            if registry_quant and config_quant and normalize_quant(registry_quant) != normalize_quant(config_quant):
+                continue
+            if artifact_quant and config_quant and normalize_quant(artifact_quant) != normalize_quant(config_quant):
+                continue
+            candidates.append({**config, "_registry_config_scope": str(raw_config_scope)})
+        return True, model_path, tuple(candidates)
+
+    candidates = tuple(
+        config for config in configs if _config_matches_artifact(config, model_path)
+    )
+    return True, model_path, candidates
+
+
+def _physical_registry_matches_lms_model(
+    model: dict[str, Any],
+    candidates: list[Any],
+    registry_keys: set[str],
+) -> tuple[str, ...]:
+    """Find existing Registry keys proven by a physical GGUF path.
+
+    This is the bridge for LMS rows whose logical ``publisher/modelKey`` does
+    not preserve the publisher encoded by the local GGUF directory.  A
+    physical candidate can suppress Registry auto-add only when its existing
+    Registry key, quantization, model basename, and LMS path evidence all
+    agree uniquely.  Ambiguous candidates intentionally return no result.
+    """
+    lms_identity = _canonical_lms_key(model)
+    _lms_publisher, lms_model, lms_quant = decompose_model_identity(lms_identity)
+    if not lms_model or not lms_quant or lms_quant == "?":
+        return ()
+    model_name = str(normalize_for_config(lms_model))
+    matches: set[str] = set()
+    for candidate in candidates:
+        registry_key = getattr(candidate, "registry_key", None)
+        evidence = getattr(candidate, "identity_evidence", None)
+        path = getattr(candidate, "path", None)
+        if (
+            not isinstance(registry_key, str)
+            or registry_key not in registry_keys
+            or not isinstance(evidence, ArtifactIdentityEvidence)
+            or not evidence.is_complete
+            or not isinstance(path, Path)
+        ):
+            continue
+        _publisher, _candidate_model, candidate_quant = decompose_model_identity(registry_key)
+        if normalize_quant(candidate_quant) != normalize_quant(lms_quant):
+            continue
+        if str(normalize_for_config(evidence.model_name)) != model_name:
+            continue
+        if not _lms_path_matches_candidate(model, path):
+            continue
+        matches.add(registry_key)
+    return tuple(sorted(matches))
 
 
 def _positive_int(value: Any) -> int | None:
@@ -657,6 +888,7 @@ def _build_runtime_binding(
     )
     return RuntimeBinding(
         config_path=Path(config["json_path"]) if config and config.get("json_path") else None,
+        config_scope=str(config.get("_registry_config_scope", "gguf")) if config else None,
         sampling=sampling_items,
         context_length=config.get("context_length") if config else None,
         use_unified_kv=config.get("use_unified_kv") if config else None,
@@ -708,6 +940,9 @@ def _materialize_local_bindings(inventory: RegistryInventory) -> int:
         if local.get("config_path") != config_path:
             local["config_path"] = config_path
             changed += 1
+        if binding.config_scope and local.get("config_scope") != binding.config_scope:
+            local["config_scope"] = binding.config_scope
+            changed += 1
 
         speculative = dict(binding.speculative)
         normalized = normalize_speculative_profile(speculative)
@@ -729,6 +964,14 @@ def _materialize_local_bindings(inventory: RegistryInventory) -> int:
             if role is not None:
                 companion = _resolve_local_companion(reference) if reference else None
                 if companion is not None:
+                    bundle_errors = validate_companion_binding(main_path, companion, normalized)
+                    if bundle_errors:
+                        print(
+                            f"  [WARN] {registry_key}: ungueltige {role}-Companion-Bindung: "
+                            + "; ".join(bundle_errors)
+                        )
+                        companion = None
+                if companion is not None:
                     companions = local.setdefault("companions", {})
                     if not isinstance(companions, dict):
                         companions = {}
@@ -739,6 +982,11 @@ def _materialize_local_bindings(inventory: RegistryInventory) -> int:
                         changed += 1
                     local_speculative["companion_role"] = role
                     persisted_role = role
+                elif role is not None:
+                    print(
+                        f"  [WARN] {registry_key}: erforderliche {role}-Companion-Datei "
+                        "konnte nicht eindeutig und kompatibel aufgeloest werden"
+                    )
             companions = local.get("companions")
             if isinstance(companions, dict):
                 # Remove obsolete bundle links after a mode/type switch. Do
@@ -1125,6 +1373,11 @@ def build_llama_preset(
         ("reasoning_format", "reasoning-format"),
         ("reasoning_effort", "reasoning-effort"),
         ("reasoning_budget", "reasoning-budget"),
+        ("spec_type", "spec-type"),
+        ("draft_model_path", "spec-draft-model"),
+        ("draft_n_max", "spec-draft-n-max"),
+        ("draft_n_min", "spec-draft-n-min"),
+        ("draft_p_min", "spec-draft-p-min"),
     )
     for key in sorted(registry, key=str.casefold):
         entry = registry.get(key)
@@ -1134,7 +1387,11 @@ def build_llama_preset(
         if not model_path:
             skipped.append(key)
             continue
-        runtime = runtime_registry.provider_runtime(key, "llama_cpp")
+        try:
+            runtime = runtime_registry.provider_runtime(key, "llama_cpp")
+        except ValueError as exc:
+            skipped.append(f"{key} (invalid local bundle: {exc})")
+            continue
         lines.extend((f"[{key}]", "# registry_tool:generated-section", f"model = {model_path}"))
         for source_key, preset_key in option_map:
             value = runtime.get(source_key)
@@ -1253,7 +1510,7 @@ def cmd_export_llama_preset(
     action = "Merged into" if merge_existing else "Wrote"
     print(f"[OK] {action} llama.cpp preset: {target} ({written} local models)")
     if skipped:
-        print(f"[WARN] Skipped {len(skipped)} Registry entries without a local GGUF")
+        print(f"[WARN] Skipped {len(skipped)} Registry entries without a resolvable main GGUF or with an invalid local bundle")
         for key in skipped:
             print(f"       - {key}")
     return 0
@@ -1422,14 +1679,31 @@ def cmd_fix_np() -> None:
 
 def cmd_compare(inventory: RegistryInventory | None = None) -> dict[str, Any]:
     inventory = inventory or _collect_registry_inventory()
+    _ensure_gguf_inventory(inventory)
     reg = inventory.registry
     lms = inventory.lms_models
     cfgs = inventory.configs
 
     registry_keys = [k for k, v in reg.items() if isinstance(v, dict)]
+    registry_key_set = set(registry_keys)
+    physical_matches_by_model = {
+        id(model): _physical_registry_matches_lms_model(
+            model,
+            inventory.gguf_candidates,
+            registry_key_set,
+        )
+        for model in lms
+    }
+
+    def model_matches_registry(model: dict[str, Any], registry_key: str) -> bool:
+        if _lms_matches_registry_key(model, registry_key):
+            return True
+        physical_matches = physical_matches_by_model.get(id(model), ())
+        return len(physical_matches) == 1 and physical_matches[0] == registry_key
+
     new_models: list[dict] = []
     for model in lms:
-        if not any(_lms_matches_registry_key(model, key) for key in registry_keys):
+        if not any(model_matches_registry(model, key) for key in registry_keys):
             new_models.append(model)
 
     missing: list[str] = []
@@ -1440,7 +1714,7 @@ def cmd_compare(inventory: RegistryInventory | None = None) -> dict[str, Any]:
             or not is_registry_candidate({"modelKey": rn})
         ):
             continue
-        if not any(_lms_matches_registry_key(model, rn) for model in lms):
+        if not any(model_matches_registry(model, rn) for model in lms):
             missing.append(rn)
 
     orphan: set[str] = set()
@@ -1448,7 +1722,14 @@ def cmd_compare(inventory: RegistryInventory | None = None) -> dict[str, Any]:
         [(normalize_model_name(k), k) for k in registry_keys],
         key=lambda x: -len(x[0]),
     )
+    identity_linked_configs = {
+        _path_identity(config_path)
+        for link in inventory.identity_links.values()
+        for config_path in link.config_paths
+    }
     for c in cfgs:
+        if _path_identity(c.get("json_path") or "") in identity_linked_configs:
+            continue
         n = normalize_model_name(c["dir_name"])
         if find_registry_key_for_config(n, registry_key_sorted, config=c) is None:
             orphan.add(f"{c['publisher']}/{c['dir_name']}")
@@ -1470,6 +1751,7 @@ def cmd_compare(inventory: RegistryInventory | None = None) -> dict[str, Any]:
             ("v_cache", "v_cache"),
             ("experts", "num_experts"),
         ),
+        inventory.identity_links,
     )
 
     report = {
@@ -2217,10 +2499,16 @@ def _build_config_sync_proposal(
     active_configs = configs
     stale_count = 0
     if installed_models is not None:
+        linked_config_paths = {
+            _path_identity(path)
+            for link in (identity_links or {}).values()
+            for path in link.config_paths
+        }
         active_configs = [
             config
             for config in configs
-            if any(_config_matches_lms_model(config, model) for model in installed_models)
+            if _path_identity(config.get("json_path") or "") in linked_config_paths
+            or any(_config_matches_lms_model(config, model) for model in installed_models)
         ]
         stale_count = len(configs) - len(active_configs)
 
@@ -2413,6 +2701,110 @@ def _build_config_sync_proposal(
     return proposals, unmatched_count + stale_count, conflicts
 
 
+def _read_lms_loaded_models() -> dict[str, Any] | None:
+    """Read LM Studio's native model list, including active load configs.
+
+    Per-model JSON defaults do not always persist ``numExperts``. The native
+    API reports the effective ``num_experts`` for loaded instances, so that
+    value can be imported without substituting GGUF's architectural maximum.
+    """
+    api_base = os.environ.get("LMSTUDIO_API_BASE", "http://127.0.0.1:1234/v1").rstrip("/")
+    if api_base.endswith("/api/v1"):
+        url = f"{api_base}/models"
+    elif api_base.endswith("/v1"):
+        url = f"{api_base[:-3]}/api/v1/models"
+    else:
+        url = f"{api_base}/api/v1/models"
+    headers = {"Accept": "application/json"}
+    token = os.environ.get("LMS_OpenAI_AUTH_TOKEN") or os.environ.get("LMS_OPENAI_AUTH_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    request = Request(url, headers=headers)
+    try:
+        with urlopen(request, timeout=3) as response:
+            payload = json.load(response)
+    except (OSError, TimeoutError, ValueError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _loaded_lms_expert_values(
+    registry: dict[str, Any], payload: dict[str, Any]
+) -> tuple[dict[str, int], dict[str, tuple[int, ...]]]:
+    """Resolve effective expert counts only from unique loaded model identities."""
+    registry_keys = [key for key, value in registry.items() if isinstance(value, dict)]
+    observations: dict[str, set[int]] = {}
+    rows = payload.get("models")
+    if not isinstance(rows, list):
+        return {}, {}
+    for model in rows:
+        if not isinstance(model, dict):
+            continue
+        instances = model.get("loaded_instances")
+        if not isinstance(instances, list) or not instances:
+            continue
+        reference = str(model.get("selected_variant") or model.get("key") or "").strip()
+        if not reference:
+            continue
+        quantization = model.get("quantization")
+        quant = str(quantization.get("name") or "") if isinstance(quantization, dict) else ""
+        canonical = canonicalize_source_identity(
+            reference,
+            publisher=str(model.get("publisher") or ""),
+            quant=quant,
+        )
+        match = resolve_registry_match(canonical, registry_keys)
+        if not isinstance(match, UniqueMatch):
+            continue
+        for instance in instances:
+            if not isinstance(instance, dict):
+                continue
+            config = instance.get("config")
+            value = config.get("num_experts") if isinstance(config, dict) else None
+            if isinstance(value, bool):
+                continue
+            try:
+                parsed = int(value)
+            except (TypeError, ValueError):
+                continue
+            if parsed > 0:
+                observations.setdefault(match.key, set()).add(parsed)
+    values = {key: next(iter(items)) for key, items in observations.items() if len(items) == 1}
+    conflicts = {key: tuple(sorted(items)) for key, items in observations.items() if len(items) > 1}
+    return values, conflicts
+
+
+def _registry_keys_with_configured_experts(
+    registry: dict[str, Any],
+    configs: list[dict[str, Any]],
+    identity_links: dict[str, IdentityLink] | None,
+) -> set[str]:
+    """Find exact config joins that already contain an expert setting."""
+    registry_keys = sorted(
+        [(normalize_model_name(key), key) for key, value in registry.items() if isinstance(value, dict)],
+        key=lambda item: -len(item[0]),
+    )
+    configured: set[str] = set()
+    for config in configs:
+        value = config.get("num_experts")
+        if value is None:
+            continue
+        source_path = Path(config["json_path"])
+        if identity_links is not None:
+            matches = [
+                model_key
+                for model_key, link in identity_links.items()
+                if source_path in link.config_paths
+            ]
+        else:
+            matches = find_registry_matches_for_config(
+                normalize_model_name(config["dir_name"]), registry_keys, config=config
+            )
+        if len(matches) == 1:
+            configured.add(matches[0])
+    return configured
+
+
 def cmd_sync_from_configs(
     write: bool = False,
     write_context: bool = False,
@@ -2423,7 +2815,9 @@ def cmd_sync_from_configs(
     """Compare GUI load settings and optionally persist them in the registry.
 
     ``write=False`` is the safe report mode. With ``write=True``, values from
-    LM Studio configs are copied. ``write_context=True`` is the narrow variant
+    LM Studio configs are copied; effective expert counts are also read from
+    loaded instances through the native API when the per-model JSON omits them.
+    ``write_context=True`` is the narrow variant
     that persists only ``context_length`` and leaves offload/UKV/KV settings
     untouched. Conflicting values across configs for one registry entry are
     reported and skipped. When ``installed_models`` is provided by ``sync``,
@@ -2461,6 +2855,77 @@ def cmd_sync_from_configs(
     proposals, skipped, conflicts = _build_config_sync_proposal(
         reg, configs, installed_models, fields_to_sync, identity_links
     )
+    has_moe_registry_models = any(
+        isinstance(entry, dict) and str(entry.get("arch", "")).casefold() == "moe"
+        for entry in reg.values()
+    )
+    if (
+        not write_context
+        and has_moe_registry_models
+        and any(field == "experts" for field, _ in fields_to_sync)
+    ):
+        live_payload = _read_lms_loaded_models()
+        if live_payload is None:
+            if write:
+                print(
+                    "[INFO] LM Studio native API unavailable; no loaded runtime expert values imported"
+                )
+        else:
+            live_values, live_conflicts = _loaded_lms_expert_values(reg, live_payload)
+            configured_experts = _registry_keys_with_configured_experts(
+                reg, configs, identity_links
+            )
+            live_source = Path("LM Studio native API loaded instance")
+            for model_key, values in live_conflicts.items():
+                if model_key in configured_experts:
+                    continue
+                proposals.append(
+                    SyncProposalItem(
+                        model_key,
+                        "experts",
+                        reg.get(model_key, {}).get("experts"),
+                        values,
+                        (live_source,),
+                        conflict=True,
+                        problem="loaded LM Studio instances report different num_experts values",
+                    )
+                )
+                conflicts += 1
+            for model_key, value in live_values.items():
+                if model_key in configured_experts:
+                    continue
+                entry = reg.get(model_key)
+                if not isinstance(entry, dict) or entry.get("experts") == value:
+                    continue
+                max_experts = entry.get("max_experts")
+                if (
+                    isinstance(max_experts, int)
+                    and not isinstance(max_experts, bool)
+                    and max_experts > 0
+                    and value > max_experts
+                ):
+                    proposals.append(
+                        SyncProposalItem(
+                            model_key,
+                            "experts",
+                            entry.get("experts"),
+                            value,
+                            (live_source,),
+                            conflict=True,
+                            problem=f"value exceeds GGUF-owned max_experts={max_experts}",
+                        )
+                    )
+                    conflicts += 1
+                    continue
+                proposals.append(
+                    SyncProposalItem(
+                        model_key,
+                        "experts",
+                        entry.get("experts"),
+                        value,
+                        (live_source,),
+                    )
+                )
     for proposal in proposals:
         source_names = ", ".join(str(path) for path in proposal.sources)
         if proposal.conflict:
@@ -2740,7 +3205,9 @@ def _quant_from_lms_record(model: dict[str, Any]) -> str | None:
     """Return the selected quantization name from an LMS record, if present."""
     selected = str(model.get("selectedVariant") or "").strip()
     if "@" in selected:
-        return selected.rsplit("@", 1)[1].lower()
+        selected_quant = selected.rsplit("@", 1)[1].lower()
+        if selected_quant not in {"", "?", "unknown"}:
+            return selected_quant
     quantization = model.get("quantization") or {}
     if isinstance(quantization, dict):
         quant = str(quantization.get("name", "")).strip()
@@ -2765,11 +3232,16 @@ def _canonical_lms_key(model: dict[str, Any]) -> str:
     base = _canonical_key(model_key, publisher)
     selected = str(model.get("selectedVariant") or "").strip()
     if "@" in selected:
-        return _canonical_key(selected, publisher)
+        selected_key = _canonical_key(selected, publisher)
+        selected_quant = _registry_quant(selected_key)
+        if selected_quant not in {None, "?", "unknown"}:
+            return selected_key
     quant = _quant_from_lms_record(model)
-    if quant and "@" not in base:
+    if quant:
         publisher_name, model_name, _existing_quant = decompose_model_identity(base)
         return build_model_identity(publisher_name, model_name, quant)
+    if "@" in selected:
+        return _canonical_key(selected, publisher)
     return base
 
 
@@ -3647,6 +4119,7 @@ def _registry_template_name(model_key: str) -> str | None:
 def cmd_sync_templates(
     configs: list[dict[str, Any]] | None = None,
     installed_models: list[dict[str, Any]] | None = None,
+    identity_links: dict[str, IdentityLink] | None = None,
 ) -> None:
     """Write promptTemplate from blueprint-defined templates into configs missing it.
 
@@ -3661,10 +4134,16 @@ def cmd_sync_templates(
     reg = load_registry()
     cfgs = configs if configs is not None else read_lms_configs(CONFIG_ROOT)
     if installed_models is not None:
+        linked_config_paths = {
+            _path_identity(path)
+            for link in (identity_links or {}).values()
+            for path in link.config_paths
+        }
         cfgs = [
             config
             for config in cfgs
-            if any(_config_matches_lms_model(config, model) for model in installed_models)
+            if _path_identity(config.get("json_path") or "") in linked_config_paths
+            or any(_config_matches_lms_model(config, model) for model in installed_models)
         ]
     registry_keys = sorted(
         [(normalize_model_name(key), key) for key, value in reg.items() if isinstance(value, dict)],
@@ -3682,13 +4161,16 @@ def cmd_sync_templates(
             print(f"  [ERROR] {model_key}: Template-Datei fehlt ({tpl_path})")
             errors += 1
             continue
-        matches = [
-            config
-            for config in cfgs
-            if find_registry_matches_for_config(
-                normalize_model_name(config["dir_name"]), registry_keys, config=config
-            ) == [model_key]
-        ]
+        if identity_links is not None and model_key in identity_links:
+            matches = configs_for_registry_key(model_key, cfgs, identity_links)
+        else:
+            matches = [
+                config
+                for config in cfgs
+                if find_registry_matches_for_config(
+                    normalize_model_name(config["dir_name"]), registry_keys, config=config
+                ) == [model_key]
+            ]
         if not matches:
             print(f"  [SKIP] {model_key}: keine eindeutig passende Config-JSON gefunden")
             skipped += 1
@@ -3727,6 +4209,7 @@ def cmd_sync_templates(
         except Exception as e:
             print(f"  [ERROR] {model_key}: {e}")
             errors += 1
+    clear_lms_config_cache(CONFIG_ROOT)
     print(f"\n[OK] sync-templates: {added} Configs aktualisiert, {skipped} übersprungen, {errors} Fehler")
 
 
@@ -4017,7 +4500,12 @@ def _gguf_drift_errors(reg: dict[str, Any]) -> list[str]:
     return out
 
 
-def cmd_validate(verbose: bool = False, repro: bool = False, ci: bool = False) -> dict[str, Any]:
+def cmd_validate(
+    verbose: bool = False,
+    repro: bool = False,
+    ci: bool = False,
+    inventory: RegistryInventory | None = None,
+) -> dict[str, Any]:
     """Validate model_registry.yaml consistency: templates, configs, overrides.
 
     verbose: zeigt alle Einzelprobleme (statt nur die ersten 10 je Kategorie).
@@ -4028,7 +4516,19 @@ def cmd_validate(verbose: bool = False, repro: bool = False, ci: bool = False) -
     Returns dict with error counts per check category.
     """
     reg = load_registry()
-    cfgs = [] if ci else read_lms_configs(CONFIG_ROOT)
+    cfgs = [] if ci else (inventory.configs if inventory is not None else read_lms_configs(CONFIG_ROOT))
+    identity_links = inventory.identity_links if inventory is not None else None
+
+    def configs_for_key(model_key: str) -> list[dict[str, Any]]:
+        if identity_links is not None:
+            return configs_for_registry_key(model_key, cfgs, identity_links)
+        return find_all_configs_for_registry_key(model_key, cfgs)
+
+    linked_config_keys: dict[str, str] = {}
+    if identity_links is not None:
+        for model_key, link in identity_links.items():
+            for config_path in link.config_paths:
+                linked_config_keys[_path_identity(config_path)] = model_key
     errors: dict[str, list[str]] = {
         "template_missing_file": [],
         "template_missing_config": [],
@@ -4040,6 +4540,8 @@ def cmd_validate(verbose: bool = False, repro: bool = False, ci: bool = False) -
         "identity_collision": [],
         "publisherless_identity_ambiguity": [],
         "registry_no_config": [],
+        "local_config_pair_invalid": [],
+        "local_companion_invalid": [],
         "reasoning_arch_mismatch": [],
         "config_context_drift": [],
         "config_experts_drift": [],
@@ -4049,6 +4551,11 @@ def cmd_validate(verbose: bool = False, repro: bool = False, ci: bool = False) -
         "config_context_too_small": [],
         "gguf_header_drift": [],
     }
+
+    if not ci:
+        bundle_errors = _registry_local_bundle_errors(reg)
+        errors["local_config_pair_invalid"].extend(bundle_errors["config"])
+        errors["local_companion_invalid"].extend(bundle_errors["companion"])
 
     # Canonical publisher/model/quant identities must be unique.  The
     # publisher-stripped namespace is retained only as a diagnostic because
@@ -4090,14 +4597,14 @@ def cmd_validate(verbose: bool = False, repro: bool = False, ci: bool = False) -
         tpl = _registry_template_name(model_key)
         if not tpl:
             continue
-        match = find_config_for_registry_key(model_key, cfgs)
-        if match is None:
+        matching_configs = configs_for_key(model_key)
+        if not matching_configs:
             errors["template_missing_config"].append(
                 f"{model_key}: template='{tpl}' definiert, "
                 f"aber Config-JSON nicht gefunden (auch nach fallback matching)"
             )
             continue
-        json_path = Path(match["json_path"])
+        json_path = Path(matching_configs[0]["json_path"])
         try:
             data = json.loads(json_path.read_text(encoding="utf-8"))
         except Exception:
@@ -4157,17 +4664,40 @@ def cmd_validate(verbose: bool = False, repro: bool = False, ci: bool = False) -
                 f"{model_key}: keine @quant (MUSS publisher/model@quant sein)"
             )
 
-    # ── Check 5: Registry name findet Config JSON (mit fallback matching) ──
+    # ── Check 5: installed LMS model has one concrete config binding ──
+    active_registry_keys: set[str] = set()
+    if inventory is not None and identity_links is not None:
+        registry_keys = [key for key, value in reg.items() if isinstance(value, dict)]
+        for model in inventory.lms_models:
+            exact_matches = [
+                key for key in registry_keys if _lms_matches_registry_key(model, key)
+            ]
+            candidates = exact_matches or [
+                key for key in registry_keys if _lms_logical_model_matches_registry_key(model, key)
+            ]
+            if len(candidates) == 1:
+                active_registry_keys.add(candidates[0])
+
     for model_key, entry in reg.items():
         if ci:
             continue
         if not isinstance(entry, dict):
             continue
-        # Skip models without GGUF installed (no config expected)
-        if not entry.get("file_size_bytes"):
+        if identity_links is not None:
+            local = entry.get("local")
+            has_declared_config = (
+                isinstance(local, dict)
+                and isinstance(local.get("config_path"), (str, os.PathLike))
+                and bool(str(local.get("config_path")).strip())
+            )
+            # file_size_bytes is a GGUF property, not proof that a model is
+            # installed in LM Studio. Only active LMS identities or explicit
+            # local config bindings require a config JSON.
+            if model_key not in active_registry_keys and not has_declared_config:
+                continue
+        elif not entry.get("file_size_bytes"):
             continue
-        match = find_config_for_registry_key(model_key, cfgs)
-        if match is None:
+        if not configs_for_key(model_key):
             rk = normalize_model_name(model_key)
             errors["registry_no_config"].append(f"{model_key}: keine passende Config-JSON gefunden (normalized: {rk})")
 
@@ -4178,6 +4708,12 @@ def cmd_validate(verbose: bool = False, repro: bool = False, ci: bool = False) -
         reasoning = entry.get("reasoning")
         arch_raw = entry.get("architecture_family") or entry.get("arch", "")
         if not reasoning or not arch_raw:
+            continue
+        model_name = str(model_key).casefold().replace("_", "-")
+        if "deepseek-r1" in model_name:
+            # Distilled DeepSeek-R1 models can use a Qwen2 GGUF base while
+            # retaining the R1 reasoning contract. The GGUF architecture is
+            # an implementation detail here, not the fine-tune's behavior.
             continue
         # Several GGUF bases are implementation families, not reasoning
         # contracts: e.g. ``deepseek2`` contains both GLM and Moonlight,
@@ -4207,8 +4743,11 @@ def cmd_validate(verbose: bool = False, repro: bool = False, ci: bool = False) -
     )
 
     for cfg in cfgs:
-        cn = normalize_model_name(cfg["dir_name"])
-        match = find_registry_key_for_config(cn, registry_key_sorted, config=cfg)
+        if identity_links is not None:
+            match = linked_config_keys.get(_path_identity(cfg["json_path"]))
+        else:
+            cn = normalize_model_name(cfg["dir_name"])
+            match = find_registry_key_for_config(cn, registry_key_sorted, config=cfg)
         if not match:
             continue
         entry = reg[match]
@@ -4297,7 +4836,7 @@ def cmd_validate(verbose: bool = False, repro: bool = False, ci: bool = False) -
         ):
             errors["runtime_experts_missing"].append(
                 f"{model_key}: MoE runtime experts missing; import the tested LM Studio "
-                "value with sync-from-configs --write-experts"
+                "value with sync --import-lms-settings while its model is loaded"
             )
         max_experts = entry.get("max_experts")
         if (
@@ -4346,6 +4885,69 @@ def cmd_validate(verbose: bool = False, repro: bool = False, ci: bool = False) -
     return errors
 
 
+def _registry_local_bundle_errors(registry: dict[str, Any]) -> dict[str, list[str]]:
+    """Validate explicitly persisted machine-local GGUF/JSON/companion bindings."""
+    errors: dict[str, list[str]] = {"config": [], "companion": []}
+    scoped_config_owners: dict[str, list[str]] = {}
+    for model_key, entry in registry.items():
+        local = entry.get("local") if isinstance(entry, dict) else None
+        config_path = local.get("config_path") if isinstance(local, dict) else None
+        if (
+            isinstance(local, dict)
+            and local.get("config_scope") == "model"
+            and isinstance(config_path, str)
+            and config_path.strip()
+        ):
+            scoped_config_owners.setdefault(_path_identity(config_path), []).append(model_key)
+
+    for model_key, entry in registry.items():
+        if not isinstance(entry, dict):
+            continue
+        local = entry.get("local")
+        if not isinstance(local, dict):
+            continue
+        main_path = local.get("model_path")
+        config_path = local.get("config_path")
+        if isinstance(config_path, str) and config_path.strip():
+            if local.get("config_scope") == "model":
+                owners = scoped_config_owners.get(_path_identity(config_path), [])
+                if len(owners) > 1:
+                    errors["config"].append(
+                        f"{model_key}: model-scoped config is assigned to multiple Registry entries: "
+                        + ", ".join(sorted(owners))
+                    )
+            errors["config"].extend(
+                f"{model_key}: {message}"
+                for message in validate_config_gguf_pair(
+                    main_path if isinstance(main_path, str) else "",
+                    config_path,
+                    scope=str(local.get("config_scope", "gguf")),
+                )
+            )
+
+        local_llama = local.get("llama_cpp")
+        speculative = local_llama.get("speculative") if isinstance(local_llama, dict) else None
+        if not isinstance(speculative, dict):
+            continue
+        normalized = normalize_speculative_profile(speculative)
+        role = companion_role(normalized)
+        if role is None:
+            continue
+        companions = local.get("companions")
+        companion_path = companions.get(role) if isinstance(companions, dict) else None
+        if role == "draft" and not isinstance(companion_path, str) and isinstance(companions, dict):
+            companion_path = companions.get("drafter")
+        errors["companion"].extend(
+            f"{model_key}: {message}"
+            for message in validate_companion_binding(
+                main_path if isinstance(main_path, str) else None,
+                companion_path if isinstance(companion_path, str) else None,
+                normalized,
+            )
+        )
+    return errors
+
+
 # These local LM Studio observations do not block Registry validation or the
 # direct llama.cpp workflow. They remain visible so LMS-specific maintenance
 # can be performed deliberately.
@@ -4381,6 +4983,31 @@ _DRIFT_CHECKS = (
 )
 
 
+def _local_candidates_as_model_records(candidates: list[Any]) -> list[dict[str, Any]]:
+    """Project physical GGUF identities into the narrow ``cmd_add`` input shape."""
+    records: dict[str, dict[str, Any]] = {}
+    for candidate in candidates:
+        evidence = getattr(candidate, "identity_evidence", None)
+        path = getattr(candidate, "path", None)
+        quant = str(getattr(candidate, "quant", "") or "").strip()
+        if not isinstance(evidence, ArtifactIdentityEvidence) or not evidence.is_complete:
+            continue
+        if not isinstance(path, Path) or not quant:
+            continue
+        identity = evidence.identity
+        records.setdefault(
+            identity.casefold(),
+            {
+                "type": "llm",
+                "modelKey": evidence.model_name,
+                "publisher": evidence.publisher,
+                "quantization": {"name": quant},
+                "path": str(path),
+            },
+        )
+    return list(records.values())
+
+
 # ── sync command (full) ────────────────────────────────────────────
 
 
@@ -4402,7 +5029,17 @@ def cmd_sync(
     Modellliste und Config-Dateien für denselben Lauf mehrfach eingelesen werden.
     """
     inventory = inventory or _collect_registry_inventory()
+    if not inventory.gguf_candidates_loaded:
+        _ensure_gguf_inventory(inventory)
     lms = inventory.lms_models
+    if not lms:
+        lms = _local_candidates_as_model_records(inventory.gguf_candidates)
+        if lms:
+            print(
+                f"[BOOTSTRAP] LM Studio liefert keine Modelle; "
+                f"{len(lms)} benchmarkfähige GGUF-Identitäten aus dem lokalen Bestand werden verwendet"
+            )
+            inventory.lms_models = lms
     reg = inventory.registry
     if show_inventory_report:
         print("[INVENTUR UND ÄNDERUNGSVORSCHLÄGE]")
@@ -4414,7 +5051,20 @@ def cmd_sync(
     # Find new models
     new_models = []
     for m in lms:
-        if not any(_lms_matches_registry_key(m, key) for key in registry_keys):
+        if any(_lms_matches_registry_key(m, key) for key in registry_keys):
+            continue
+        physical_matches = _physical_registry_matches_lms_model(
+            m,
+            inventory.gguf_candidates,
+            set(registry_keys),
+        )
+        if len(physical_matches) == 1:
+            print(
+                f"  [INFO] LMS-Identität {m.get('modelKey')}: physisch bereits gebunden an "
+                f"{physical_matches[0]} - kein neuer Registry-Key"
+            )
+            continue
+        if not physical_matches:
             new_models.append(m)
 
     if new_models:
@@ -4422,6 +5072,13 @@ def cmd_sync(
         cmd_add(new_models, research_web=False)
     else:
         print("[add] Keine neuen Modelle")
+
+    if not REGISTRY_PATH.is_file():
+        print(
+            "[ERROR] Es konnte keine erste Registry erzeugt werden: "
+            "keine benchmarkfähigen LM-Studio-Modelle oder eindeutig identifizierbaren lokalen GGUF-Dateien gefunden."
+        )
+        return
 
     if refresh_sampling:
         print("[sampling] Explizite Websuche für alle Registry-Kandidaten ...")
@@ -4484,6 +5141,7 @@ def cmd_pipeline(
     ignore_drift: bool = False,
     refresh_sampling: bool = False,
     import_lms_settings: bool = False,
+    write_prompts: bool = False,
 ) -> None:
     """Ein-Aufruf-Wartungspipeline (ersetzt sync_model_configs.ps1).
 
@@ -4491,6 +5149,7 @@ def cmd_pipeline(
       status  -> LMS-Modellzahl + compare-Report (Default, schreibt nichts)
       sync    -> status + registry_tool sync + Klassifikation
       full    -> sync + fehlende Template-Felder + Prompt-Preview + Validierung
+                 (mit --write-prompts werden System-Prompts atomar geschrieben)
 
     ignore_drift: beendet full NICHT mit Exit-Code 1, auch wenn Melde-Konflikte
     (Feld-Ownership: Config-Felder, GGUF-Header-Drift) offen sind.
@@ -4531,16 +5190,27 @@ def cmd_pipeline(
 
     if mode == "full":
         print("[4a] Fehlende LM-Studio-Prompt-Templates ergänzen ...")
-        cmd_sync_templates(configs=inventory.configs, installed_models=inventory.lms_models)
-        print("[5] Prompt-Assembly (PREVIEW; System-Prompts werden nicht geschrieben) ...")
-        assemble_prompts(preview_only=True)
-        print("[HINWEIS] System-Prompts explizit in die LM-Studio-Configs schreiben mit:")
-        print("  py -3.12 .\\src\\assemble_blueprint.py assemble")
+        cmd_sync_templates(
+            configs=inventory.configs,
+            installed_models=inventory.lms_models,
+            identity_links=inventory.identity_links,
+        )
+        if write_prompts:
+            print("[5] Prompt-Assembly (WRITE; eindeutige IdentityLinks) ...")
+        else:
+            print("[5] Prompt-Assembly (PREVIEW; System-Prompts werden nicht geschrieben) ...")
+        assemble_prompts(
+            preview_only=not write_prompts,
+            identity_links=inventory.identity_links,
+        )
+        if not write_prompts:
+            print("[HINWEIS] System-Prompts nach Prüfung schreiben mit:")
+            print("  py -3.12 .\\src\\registry_tool.py full --write-prompts")
         print("[5a] GLM-Config-Patch übersprungen (separater Schreibbefehl) ...")
         print("[6] Validierung ...")
         validate_prompts()
         print("[6a] Registry-Drift-Validierung (Feld-Ownership) ...")
-        errors = cmd_validate()
+        errors = cmd_validate(inventory=inventory)
         open_drift = {k: v for k, v in errors.items() if k in _DRIFT_CHECKS and v}
         if open_drift:
             total_open = sum(len(v) for v in open_drift.values())
@@ -4930,6 +5600,11 @@ def _run_public_cli(arguments: list[str]) -> bool:
         action="store_true",
         help="search the web for sampling evidence; may take several minutes",
     )
+    full_parser.add_argument(
+        "--write-prompts",
+        action="store_true",
+        help="write assembled system prompts into uniquely joined LM Studio configs",
+    )
 
     validate_parser = subparsers.add_parser("validate", help="Validate Registry and runtime ownership rules")
     validate_parser.add_argument("--ci", "--headless", action="store_true", help="skip local LM Studio state")
@@ -4951,6 +5626,7 @@ def _run_public_cli(arguments: list[str]) -> bool:
         parser.print_help()
         print("\nRecommended sequence: status -> sync -> full")
         print("Import tested GUI tuning only after reviewing the proposals: sync --import-lms-settings")
+        print("Write uniquely joined LM Studio system prompts explicitly: full --write-prompts")
         return True
 
     args = parser.parse_args(arguments)
@@ -4968,9 +5644,18 @@ def _run_public_cli(arguments: list[str]) -> bool:
             ignore_drift=args.ignore_drift,
             refresh_sampling=args.refresh_sampling,
             import_lms_settings=args.import_lms_settings,
+            write_prompts=args.write_prompts,
         )
     elif args.command == "validate":
-        errors = cmd_validate(verbose=args.verbose, repro=args.repro, ci=args.ci)
+        inventory = None if args.ci else _collect_registry_inventory()
+        if inventory is not None:
+            _ensure_gguf_inventory(inventory)
+        errors = cmd_validate(
+            verbose=args.verbose,
+            repro=args.repro,
+            ci=args.ci,
+            inventory=inventory,
+        )
         sys.exit(1 if _blocking_validation_errors(errors) else 0)
     elif args.command == "preset":
         sys.exit(cmd_export_llama_preset(args.path, merge_existing=args.merge_existing))
@@ -5174,10 +5859,15 @@ def main() -> None:
         sys.exit(cmd_rm(sys.argv[2], delete_files=delete_files, assume_yes=assume_yes))
     elif cmd == "validate":
         flags = set(sys.argv[2:])
+        ci = "--ci" in flags or "--headless" in flags
+        inventory = None if ci else _collect_registry_inventory()
+        if inventory is not None:
+            _ensure_gguf_inventory(inventory)
         errors = cmd_validate(
             verbose="--verbose" in flags,
             repro="--repro" in flags,
-            ci="--ci" in flags or "--headless" in flags,
+            ci=ci,
+            inventory=inventory,
         )
         has_blocking_errors = bool(_blocking_validation_errors(errors))
         sys.exit(1 if has_blocking_errors else 0)
@@ -5211,11 +5901,13 @@ def main() -> None:
         ignore_drift = "--ignore-drift" in sys.argv[2:]
         refresh_sampling = "--refresh-sampling" in sys.argv[2:]
         import_lms_settings = "--import-lms-settings" in sys.argv[2:]
+        write_prompts = "--write-prompts" in sys.argv[2:]
         cmd_pipeline(
             mode,
             ignore_drift=ignore_drift,
             refresh_sampling=refresh_sampling,
             import_lms_settings=import_lms_settings,
+            write_prompts=write_prompts,
         )
     elif cmd == "patch-reasoning-effort":
         flags = set(sys.argv[2:])

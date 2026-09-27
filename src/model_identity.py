@@ -274,6 +274,25 @@ def normalize_match_identity(key: str, *, include_quant: bool = True) -> str:
     return normalized
 
 
+def normalize_namespace_suffix(key: str) -> str:
+    """Normalize a full model namespace without discarding inner slashes.
+
+    LM Studio may expose a Hub-style model key such as
+    ``qwen/qwen3.5-9b@q6_k`` while the local Registry keeps the physical
+    publisher in front of that namespace:
+    ``lmstudio-community/qwen/qwen3.5-9b@q6_k``.  The first slash is
+    therefore not always the publisher/model boundary.  This helper keeps
+    the complete input namespace; callers may compare it to the part of a
+    Registry key after its physical publisher prefix.
+    """
+    return normalize_model_reference(key)
+
+
+def _registry_namespace_suffix(key: str) -> str:
+    """Return the Registry key after its first (physical) publisher part."""
+    return normalize_namespace_suffix(key.split("/", 1)[1] if "/" in key else key)
+
+
 def unique_normalized_index(keys: list[str], *, include_quant: bool = True) -> dict[str, str]:
     """Build a first-safe index containing only unique normalized identities."""
     grouped: dict[str, list[str]] = {}
@@ -531,6 +550,20 @@ def resolve_registry_match(name: str, keys: list[str]) -> RegistryMatch:
     exact = unique_stage(normalized_identity, normalize_registry_identity, "publisher-aware-exact")
     if exact is not None:
         return exact
+
+    # LMS Hub aliases can contain a slash in the model name itself.  Compare
+    # the complete requested namespace with the Registry key after its first
+    # publisher component before entering the publisherless fallback.  The
+    # stage remains fail-closed when multiple physical publishers expose the
+    # same namespace.
+    namespace = normalize_namespace_suffix(name)
+    namespace_alias = unique_stage(
+        namespace,
+        _registry_namespace_suffix,
+        "publisher-alias-namespace-exact",
+    )
+    if namespace_alias is not None:
+        return namespace_alias
 
     # Publisherless exact matching remains supported only when it is unique.
     norm = normalize_match_identity(name)

@@ -41,6 +41,10 @@ _SPECS = (
     QuantizationSpec("q5_k_s"),
     QuantizationSpec("q5_k_m"),
     QuantizationSpec("q6_k"),
+    # LM Studio / community GGUF filenames use Q6_K_L for a distinct larger
+    # variant. Keep the trailing L: collapsing it to Q6_K creates identity
+    # collisions and makes exact Registry-to-config joins fail closed.
+    QuantizationSpec("q6_k_l"),
     QuantizationSpec("q8_0_i"),
     QuantizationSpec("q8_0"),
     QuantizationSpec("q8_1"),

@@ -80,6 +80,7 @@ import requests
 
 import csv_writer as csv_writer
 from benchmark_config import EXCLUDE_KEYWORDS, get_model_config
+from comparison_manifest import canonical_task_id
 
 # Model management from shared module (is NOT initiated from here)
 # NOTE: This script imports the constants and helper functions from
@@ -95,6 +96,7 @@ from model_manager import (
     is_api_available,
     parse_selection,
 )
+from quantization import normalize_quant
 
 # Compatibility export for helper modules that still inspect the historical
 # import-time endpoint. Requests themselves use get_api_base().
@@ -220,6 +222,12 @@ def _can_use_structured_output(model_identifier: str | None) -> bool:
         return False
     if model_identifier and "codestral" in model_identifier.lower():
         return False
+    # Muse-Glimmer's chat-template reasoning preservation is not compatible
+    # with the strict JSON grammar used by the local API. Keep code extraction
+    # on the plain-text path; llama.cpp additionally receives
+    # --reasoning-format none from the Registry adapter.
+    if model_identifier and "muse-glimmer" in model_identifier.lower():
+        return False
     return True
 
 
@@ -340,6 +348,51 @@ def subsample_tasks(tasks: list[dict[str, Any]], task_type: str, sample_size: in
     if len(selected) > sample_size:
         selected = random.sample(selected, sample_size)
     return selected
+
+
+def _select_manifest_tasks(
+    tasks: list[dict[str, Any]],
+    expected_ids: list[str],
+    sample_size: int,
+) -> list[dict[str, Any]]:
+    """Select the exact manifest task IDs or reject a stale/incompatible manifest."""
+    by_id = {
+        canonical_task_id(task, int(task["_manifest_ordinal"])): task
+        for task in tasks
+    }
+    if len(by_id) != len(tasks):
+        raise ValueError("DS1000 task IDs are not unique; comparison manifest cannot bind them")
+    if len(expected_ids) != len(set(expected_ids)) or any(task_id not in by_id for task_id in expected_ids):
+        raise ValueError("comparison manifest DS1000 selected_ids do not match the filtered source tasks")
+    if len(expected_ids) > sample_size:
+        raise ValueError("comparison manifest selects more DS1000 tasks than sample_size")
+    return [by_id[task_id] for task_id in expected_ids]
+
+
+def _confirmed_manifest_task_ids(
+    tasks: list[dict[str, Any]],
+    results: list[dict[str, Any]],
+    expected_ids: list[str],
+) -> list[str]:
+    """Return IDs only when each expected task has a completed result row."""
+    task_indexes = [result.get("task_index") for result in results]
+    expected_indexes = list(range(1, len(tasks) + 1))
+    if (
+        any(type(index) is not int for index in task_indexes)
+        or sorted(task_indexes) != expected_indexes
+    ):
+        raise ValueError("DS1000 result rows do not cover every manifest task exactly once")
+    ordered_tasks = [tasks[index - 1] for index in sorted(task_indexes)]
+    actual_ids = [
+        canonical_task_id(task, int(task["_manifest_ordinal"]))
+        for task in ordered_tasks
+    ]
+    if actual_ids != expected_ids:
+        raise ValueError(
+            "DS1000 completed task IDs differ from comparison manifest: "
+            f"expected={expected_ids}, actual={actual_ids}"
+        )
+    return actual_ids
 
 
 _DS1000_BROKEN_API_PATTERNS: list[str] = [
@@ -847,11 +900,17 @@ def strip_thinking_tokens(text: str | None) -> tuple[str | None, int]:
     return cleaned, estimated_tokens
 
 
-def _non_streaming_fallback(url: str, body: dict[str, Any], timeout: int) -> tuple[str | None, int, int, int, bool]:
+def _non_streaming_fallback(
+    url: str,
+    body: dict[str, Any],
+    timeout: int,
+    headers: dict[str, str] | None = None,
+) -> tuple[str | None, int, int, int, bool]:
     """Non-streaming fallback, if streaming fails."""
     try:
         payload = json.dumps(body).encode("utf-8")
-        req = Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
+        request_headers = {"Content-Type": "application/json", **(headers or {})}
+        req = Request(url, data=payload, headers=request_headers, method="POST")
         with urlopen(req, timeout=timeout) as resp:
             result = json.loads(resp.read().decode("utf-8"))
         message = result["choices"][0]["message"]
@@ -982,15 +1041,72 @@ def generate_answer(cfg: GenerationConfig) -> tuple[str | None, float, int, int,
         body["response_format"] = cfg.response_format
     url = f"{get_api_base()}/chat/completions"
     headers = {"Content-Type": "application/json"}
+    auth_token = os.environ.get("LMS_OpenAI_AUTH_TOKEN") or os.environ.get("LMS_OPENAI_AUTH_TOKEN")
+    if auth_token:
+        headers["Authorization"] = f"Bearer {auth_token}"
+    streamed_reasoning_only = False
+    stream_metrics = (0.0, 0, 0, 0, False)
     if cfg.is_streaming:
         content, elapsed, t_in, t_out, tps, think_tok, truncated, err_type, err_detail = _stream_chat_completion(url, headers, body)
-        if content is not None:
+        if content and content.strip():
             return content, elapsed, t_in, t_out, tps, think_tok, truncated, err_type, err_detail
-        warn(f"Streaming failed ({err_detail}), fallback without streaming...")
+        if err_type is None:
+            if truncated or (cfg.max_tokens and t_out >= cfg.max_tokens):
+                # A second request with the same prompt and output cap cannot
+                # recover a final answer after the stream already exhausted
+                # that cap. Preserve the first attempt's diagnostics instead
+                # of paying for a duplicate full-length reasoning generation.
+                warn("Stream reached the output limit without final content; skipping identical non-stream retry.")
+                return (
+                    "",
+                    elapsed,
+                    t_in,
+                    t_out,
+                    tps,
+                    think_tok,
+                    True,
+                    None,
+                    "Streaming reached the output limit without final content; retry skipped",
+                )
+            # Some local chat endpoints stream reasoning deltas but omit the
+            # final content, while the non-stream response includes it. Treat
+            # a completed content-empty stream as an incomplete transport
+            # result and retry once without streaming before scoring it as a
+            # model failure (observed with LM Studio + Qwen3.5 on DS1000).
+            streamed_reasoning_only = True
+            stream_metrics = (elapsed, t_in, t_out, think_tok, truncated)
+            warn("Stream completed without final content; retrying the same request without streaming...")
+        else:
+            warn(f"Streaming failed ({err_detail}), fallback without streaming...")
     start = time.time()
-    content, t_in, t_out, think_tok, truncated = _non_streaming_fallback(url, {**body, "stream": False}, cfg.timeout)
+    content, t_in, t_out, think_tok, truncated = _non_streaming_fallback(
+        url, {**body, "stream": False}, cfg.timeout, headers=headers
+    )
     elapsed = time.time() - start
     if content is not None:
+        if streamed_reasoning_only:
+            stream_elapsed, stream_t_in, stream_t_out, stream_think, stream_truncated = stream_metrics
+            total_elapsed = stream_elapsed + elapsed
+            total_t_in = stream_t_in + t_in
+            total_t_out = stream_t_out + t_out
+            total_think = stream_think + think_tok
+            tokens_per_sec = total_t_out / total_elapsed if total_elapsed > 0 else 0
+            note = (
+                "Streaming returned no final content; a non-stream retry recovered the answer"
+                if content.strip()
+                else "Streaming and non-stream retry returned no final content"
+            )
+            return (
+                content,
+                total_elapsed,
+                total_t_in,
+                total_t_out,
+                tokens_per_sec,
+                total_think,
+                stream_truncated or truncated,
+                None,
+                note,
+            )
         tokens_per_sec = t_out / elapsed if elapsed > 0 else 0
         return content, elapsed, t_in, t_out, tokens_per_sec, think_tok, truncated, None, None
     return None, elapsed, t_in, t_out, 0, think_tok, truncated, "api_error", "Fallback also failed"
@@ -1534,9 +1650,9 @@ def _try_ds1000_harness(generated_code: str, setup_code: str) -> tuple[float, st
             _eval_log("DS1000-Harness: PASSED (original)")
             return 1.0, "OK (DS1000-Harness)"
         _eval_log(f"DS1000-Harness: FAILED -> {result['result']}")
-        return 0.0, f"Harness error: {result['result']}"
+        return 0.0, f"Generated code failed DS1000 harness: {result['result']}"
     _eval_log(f"DS1000-Harness: FAILED -> {result['result']}")
-    return 0.0, f"Harness error: {result['result']}"
+    return 0.0, f"Generated code failed DS1000 harness: {result['result']}"
 
 
 def _patch_matplotlib_compat(code: str) -> str:
@@ -1735,7 +1851,11 @@ def run_task(task: dict[str, Any], task_type: str, model_identifier: str | None 
     # when needed, is supplied explicitly at request level. GLM-4.6V (glm4
     # architecture) does not match this family and keeps the existing prompt
     # policy.
-    code_only = bool(model_config.get("enable_thinking")) and structured_policy != "native_channels"
+    registry_thinking_model = _model_supports_reasoning(model_identifier) is True
+    code_only = (
+        (bool(model_config.get("enable_thinking")) or registry_thinking_model)
+        and structured_policy != "native_channels"
+    )
     if isinstance(runtime, dict) and runtime.get("prompt_suffix") == "none":
         code_only = False
 
@@ -1797,7 +1917,12 @@ def _make_codereval_prompt(prompt: str, entry_point: str, code_only: bool = Fals
 
 def _make_datascience_prompt(prompt: str, entry_point: str, code_only: bool = False) -> str:
     """Build the DS1000-style instruction: complete the code with code-only suffix."""
-    full = "Complete the following Python code. Only output the code, no additional text.\n\n" + prompt
+    full = (
+        "Complete the following Python code. Only output the code, no additional text.\n"
+        "Return the missing solution, do not repeat the provided imports or input setup, "
+        "and define the output variable(s) requested by the task.\n\n"
+        + prompt
+    )
     if entry_point:
         full += f"\n\nCreate the function `{entry_point}`."
     if code_only:
@@ -1837,6 +1962,15 @@ def _extract_setup_code(task: dict[str, Any], prompt: str, reference_code: str) 
     return setup_code
 
 
+def _is_prompt_echo(response: str, prompt: str, *, min_prefix_chars: int = 120) -> bool:
+    """Detect a completion that starts by reproducing the submitted prompt."""
+    normalized_prompt = re.sub(r"\s+", " ", prompt).strip()
+    normalized_response = re.sub(r"\s+", " ", response).strip()
+    if len(normalized_prompt) < min_prefix_chars or len(normalized_response) < min_prefix_chars:
+        return False
+    return normalized_response.startswith(normalized_prompt[:min_prefix_chars])
+
+
 def _call_and_evaluate(full_prompt: str, generation_parameters: dict[str, Any], model_identifier: str | None,
                        entry_point: str, tests_field: list, reference_code: str, setup_code: str,
                        structured_policy: Any = None) -> TaskResult:
@@ -1870,6 +2004,39 @@ def _call_and_evaluate(full_prompt: str, generation_parameters: dict[str, Any], 
                 "thinking_tokens": think_tok, "truncated": truncated,
                 "output_status": "empty", "entry_point_found": None,
                 "error_type": err_type, "error_detail": err_detail}
+    if not response and think_tok:
+        detail = "No final answer content; the model emitted only a reasoning channel"
+        if err_detail:
+            detail += f"; {err_detail}"
+        return {
+            "response": response,
+            "extracted_code": "",
+            "score": 0.0,
+            "score_detail": detail,
+            "latency": latency,
+            "tokens_in": t_in,
+            "tokens_out": t_out,
+            "tokens_per_sec": tps,
+            "thinking_tokens": think_tok,
+            "truncated": truncated,
+            "output_status": "thinking_only",
+            "entry_point_found": None,
+        }
+    if response and _is_prompt_echo(response, full_prompt):
+        return {
+            "response": response,
+            "extracted_code": "",
+            "score": 0.0,
+            "score_detail": "Model echoed the task prompt; no solution code could be extracted",
+            "latency": latency,
+            "tokens_in": t_in,
+            "tokens_out": t_out,
+            "tokens_per_sec": tps,
+            "thinking_tokens": think_tok,
+            "truncated": truncated,
+            "output_status": "prompt_echo",
+            "entry_point_found": None,
+        }
     is_structured = structured
     code = extract_code(response, is_structured=is_structured) if response else ""
     if not code and response:
@@ -1883,6 +2050,8 @@ def _call_and_evaluate(full_prompt: str, generation_parameters: dict[str, Any], 
             )
     struct = classify_output(code, response or "", is_structured, entry_point)
     score, detail = evaluate_code(code, entry_point, tests_field, reference_code, setup_code=setup_code)
+    if err_type is None and err_detail:
+        detail += f" [{err_detail}]"
     return {
         "response": response,
         "extracted_code": code,
@@ -2289,11 +2458,24 @@ def _parse_args() -> tuple[Any, int]:
                          help="Enable thinking mode for reasoning models")
     _parser.add_argument("--seed", type=int, default=None,
                          help="Random seed for reproducible task selection")
+    _parser.add_argument("--selected-task-ids", type=str, default=None,
+                         help="JSON array of exact task IDs supplied by a comparison manifest")
     _parser.add_argument("--no-structured-output", action="store_true",
                          help="Disable structured JSON output (fallback to regex code extraction)")
     _parser.add_argument("--keep-response", action="store_true",
                          help="Write full LLM response to per-task CSVs (default: truncated to 200 chars)")
     _args, _ = _parser.parse_known_args()
+    if _args.selected_task_ids is not None:
+        try:
+            _args.selected_task_ids = json.loads(_args.selected_task_ids)
+        except json.JSONDecodeError as exc:
+            raise ValueError("--selected-task-ids must be a JSON array") from exc
+        if (
+            not isinstance(_args.selected_task_ids, list)
+            or not _args.selected_task_ids
+            or any(not isinstance(value, str) or not value for value in _args.selected_task_ids)
+        ):
+            raise ValueError("--selected-task-ids must be a non-empty JSON array of strings")
     global IS_QWEN_PROMPT_MODE, IS_THINKING_MODE, HAS_STRUCTURED_OUTPUT, KEEP_RESPONSE
     IS_QWEN_PROMPT_MODE = _args.qwen_prompt
     IS_THINKING_MODE = _args.thinking
@@ -2350,14 +2532,42 @@ def _resolve_benchmarks(args: Any) -> list[dict[str, Any]]:
 
 
 def _resolve_models(args: Any) -> list[dict[str, Any]]:
-    """Resolve the model list for non-interactive mode (with --model-key override)."""
+    """Resolve exactly one model when a key is supplied; reject ambiguous aliases."""
     available = get_available_models(exclude_keywords=EXCLUDE_KEYWORDS)
     if args.model_key:
         target = args.model_key.strip()
-        # Tolerant match: exakte Key-Übereinstimmung ODER Basis-Key-Vergleich
-        # (ohne @quant). Registry-Keys mit '@mixed' (z.B. REAP-Modelle)
-        # unterscheiden sich vom LMS modelKey (ohne Quant); der Launcher
-        # übergibt model_info["key"] aus get_available_models().
+        target_folded = target.casefold()
+        # Prefer a full Registry identity. A plain LMS model key can be shared
+        # by multiple concrete variants and is therefore not sufficient to
+        # select one model.
+        registry_exact = [
+            model
+            for model in available
+            if str(model.get("registry_key", "")).casefold() == target_folded
+        ]
+        if len(registry_exact) == 1:
+            return registry_exact
+        if len(registry_exact) > 1:
+            error(f"Model key '{target}' matches multiple Registry entries; selection is ambiguous.")
+            sys.exit(1)
+
+        key_exact = [
+            model
+            for model in available
+            if str(model.get("key", "")).casefold() == target_folded
+        ]
+        if len(key_exact) == 1:
+            return key_exact
+        if len(key_exact) > 1:
+            error(
+                f"Model key '{target}' identifies multiple variants; "
+                "select a full publisher/model@quant Registry key."
+            )
+            sys.exit(1)
+
+        # Compatibility fallback for LMS identities that omit publisher or
+        # quantization (notably @mixed/REAP). It is valid only when it resolves
+        # to one available concrete model.
         try:
             from assemble_blueprint import normalize_model_name
             target_norm = normalize_model_name(target)
@@ -2365,25 +2575,39 @@ def _resolve_models(args: Any) -> list[dict[str, Any]]:
         except (ImportError, AttributeError):
             target_norm = target.lower()
             target_base = target_norm.split("@")[0]
+        requested_quant = target.rsplit("@", 1)[1].strip() if "@" in target else ""
+        requested_quant = normalize_quant(requested_quant) if requested_quant else ""
+        quant_is_explicit = requested_quant not in {"", "?", "unknown", "mixed"}
         models = []
         for m in available:
             key = m.get("key", "")
             registry_key = m.get("registry_key", "")
-            if key == target or registry_key == target:
-                models.append(m)
-                continue
             try:
                 from assemble_blueprint import normalize_model_name
                 m_norm = normalize_model_name(key)
             except (ImportError, AttributeError):
                 m_norm = key.lower()
             registry_norm = normalize_model_name(registry_key) if registry_key else ""
+            candidate_keys = [registry_key, key]
+            candidate_quants = [
+                normalize_quant(value.rsplit("@", 1)[1].strip())
+                for value in candidate_keys
+                if isinstance(value, str) and "@" in value
+            ]
+            if quant_is_explicit and requested_quant not in candidate_quants:
+                continue
             if (m_norm == target_norm or m_norm.split("@")[0] == target_base
                     or registry_norm == target_norm
                     or registry_norm.split("@")[0] == target_base):
                 models.append(m)
         if not models:
             error(f"Model '{args.model_key}' not found.")
+            sys.exit(1)
+        if len(models) > 1:
+            error(
+                f"Model key '{target}' matches multiple concrete variants; "
+                "select a full publisher/model@quant Registry key."
+            )
             sys.exit(1)
     else:
         models = available
@@ -2423,6 +2647,8 @@ def _run_model_loop(models: list[dict[str, Any]], benchmarks: list[dict[str, Any
                 warn(f"Missing: {fp}")
                 continue
             tasks = load_jsonl(fp)
+            for task_index, task in enumerate(tasks):
+                task["_manifest_ordinal"] = task_index
             if len(tasks) > MAX_TASKS_PER_BENCHMARK:
                 print(f"\n  Loading {bench['file']} ({len(tasks)} tasks, using {MAX_TASKS_PER_BENCHMARK})")
                 tasks = tasks[:MAX_TASKS_PER_BENCHMARK]
@@ -2432,7 +2658,11 @@ def _run_model_loop(models: list[dict[str, Any]], benchmarks: list[dict[str, Any
             # the current environment (e.g. scipy.interpolate.interp2d).
             tasks = _filter_broken_code_tasks(tasks)
             tt = get_task_type(bench["file"])
-            tasks = subsample_tasks(tasks, tt, sample_size=sample_size)
+            expected_ids = getattr(args, "selected_task_ids", None)
+            if expected_ids is not None and bench["name"].casefold() == "ds1000":
+                tasks = _select_manifest_tasks(tasks, expected_ids, sample_size)
+            else:
+                tasks = subsample_tasks(tasks, tt, sample_size=sample_size)
             try:
                 res, avg_s, avg_l, avg_t, cs = benchmark_model(
                     model_info, tasks, tt, bench["name"], monitor,
@@ -2445,6 +2675,9 @@ def _run_model_loop(models: list[dict[str, Any]], benchmarks: list[dict[str, Any
                 res = []
                 avg_s = avg_l = avg_t = None
                 cs = {}
+            if expected_ids is not None and bench["name"].casefold() == "ds1000":
+                confirmed_ids = _confirmed_manifest_task_ids(tasks, res, expected_ids)
+                print(f"[MANIFEST_TASK_IDS] {json.dumps(confirmed_ids, ensure_ascii=False)}")
             csv_p = csv_writer.write_per_task_csv(
                 res, bench["name"], model_display,
                 model_key=model_info.get("key", ""),

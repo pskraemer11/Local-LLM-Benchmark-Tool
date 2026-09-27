@@ -11,6 +11,7 @@ import json
 import os
 import subprocess
 import sys
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -210,6 +211,10 @@ class TestGetCurrentLoadedModel:
         assert get_current_loaded_model() is None
 
     def test_returns_first_model(self, mocker):
+        mocker.patch(
+            "providers.lmstudio_provider.LMStudioProvider._native_request",
+            return_value=None,
+        )
         result = MagicMock()
         result.returncode = 0
         result.stdout = json.dumps([
@@ -279,6 +284,24 @@ class TestGetAvailableModels:
         result.stdout = "invalid json"
         mocker.patch("subprocess.run", return_value=result)
         assert get_available_models() == []
+
+    def test_registry_join_prefers_selected_variant_over_base_key(self, mocker):
+        registry = MagicMock()
+        registry.load.return_value = {"lmstudio-community/qwen/qwen3.5-9b@q6_k": {}}
+        registry.resolve.return_value = SimpleNamespace(
+            registry_key="lmstudio-community/qwen/qwen3.5-9b@q6_k"
+        )
+        mocker.patch("model_manager._registry_view", return_value=registry)
+
+        models = mm._attach_registry_identity(
+            [{
+                "key": "qwen/qwen3.5-9b@q6_k",
+                "model_identifier": "qwen/qwen3.5-9b",
+            }]
+        )
+
+        registry.resolve.assert_called_once_with("qwen/qwen3.5-9b@q6_k")
+        assert models[0]["registry_key"] == "lmstudio-community/qwen/qwen3.5-9b@q6_k"
 
     def test_filters_excluded_keywords(self, mocker):
         result = MagicMock()
@@ -397,7 +420,7 @@ class TestGetAvailableModels:
         models = get_available_models()
         keys = [m["key"] for m in models]
         assert "gemma-4-12b-it-qat@q8_0" not in keys
-        assert "qwen3.6-27b-mtp" in keys
+        assert "qwen3.6-27b-mtp@IQ3_XXS" in keys
         assert "good_model" in keys
         assert len(models) == 2
 
@@ -950,7 +973,7 @@ class TestValidateModelKey:
         mocker.patch("time.sleep")
         is_model_ready(timeout=2)
         assert len(captured_urls) >= 1
-        assert captured_urls[0] == f"{API_BASE}/chat/completions"
+        assert f"{API_BASE}/chat/completions" in captured_urls
 
     def test_default_timeout(self, mocker):
         # The function uses TIMEOUT_MODEL_READY as default

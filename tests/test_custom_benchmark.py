@@ -678,6 +678,61 @@ class TestResolveModels:
         assert models[0]["key"] == "unsloth/phi-4"
 
     @patch.object(cb, "get_available_models")
+    def test_exact_registry_key_excludes_other_publishers_with_same_base_name(self, mock_get):
+        mock_get.return_value = [
+            {
+                **_fake_model("liquidai/lfm2.5-8b-a1b@q6_k"),
+                "registry_key": "liquidai/lfm2.5-8b-a1b@q6_k",
+            },
+            {
+                **_fake_model("unsloth/lfm2.5-8b-a1b@mxfp4"),
+                "registry_key": "unsloth/lfm2.5-8b-a1b@mxfp4",
+            },
+        ]
+        args = _Args(model_key="unsloth/lfm2.5-8b-a1b@mxfp4")
+        models = cb._resolve_models(args)
+        assert [model["registry_key"] for model in models] == ["unsloth/lfm2.5-8b-a1b@mxfp4"]
+
+    @patch.object(cb, "get_available_models")
+    def test_ambiguous_quantless_key_fails_closed(self, mock_get):
+        mock_get.return_value = [
+            _fake_model("lfm2.5-8b-a1b@q6_k"),
+            _fake_model("lfm2.5-8b-a1b@mxfp4"),
+        ]
+        args = _Args(model_key="lfm2.5-8b-a1b")
+        with pytest.raises(SystemExit):
+            cb._resolve_models(args)
+
+
+    @patch.object(cb, "get_available_models")
+    def test_explicit_quant_never_falls_back_to_other_variant(self, mock_get):
+        mock_get.return_value = [
+            {
+                **_fake_model("publisher/model@q6_k"),
+                "registry_key": "publisher/model@q6_k",
+            }
+        ]
+        args = _Args(model_key="publisher/model@q5_k_s")
+        with pytest.raises(SystemExit):
+            cb._resolve_models(args)
+
+    @patch.object(cb, "get_available_models")
+    def test_explicit_quant_alias_matches_only_same_quant(self, mock_get):
+        mock_get.return_value = [
+            {
+                **_fake_model("publisher/model@Q5-K-S"),
+                "registry_key": "publisher/model@Q5-K-S",
+            },
+            {
+                **_fake_model("publisher/model@q6_k"),
+                "registry_key": "publisher/model@q6_k",
+            },
+        ]
+        args = _Args(model_key="publisher/model@q5_k_s")
+        models = cb._resolve_models(args)
+        assert [model["registry_key"] for model in models] == ["publisher/model@Q5-K-S"]
+
+    @patch.object(cb, "get_available_models")
     def test_registry_mixed_key_matches_lms_base_key(self, mock_get):
         # REAP-Fall: Launcher übergibt Registry-Key mit '@mixed', LMS-Key
         # ist der Basis-Key ohne Quant (Fix 13.08.: REAP DS1000/CoderEval).
@@ -701,6 +756,34 @@ class TestResolveModels:
         args = _Args(model_key="does-not-exist")
         with pytest.raises(SystemExit):
             cb._resolve_models(args)
+
+
+def test_custom_pipeline_selects_exact_manifest_tasks_and_fails_on_stale_id():
+    tasks = [
+        {"task_id": "second", "_manifest_ordinal": 1},
+        {"task_id": "first", "_manifest_ordinal": 0},
+    ]
+    selected = cb._select_manifest_tasks(tasks, ["first", "second"], sample_size=2)
+    assert [task["task_id"] for task in selected] == ["first", "second"]
+
+    with pytest.raises(ValueError, match="do not match"):
+        cb._select_manifest_tasks(tasks, ["missing"], sample_size=1)
+
+
+def test_custom_manifest_confirmation_requires_one_result_per_selected_task():
+    tasks = [
+        {"task_id": "first", "_manifest_ordinal": 0},
+        {"task_id": "second", "_manifest_ordinal": 1},
+    ]
+    results = [{"task_index": 2}, {"task_index": 1}]
+
+    assert cb._confirmed_manifest_task_ids(tasks, results, ["first", "second"]) == [
+        "first",
+        "second",
+    ]
+
+    with pytest.raises(ValueError, match="do not cover every manifest task"):
+        cb._confirmed_manifest_task_ids(tasks, [{"task_index": 1}], ["first", "second"])
 
 
 class TestModelSupportsReasoning:

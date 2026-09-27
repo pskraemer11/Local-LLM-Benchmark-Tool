@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import time
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -35,6 +36,7 @@ class RequestSpec:
     top_p: float = 1.0
     seed: int = 42
     response_format: str = "text"
+    system_prompt: str = ""
 
 
 @dataclass
@@ -69,13 +71,16 @@ def build_payload(model: str, spec: RequestSpec, *, stream: bool) -> dict[str, A
     """Build the exact request payload used by both providers."""
     payload: dict[str, Any] = {
         "model": model,
-        "messages": [{"role": "user", "content": spec.prompt}],
+        "messages": [],
         "max_tokens": spec.max_tokens,
         "temperature": spec.temperature,
         "top_p": spec.top_p,
         "seed": spec.seed,
         "stream": stream,
     }
+    if spec.system_prompt:
+        payload["messages"].append({"role": "system", "content": spec.system_prompt})
+    payload["messages"].append({"role": "user", "content": spec.prompt})
     if spec.response_format == "json":
         payload["response_format"] = {"type": "json_object"}
     return payload
@@ -141,7 +146,11 @@ def parse_sse_lines(lines: Iterable[bytes | str]) -> tuple[str, str, str | None,
 
 
 def _request_headers() -> dict[str, str]:
-    return {"Accept": "application/json", "Content-Type": "application/json"}
+    headers = {"Accept": "application/json", "Content-Type": "application/json"}
+    token = os.environ.get("LMS_OpenAI_AUTH_TOKEN") or os.environ.get("LMS_OPENAI_AUTH_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
 
 
 def measure(base_url: str, backend: str, model: str, spec: RequestSpec, *, stream: bool, timeout: int) -> Measurement:
@@ -242,6 +251,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--top-p", type=float, default=1.0)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--response-format", choices=("text", "json"), default="text")
+    parser.add_argument("--system", dest="system_prompt", default="")
     parser.add_argument("--mode", choices=("all", "nonstream", "stream"), default="all")
     parser.add_argument("--backend", choices=("all", "lmstudio", "llama_cpp"), default="all")
     parser.add_argument("--timeout", type=int, default=120)
@@ -259,6 +269,7 @@ def main(argv: list[str] | None = None) -> int:
         top_p=args.top_p,
         seed=args.seed,
         response_format=args.response_format,
+        system_prompt=args.system_prompt,
     )
     if args.backend == "all":
         report = run_comparison(

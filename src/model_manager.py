@@ -480,7 +480,11 @@ def _attach_registry_identity(
         return [] if registry_only else models
     matched: list[AvailableModelInfo] = []
     for model in models:
-        identifier = str(model.get("model_identifier") or model.get("key") or "")
+        # Keep the selected LMS variant (usually ``model@quant``) ahead of
+        # the base model key.  The variant is identity-bearing; resolving the
+        # base key alone can fall through to a different publisher's model
+        # when two local GGUFs share the same family name.
+        identifier = str(model.get("key") or model.get("model_identifier") or "")
         resolved = registry.resolve(identifier)
         if resolved is not None:
             model["registry_key"] = resolved.registry_key

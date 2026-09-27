@@ -19,6 +19,7 @@ from typing import Any, cast
 
 from ruamel.yaml import YAML
 
+from artifact_bundle import validate_companion_binding
 from model_identity import UniqueMatch, resolve_registry_match
 from providers.llama_cpp_args import normalize_cache_type
 from speculative import companion_role, llama_cpp_spec_type, normalize_speculative_profile
@@ -197,6 +198,15 @@ class ResolvedRegistryEntry:
             # provider-specific: they are not part of the LM Studio JSON
             # contract and must never be inferred from a GUI artifact.
             if provider == "llama_cpp":
+                # An instruct model must not inherit llama.cpp's automatic
+                # reasoning-preservation parser.  Auto mode is appropriate
+                # for explicit thinking profiles, but Muse-/chat-template
+                # families can emit ordinary assistant text that auto mode
+                # then sends through the PEG reasoning parser.  The Registry
+                # reasoning field is the authoritative model-policy signal;
+                # an explicit entry-level reasoning_format still wins below.
+                if self.entry.get("reasoning") == "instruct" and self.entry.get("reasoning_format") is None:
+                    overrides["reasoning_format"] = "none"
                 runtime_experts = runtime.get("num_experts")
                 architecture_family = self.entry.get("architecture_family")
                 if (
@@ -239,6 +249,18 @@ class ResolvedRegistryEntry:
                     # their exact companion path was materialized. Integrated
                     # MTP has no companion requirement. Missing evidence must
                     # not produce a broken llama-server command.
+                    if role is not None:
+                        main_path = local.get("model_path") if isinstance(local, dict) else None
+                        bundle_errors = validate_companion_binding(
+                            main_path if isinstance(main_path, str) else None,
+                            draft_path,
+                            normalized_speculative,
+                        )
+                        if bundle_errors:
+                            raise ValueError(
+                                f"invalid speculative bundle for {self.registry_key}: "
+                                + "; ".join(bundle_errors)
+                            )
                     if backend_spec_type is not None and (role is None or draft_path is not None):
                         overrides["spec_type"] = backend_spec_type
                     if draft_path is not None:

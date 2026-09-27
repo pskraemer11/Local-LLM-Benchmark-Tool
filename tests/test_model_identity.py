@@ -250,6 +250,18 @@ class TestMatchRegistryKey:
 
         assert find_match_collisions(keys) == {}
 
+    def test_lms_namespace_alias_resolves_to_physical_publisher(self) -> None:
+        keys = [
+            "lmstudio-community/qwen/qwen3.5-9b@q6_k",
+            "byteshape/qwen3.5-9b@q5_k_s",
+        ]
+
+        result = resolve_registry_match("qwen/qwen3.5-9b@q6_k", keys)
+
+        assert isinstance(result, UniqueMatch)
+        assert result.key == "lmstudio-community/qwen/qwen3.5-9b@q6_k"
+        assert result.stage == "publisher-alias-namespace-exact"
+
 
 # ─────────────────────────────────────────────────────────────────────
 # Familien-Klassifikation

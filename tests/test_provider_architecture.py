@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from types import SimpleNamespace
@@ -41,6 +42,12 @@ def test_provider_factory_selects_direct_llama_cpp_provider(monkeypatch: pytest.
     assert provider.capabilities.can_load_models is True
     assert provider.capabilities.can_unload_models is True
     assert provider.capabilities.max_parallel == 4
+
+
+def test_direct_llama_cpp_uses_local_auth_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LMS_OpenAI_AUTH_TOKEN", "local-test-token")
+    provider = LlamaCppProvider("http://127.0.0.1:18080/v1")
+    assert provider.headers["Authorization"] == "Bearer local-test-token"
 
 
 def test_provider_context_owns_client_endpoint_and_capabilities(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -114,6 +121,93 @@ def test_lmstudio_is_default_legacy_compatibility_path(monkeypatch: pytest.Monke
     assert model_manager.get_provider_name() == "lmstudio"
     assert model_manager._uses_legacy_lmstudio_path() is True
     assert isinstance(model_manager.get_provider(), LMStudioProvider)
+
+
+def test_lmstudio_uses_explicit_local_auth_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LMS_OpenAI_AUTH_TOKEN", "local-test-token")
+    provider = LMStudioProvider("http://127.0.0.1:1234/v1")
+    assert provider.headers["Authorization"] == "Bearer local-test-token"
+
+
+def test_lmstudio_resolves_placeholder_quant_from_full_gguf_filename() -> None:
+    provider = LMStudioProvider(
+        "http://127.0.0.1:1234/v1",
+        subprocess_run=lambda *_args, **_kwargs: SimpleNamespace(
+            returncode=0,
+            stdout='[{"modelKey":"ternary-bonsai-27b@?",'
+            '"selectedVariant":"ternary-bonsai-27b@?",'
+            '"quantization":{"name":"?"},'
+            '"path":"D:/models/prism-ml/Ternary-Bonsai-27B-Q2_g64.gguf"}]',
+        ),
+    )
+
+    [model] = provider.list_models()
+
+    assert model["key"] == "ternary-bonsai-27b@Q2_G64"
+    assert model["quant"] == "Q2_G64"
+    # Keep LM Studio's load identifier separate from our corrected registry key.
+    assert model["model_identifier"] == "ternary-bonsai-27b@?"
+
+
+def test_lmstudio_current_model_falls_back_to_native_loaded_instances() -> None:
+    native_models = {
+        "models": [
+            {
+                "key": "ternary-bonsai-27b@?",
+                "publisher": "prism-ml",
+                "display_name": "Ternary Bonsai 27B Q2 G64",
+                "loaded_instances": [{"id": "ternary-bonsai-27b@?"}],
+            }
+        ]
+    }
+    lms_inventory = [
+        {
+            "modelKey": "ternary-bonsai-27b@?",
+            "selectedVariant": "ternary-bonsai-27b@?",
+            "publisher": "prism-ml",
+            "displayName": "Ternary Bonsai 27B Q2 G64",
+            "quantization": {"name": "?"},
+            "path": "D:/models/prism-ml/Ternary-Bonsai-27B-Q2_g64.gguf",
+        }
+    ]
+
+    def run_lms(args: list[str], **_kwargs: object) -> SimpleNamespace:
+        payload = [] if args[1:3] == ["ps", "--json"] else lms_inventory
+        return SimpleNamespace(returncode=0, stdout=json.dumps(payload))
+
+    provider = LMStudioProvider(
+        "http://127.0.0.1:1234/v1",
+        rest_request=lambda *_args, **_kwargs: native_models,
+        subprocess_run=run_lms,
+        registry_loader=lambda: {"prism-ml/ternary-bonsai-27b@q2_g64": {}},
+    )
+
+    current = provider.current_model()
+
+    assert current is not None
+    assert current["identifier"] == "ternary-bonsai-27b@?"
+    assert current["model_identifier"] == "prism-ml/ternary-bonsai-27b@q2_g64"
+
+
+def test_lmstudio_native_empty_state_overrides_stale_cli_process_row() -> None:
+    cli_called = False
+
+    def run_lms(_args: list[str], **_kwargs: object) -> SimpleNamespace:
+        nonlocal cli_called
+        cli_called = True
+        return SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps([{"modelKey": "stale-model", "identifier": "stale-instance"}]),
+        )
+
+    provider = LMStudioProvider(
+        "http://127.0.0.1:1234/v1",
+        rest_request=lambda *_args, **_kwargs: {"models": []},
+        subprocess_run=run_lms,
+    )
+
+    assert provider.current_model() is None
+    assert cli_called is False
 
 
 def test_lmstudio_load_rejects_explicit_api_error() -> None:
