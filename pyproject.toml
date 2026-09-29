@@ -143,6 +143,7 @@ warn_redundant_casts = false
 # Legacy-Ordner ausschliessen (wie in ruff extend-exclude):
 # simple_evals/types.py schattet das stdlib-Modul `types` und blockiert sonst alle Checks.
 exclude = [
+    "^utils/",
     "^simple_evals/",
     "^Archiv/",
     "^Doku-intern/",

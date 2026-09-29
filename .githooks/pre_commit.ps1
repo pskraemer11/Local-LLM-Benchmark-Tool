@@ -81,11 +81,8 @@ if ($pythonFiles.Count -gt 0) {
     if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
         Stop-Hook "Python 3.12 ist fuer Python-Pruefungen nicht verfuegbar."
     }
-    if (-not (Get-Command ruff -ErrorAction SilentlyContinue)) {
-        Stop-Hook "ruff ist fuer den Pre-Commit-Check nicht verfuegbar."
-    }
     $ruffArgs = @("check", "--select", "E,F", "--ignore", "E501,F401,E402", "--no-fix", "--") + $pythonFiles
-    Invoke-Checked "py" (@("-3.12", "-m", "ruff") + $ruffArgs)
+    Invoke-Checked "python" (@("-m", "ruff") + $ruffArgs)
     $compileArgs = @("-m", "py_compile") + $pythonFiles
     Invoke-Checked "python" $compileArgs
 }

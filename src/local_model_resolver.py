@@ -19,11 +19,13 @@ from benchmark_config import (
     is_blacklisted_model_name,
     is_support_file,
 )
+from gguf_evidence import resolve_artifact_quant
 from model_identity import (
     ArtifactIdentityEvidence,
     UniqueMatch,
     decompose_model_identity,
-    normalize_for_config,
+    normalize_artifact_model_name,
+    normalize_model_name,
     resolve_registry_match,
 )
 from model_paths import configured_gguf_roots
@@ -117,7 +119,9 @@ class LocalModelResolver:
 
     @staticmethod
     def _match_registry(base_id: str, quant: str, registry: dict[str, Any]) -> str | None:
-        keys = list(registry)
+        publisher, _, _ = decompose_model_identity(base_id)
+        # A physical package owner is evidence, never a publisher alias.
+        keys = [key for key in registry if not publisher or decompose_model_identity(key)[0] == publisher]
         # Local HF/LM Studio folders commonly carry a terminal ``-GGUF``
         # format marker (``publisher/model-GGUF``), while the semantic
         # Registry identity is ``publisher/model``.  Try that packaging
@@ -141,7 +145,7 @@ class LocalModelResolver:
             # the normalized model basename only when exactly one Registry
             # key with that publisher/quant has the same model base.
             publisher, model_name, _ = decompose_model_identity(base_id)
-            model_base = normalize_for_config(model_name)
+            model_base = normalize_artifact_model_name(model_name, quant)
             suffix_matches = []
             for key in keys:
                 key_publisher, key_model, key_quant = decompose_model_identity(key)
@@ -149,7 +153,7 @@ class LocalModelResolver:
                     key_publisher == publisher.casefold()
                     and LocalModelResolver._normalize_quant(key_quant)
                     == LocalModelResolver._normalize_quant(quant)
-                    and normalize_for_config(key_model) == model_base
+                    and normalize_model_name(key_model) == model_base
                 ):
                     suffix_matches.append(key)
             if len(suffix_matches) == 1:
@@ -164,7 +168,7 @@ class LocalModelResolver:
             return cast("str", matched.key)
         normalized_quant = LocalModelResolver._normalize_quant(quant)
         registry_quant = LocalModelResolver._registry_quant(matched.key)
-        return cast("str", matched.key) if registry_quant in {normalized_quant, "mixed"} else None
+        return cast("str", matched.key) if registry_quant == normalized_quant else None
 
     @staticmethod
     def _normalize_quant(quant: str) -> str:
@@ -204,16 +208,21 @@ class LocalModelResolver:
                 f"Persistierter lokaler GGUF-Binding-Pfad ist ungueltig: "
                 f"{registry_key} -> {path}"
             )
-        quant = self._registry_quant(registry_key)
-        candidate = LocalModelCandidate(
-            model_identifier=registry_key,
-            path=path,
-            quant=quant,
-            registry_key=registry_key,
-            display=self._display_name(registry_key, quant, entry),
-            identity_evidence=ArtifactIdentityEvidence.from_reference(path, registry_key, quant),
+        reference = self._model_base_id(path)
+        quant = guess_quant_from_filename(path.name)
+        if not quant:
+            publisher, _, _ = decompose_model_identity(reference)
+            quant = (resolve_artifact_quant(path, publisher=publisher) or "").upper()
+        evidence = ArtifactIdentityEvidence.from_reference(path, reference, quant)
+        if not evidence.is_complete or self._match_registry(reference, quant, registry) != registry_key:
+            raise ModelResolutionError(
+                f"Persistierter lokaler GGUF-Binding-Pfad belegt die Identitaet nicht: "
+                f"{registry_key} -> {path}"
+            )
+        return LocalModelCandidate(
+            registry_key, path, quant, registry_key,
+            self._display_name(registry_key, quant, entry), evidence,
         )
-        return candidate
 
     def candidates(self, registry_only: bool = False) -> list[LocalModelCandidate]:
         """Return eligible, path-deduplicated local GGUF candidates."""
@@ -237,6 +246,9 @@ class LocalModelResolver:
             if is_support_file(path):
                 continue
             quant = guess_quant_from_filename(path.name)
+            if not quant:
+                publisher, _, _ = decompose_model_identity(model_base_id)
+                quant = (resolve_artifact_quant(path, publisher=publisher) or "").upper()
             identity_evidence = ArtifactIdentityEvidence.from_reference(path, model_base_id, quant)
             registry_key = self._match_registry(model_base_id, quant, registry)
             if registry_only and registry_key is None:
@@ -268,9 +280,15 @@ class LocalModelResolver:
             identity = model_identifier.casefold()
             existing_path = by_identifier.get(identity)
             if existing_path is not None and existing_path != canonical_path:
-                # The first root wins.  A fallback must not make an otherwise
-                # identical model ambiguous when the primary root contains it.
-                continue
+                # Preserve root priority, but two different files in the same
+                # root are ambiguous evidence and must both reach IdentityLink.
+                same_root = any(
+                    Path(existing_path).is_relative_to(root.resolve())
+                    and Path(canonical_path).is_relative_to(root.resolve())
+                    for root in existing_roots
+                )
+                if not same_root:
+                    continue
             existing = by_path.get(canonical_path)
             if existing is None or (existing.registry_key is None and registry_key is not None):
                 by_path[canonical_path] = candidate

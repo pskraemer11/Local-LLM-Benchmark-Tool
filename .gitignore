@@ -38,7 +38,6 @@ run.example.yaml
 run_lint.ps1
 
 # LM Studio / Nutzer-spezifisch
-doc-git/model_registry.yaml
 lmstudio_model-list*.json
 lmstudio_model-list*.txt
 model-list.json
@@ -47,6 +46,7 @@ ans.png
 opencode.json
 benchmark-dirs.txt
 *.sqlite
+doc-git/model_registry.yaml
 
 # OpenCode
 .opencode/
@@ -63,7 +63,7 @@ embedding-eval/
 .coverage.*
 
 # LM Studio model dumps
-lms_models*.txt
+*models*.txt
 
 # Prompt Inventar
 prompt_inventory.csv
@@ -77,6 +77,12 @@ prompt_inventory.csv
 .pytest-temp-local/
 .pytest-run-*/
 .pytest-push-*/
+.pytest-tmp-registry-*/
+.pytest-temp-20260925/
+.pytest-temp-codex-provider-20260925-02/
+.pytest-tmp-current/
+.sidecar-test-escalated-20260925/
+.sidecar-test-tmp-20260925-b/
 
 # Review-Gate-Logs (Artefakte in doc-git/Review-Artifacts/ werden committet)
 pre_review_checks_*.log
@@ -92,4 +98,4 @@ model-list.txt
 doc-git/*_llama-server_version+help.txt
 
 # Fremder, unversionierter Hilfscode im Arbeitsbaum
-utils/
+/utils/

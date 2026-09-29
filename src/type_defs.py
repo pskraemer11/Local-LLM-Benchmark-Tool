@@ -15,6 +15,7 @@ class ModelConfig(TypedDict):
     reasoning_effort: NotRequired[str]
     no_system_msg: NotRequired[bool]
     _source: NotRequired[str]
+    _reasoning_template_controls: NotRequired[frozenset[str]]
 
 
 class SamplingCell(TypedDict):
@@ -116,6 +117,11 @@ class SandboxResult(TypedDict):
     ok: bool
     error: str | None
     state: NotRequired[dict[str, str] | None]
+    setup_state: NotRequired[dict[str, str]]
+    state_hashes: NotRequired[dict[str, str]]
+    setup_state_hashes: NotRequired[dict[str, str]]
+    state_value_keys: NotRequired[list[str]]
+    error_phase: NotRequired[str]
     passed: int
     total: int
     details: NotRequired[list[dict[str, Any]]]
@@ -192,7 +198,7 @@ class GenerationConfig:
     prompt: str | None = None
     model_identifier: str | None = None
     native_model_identifier: str | None = None
-    timeout: int = 120_000
+    timeout: int = 120
     max_tokens: int = 4096
     system_msg: str | None = None
     messages: list[dict[str, Any]] | None = None
@@ -204,6 +210,7 @@ class GenerationConfig:
     repetition_penalty: float | None = None
     is_thinking_enabled: bool | None = None
     reasoning_effort: str | None = None
+    reasoning_template_kwargs: dict[str, Any] | None = None
     max_thinking_tokens: int | None = None
     is_streaming: bool = True
     stop: list[str] | None = None

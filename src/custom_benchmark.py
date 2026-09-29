@@ -70,7 +70,7 @@ import threading
 import time
 import traceback
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -96,7 +96,7 @@ from model_manager import (
     is_api_available,
     parse_selection,
 )
-from quantization import normalize_quant
+from runtime_policy import reasoning_request_kwargs
 
 # Compatibility export for helper modules that still inspect the historical
 # import-time endpoint. Requests themselves use get_api_base().
@@ -129,38 +129,13 @@ def _model_supports_reasoning(model_identifier: str) -> bool | None:
 
     Returns True (thinking), False (instruct), None (missing / unknown).
     """
-    global _REGISTRY_REASONING_CACHE
-    if _REGISTRY_REASONING_CACHE is None:
-        _REGISTRY_REASONING_CACHE = {}
-        try:
-            from model_identity import unique_normalized_index
-            from registry_tool import load_registry
-            data = load_registry()
-            reasoning_keys = [
-                key for key, entry in data.items()
-                if isinstance(entry, dict) and "reasoning" in entry
-            ]
-            exact_index = unique_normalized_index(reasoning_keys)
-            base_index = unique_normalized_index(reasoning_keys, include_quant=False)
-            for normalized, key in {**base_index, **exact_index}.items():
-                _REGISTRY_REASONING_CACHE[normalized] = data[key]["reasoning"]
-        except (OSError, KeyError, ValueError):
-            pass
-    try:
-        from model_identity import normalize_match_identity
-        normalized_key = normalize_match_identity(model_identifier)
-    except (ImportError, AttributeError):
-        normalized_key = model_identifier.lower().replace("-", "_").replace(" ", "_")
-    cached = _REGISTRY_REASONING_CACHE.get(normalized_key) if normalized_key else None
-    # Fallback: ohne @quant-Suffix (Registry-Keys haben kein Quant)
-    if cached is None and normalized_key and "@" in normalized_key:
-        base_key = normalized_key.split("@")[0]
-        cached = _REGISTRY_REASONING_CACHE.get(base_key)
-    if cached == "thinking":
-        return True
-    if cached == "instruct":
-        return False
-    return None
+    from model_registry import ModelRegistry
+    resolved = ModelRegistry().resolve(model_identifier)
+    if resolved is None:
+        return None
+    reasoning = resolved.entry.get("reasoning")
+    return reasoning == "thinking" if reasoning in {"thinking", "instruct"} else None
+
 
 
 SRC_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -331,7 +306,7 @@ def subsample_tasks(tasks: list[dict[str, Any]], task_type: str, sample_size: in
         return tasks
     if sample_size is None or sample_size >= len(tasks):
         return tasks
-    groups = {}
+    groups: dict[str, list[dict[str, Any]]] = {}
     for t in tasks:
         g = t.get("_group")
         if g is not None:
@@ -375,11 +350,15 @@ def _confirmed_manifest_task_ids(
     expected_ids: list[str],
 ) -> list[str]:
     """Return IDs only when each expected task has a completed result row."""
-    task_indexes = [result.get("task_index") for result in results]
+    task_indexes: list[int] = []
+    for result in results:
+        index = result.get("task_index")
+        if type(index) is not int:
+            raise ValueError("DS1000 result rows do not cover every manifest task exactly once")
+        task_indexes.append(index)
     expected_indexes = list(range(1, len(tasks) + 1))
     if (
-        any(type(index) is not int for index in task_indexes)
-        or sorted(task_indexes) != expected_indexes
+        sorted(task_indexes) != expected_indexes
     ):
         raise ValueError("DS1000 result rows do not cover every manifest task exactly once")
     ordered_tasks = [tasks[index - 1] for index in sorted(task_indexes)]
@@ -400,14 +379,14 @@ _DS1000_BROKEN_API_PATTERNS: list[str] = [
 ]
 
 
-def _filter_broken_code_tasks(tasks: list[dict]) -> list[dict]:
+def _filter_broken_code_tasks(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Filter out DS1000 tasks whose code_context uses removed/broken APIs.
 
     The official DS1000 environment pins scipy==1.12.0, but the current
     benchmark environment has scipy>=1.17 where interp2d was removed.
     These tasks would always score 0 due to harness error, not model quality.
     """
-    filtered: list[dict] = []
+    filtered: list[dict[str, Any]] = []
     removed = 0
     for task in tasks:
         code_ctx = task.get("code_context", "")
@@ -428,12 +407,12 @@ class Monitor:
         unavailable, GPU metrics stay empty and a warning is issued. CPU/RAM
         come from psutil.
         """
-        self.cpu_percent = []
-        self.gpu_percent = []
-        self.ram_usage_gb = []
-        self.vram_usage_gb = []
+        self.cpu_percent: list[float] = []
+        self.gpu_percent: list[float] = []
+        self.ram_usage_gb: list[float] = []
+        self.vram_usage_gb: list[float] = []
         self._is_sampling = False
-        self._peak = {"cpu": 0, "ram": 0, "gpu": 0, "vram": 0}
+        self._peak: dict[str, float] = {"cpu": 0, "ram": 0, "gpu": 0, "vram": 0}
         self._is_nvml_ok = False
         try:
             _nvml.nvmlInit()
@@ -469,7 +448,7 @@ class Monitor:
         self.cpu_percent.append(cpu)
         self.ram_usage_gb.append(ram)
         gpu, vram = self._read_gpu()
-        if gpu is not None:
+        if gpu is not None and vram is not None:
             self.gpu_percent.append(gpu)
             self.vram_usage_gb.append(vram)
         for lst in (self.cpu_percent, self.ram_usage_gb, self.gpu_percent, self.vram_usage_gb):
@@ -601,9 +580,9 @@ def collect_system_metrics() -> SystemMetrics:
 class MetricsCollector:
     def __init__(self, sample_interval: int = 10) -> None:
         """Create a collector that samples system metrics every ``sample_interval`` seconds."""
-        self.samples = []
-        self._start_time = None
-        self._last_sample_time = 0
+        self.samples: list[tuple[float, SystemMetrics]] = []
+        self._start_time: float | None = None
+        self._last_sample_time = 0.0
         self._sample_interval = sample_interval
 
     def start(self) -> None:
@@ -635,7 +614,7 @@ class MetricsCollector:
 
     def _values(self, key: str) -> list[float]:
         """All non-None values of a metric key across the samples."""
-        return [s[1].get(key) for s in self.samples if s[1].get(key) is not None]
+        return [value for _, sample in self.samples if isinstance(value := sample.get(key), (float, int))]
 
     def avg(self, key: str) -> float | None:
         """Average of a metric key over the samples (None if empty)."""
@@ -658,7 +637,7 @@ class MetricsCollector:
         for k in ("cpu_percent", "gpu_util", "ram_percent", "ram_used_gb", "gpu_mem_used_gb", "gpu_temp", "vram_gb"):
             result[f"{k}_avg"] = self.avg(k)
             result[f"{k}_max"] = self.max(k)
-        return result
+        return cast("MetricsSummary", result)
 
 
 def load_jsonl(filepath: str) -> list[dict[str, Any]]:
@@ -668,169 +647,194 @@ def load_jsonl(filepath: str) -> list[dict[str, Any]]:
 
 
 
-def _stream_chat_completion(url: str, headers: dict[str, str], body: dict[str, Any], start_timeout: int = START_TIMEOUT, finish_timeout: int = FINISH_TIMEOUT, max_retries: int = MAX_RETRIES) -> tuple[str | None, float, int, int, float, int, bool, str | None, str | None]:
-    """Streaming chat completion with dual timeout and retry logic.
-    
-    Uses threading to monitor start_timeout (first token) and finish_timeout
-    (between tokens) independently from the SSE stream.
-    Returns 9-tuple: (content, elapsed, t_in, t_out, tps, thinking_tokens, truncated, error_type, error_detail)
-    truncated = True when the server stopped generation because the
-    token budget was reached (finish_reason "length" or tokens_out >= max_tokens).
+def _reported_reasoning_tokens(usage: dict[str, Any]) -> int | None:
+    """Read exact reasoning usage when the OpenAI-compatible server reports it."""
+    details = usage.get("completion_tokens_details")
+    value = details.get("reasoning_tokens") if isinstance(details, dict) else None
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
+
+
+def _cancel_stream_response(response: Any) -> None:
+    """Interrupt urllib3's blocking read before releasing the SSE response."""
+    shutdown = getattr(getattr(response, "raw", None), "shutdown", None)
+    if callable(shutdown):
+        try:
+            shutdown()
+        except (OSError, ValueError, RuntimeError):
+            # The socket may already have been released by the worker.
+            pass
+    try:
+        response.close()
+    except (OSError, ValueError):
+        pass
+
+
+def _stream_chat_completion(
+    url: str,
+    headers: dict[str, str],
+    body: dict[str, Any],
+    start_timeout: int = START_TIMEOUT,
+    finish_timeout: int = FINISH_TIMEOUT,
+    max_retries: int = MAX_RETRIES,
+    *,
+    total_timeout: float = 120,
+) -> tuple[str | None, float, int, int, float, int, bool, str | None, str | None]:
+    """Consume SSE within one absolute deadline and the reported output budget.
+
+    completion_tokens already includes reasoning; do not add its breakdown a
+    second time. Without server usage, text estimates remain diagnostics and
+    cannot prove an exact token limit. The absolute deadline still applies.
     """
+    started = time.monotonic()
+    deadline = started + total_timeout
     max_tokens_requested = body.get("max_tokens")
     for attempt in range(max_retries):
-        current_start_timeout = start_timeout * (RETRY_MULTIPLIER ** attempt)
-        result = {"content": "", "thinking": "", "done": False, "error": None, "usage": None, "finish_reason": None}
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        current_start_timeout = min(start_timeout * (RETRY_MULTIPLIER ** attempt), remaining)
+        result: dict[str, Any] = {
+            "content": "", "thinking": "", "done": False, "error": None,
+            "usage": {}, "finish_reason": None, "response": None, "budget_exceeded": False,
+        }
         result_lock = threading.Lock()
         cancel_event = threading.Event()
 
-        def _set_result(key: str, value: Any, result_lock: threading.Lock = result_lock,
-                        result: dict[str, Any] = result) -> None:
-            """Thread-safe write to the shared result dict."""
-            with result_lock:
-                result[key] = value
-
-        def _result(key: str, result_lock: threading.Lock = result_lock,
-                    result: dict[str, Any] = result) -> Any:
-            """Thread-safe read from the shared result dict."""
-            with result_lock:
-                return result.get(key)
-
-        def _worker(result_lock: threading.Lock = result_lock,
-                    result: dict[str, Any] = result,
-                    cancel_event: threading.Event = cancel_event,
-                    current_start_timeout: int = current_start_timeout) -> None:
-            """Stream SSE deltas into the shared result dict in a background thread."""
+        def _worker(result_lock: threading.Lock = result_lock, result: dict[str, Any] = result,
+                    cancel_event: threading.Event = cancel_event, current_start_timeout: float = current_start_timeout) -> None:
+            """Accumulate transport deltas and close the response at a proven cap."""
             sess = None
+            resp = None
             try:
                 sess = requests.Session()
-                resp = sess.post(url, headers=headers, json={**body, "stream": True}, stream=True, timeout=(10, current_start_timeout))
+                options = body.get("stream_options")
+                request_body = {**body, "stream": True, "stream_options": {
+                    **(options if isinstance(options, dict) else {}), "include_usage": True,
+                }}
+                resp = sess.post(url, headers=headers, json=request_body, stream=True,
+                                 timeout=(min(10, current_start_timeout), current_start_timeout))
+                with result_lock:
+                    result["response"] = resp
                 resp.raise_for_status()
                 for line in resp.iter_lines(decode_unicode=True):
                     if cancel_event.is_set():
                         break
-                    if not line:
+                    if not line or not line.strip().startswith("data: "):
                         continue
-                    text = line.strip()
-                    if text == "data: [DONE]":
+                    text = line.strip()[6:]
+                    if text == "[DONE]":
                         break
-                    if text.startswith("data: "):
-                        try:
-                            chunk = json.loads(text[6:])
-                            if "usage" in chunk:
-                                with result_lock:
-                                    result["usage"] = chunk["usage"]
-                            finish_reason = chunk.get("choices", [{}])[0].get("finish_reason")
-                            if finish_reason:
-                                with result_lock:
-                                    result["finish_reason"] = finish_reason
-                            delta = chunk.get("choices", [{}])[0].get("delta", {})
-                            reasoning_delta = _extract_reasoning_delta(delta)
-                            with result_lock:
-                                if delta.get("content"):
-                                    result["content"] += delta["content"]
-                                if reasoning_delta:
-                                    result["thinking"] += reasoning_delta
-                        except json.JSONDecodeError:
-                            pass
-                _set_result("done", True)
-            except (requests.exceptions.RequestException, ConnectionError, TimeoutError, ValueError, KeyError) as e:
-                # Extract response body for HTTPError so the launcher can detect
-                # "Cannot combine structured output constraints with lazy grammar"
-                # (LM Studio Channel-Error - see Server-Log 12.07.2026 L58671).
-                err_text = str(e)
-                try:
-                    if hasattr(e, "response") and e.response is not None:
-                        resp_body = e.response.text or ""
-                        if resp_body:
-                            err_text = f"{err_text} | body={resp_body[:300]}"
-                except (AttributeError, ValueError, TypeError):
-                    pass
-                _set_result("error", err_text)
-                _set_result("done", True)
-            finally:
-                if sess is not None:
                     try:
+                        chunk = json.loads(text)
+                    except json.JSONDecodeError:
+                        continue
+                    if not isinstance(chunk, dict):
+                        continue
+                    choices = chunk.get("choices") or []
+                    choice = choices[0] if choices and isinstance(choices[0], dict) else {}
+                    delta = choice.get("delta") or {}
+                    if not isinstance(delta, dict):
+                        delta = {}
+                    usage = chunk.get("usage")
+                    with result_lock:
+                        if isinstance(usage, dict):
+                            result["usage"] = usage
+                        if choice.get("finish_reason"):
+                            result["finish_reason"] = choice["finish_reason"]
+                        if isinstance(delta.get("content"), str):
+                            result["content"] += delta["content"]
+                        result["thinking"] += _extract_reasoning_delta(delta)
+                        count = result["usage"].get("completion_tokens")
+                        at_limit = (
+                            isinstance(max_tokens_requested, int) and max_tokens_requested > 0
+                            and isinstance(count, int) and not isinstance(count, bool)
+                            and count >= max_tokens_requested
+                        )
+                        if at_limit:
+                            result["finish_reason"] = "length"
+                            result["budget_exceeded"] = count > max_tokens_requested
+                    if at_limit:
+                        break
+            except (requests.exceptions.RequestException, ConnectionError, TimeoutError, ValueError, KeyError, TypeError) as exc:
+                err_text = str(exc)
+                response = getattr(exc, "response", None)
+                if response is not None:
+                    response_text = getattr(response, "text", "")
+                    if response_text:
+                        err_text += f" | body={response_text[:300]}"
+                with result_lock:
+                    result["error"] = err_text
+            finally:
+                try:
+                    if resp is not None:
+                        resp.close()
+                    if sess is not None:
                         sess.close()
-                    except OSError:
-                        pass
-        start = time.time()
-        thread = threading.Thread(target=_worker)
-        thread.daemon = True
+                except (OSError, ValueError):
+                    pass
+                finally:
+                    with result_lock:
+                        result["done"] = True
+
+        attempt_start = time.monotonic()
+        last_activity = attempt_start
+        last_length = 0
+        stop_reason = None
+        thread = threading.Thread(target=_worker, daemon=True)
         thread.start()
-        while time.time() - start < current_start_timeout:
-            with result_lock:
-                done = result["done"]
-                content = result["content"]
-                thinking = result["thinking"]
-                error = result["error"]
-            # Reasoning-Modelle (z.B. DeepSeek R1 Distill) streamen zunaechst
-            # NUR reasoning_content; content folgt erst nach dem Denken. Wird
-            # nur auf content gewartet, laeuft der Start-Timeout ab und der
-            # Stream wird abgebrochen, obwohl das Modell aktiv arbeitet.
-            if done or content or thinking or error:
-                break
-            time.sleep(0.05)
-        elapsed = time.time() - start
-        with result_lock:
-            error_val = result["error"]
-        if error_val:
-            if attempt < max_retries - 1:
-                cancel_event.set()
-                thread.join(timeout=1)
-                time.sleep(2 ** attempt)
-                continue
-            return None, elapsed, 0, 0, 0, 0, False, "api_error", error_val
-        with result_lock:
-            has_content = bool(result["content"]) or bool(result["thinking"])
-            is_done = result["done"]
-        if not has_content and not is_done:
-            cancel_event.set()
-            thread.join(timeout=1)
-            if attempt < max_retries - 1:
-                time.sleep(2 ** attempt)
-                continue
-            return None, elapsed, 0, 0, 0, 0, False, "api_error", f"No response within {current_start_timeout}s (attempt {attempt+1})"
-        last_content_len = 0
-        stall_start = time.time()
-        while time.time() - stall_start < finish_timeout:
+        while True:
+            now = time.monotonic()
             with result_lock:
                 is_done = result["done"]
+                current_length = len(result["content"]) + len(result["thinking"])
+                response = result["response"]
             if is_done:
                 break
-            with result_lock:
-                current_len = len(result["content"]) + len(result["thinking"])
-            if current_len > last_content_len:
-                last_content_len = current_len
-                stall_start = time.time()
-            time.sleep(0.05)
+            if current_length != last_length:
+                last_activity = now
+                last_length = current_length
+            if now >= deadline:
+                stop_reason = "Absolute streaming deadline reached"
+            elif not current_length and now - attempt_start >= current_start_timeout:
+                stop_reason = "No response before the first-token deadline"
+            elif current_length and now - last_activity >= finish_timeout:
+                stop_reason = "Streaming stalled before completion"
+            if stop_reason:
+                cancel_event.set()
+                if response is not None:
+                    _cancel_stream_response(response)
+                thread.join(timeout=1)
+                break
+            time.sleep(min(0.05, max(0, deadline - now)))
+        elapsed = time.monotonic() - started
         with result_lock:
-            is_done = result["done"]
-        if not is_done:
-            cancel_event.set()
-            thread.join(timeout=1)
-        full_elapsed = time.time() - start
-        with result_lock:
-            thinking_content = result["thinking"]
-            content_raw = result["content"]
-            usage = result.get("usage") or {}
+            thinking = result["thinking"]
+            raw_content = result["content"]
+            usage = result["usage"]
             finish_reason = result["finish_reason"]
-        thinking_tokens = len(thinking_content.split()) if thinking_content else 0
-        content, think_tags = strip_thinking_tokens(content_raw)
-        thinking_tokens = thinking_tokens + think_tags
-        tokens_in = usage.get("prompt_tokens", 0)
-        tokens_out = usage.get("completion_tokens", 0)
-        usage_present = bool(usage)
-        if not usage_present:
-            # LM Studio liefert usage nicht immer im Stream - dann abschaetzen
-            # ueber Wortzahl (inkl. Thinking-Anteil fuer Reasoning-Modelle).
-            tokens_out = len((content_raw + " " + thinking_content).split())
+            error_detail = result["error"]
+            budget_exceeded = result["budget_exceeded"]
+        if error_detail and time.monotonic() >= deadline:
+            stop_reason = "Absolute streaming deadline reached"
+        content, thinking_estimate = strip_thinking_tokens(raw_content)
+        exact_reasoning = _reported_reasoning_tokens(usage)
+        thinking_tokens = exact_reasoning if exact_reasoning is not None else len(thinking.split()) + thinking_estimate
+        tokens_in = int(usage.get("prompt_tokens", 0))
+        reported_output = usage.get("completion_tokens")
+        tokens_out = reported_output if isinstance(reported_output, int) else len((raw_content + " " + thinking).split())
+        tps = tokens_out / elapsed if elapsed > 0 else 0
         truncated = finish_reason == "length"
-        if max_tokens_requested and usage_present and tokens_out >= max_tokens_requested:
-            truncated = True
-        tokens_per_sec = tokens_out / full_elapsed if full_elapsed > 0 else 0
-        return content, full_elapsed, tokens_in, tokens_out, tokens_per_sec, thinking_tokens, truncated, None, None
-    return None, 0, 0, 0, 0, 0, False, "api_error", "Max retries exceeded"
+        if budget_exceeded:
+            return None, elapsed, tokens_in, tokens_out, tps, thinking_tokens, True, "output_budget_exceeded", "Server exceeded requested max_tokens"
+        if stop_reason:
+            return None, elapsed, tokens_in, tokens_out, tps, thinking_tokens, True, "timeout", stop_reason
+        if error_detail:
+            if not raw_content and not thinking and attempt < max_retries - 1 and time.monotonic() < deadline:
+                time.sleep(min(2 ** attempt, max(0, deadline - time.monotonic())))
+                continue
+            return None, elapsed, tokens_in, tokens_out, tps, thinking_tokens, False, "api_error", error_detail
+        return content, elapsed, tokens_in, tokens_out, tps, thinking_tokens, truncated, None, None
+    return None, time.monotonic() - started, 0, 0, 0, 0, True, "timeout", "Absolute streaming deadline reached"
 
 
 def strip_thinking_tokens(text: str | None) -> tuple[str | None, int]:
@@ -926,6 +930,9 @@ def _non_streaming_fallback(
         content, think_tags = strip_thinking_tokens(raw_content)
         thinking_tokens += think_tags
         usage = result.get("usage", {})
+        exact_reasoning = _reported_reasoning_tokens(usage)
+        if exact_reasoning is not None:
+            thinking_tokens = exact_reasoning
         tokens_in = usage.get("prompt_tokens", 0)
         tokens_out = usage.get("completion_tokens", 0)
         finish_reason = result.get("choices", [{}])[0].get("finish_reason")
@@ -939,7 +946,7 @@ def _non_streaming_fallback(
         return None, 0, 0, 0, False
 
 
-def _extract_reasoning_delta(delta: dict) -> str:
+def _extract_reasoning_delta(delta: dict[str, Any]) -> str:
     """Extract reasoning content from a streamed chat delta chunk.
 
     The field name depends on model and LM Studio version:
@@ -952,7 +959,7 @@ def _extract_reasoning_delta(delta: dict) -> str:
     reasoning = delta.get("reasoning_content")
     if reasoning is None and isinstance(delta.get("reasoning"), str):
         reasoning = delta["reasoning"]
-    return reasoning or ""
+    return reasoning if isinstance(reasoning, str) else ""
 
 
 def _supports_chat_template_kwargs(model_identifier: str | None) -> bool:
@@ -967,8 +974,9 @@ def _supports_chat_template_kwargs(model_identifier: str | None) -> bool:
         was covered, so Gemma never received the flag and the JSON-config
         budget (2048) kept thinking active for ALL Gemma benchmarks).
     """
-    name = (model_identifier or "").lower()
-    return "qwen" in name or "gemma" in name
+    config = get_model_config(model_identifier or "")
+    return bool(config.get("_reasoning_template_controls"))
+
 
 
 def _is_glm_47_model(model_identifier: str | None) -> bool:
@@ -1007,34 +1015,18 @@ def generate_answer(cfg: GenerationConfig) -> tuple[str | None, float, int, int,
         value = getattr(cfg, key, None)
         if value is not None:
             body[key] = value
-    if cfg.max_thinking_tokens is not None and "gpt-oss" in (cfg.model_identifier or "").lower():
+    if cfg.max_thinking_tokens is not None and "gpt-oss" in (cfg.native_model_identifier or cfg.model_identifier or "").lower():
         body["max_thinking_tokens"] = cfg.max_thinking_tokens
-    # ── Thinking-Modus ueber OpenAI-kompatibles API steuern ──
-    #
-    # Quelle:
-    #   - Qwen3/Qwen3.5 und Qwen-basierte Distills: chat_template_kwargs
-    #     (nur fuer Qwen-Templates) Quelle:
-    #     https://github.com/lmstudio-ai/lmstudio-bug-tracker/issues/1573
-    #
-    # WICHTIG: chat_template_kwargs ist KEIN OpenAI-Standard-Parameter und wird
-    #   nur von Qwen-Modellen unterstuetzt. Fuer andere Modelle keine
-    #   Thinking-Steuerung ueber diese API moeglich.
-    #
-    # 2026-08-02: Der gpt-oss-Override (reasoning_effort="low" +
-    #   max_thinking_tokens=200) wurde entfernt. Reasoning-Budget wird in
-    #   LM Studio GUI per Modell gesetzt (Slider); siehe Recovery.
-    #
-    if cfg.is_thinking_enabled is False:
-        if _supports_chat_template_kwargs(cfg.model_identifier):
-            body["chat_template_kwargs"] = {"enable_thinking": False}
-    elif cfg.is_thinking_enabled is not None or cfg.reasoning_effort is not None:
-        kwargs = {}
-        if cfg.is_thinking_enabled is not None:
-            kwargs["enable_thinking"] = cfg.is_thinking_enabled
-        if cfg.reasoning_effort is not None:
-            kwargs["reasoning_effort"] = cfg.reasoning_effort
-        if _supports_chat_template_kwargs(cfg.model_identifier):
-            body["chat_template_kwargs"] = kwargs
+    # Resolve against the canonical native identity before substituting the
+    # serving-instance alias into the wire payload.
+    template_kwargs = cfg.reasoning_template_kwargs
+    if template_kwargs is None:
+        policy = dict(get_model_config(cfg.native_model_identifier or cfg.model_identifier or ""))
+        policy["enable_thinking"] = cfg.is_thinking_enabled
+        policy["reasoning_effort"] = cfg.reasoning_effort
+        template_kwargs = reasoning_request_kwargs(policy)
+    if template_kwargs:
+        body["chat_template_kwargs"] = dict(template_kwargs)
     if cfg.stop:
         body["stop"] = cfg.stop
     if cfg.response_format is not None:
@@ -1047,7 +1039,9 @@ def generate_answer(cfg: GenerationConfig) -> tuple[str | None, float, int, int,
     streamed_reasoning_only = False
     stream_metrics = (0.0, 0, 0, 0, False)
     if cfg.is_streaming:
-        content, elapsed, t_in, t_out, tps, think_tok, truncated, err_type, err_detail = _stream_chat_completion(url, headers, body)
+        content, elapsed, t_in, t_out, tps, think_tok, truncated, err_type, err_detail = _stream_chat_completion(url, headers, body, total_timeout=cfg.timeout)
+        if err_type in {"timeout", "output_budget_exceeded"}:
+            return content, elapsed, t_in, t_out, tps, think_tok, truncated, err_type, err_detail
         if content and content.strip():
             return content, elapsed, t_in, t_out, tps, think_tok, truncated, err_type, err_detail
         if err_type is None:
@@ -1083,6 +1077,8 @@ def generate_answer(cfg: GenerationConfig) -> tuple[str | None, float, int, int,
         url, {**body, "stream": False}, cfg.timeout, headers=headers
     )
     elapsed = time.time() - start
+    if cfg.max_tokens and t_out > cfg.max_tokens:
+        return None, elapsed, t_in, t_out, 0, think_tok, True, "output_budget_exceeded", "Server exceeded requested max_tokens"
     if content is not None:
         if streamed_reasoning_only:
             stream_elapsed, stream_t_in, stream_t_out, stream_think, stream_truncated = stream_metrics
@@ -1175,13 +1171,13 @@ def extract_code(text: str | None, is_structured: bool = False) -> str:
                 # GLM's llama.cpp chat template may return the generic
                 # json_object in its native tool-like form.
                 code = parsed.get("content", "")
-            if code:
+            if isinstance(code, str) and code:
                 return code.strip()
         except (json.JSONDecodeError, AttributeError, TypeError):
             pass  # Fallback to regex
     # Try standard markdown code-block extraction
     pattern = r"```(?:python)?\s*\n(.*?)```"
-    matches = re.findall(pattern, text, re.DOTALL)
+    matches = [match.group(1) for match in re.finditer(pattern, text, re.DOTALL)]
     if matches:
         return matches[-1].strip()
     # Try alternative code-block delimiters (Granite sometimes uses
@@ -1191,7 +1187,7 @@ def extract_code(text: str | None, is_structured: bool = False) -> str:
         r"`{3,}\w*\s*(.*?)`{3,}",            # 3+ backticks
     ]
     for alt in alt_patterns:
-        m = re.findall(alt, text, re.DOTALL)
+        m = [match.group(1) for match in re.finditer(alt, text, re.DOTALL)]
         if m:
             return m[-1].strip()
     # No code blocks at all — try to extract Python from plain text
@@ -1385,13 +1381,22 @@ def _sandbox_environment(tmpdir: str) -> dict[str, str]:
     return env
 
 
-def _build_sandbox_script(code_string: str, should_capture_state: bool = False, tests: list[str] | None = None) -> str:
+def _build_sandbox_script(
+    code_string: str,
+    should_capture_state: bool = False,
+    tests: list[str] | None = None,
+    *,
+    setup_code: str | None = None,
+) -> str:
     """Build the JSON request consumed by ``sandbox_worker.py``."""
-    return _json.dumps({
+    request: dict[str, Any] = {
         "code": code_string,
         "capture_state": should_capture_state,
         "tests": tests,
-    }, ensure_ascii=False, separators=(",", ":"))
+    }
+    if setup_code is not None:
+        request["setup_code"] = setup_code
+    return _json.dumps(request, ensure_ascii=False, separators=(",", ":"))
 
 
 def _run_sandbox(script: str, timeout: int = TIMEOUT_EXEC) -> SandboxResult:
@@ -1532,7 +1537,7 @@ def _unwrap_solution_for_insert(solution: str, setup_code: str) -> str:
             break
     if def_idx is not None:
         # def/class found -> compare function names
-        sf = _re.match(r"def\s+(\w+)", def_line)
+        sf = _re.match(r"def\s+(\w+)", def_line or "")
         sol_func = sf.group(1) if sf else None
         if exec_func and sol_func and exec_func != sol_func:
             # Different function name → include the model's function
@@ -1695,7 +1700,7 @@ def evaluate_code(generated_code: str, entry_point: str, tests_field: Any, refer
        function is missing.
     2. DS1000 harness when setup_code defines test_execution.
     3. Namespace comparison: run reference and generated code in the
-       sandbox and compare state keys not provided by setup_code.
+       sandbox and compare new outputs or changed setup values.
     4. Reference-as-tests or direct test execution in the sandbox.
 
     Returns (score 0.0-1.0, human-readable detail).
@@ -1721,33 +1726,48 @@ def evaluate_code(generated_code: str, entry_point: str, tests_field: Any, refer
 
     # --- Namespace comparison (Reference vs Generated) ---
     if not tests and reference_code and setup_code:
-        ref_combined = setup_code + "\n" + reference_code
-        script = _build_sandbox_script(ref_combined, capture_state=True)
+        script = _build_sandbox_script(reference_code, should_capture_state=True, setup_code=setup_code)
         res = _run_sandbox(script)
         if not res["ok"]:
+            if res.get("error_phase") == "setup":
+                return 0.0, f"Setup error: {res['error']}"
             return 0.0, f"Reference error: {res['error']}"
-        ref_state = res.get("state", {})
-        setup_keys = set(ref_state.keys()) | {"__builtins__"}
+        setup_state = res.get("setup_state")
+        ref_state = res.get("state")
+        setup_hashes = res.get("setup_state_hashes")
+        ref_hashes = res.get("state_hashes")
+        ref_value_keys = res.get("state_value_keys")
+        if setup_state is None or ref_state is None or setup_hashes is None or ref_hashes is None or ref_value_keys is None:
+            return 0.0, "Reference error: namespace snapshots are missing"
+        if setup_state.keys() != setup_hashes.keys() or ref_state.keys() != ref_hashes.keys():
+            return 0.0, "Reference error: complete namespace hashes are missing"
 
-        gen_combined = setup_code + "\n" + generated_code
-        script = _build_sandbox_script(gen_combined, capture_state=True)
+        script = _build_sandbox_script(generated_code, should_capture_state=True, setup_code=setup_code)
         res = _run_sandbox(script)
         if not res["ok"]:
             return 0.0, f"Code error: {res['error']}"
-        gen_state = res.get("state", {})
+        gen_state = res.get("state")
+        gen_hashes = res.get("state_hashes")
+        gen_value_keys = res.get("state_value_keys")
+        if gen_state is None or gen_hashes is None or gen_value_keys is None:
+            return 0.0, "Code error: namespace snapshot is missing"
+        if gen_state.keys() != gen_hashes.keys():
+            return 0.0, "Code error: complete namespace hashes are missing"
 
-        # Only compare state keys that are NOT in setup_keys
-        ref_only = {k: v for k, v in ref_state.items() if k not in setup_keys}
-        gen_only = {k: v for k, v in gen_state.items() if k not in setup_keys}
+        # Reference outputs include both new variables and modifications to
+        # setup variables. Unchanged inputs must not inflate the score.
+        ref_only = {
+            k: digest for k, digest in ref_hashes.items()
+            if k in ref_value_keys and (k not in setup_hashes or digest != setup_hashes[k])
+        }
 
         if not ref_only:
-            _eval_log("Namespace comparison: no comparable outputs -> 1.0")
-            return 1.0, "OK (Namespace: no outputs)"
+            _eval_log("Namespace comparison: no comparable reference outputs -> 0.0")
+            return 0.0, "Namespace: no comparable reference outputs"
 
         matched = 0
-        for k, ref_val in ref_only.items():
-            gen_val = gen_only.get(k)
-            if gen_val == ref_val:
+        for k, ref_digest in ref_only.items():
+            if k in gen_value_keys and gen_hashes.get(k) == ref_digest:
                 matched += 1
         score = matched / len(ref_only)
         _eval_log(f"Namespace comparison: {matched}/{len(ref_only)} correct")
@@ -1828,6 +1848,7 @@ def run_task(task: dict[str, Any], task_type: str, model_identifier: str | None 
         "repetition_penalty": model_config.get("repetition_penalty"),
         "is_thinking_enabled": model_config.get("enable_thinking"),
         "reasoning_effort": model_config.get("reasoning_effort"),
+        "reasoning_template_kwargs": reasoning_request_kwargs(dict(model_config)),
         "max_thinking_tokens": model_config.get("max_thinking_tokens"),
         "stop": model_config.get("stop", STOP_TOKENS_CODING),
         "max_tokens": int(model_config.get("max_tokens", MAX_TOKENS_GENERAL)),
@@ -1851,7 +1872,7 @@ def run_task(task: dict[str, Any], task_type: str, model_identifier: str | None 
     # when needed, is supplied explicitly at request level. GLM-4.6V (glm4
     # architecture) does not match this family and keeps the existing prompt
     # policy.
-    registry_thinking_model = _model_supports_reasoning(model_identifier) is True
+    registry_thinking_model = _model_supports_reasoning(model_identifier or "") is True
     code_only = (
         (bool(model_config.get("enable_thinking")) or registry_thinking_model)
         and structured_policy != "native_channels"
@@ -1937,7 +1958,8 @@ def _extract_setup_code(task: dict[str, Any], prompt: str, reference_code: str) 
     before the SOLUTION marker in the prompt, and prepends the
     matplotlib Agg preamble when the task uses plotting libraries.
     """
-    setup_code = task.get("code_context", "")
+    setup_code_value = task.get("code_context", "")
+    setup_code = setup_code_value if isinstance(setup_code_value, str) else ""
     for marker in ("# SOLUTION START", "BEGIN SOLUTION\n<code>"):
         idx = prompt.find(marker)
         if idx >= 0:
@@ -1972,7 +1994,7 @@ def _is_prompt_echo(response: str, prompt: str, *, min_prefix_chars: int = 120) 
 
 
 def _call_and_evaluate(full_prompt: str, generation_parameters: dict[str, Any], model_identifier: str | None,
-                       entry_point: str, tests_field: list, reference_code: str, setup_code: str,
+                       entry_point: str, tests_field: list[str], reference_code: str, setup_code: str,
                        structured_policy: Any = None) -> TaskResult:
     """Generate an answer, extract code, classify output and evaluate it.
 
@@ -2153,7 +2175,7 @@ def benchmark_model(model_info: Any, tasks: list[dict[str, Any]], task_type: str
         """Sanitize a string for safe output (lossy UTF-8 round-trip)."""
         return str(text).encode("utf-8", errors="replace").decode("utf-8")
     n_tasks = len(tasks)
-    native_identifier = api_model or model_info.get("model_identifier", model_identifier)
+    native_identifier = model_identifier
     # Fortschrittsbalken statt Per-Task-Ausgabe (Punkt 2a): Details gehoeren
     # in die CSV (write_per_task_csv); auf dem Bildschirm reicht der Balken.
     _progress = _TaskProgress(total=n_tasks, enabled=not is_quiet_mode)
@@ -2171,6 +2193,10 @@ def benchmark_model(model_info: Any, tasks: list[dict[str, Any]], task_type: str
                     result = run_task(task, task_type, model_identifier=model_identifier, api_model=api_model, model_config=model_config,
                                       native_model_identifier=native_identifier)
                     if result is not None and result.get("error_type") is None:
+                        break
+                    if result is not None and result.get("error_type") in {"timeout", "output_budget_exceeded"}:
+                        # A terminal generation limit must not start the same
+                        # expensive reasoning request again at the task layer.
                         break
                     if result is not None and result.get("error_type"):
                         err_detail = str(result.get("error_detail", "?"))
@@ -2304,13 +2330,13 @@ def benchmark_model(model_info: Any, tasks: list[dict[str, Any]], task_type: str
     _ram_total_gb = psutil.virtual_memory().total / (1073741824)
     def _peak_avg_max(key: str, min_val: float = 0) -> tuple[float | None, float | None]:
         """Average and max of a per-task resource metric above ``min_val``."""
-        vals = [r.get(key) for r in results if r.get(key) is not None and r[key] > min_val]
+        vals = [value for r in results if isinstance(value := r.get(key), (int, float)) and value > min_val]
         if not vals:
             return None, None
         return sum(vals) / len(vals), max(vals)
     _cpu_avg, _cpu_max = _peak_avg_max("cpu_during")
     _gpu_avg, _gpu_max = _peak_avg_max("gpu_during")
-    _ram_vals = [r.get("ram_during") for r in results if r.get("ram_during") is not None and r["ram_during"] > 0]
+    _ram_vals = [value for r in results if isinstance(value := r.get("ram_during"), (int, float)) and value > 0]
     _ram_avg_pct = (sum(_ram_vals) / len(_ram_vals) / _ram_total_gb * 100) if _ram_vals and _ram_total_gb > 0 else None
     _ram_max_pct = (max(_ram_vals) / _ram_total_gb * 100) if _ram_vals and _ram_total_gb > 0 else None
     _vram_avg, _vram_max = _peak_avg_max("vram_during")
@@ -2351,7 +2377,10 @@ def parse_resource_avgs(task_results: list[dict[str, Any]]) -> tuple[float | Non
     Non-numeric or missing values are ignored (via _safe_float); returns
     (cpu, ram, gpu, vram) with None for metrics without samples.
     """
-    cpu, ram, gpu, vram = [], [], [], []
+    cpu: list[float] = []
+    ram: list[float] = []
+    gpu: list[float] = []
+    vram: list[float] = []
     for t in task_results:
         for buf, key in ((cpu, "cpu_during"), (ram, "ram_during"),
                          (gpu, "gpu_during"), (vram, "vram_during")):
@@ -2436,7 +2465,9 @@ def _parse_args() -> tuple[Any, int]:
     """
     try:
         import sys as _sys
-        _sys.stdout.reconfigure(encoding="utf-8")
+        reconfigure_stdout = getattr(_sys.stdout, "reconfigure", None)
+        if callable(reconfigure_stdout):
+            reconfigure_stdout(encoding="utf-8")
     except (AttributeError, OSError):
         # Python <3.7 or non-reconfigurable stdout (subprocess without TTY)
         pass
@@ -2565,41 +2596,15 @@ def _resolve_models(args: Any) -> list[dict[str, Any]]:
             )
             sys.exit(1)
 
-        # Compatibility fallback for LMS identities that omit publisher or
-        # quantization (notably @mixed/REAP). It is valid only when it resolves
-        # to one available concrete model.
-        try:
-            from assemble_blueprint import normalize_model_name
-            target_norm = normalize_model_name(target)
-            target_base = target_norm.split("@")[0]
-        except (ImportError, AttributeError):
-            target_norm = target.lower()
-            target_base = target_norm.split("@")[0]
-        requested_quant = target.rsplit("@", 1)[1].strip() if "@" in target else ""
-        requested_quant = normalize_quant(requested_quant) if requested_quant else ""
-        quant_is_explicit = requested_quant not in {"", "?", "unknown", "mixed"}
-        models = []
-        for m in available:
-            key = m.get("key", "")
-            registry_key = m.get("registry_key", "")
-            try:
-                from assemble_blueprint import normalize_model_name
-                m_norm = normalize_model_name(key)
-            except (ImportError, AttributeError):
-                m_norm = key.lower()
-            registry_norm = normalize_model_name(registry_key) if registry_key else ""
-            candidate_keys = [registry_key, key]
-            candidate_quants = [
-                normalize_quant(value.rsplit("@", 1)[1].strip())
-                for value in candidate_keys
-                if isinstance(value, str) and "@" in value
-            ]
-            if quant_is_explicit and requested_quant not in candidate_quants:
-                continue
-            if (m_norm == target_norm or m_norm.split("@")[0] == target_base
-                    or registry_norm == target_norm
-                    or registry_norm.split("@")[0] == target_base):
-                models.append(m)
+        from model_identity import UniqueMatch, resolve_registry_match
+
+        keys = {str(model.get("registry_key") or model.get("key") or "") for model in available}
+        match = resolve_registry_match(target, sorted(keys))
+        models = [
+            model for model in available
+            if isinstance(match, UniqueMatch)
+            and str(model.get("registry_key") or model.get("key") or "") == match.key
+        ]
         if not models:
             error(f"Model '{args.model_key}' not found.")
             sys.exit(1)
@@ -2639,6 +2644,8 @@ def _run_model_loop(models: list[dict[str, Any]], benchmarks: list[dict[str, Any
         if api_model_override:
             model_info["_api_model"] = api_model_override
         model_results = []
+        avg_l: float | None
+        avg_t: float | None
         # Model management (load/unload) is initiated ONLY by run_benchmarks.py.
         # We assume that the model is already loaded and ready.
         for bench in benchmarks:

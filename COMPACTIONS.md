@@ -1992,3 +1992,109 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 - `doc-git/model_registry.yaml`: lokale absolute Pfade und Bundle-Daten.
 - `tests/test_model_manager.py`: zwei Korrekturen an Testvertrag/Isolation.
 - `CHANGELOG.md`: Verweis auf diesen Checkpoint.
+
+=============== Compaction 29.09.2026 / 01:34 ================
+
+## Objective
+- Completed: Registry-Review R01–R12 in der vorgegebenen Reihenfolge beheben,
+  betroffene Sampling-Profile erneut recherchieren und den Arbeitsbaum reviewen.
+- Dieser Checkpoint sichert Umsetzung, Abnahmegrenzen und offene Folgearbeit.
+  Kein Commit oder Push; Arbeitsbaum auf `main`, HEAD `5fe026b`.
+
+## Important Details
+- `IdentityLink` ist die gemeinsame Grenze für Publisher/Modell@Quantisierung
+  bei Matching, Header-Sync, JSON-Import und Load-Verifikation. Persistierte
+  Pfade und Serving-Aliase dürfen fehlende oder widersprechende Evidenz nicht
+  ersetzen. Der Pipeline-Endstatus blockiert sämtliche Vertragsverletzungen.
+- Gemeinsame Kontext-/Reasoning-/Template-Resolver bestimmen tatsächliche
+  Provider- und Request-Ausgaben. Explizite Registry-Policy hat Vorrang;
+  `fill-reasoning` ergänzt nur fehlende, durch Template-Evidenz belegte Werte.
+- Gewöhnliche Drafter brauchen passende Tokenizer-/Token-Tabellen. DFlash,
+  DSpark und separate MTP-Helfer brauchen typgerechte Header und nachgewiesene
+  Zielbindung oder aktuelle datei-/fingerprintgebundene Pairing-Evidenz.
+  Ein gemeinsames untypisiertes Basismodell beweist keine Helper-Kompatibilität.
+- Nach dem abgeschlossenen parallelen Benutzer-Sync wurde dessen aktuelle
+  Registry als Baseline erhalten. Webevidenz folgt belegter Artefaktidentität:
+  36 Sampling-Profile geprüft, 17 bestätigt, 16 ungeklärt, drei widersprüchlich.
+  Abschließender Header-Sync korrigierte vier Felder in drei Einträgen.
+  Registry und Backups bleiben lokal/gitignoriert; Root-`utils/` ist ausgeschlossen.
+
+## Work State
+### Completed / Active / Blocked
+- Completed: R01–R12 mit Regressionen und erneuter Review dokumentiert.
+  Abnahme vom 28.09.: 1323 Tests bestanden, Ruff und fokussierter mypy über
+  elf Dateien grün; `pre_review_checks.ps1 -NoTranscript -NoArtifacts` Exit 0.
+- Active: Neuer Bestandsbefund R13/P2 im Namespace-Fallback von `evaluate_code`:
+  falsches Keyword `capture_state` statt `should_capture_state`; zusätzlich
+  blendet die Setup-Schlüsselauswahl Referenzausgaben aus. Noch nicht behoben.
+- Blocked: Die konkrete lokale Registry-Validierung endet weiterhin mit Exit 1:
+  27 Probleme (zehn Config-/Identitätsbindungen, 17 Companion-Meldungen).
+  15 separate Helper-Profile sind nicht freigegeben. Es gibt keinen neuen
+  GPU-Pairing-Smoke mit aktuellen Fingerprints; Offline-Gates beweisen diesen
+  lokalen Datenvertrag nicht. Vollbaum-mypy meldet informativ 119 Fehler.
+- Fremde Änderungen einschließlich `AGENTS.md` und bestehender Löschungen
+  bleiben erhalten. Dieser Dokumentationsschritt führt keine neuen Tests aus.
+
+## Next Move
+1. Nach Beauftragung R13 mit korrekter/falscher Namespace-Ausgabe und getrenntem
+   Setup-Zustand reproduzieren, beheben und fokussiert prüfen.
+2. Lokale Datei-/Config-Bindungen und typgerechte Helper-Ziele einzeln klären;
+   nur tatsächlich erfolgreiche Pairings mit aktuellen Fingerprints hinterlegen.
+3. Danach lokale Validierung und Review-Gate wiederholen; Commit/Push erst bei
+   ausdrücklicher Beauftragung, mit geprüftem Scope und Repository-Hooks.
+
+## Relevant Files
+- `doc-git/Review-Artifacts/Code-Review_registry_2026-09-28.md`: ursprüngliche Befunde.
+- `doc-git/Review-Artifacts/Code-Review_registry_Fixes_2026-09-28.md`: Fix-Nachweise,
+  Pairing-Vertrag, Datenblocker und R13 mit Reproduktion.
+- `doc-git/Review-Artifacts/Sampling-Identity-Refresh_2026-09-28.md`: Quellen und Werte.
+- `src/model_identity.py`, `src/gguf_evidence.py`, `src/runtime_policy.py`,
+  `src/speculative.py`, `src/registry_tool.py`: gemeinsame Vertragsgrenzen.
+- `src/custom_benchmark.py`: offener R13; `CHANGELOG.md`: konkrete Änderungen.
+
+=============== Compaction 29.09.2026 / 14:30 ================
+## Objective
+- Nach dem abgeschlossenen R01–R13-Folgereview erneuten Modellbestand und
+  Benutzerentscheidungen übernehmen; Thinking-Überläufe und KV-Warnungen klären.
+- Benutzer hat anschließend Commit, Projekt-Hooks und Push nach GitHub autorisiert.
+
+## Important Details
+- **Laufende Modelle schützen:** ausdrücklich nur Code, Dateien und vorhandene
+  Logs prüfen; keine GPU-Generation, kein Unload/Reload. Auch jrell wurde vom
+  Benutzer gelöscht. Frischer Sync archiviert sechs entfernte Modelle ohne
+  externe Configs zu verschieben; aktuelle Registry besitzt 63 Einträge.
+- **Identität:** Millies ~2.2 bpw ist das Publisher-Forkformat Q2_SYM32K4 mit
+  gemischten Tensor-Typen. Gemeinsame Header-/Quant-Resolver belegen den Namen;
+  @?-Migration, Sync und JSON-Import dürfen keine zweite unbekannte Identität
+  erzeugen. Eine korrekte Registry-ID bestätigt keine Standardbackend-Kompatibilität.
+- **Policy/Reasoning:** Byteshape-Qwen3.8 bleibt ohne Drafter. Registry-eigene
+  Profile und Muse-Blueprint bleiben vor automatischer GUI-/Klassifikations-
+  Überschreibung geschützt. Muse verwendet das tatsächlich vorhandene
+  reasoning_strength-Control, Budget 512/8192 und atomare abgeleitete Dateien.
+- **Budgetfehler:** reine Usage-Chunks, absoluter Deadline-Abbruch und äußere
+  terminale Retry-Grenze korrigiert. Ohne laufende Usage ist kein tokenexakter
+  clientseitiger Stopp belegbar. Default-Timeout beträgt 120 Transportsekunden.
+- **Review:** separater Nachreview fand LMS-Load-Policy-Weitergabe und bool-/Zahlen-
+  Aliasvergleich; beide geschlossen. Explizite Load/Reuse-Policies verlangen
+  tatsächliche Effective-Evidenz. Fehlende Native-API-Felder bleiben blockierend.
+- **KV:** beide installierten CUDA-DLLs enthalten dieselbe FA_QUANTS-Matrix;
+  CUDA 13.4 allein beseitigt CUDA-12.8-Warnungen nicht. Keine neue Performance-
+  Messung. LMS-Binärbasis ist dirty; Upstream-Commit beschreibt nicht alle Patches.
+
+## Work State
+- Completed: aktueller Registry-Sync, 53 gesicherte/überprüfte JSON-Systemprompts,
+  tatsächlicher Preset-Merge mit 59 Modellabschnitten, 107 unabhängige fokussierte
+  Review-Tests. Konkrete Änderungen und Evidenz stehen in CHANGELOG und dem
+  `Registry-Update_Runtime-and-KV_2026-09-29.md`.
+- Active: finaler vollständiger Hook-Nachweis sowie autorisierter Commit/Push.
+  Neue Ownership-Regeln sind ergänzt; GPT-OSS-Requesttests verwenden eine
+  eindeutige Fixture statt des inzwischen mehrdeutigen lokalen Modellbestands.
+- Open: Bonsai/Qwen3.8-DSpark-Zielbindung, Gemma-31B-Helper sowie neue Config-/
+  Expert-Verträge; keine beleglosen Freigaben und keine GPU-Tests zu ihrer Klärung.
+- Fremde AGENTS-/Dokumentänderungen und bestehende Löschungen bleiben lokal.
+
+## Next Move
+1. Finalen Pre-Commit-/Commit-Message-/Pre-Push-Nachweis abschließen und nur
+   aufgabenspezifische Dateien committen/pushen.
+2. Tatsächliche GitHub-Actions für den neuen Commit prüfen und Status berichten.
+3. Offene lokale Modellverträge erst mit zusätzlicher konkreter Evidenz klären.

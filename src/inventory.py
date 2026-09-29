@@ -80,6 +80,8 @@ class InventorySnapshot:
         tuple[tuple[int | None, int | None, bool | None, int | None, int | None], str | None],
     ] = field(default_factory=dict)
     identity_links: dict[str, IdentityLink] = field(default_factory=dict)
+    # Explicit saved file inventories cover only these verified physical roots.
+    gguf_roots: tuple[Path, ...] | None = None
 
     def with_identity_link(self, link: IdentityLink) -> None:
         """Record a link without mutating any source artifact."""

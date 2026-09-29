@@ -22,7 +22,8 @@ from ruamel.yaml import YAML
 from artifact_bundle import validate_companion_binding
 from model_identity import UniqueMatch, resolve_registry_match
 from providers.llama_cpp_args import normalize_cache_type
-from speculative import companion_role, llama_cpp_spec_type, normalize_speculative_profile
+from runtime_policy import resolve_context_length, resolve_template
+from speculative import companion_role, llama_cpp_spec_type, normalize_speculative_profile, registry_speculative_policy
 
 RegistryLoader = Callable[[], dict[str, Any]]
 
@@ -86,13 +87,7 @@ class ResolvedRegistryEntry:
 
     def benchmark_context_length(self) -> int | None:
         """Return the benchmark context length clipped to the technical max."""
-        benchmark = self._positive_int(self.entry.get("context_length"))
-        native = self.native_context_length()
-        if benchmark is None:
-            return native
-        if native is not None and benchmark > native:
-            return native
-        return benchmark
+        return cast("int | None", resolve_context_length(self.entry))
 
     def technical_boundary_issues(self) -> list[str]:
         """Report technical-boundary violations between registry and GGUF limit."""
@@ -168,11 +163,31 @@ class ResolvedRegistryEntry:
             return overrides
 
         if provider in {"lmstudio", "lm_studio"}:
+            from speculative import lms_speculative_values
+
             overrides = {}
+            context_length = runtime.get("context_length")
+            if isinstance(context_length, int) and context_length > 0:
+                overrides["context_length"] = context_length
             runtime_experts = runtime.get("num_experts")
             if isinstance(runtime_experts, int) and runtime_experts > 0:
                 overrides["num_experts"] = runtime_experts
             overrides.update({key: value for key, value in explicit.items() if value is not None})
+            context_length = resolve_context_length({**self.entry, "context_length": overrides.get("context_length")})
+            if context_length is not None:
+                overrides["context_length"] = context_length
+            else:
+                overrides.pop("context_length", None)
+            # Native load IDs may use the Hub namespace instead of the
+            # physical GGUF publisher. Keep the resolved benchmark identity
+            # attached while passing the exact catalog load ID separately.
+            overrides["_registry_key"] = self.registry_key
+            speculative_expected = lms_speculative_values(self.entry)
+            if speculative_expected is not None:
+                # This is a verification contract, never an unsupported
+                # native REST load argument. Saved defaults alone do not
+                # prove the configuration of an already loaded instance.
+                overrides["_speculative_expected"] = speculative_expected
             return overrides
 
         if provider in {"unsloth_server", "llama_cpp"}:
@@ -190,7 +205,7 @@ class ResolvedRegistryEntry:
             if isinstance(unified_kv, bool):
                 overrides["kv_unified"] = unified_kv
             if self.entry.get("template_policy") == "explicit_file":
-                template_name = self.entry.get("template")
+                template_name = resolve_template(self.entry, None)
                 if isinstance(template_name, str) and template_name.strip():
                     root = template_root or _DEFAULT_TEMPLATE_ROOT
                     overrides["chat_template_file"] = str(root / template_name.strip())
@@ -227,6 +242,9 @@ class ResolvedRegistryEntry:
                     else None
                 )
                 companions = local.get("companions") if isinstance(local, dict) else None
+                if registry_speculative_policy(self.entry) == "disabled":
+                    speculative = {}
+                    overrides["spec_type"] = "none"
                 if isinstance(speculative, dict):
                     normalized_speculative = normalize_speculative_profile(speculative)
                     if normalized_speculative:
@@ -249,12 +267,12 @@ class ResolvedRegistryEntry:
                     # their exact companion path was materialized. Integrated
                     # MTP has no companion requirement. Missing evidence must
                     # not produce a broken llama-server command.
-                    if role is not None:
+                    if speculative:
                         main_path = local.get("model_path") if isinstance(local, dict) else None
                         bundle_errors = validate_companion_binding(
                             main_path if isinstance(main_path, str) else None,
                             draft_path,
-                            normalized_speculative,
+                            speculative,
                         )
                         if bundle_errors:
                             raise ValueError(
@@ -266,7 +284,6 @@ class ResolvedRegistryEntry:
                     if draft_path is not None:
                         overrides["draft_model_path"] = draft_path
                     for field in (
-                        "draft_model_path",
                         "draft_n_max",
                         "draft_n_min",
                         "draft_p_min",
@@ -290,6 +307,16 @@ class ResolvedRegistryEntry:
                     if value is not None:
                         overrides[field] = value
             # Registry-specific provider fields win over the derived defaults.
+            if provider == "llama_cpp":
+                # These fields identify the validated bundle. An independent
+                # provider override must never swap its algorithm or helper.
+                for field in ("spec_type", "spec_kind", "spec_mode", "spec_method", "draft_model_path"):
+                    proposed = explicit.get(field)
+                    if proposed is not None and proposed != overrides.get(field):
+                        raise ValueError(
+                            f"{field} override conflicts with the validated speculative bundle "
+                            f"for {self.registry_key}"
+                        )
             overrides.update({key: value for key, value in explicit.items() if value is not None})
             return overrides
 

@@ -265,11 +265,7 @@ def compact_sampling_block(
                 kind = "derived"
                 derived_from = "coding"
 
-        clean_cell = {
-            key: value
-            for key, value in cell.items()
-            if key in (*SUPPORTED_FIELDS, "enabled")
-        }
+        clean_cell = {key: value for key, value in cell.items() if key in (*SUPPORTED_FIELDS, "enabled")}
         if kind:
             clean_cell["evidence_kind"] = kind
         if kind == "derived" and derived_from:
@@ -332,33 +328,95 @@ def _repo_id_from_url(url: str) -> str | None:
     if parsed.netloc.lower() not in _HF_HOSTS:
         return None
     parts = [part for part in parsed.path.split("/") if part]
-    if len(parts) < 2 or parts[0] in {"api", "datasets", "spaces"}:
+    if len(parts) < 2 or parts[0] in {"api", "datasets", "spaces", "papers"}:
+        return None
+    if "@" in parts[1]:
         return None
     return "/".join(parts[:2])
 
 
 def _hf_repo_urls(model: Mapping[str, Any]) -> list[str]:
-    """Return likely HF model-card URLs for the installed model."""
+    """Return identity-proven repositories, without repairing guessed aliases.
+
+    Registry callers supply repositories from their exact IdentityLink artifact.
+    An explicitly empty proof set fails closed. Standalone callers may use an
+    exact publisher/model reference, but a different explicit URL is a candidate
+    rather than permission to import another model's recommendations.
+    """
+    if "proven_hf_repositories" in model:
+        repositories = model.get("proven_hf_repositories")
+        return (
+            _unique_urls([f"https://huggingface.co/{repo}" for repo in repositories if _repo_id_from_value(repo)])
+            if isinstance(repositories, (list, tuple))
+            else []
+        )
     urls: list[str] = []
+    key = _base_model_name(model)
+    publisher = str(model.get("publisher") or "").strip()
+    expected = key if key.count("/") == 1 else f"{publisher}/{key}" if "/" not in key else ""
     explicit = str(model.get("hf_url") or "").strip()
     if explicit:
         normalized = _normalise_url(explicit)
-        if normalized and _repo_id_from_url(normalized):
+        repo = _repo_id_from_url(normalized) if normalized else None
+        if normalized and repo and repo.casefold() == expected.casefold():
             urls.append(normalized)
-
-    key = _base_model_name(model)
-    publisher = str(model.get("publisher") or "").strip()
-    if "/" in key:
-        urls.append(f"https://huggingface.co/{key}")
-    elif publisher and key:
-        urls.append(f"https://huggingface.co/{publisher}/{key}")
-
-    path = str(model.get("path") or model.get("indexedModelIdentifier") or "").strip()
-    parts = [part for part in path.split("/") if part]
-    if len(parts) >= 2:
-        urls.append(f"https://huggingface.co/{parts[0]}/{parts[1]}")
-
+    if _repo_id_from_value(expected):
+        urls.append(f"https://huggingface.co/{expected}")
     return _unique_urls(urls)
+
+
+def _scoped_source_text(text: str, repositories: Sequence[str], *, model_card: bool) -> str:
+    """Keep parameter lines only within a proven model/variant scope.
+
+    Dedicated model cards can declare a general profile. Explicit headings or
+    model assignments for another repository disqualify that section. Publisher
+    documents additionally need an exact model name in the active section;
+    merely sharing a host or a model family is not enough.
+    """
+    normalized = {repo.casefold() for repo in repositories}
+    names = [
+        re.compile(
+            r"(?<![a-z0-9_.-])"
+            + "".join(r"[-_. ]" if char in "-_." else re.escape(char) for char in repo.rsplit("/", 1)[-1].casefold())
+            + r"(?![a-z0-9_.-])"
+        )
+        for repo in repositories
+    ]
+    sections: list[str] = []
+    assigned: str | None = None
+    out: list[str] = []
+    for line in _strip_markup(text).splitlines():
+        heading = re.match(r"^\s*(#{1,6})\s+(.*)", line)
+        if heading:
+            depth = len(heading[1])
+            sections = [*sections[: depth - 1], heading[2]]
+            assigned = None
+        reference = re.search(r"(?i)\b(?:model(?:_name|_id)?|repo(?:_id)?)\s*[:=]\s*[\"']([^\"']+/[^\"']+)[\"']", line)
+        if reference:
+            assigned = reference[1].casefold()
+        heading_scope: bool | None = None
+        for section in sections:
+            section_text = section.casefold()
+            refs = re.findall(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", section)
+            model_heading = bool(re.search(r"\b[a-z][a-z0-9_.-]*\d[a-z0-9_.-]*\b", section_text)) or any(
+                re.search(r"(?<![a-z0-9])" + re.escape(repo.rsplit("/", 1)[-1].split("-", 1)[0]), section_text)
+                for repo in repositories
+            )
+            if refs or model_heading:
+                heading_scope = any(name.search(section_text) for name in names) and all(
+                    repo.casefold() in normalized for repo in refs
+                )
+        wrong_scope = bool(assigned and assigned not in normalized) or heading_scope is False
+        exact_scope = (
+            heading_scope is True or any(name.search(line.casefold()) for name in names) or assigned in normalized
+        )
+        if any(pattern.search(line) for pattern in _FIELD_PATTERNS.values()) and (
+            wrong_scope or (not model_card and not exact_scope)
+        ):
+            out.append("")
+        else:
+            out.append(line)
+    return "\n".join(out)
 
 
 def _manufacturer_urls(model: Mapping[str, Any]) -> list[str]:
@@ -461,6 +519,9 @@ def _collect_document(
     timeout_s: float,
     documents: list[SourceDocument],
     visited: set[str],
+    repositories: Sequence[str] | None = None,
+    *,
+    model_card: bool = False,
 ) -> str | None:
     normalized = _normalise_url(url)
     if not normalized or normalized in visited:
@@ -468,7 +529,8 @@ def _collect_document(
     visited.add(normalized)
     text = fetch(normalized, timeout_s)
     if text:
-        documents.append(SourceDocument(normalized, text, priority))
+        scoped = _scoped_source_text(text, repositories, model_card=model_card) if repositories is not None else text
+        documents.append(SourceDocument(normalized, scoped, priority))
     return text
 
 
@@ -480,22 +542,31 @@ def _crawl_official_sources(
     documents: list[SourceDocument],
     visited: set[str],
     generation: str | None = None,
+    repositories: Sequence[str] = (),
 ) -> None:
     """Follow a small, same-domain documentation frontier."""
     queue: deque[tuple[str, int, int]] = deque((url, priority, 0) for url, priority in seeds)
     pages = 0
     while queue and pages < _MAX_OFFICIAL_PAGES:
         url, priority, depth = queue.popleft()
+        # HF links in navigation/model cards are candidates. They are fetched
+        # as raw cards only after the exact repository/quantized join below.
+        if urlparse(url).netloc.lower() in _HF_HOSTS:
+            continue
         if not _compatible_official_source(url, generation):
             continue
-        text = _collect_document(url, priority, fetch, timeout_s, documents, visited)
+        text = _collect_document(url, priority, fetch, timeout_s, documents, visited, repositories)
         if not text:
             continue
         pages += 1
         if depth >= _MAX_OFFICIAL_DEPTH:
             continue
         links = sorted(
-            (link for link in _linked_official_sources(text, publisher, url) if _compatible_official_source(link, generation)),
+            (
+                link
+                for link in _linked_official_sources(text, publisher, url)
+                if _compatible_official_source(link, generation)
+            ),
             key=_link_score,
             reverse=True,
         )
@@ -563,6 +634,35 @@ def _base_model_ids(metadata: Mapping[str, Any]) -> list[str]:
     return _unique_strings(found)
 
 
+def _quantized_base_model_ids(metadata: Mapping[str, Any]) -> list[str]:
+    """Allow parameter inheritance only through declared quantization links."""
+    tags = metadata.get("tags")
+    tagged = (
+        [
+            repo
+            for tag in tags
+            if isinstance(tag, str) and tag.startswith("base_model:quantized:") and (repo := _repo_id_from_value(tag))
+        ]
+        if isinstance(tags, list)
+        else []
+    )
+    card = metadata.get("cardData")
+    relation = card.get("base_model_relation") if isinstance(card, Mapping) else None
+    relation = relation or metadata.get("base_model_relation")
+    if relation in {"finetune", "merge", "adapter"} or (
+        isinstance(tags, list)
+        and any(
+            isinstance(tag, str)
+            and tag.startswith(("base_model:finetune:", "base_model:merge:", "base_model:adapter:"))
+            for tag in tags
+        )
+    ):
+        return []
+    if relation == "quantized":
+        tagged.extend(_base_model_ids(metadata))
+    return _unique_strings(tagged)
+
+
 def _unique_strings(values: list[str]) -> list[str]:
     seen: set[str] = set()
     result: list[str] = []
@@ -584,8 +684,9 @@ def _discover_hf_repositories(
     hf_urls: list[str],
     fetch: FetchText,
     timeout_s: float,
+    rejected_sources: list[str] | None = None,
 ) -> list[tuple[str, int]]:
-    """Resolve quantizer aliases and missing cards through the HF API."""
+    """Follow proven quantization ancestry; search results remain candidates."""
     repositories: list[tuple[str, int]] = []
     seen: set[str] = set()
 
@@ -594,16 +695,29 @@ def _discover_hf_repositories(
             seen.add(repo_id)
             repositories.append((repo_id, priority))
 
-    for url in hf_urls:
-        repo_id = _repo_id_from_url(url)
-        if not repo_id:
+    roots = [repo for url in hf_urls if (repo := _repo_id_from_url(url))]
+    frontier = deque((repo, 0) for repo in roots)
+    checked: set[str] = set()
+    while frontier and len(checked) < 12:
+        repo_id, depth = frontier.popleft()
+        if repo_id.casefold() in checked:
             continue
+        checked.add(repo_id.casefold())
         api_url = f"https://huggingface.co/api/models/{quote(repo_id, safe='/')}?full=false"
         metadata = _parse_json(fetch(api_url, timeout_s))
         if isinstance(metadata, Mapping):
-            for base_id in _base_model_ids(metadata):
+            returned_id = metadata.get("id") or metadata.get("modelId")
+            if returned_id and str(returned_id).casefold() != repo_id.casefold():
+                continue
+            quantized_bases = _quantized_base_model_ids(metadata)
+            if rejected_sources is not None:
+                rejected_sources.extend(base for base in _base_model_ids(metadata) if base not in quantized_bases)
+            for base_id in quantized_bases:
                 add(base_id, 3)
+                if depth < 3:
+                    frontier.append((base_id, depth + 1))
 
+    permitted = {repo.casefold() for repo in roots} | {repo.casefold() for repo, _ in repositories}
     for query in _search_terms(model):
         api_url = f"https://huggingface.co/api/models?search={quote(query)}&limit={_MAX_HF_SEARCH_RESULTS}&full=false"
         result = _parse_json(fetch(api_url, timeout_s))
@@ -612,12 +726,13 @@ def _discover_hf_repositories(
         for item in result:
             if not isinstance(item, Mapping):
                 continue
-            repo_id = item.get("id") or item.get("modelId")
-            if not isinstance(repo_id, str) or repo_id.count("/") != 1:
+            candidate_id = item.get("id") or item.get("modelId")
+            if not isinstance(candidate_id, str) or candidate_id.count("/") != 1:
                 continue
-            add(repo_id, 2)
-            for base_id in _base_model_ids(item):
-                add(base_id, 3)
+            if candidate_id.casefold() in permitted:
+                add(candidate_id, 2)
+            elif rejected_sources is not None:
+                rejected_sources.append(candidate_id)
         if repositories:
             break
     return repositories[:12]
@@ -849,10 +964,7 @@ def _research_source_urls(
     highest-priority fetched documents as a bounded record of what was tried.
     """
     evidence_urls = {
-        str(source["url"])
-        for evidence in evidence_maps
-        for source in evidence.values()
-        if source.get("url")
+        str(source["url"]) for evidence in evidence_maps for source in evidence.values() if source.get("url")
     }
     if evidence_urls:
         return sorted(evidence_urls)
@@ -874,6 +986,22 @@ def research_sampling_report(
     publisher = str(model.get("publisher") or "").strip().lower()
     generation = _granite_generation(model)
     hf_urls = _hf_repo_urls(model)
+    if "proven_hf_repositories" in model and not hf_urls:
+        return {
+            "sampling": compact_sampling_block(
+                {},
+                status="unresolved",
+                sources=[],
+                evidence=_unresolved_evidence("math", "Kein eindeutiger IdentityLink für die Modellquelle."),
+            ),
+            "sampling_research_status": "unresolved",
+            "sampling_sources": [],
+        }
+    rejected_sources: list[str] = []
+    discovered = _discover_hf_repositories(model, hf_urls, fetch, timeout_s, rejected_sources) if hf_urls else []
+    repositories = _unique_strings(
+        [repo for url in hf_urls if (repo := _repo_id_from_url(url))] + [repo for repo, _priority in discovered]
+    )
     documents: list[SourceDocument] = []
     visited: set[str] = set()
 
@@ -882,7 +1010,7 @@ def research_sampling_report(
         if not repo_id:
             continue
         for raw_url in _raw_hf_urls(repo_id):
-            text = _collect_document(raw_url, 4, fetch, timeout_s, documents, visited)
+            text = _collect_document(raw_url, 4, fetch, timeout_s, documents, visited, repositories, model_card=True)
             if text:
                 linked = [
                     link
@@ -897,6 +1025,7 @@ def research_sampling_report(
                     documents,
                     visited,
                     generation,
+                    repositories,
                 )
 
     _crawl_official_sources(
@@ -907,13 +1036,16 @@ def research_sampling_report(
         documents,
         visited,
         generation,
+        repositories,
     )
 
     normal_values, normal_evidence, normal_conflicts = _resolve_profile(documents, "normal")
     if "temperature" not in normal_values or "top_p" not in normal_values or normal_conflicts:
-        for repo_id, priority in _discover_hf_repositories(model, hf_urls, fetch, timeout_s):
+        for repo_id, priority in discovered:
             for raw_url in _raw_hf_urls(repo_id):
-                text = _collect_document(raw_url, priority, fetch, timeout_s, documents, visited)
+                text = _collect_document(
+                    raw_url, priority, fetch, timeout_s, documents, visited, repositories, model_card=True
+                )
                 if text:
                     linked = [
                         link
@@ -928,13 +1060,18 @@ def research_sampling_report(
                         documents,
                         visited,
                         generation,
+                        repositories,
                     )
         normal_values, normal_evidence, normal_conflicts = _resolve_profile(documents, "normal")
 
     thinking_values, thinking_evidence, thinking_conflicts = _resolve_profile(documents, "thinking")
     source_urls = _research_source_urls(documents, normal_evidence, thinking_evidence)
     if "temperature" not in normal_values or "top_p" not in normal_values:
-        status = "conflict" if normal_conflicts else ("unresolved" if documents else "not_found")
+        status = (
+            "conflict"
+            if normal_conflicts
+            else ("unresolved" if documents or rejected_sources or model.get("hf_url") else "not_found")
+        )
         unresolved = _unresolved_evidence(
             "math",
             "Kein allgemeines Profil; Coding-/Math-Fallback kann nicht belastbar bestimmt werden.",

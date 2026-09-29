@@ -11,6 +11,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from model_registry import ModelRegistry
+from tests.gguf_fixture import write_gguf
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -77,10 +78,10 @@ def test_model_registry_clips_context_to_native_limit(tmp_path: Path) -> None:
 
 def test_model_registry_derives_provider_specific_runtime(tmp_path: Path) -> None:
     main_path = tmp_path / "gpt-oss-20b-Q8_0.gguf"
-    main_path.write_bytes(b"GGUF main placeholder")
+    write_gguf(main_path, architecture="gpt-oss", hidden_dim=2880, source_repo="openai/gpt-oss-20b")
     draft_path = tmp_path / "draft" / "dflash-q4_0.gguf"
     draft_path.parent.mkdir(parents=True)
-    draft_path.write_bytes(b"GGUF draft placeholder")
+    write_gguf(draft_path, architecture="dflash", hidden_dim=2880, helper="dflash", target_repo="openai/gpt-oss-20b")
     registry = {
         "unsloth/gpt-oss-20b-GGUF@q8_0": {
             "context_length": 32768,
@@ -182,13 +183,23 @@ def test_model_registry_quant_list_falls_back_safely(tmp_path: Path) -> None:
 
 
 def test_model_registry_keeps_integrated_mtp_without_draft_path(tmp_path: Path) -> None:
+    main = tmp_path / "qwen-MTP.gguf"
+    write_gguf(main, block_count=4, metadata={"qwen35.nextn_predict_layers": 1}, tensors={
+        "token_embd.weight": (5120, 4),
+        "blk.0.attn_q.weight": (5120, 5120),
+        "blk.3.nextn.eh_proj.weight": (10240, 5120),
+        "blk.3.nextn.enorm.weight": (5120,),
+        "blk.3.nextn.hnorm.weight": (5120,),
+    })
     registry = {
         "unsloth/qwen3.6-35b-a3b-mtp@iq2_m": {
             "local": {
+                "model_path": str(main),
                 "llama_cpp": {
                     "speculative": {
                         "type": "mtp",
                         "mode": "integrated",
+                        "draft_model_path": "missing-unverified.gguf",
                     }
                 }
             }
@@ -206,11 +217,30 @@ def test_model_registry_keeps_integrated_mtp_without_draft_path(tmp_path: Path) 
     assert "draft_model_path" not in runtime
 
 
+@pytest.mark.parametrize("profile", [
+    {"draft_model_path": "missing.gguf"},
+    {"draft_model_reference": "vendor/helper.gguf"},
+    {"method": "dspark"},
+])
+def test_model_registry_rejects_nonempty_speculative_profiles_without_type(profile: dict) -> None:
+    registry = {"vendor/model@q6_k": {"local": {"llama_cpp": {"speculative": profile}}}}
+    with pytest.raises(ValueError, match="profile type is missing"):
+        ModelRegistry(lambda: registry).provider_runtime("vendor/model@q6_k", "llama_cpp")
+
+
+def test_model_registry_preserves_empty_non_speculative_profile() -> None:
+    registry = {"vendor/model@q6_k": {"local": {"llama_cpp": {"speculative": {}}}}}
+    runtime = ModelRegistry(lambda: registry).provider_runtime("vendor/model@q6_k", "llama_cpp")
+    assert "spec_type" not in runtime
+    assert "draft_model_path" not in runtime
+
+
 def test_model_registry_resolves_separate_mtp_companion(tmp_path: Path) -> None:
     main_path = tmp_path / "gemma-4-12b-it-Q6_K.gguf"
-    main_path.write_bytes(b"GGUF main placeholder")
+    write_gguf(main_path, architecture="gemma4", hidden_dim=3840, source_repo="google/gemma-4-12b-it")
     mtp_path = tmp_path / "mtp-gemma-Q8_0.gguf"
-    mtp_path.write_bytes(b"GGUF placeholder")
+    write_gguf(mtp_path, architecture="gemma4-assistant", hidden_dim=1024, helper="mtp", target_dim=3840,
+               target_repo="google/gemma-4-12b-it")
     registry = {
         "unsloth/gemma-4-12b-it@q6_k": {
             "local": {
@@ -261,8 +291,8 @@ def test_model_registry_rejects_companion_cli_without_companion_path(tmp_path: P
 def test_model_registry_rejects_incompatible_dflash_companion(tmp_path: Path) -> None:
     main_path = tmp_path / "qwen3.6-27b-Q6_K.gguf"
     helper_path = tmp_path / "qwen3.8-27b-dflash2-Q8_0.gguf"
-    main_path.write_bytes(b"GGUF main")
-    helper_path.write_bytes(b"GGUF helper")
+    write_gguf(main_path)
+    write_gguf(helper_path, architecture="dflash", helper="dflash", target_repo="Qwen/Qwen3.8-27B")
     registry = {
         "unsloth/qwen3.6-27b@q6_k": {
             "local": {
@@ -280,7 +310,7 @@ def test_model_registry_rejects_incompatible_dflash_companion(tmp_path: Path) ->
     }
     model_registry = ModelRegistry(lambda: registry, template_root=tmp_path)
 
-    with pytest.raises(ValueError, match="Qwen generation mismatch"):
+    with pytest.raises(ValueError, match="target identity is unproven"):
         model_registry.provider_runtime("unsloth/qwen3.6-27b@q6_k", "llama_cpp")
 
 
@@ -297,3 +327,19 @@ def test_model_registry_never_first_wins_on_publisher_collision(tmp_path: Path) 
     assert explicit is not None
     assert explicit.registry_key == "byteshape/qwen3.5-9b@q5_k_s"
     assert publisherless is None
+
+
+@pytest.mark.parametrize("override", [
+    {"spec_type": "draft-dspark"}, {"draft_model_path": "foreign.gguf"}, {"spec_method": "dspark"},
+])
+def test_provider_override_cannot_replace_validated_companion(tmp_path: Path, override: dict) -> None:
+    main, helper = tmp_path / "main-Q6_K.gguf", tmp_path / "helper-Q8_0.gguf"
+    write_gguf(main)
+    write_gguf(helper, architecture="dflash", helper="dflash", target_repo="Qwen/Qwen3.6-27B")
+    registry = {"vendor/model@q6_k": {
+        "llama_cpp": override,
+        "local": {"model_path": str(main), "companions": {"draft": str(helper)},
+                  "llama_cpp": {"speculative": {"type": "draft", "method": "dflash"}}},
+    }}
+    with pytest.raises(ValueError, match="override conflicts"):
+        ModelRegistry(lambda: registry).provider_runtime("vendor/model@q6_k", "llama_cpp")

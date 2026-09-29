@@ -41,7 +41,7 @@ def test_research_uses_explicit_profiles_and_marks_fallbacks() -> None:
     )
 
     assert result is not None
-    assert requested[0].endswith("https://huggingface.co/example/model/raw/main/README.md")
+    assert "https://huggingface.co/example/model/raw/main/README.md" in requested
     assert {
         key: result["sampling"]["coding"][key]
         for key in ("temperature", "top_p", "top_k", "min_p")
@@ -255,7 +255,7 @@ def test_research_resolves_quantizer_through_huggingface_base_model_api() -> Non
     def fetcher(url: str, _timeout: float) -> str | None:
         requested.append(url)
         if url == "https://huggingface.co/api/models/byteshape/example?full=false":
-            return json.dumps({"tags": ["base_model:Qwen/Qwen3.6-35B-A3B"]})
+            return json.dumps({"tags": ["base_model:quantized:Qwen/Qwen3.6-35B-A3B"]})
         if url == "https://huggingface.co/Qwen/Qwen3.6-35B-A3B/raw/main/README.md":
             return 'Recommended: {"temperature": 0.7, "top_p": 0.8, "top_k": 20, "min_p": 0.0}'
         return None
@@ -280,7 +280,7 @@ def test_research_follows_relative_official_documentation_link() -> None:
         if url == "https://qwen.readthedocs.io/en/latest":
             return "See [sampling](generation/sampling.html)."
         if url == "https://qwen.readthedocs.io/en/latest/generation/sampling.html":
-            return "Recommended generation: temperature=0.7, top_p=0.8, top_k=20"
+            return "## qwen/example\nRecommended generation: temperature=0.7, top_p=0.8, top_k=20"
         return None
 
     result = research_sampling(

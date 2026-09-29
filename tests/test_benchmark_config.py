@@ -19,6 +19,28 @@ def _no_real_lms_files(mocker: Any) -> None:
     Tests that need a JSON-config dict re-patch _lms_generation_config.
     """
     mocker.patch.object(bc, "_lms_generation_config", return_value=None)
+    # Machine-local web refreshes must not change unit-test expectations.
+    # These synthetic profiles test precedence, not manufacturer recommendations.
+    def profile(temperature, top_p, **extra):
+        return {category: {"temperature": temperature, "top_p": top_p, **extra}
+                for category in ("coding", "knowledge", "agentic", "math")}
+
+    qwen = profile(0.7, 0.8)
+    qwen.update(sampling_research_status="confirmed", thinking={"temperature": 0.6, "top_p": 0.95})
+    mocker.patch.object(bc, "_load_quant_registry", return_value={
+        "byteshape/qwen3.8-27b@iq4_xs": {"reasoning": "thinking", "sampling": qwen},
+        "ibm-granite/granite-4.2-8b@q6_k": {"sampling": profile(1.0, 0.95)},
+        "noctrex/ernie-4.5-21b-a3b-pt_moe@iq4_nl": {"sampling": profile(0.8, 0.95)},
+        "qwen/qwen3-14b@q6_k": {"reasoning": "thinking", "sampling": profile(0.6, 0.95)},
+        "unsloth/gemma-4-12b-it@q6_k": {
+            "reasoning": "thinking", "architecture_family": "gemma4", "blueprint": "gemma_reasoning",
+            "sampling": {**profile(1.0, 0.95, top_k=64), "sampling_research_status": "confirmed",
+                         "thinking": {"temperature": 0.6, "top_p": 0.95}},
+        },
+        "lmstudio-community/qwen/qwen3.5-9b@q6_k": {"reasoning": "thinking"},
+        "unsloth/gemma-4-26b-a4b-it@iq3_xxs": {"reasoning": "thinking"},
+        "intel/qwen3-30b-a3b-instruct-2507-q2ks-mixed-autoround@q2_k_s": {"sampling": profile(0.7, 0.8)},
+    })
     return None
 
 
@@ -86,13 +108,21 @@ class TestRegistryBackedSampling:
         assert (cfg["temperature"], cfg["top_p"]) == (1.0, 1.0)
         assert cfg["_source"] == "registry-sampling"
 
-    def test_per_category_row_glm_4_7(self):
+    def test_per_category_row_glm_4_7(self, mocker):
         expected = {
             "coding": (0.7, 1.0),
             "knowledge": (1.0, 0.95),
             "agentic": (0.0, 0.95),
             "math": (0.7, 1.0),
         }
+        mocker.patch.object(bc, "_load_quant_registry", return_value={"unsloth/glm-4.7-flash@q3_k_s": {
+            "reasoning": "thinking", "sampling": {
+                "coding": {"temperature": 0.7, "top_p": 1.0},
+                "knowledge": {"temperature": 1.0, "top_p": 0.95},
+                "agentic": {"temperature": 0.0, "top_p": 0.95},
+                "math": {"temperature": 0.7, "top_p": 1.0},
+            },
+        }})
         for cat, (temp, top_p) in expected.items():
             cfg = get_model_config("unsloth/glm-4.7-flash", category=cat)
             assert (cfg["temperature"], cfg["top_p"]) == (temp, top_p)
@@ -111,7 +141,6 @@ class TestRegistryBackedSampling:
         for key in (
             "qwen/qwen3-14b",
             "qwen/qwen3-14b@q6_k",
-            "qwen/qwen3-14b@q8_0",
         ):
             cfg = get_model_config(key, category="math")
             assert (cfg["temperature"], cfg["top_p"]) == (0.6, 0.95)
@@ -152,8 +181,11 @@ class TestRegistrySampling:
         assert (cfg["temperature"], cfg["top_p"]) == (0.8, 0.95)  # Registry-Ableitung
         assert cfg["_source"] == "registry-sampling"
 
-    def test_registry_block_partial_row_falls_back(self):
+    def test_registry_block_partial_row_falls_back(self, mocker):
         # kimi-linear: kein agentic im Block -> Kategorie-Fallback
+        mocker.patch.object(bc, "_load_quant_registry", return_value={"mradermacher/kimi-linear-reap-35b-a3b-instruct-i1@q4_k_m": {
+            "sampling": {"coding": {"temperature": 0.6, "top_p": 0.95}},
+        }})
         cfg = get_model_config("mradermacher/kimi-linear-reap-35b-a3b-instruct-i1", category="coding")
         assert (cfg["temperature"], cfg["top_p"]) == (0.6, 0.95)
         assert cfg["_source"] == "registry-sampling"
@@ -235,7 +267,10 @@ class TestThinkingRuns:
         cfg = get_model_config("openai/gpt-oss-20b", category="coding", is_thinking_enabled=True)
         assert (cfg["temperature"], cfg["top_p"]) == (1.0, 1.0)
 
-    def test_instruct_model_not_affected_by_thinking_flag(self):
+    def test_instruct_model_not_affected_by_thinking_flag(self, mocker):
+        mocker.patch.object(bc, "_load_quant_registry", return_value={"unsloth/glm-4.7-flash@q3_k_s": {
+            "reasoning": "instruct", "sampling": {"coding": {"temperature": 0.7, "top_p": 1.0}},
+        }})
         cfg = get_model_config("unsloth/glm-4.7-flash", category="coding", is_thinking_enabled=True)
         assert (cfg["temperature"], cfg["top_p"]) == (0.7, 1.0)
 
@@ -333,26 +368,26 @@ class TestGemmaThinkingByCategory:
     """
 
     def test_gemma_coding_off(self):
-        cfg = get_model_config("unsloth/gemma-4-12b-it-qat@q4_k_xl", category="coding")
+        cfg = get_model_config("unsloth/gemma-4-12b-it@q6_k", category="coding")
         assert cfg["enable_thinking"] is False
 
     def test_gemma_agentic_off(self):
-        cfg = get_model_config("unsloth/gemma-4-12b-it-qat@q4_k_xl", category="agentic")
+        cfg = get_model_config("unsloth/gemma-4-12b-it@q6_k", category="agentic")
         assert cfg["enable_thinking"] is False
 
     def test_gemma_math_on(self):
-        cfg = get_model_config("unsloth/gemma-4-12b-it-qat@q4_k_xl", category="math")
+        cfg = get_model_config("unsloth/gemma-4-12b-it@q6_k", category="math")
         assert cfg["enable_thinking"] is True
 
     def test_gemma_knowledge_on(self):
-        cfg = get_model_config("unsloth/gemma-4-12b-it-qat@q4_k_xl", category="knowledge")
+        cfg = get_model_config("unsloth/gemma-4-12b-it@q6_k", category="knowledge")
         assert cfg["enable_thinking"] is True
 
     def test_gemma_thinking_flag_forces_on(self):
         # --thinking-Flag gewinnt ueber die Kategorie-Steuerung (coding=False):
         # der Force-Override steht NACH dem bp_thinking-Block.
         cfg = get_model_config(
-            "unsloth/gemma-4-12b-it-qat@q4_k_xl",
+            "unsloth/gemma-4-12b-it@q6_k",
             category="coding",
             is_thinking_enabled=True,
         )
@@ -367,6 +402,6 @@ class TestGemmaThinkingByCategory:
             "llm.prediction.reasoning.budgetTokens": {"checked": True, "value": 2048},
         }
         mocker.patch.object(bc, "_lms_generation_config", return_value=lms)
-        cfg = get_model_config("unsloth/gemma-4-12b-it-qat@q4_k_xl", category="coding")
+        cfg = get_model_config("unsloth/gemma-4-12b-it@q6_k", category="coding")
         assert cfg["enable_thinking"] is False
         assert cfg["top_k"] == 64

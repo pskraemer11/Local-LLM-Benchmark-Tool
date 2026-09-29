@@ -95,6 +95,18 @@ FIELD_OWNERSHIP: dict[str, FieldRule] = {
     "blueprint": FieldRule(
         "registry", "config", False, description="Blueprint-Auswahl (menschlich)"
     ),
+    "blueprint_policy": FieldRule(
+        "registry", "config", False, description="Explizite Blueprint-Auswahl bei Klassifikation erhalten"
+    ),
+    "speculative_policy": FieldRule(
+        "registry", "config", False, description="Drafter deaktivieren, explizit binden oder aus LMS ableiten"
+    ),
+    "reasoning_budget": FieldRule(
+        "registry", "config", False, description="Explizites natives Reasoning-Tokenbudget"
+    ),
+    "reasoning_effort": FieldRule(
+        "registry", "config", False, description="Explizite native Reasoning-Stärke"
+    ),
     "template": FieldRule(
         "registry", "config", False, checks=("template_file",),
         description="Jinja-Vorlage-Referenz (menschlich)"

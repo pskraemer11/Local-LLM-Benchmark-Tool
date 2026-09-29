@@ -50,9 +50,7 @@ def test_dflash_is_a_draft_llm_not_mtp() -> None:
 
 
 def test_drafter_reference_defaults_to_simple_method() -> None:
-    profile = classify_lms_speculative_values(
-        {"draft_model_reference": "publisher/small-compatible-model-Q4_K_M.gguf"}
-    )
+    profile = classify_lms_speculative_values({"draft_model_reference": "publisher/small-compatible-model-Q4_K_M.gguf"})
 
     assert profile["type"] == "draft"
     assert profile["method"] == "simple"
@@ -60,9 +58,7 @@ def test_drafter_reference_defaults_to_simple_method() -> None:
 
 
 def test_dspark_reference_is_not_downgraded_to_generic_drafter() -> None:
-    profile = classify_lms_speculative_values(
-        {"draft_model_reference": "publisher/target-DSpark2-Q4_K_M.gguf"}
-    )
+    profile = classify_lms_speculative_values({"draft_model_reference": "publisher/target-DSpark2-Q4_K_M.gguf"})
 
     assert profile["type"] == "draft"
     assert profile["method"] == "dspark"
@@ -99,3 +95,17 @@ def test_legacy_cli_labels_are_normalized_without_becoming_registry_types() -> N
         "type": "draft",
         "method": "dflash",
     }
+
+
+def test_explicit_invalid_method_is_preserved_for_validation_not_guessed() -> None:
+    profile = normalize_speculative_profile({"type": "draft", "method": "typo", "draft_model_reference": "dflash.gguf"})
+    assert profile["method"] == "typo"
+    assert companion_role(profile) == "draft"
+    assert llama_cpp_spec_type(profile) is None
+
+
+def test_pairing_provenance_survives_profile_normalization() -> None:
+    pairing = {"evidence_path": "pair.json", "evidence_sha256": "a" * 64}
+    assert (
+        normalize_speculative_profile({"type": "draft", "method": "dflash", "pairing": pairing})["pairing"] == pairing
+    )

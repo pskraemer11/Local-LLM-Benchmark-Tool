@@ -10,6 +10,10 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 
 @dataclass(frozen=True)
@@ -27,6 +31,7 @@ _SPECS = (
     QuantizationSpec("q2_k_m"),
     QuantizationSpec("q2_k_l"),
     QuantizationSpec("q2_g64"),
+    QuantizationSpec("q2_sym32k4"),
     QuantizationSpec("q3_k_xs"),
     QuantizationSpec("q3_k_s"),
     QuantizationSpec("q3_k_m"),
@@ -76,16 +81,11 @@ _SPECS = (
 QUANTIZATION_SPECS: tuple[QuantizationSpec, ...] = _SPECS
 KNOWN_QUANTS: tuple[str, ...] = tuple(spec.canonical for spec in _SPECS)
 _ALIASES = {
-    alias.replace("-", "_").casefold(): spec.canonical
-    for spec in _SPECS
-    for alias in (spec.canonical, *spec.aliases)
+    alias.replace("-", "_").casefold(): spec.canonical for spec in _SPECS for alias in (spec.canonical, *spec.aliases)
 }
 _QUANT_RE = re.compile(
     r"(?<![a-z0-9])(?:"
-    + "|".join(
-        re.escape(value).replace("_", r"[_-]")
-        for value in sorted(_ALIASES, key=len, reverse=True)
-    )
+    + "|".join(re.escape(value).replace("_", r"[_-]") for value in sorted(_ALIASES, key=len, reverse=True))
     + r")(?![a-z0-9])",
     re.IGNORECASE,
 )
@@ -106,3 +106,33 @@ def extract_quant_from_text(value: str) -> str | None:
 def is_known_quant(value: str) -> bool:
     """Return whether a value belongs to the shared quantization vocabulary."""
     return normalize_quant(value) in KNOWN_QUANTS
+
+
+def quant_from_gguf_evidence(
+    filename: str,
+    *,
+    publisher: str | None,
+    file_type: object,
+    tensor_types: Mapping[str, int],
+) -> str | None:
+    """Resolve a filename or a publisher-scoped, independently backed format.
+
+    ``publisher`` must come from the physical artifact source identity. Fork
+    enum values are not globally unique. llmsforall's llama.h and ggml.h both
+    define Q2_SYM32K4 as 56; require both the file-level declaration and an
+    actual tensor using that type before identifying a filename without quant.
+    """
+    named_quant = extract_quant_from_text(filename)
+    if named_quant is not None:
+        return named_quant
+    if (
+        str(publisher or "").strip().casefold() == "llmsforall"
+        and isinstance(file_type, int)
+        and not isinstance(file_type, bool)
+        and file_type == 56
+        and any(
+            isinstance(value, int) and not isinstance(value, bool) and value == 56 for value in tensor_types.values()
+        )
+    ):
+        return "q2_sym32k4"
+    return None

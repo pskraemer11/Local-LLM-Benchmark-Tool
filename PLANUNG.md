@@ -1,6 +1,60 @@
 # Planung: Prozessisolation, direkte llama.cpp-Migration und Benchmark-Abnahme
 
-Status: 2026-09-27. Prioritaet: reproduzierbare Backend-Abnahme und Score-Kompatibilitaet.
+Status: 2026-09-29. Prioritaet: Registry-Verträge, reproduzierbare Backend-Abnahme und Score-Kompatibilitaet.
+
+## Benutzerupdates und Runtime-Nachreview vom 29.09.2026
+
+- [x] Elf neue Modelle synchronisieren, acht tatsächlich gelöschte Modelle einschließlich jrell archivieren.
+- [x] Millies spezielle Quant-Identität aus Publisher-Fork und tatsächlichen Tensor-Typen auflösen; @?-Migration und anschließenden Sync/JSON-Import testen.
+- [x] Byteshape-Qwen3.8 ohne Drafter erhalten; explizite Helper-Policy vor GUI-Überschreibungen schützen.
+- [x] Gemma-REAP126/MTP und Muse/DSpark durch vorhandene konkrete LM-Studio-Läufe belegen; keine neuen GPU-/Load-Aufrufe.
+- [x] Muse-Reasoning und Gesamtbudget bis in Blueprint, Template, JSON und Request-Ausgaben prüfen; absolute Deadline und terminale Retry-Grenze korrigieren.
+- [x] 54 aktuell gebundene JSON-Systemprompts sowie Preset mit 57 Modellabschnitten prüfen; manuelle/globale Preset-Abschnitte erhalten. Neu gewählte Expertenwerte 18/32 importieren und zwei fehlende GPT-OSS-Harmony-Templates ergänzen.
+- [x] Neue Codeverträge unabhängig nachprüfen: LMS-Load-Policy und typstrenge Aliaswerte korrigiert.
+- [x] Abschließendes vollständiges Review-Gate: 1.501 Tests, Ruff, Vollbaum-mypy und GGUF-Abgleich ohne Fehler; Pre-Commit mit 174 fokussierten Tests bestanden.
+- [ ] Neue Bonsai/Qwen3.8-DSpark-Paarung sowie Gemma-31B-Helper mit konkreter Ziel-/Dateievidenz freigeben; fehlende lokale Config-/Expert-Verträge getrennt klären.
+- [ ] Autorisierten Commit und Push nach abschließenden Hooks durchführen; GitHub-Actions für den tatsächlichen Commit prüfen.
+
+Details und Grenzen stehen im `Registry-Update_Runtime-and-KV_2026-09-29.md`.
+
+## Folgereview vom 29.09.2026: Plan und Abnahme
+
+Der Bericht `doc-git/Review-Artifacts/Code-Review_registry_Fixes_2026-09-29.md`
+führt den Fix-Bericht vom 28.09. mit dem aktuellen Datei-Inventar fort.
+
+- [x] Aktuelle LMS-/GGUF-Snapshots prüfen, Registry sichern und aktuelle Modelle synchronisieren.
+- [x] R13 mit vollständigem Namespace-/Setup-Vergleich und Windows-Subprozess-Regressionen schließen.
+- [x] 119 Vollbaum-Typecheck-Fehler ohne Lockerung der Typregeln korrigieren.
+- [x] Zusätzliche Identitäts-/Companion-Vertragslücken schließen und unabhängig nachprüfen.
+- [x] Vier aktuelle MTP-/DSpark-Paarungen durch tatsächliche Generation mit akzeptierten Draft-Tokens belegen.
+- [ ] Übrige lokale Modell-/Config-/Helper-Bindungen freigeben: zwei externe Helper-Ladefehler, zwei fehlende Alt-Helper und Millies spezielles Format bleiben offen.
+- [x] Finale Gesamtsuite (1.414 Tests) und Commit-/Push-Hooks im Arbeitsbaum nachweisen; Ergebnis im Folgereview dokumentiert.
+
+Die archivierten gelöschten Modelle sind keine aktiven Registry-Einträge mehr;
+ältere Smoke-/Profilangaben in dieser Planung bleiben historische Nachweise.
+Eine statisch gültige Registry ersetzt keine erfolgreiche lokale Backend-Abnahme.
+
+## Registry-Review vom 28.09.2026: Implementierungsstand
+
+Die Befunde R01–R12 aus `doc-git/Review-Artifacts/Code-Review_registry_2026-09-28.md`
+werden durch gemeinsame Identitäts-, Runtime- und Companion-Grenzen geschlossen.
+Der ergänzende Fix-/Re-Review-Bericht dokumentiert Regressionen und das Vollgate;
+die frühere SampleSize-1-Abnahme ersetzt diese neuen Vertragsprüfungen nicht.
+
+- Vollständige Identitäten und `IdentityLink` sind Voraussetzung für Header-,
+  JSON- und Webübernahme. Konkrete Publisher-/Quant-/Variantenkonflikte und
+  mehrdeutige Quellen bleiben blockiert.
+- Kontext, Reasoning und Template-Auswahl benutzen gemeinsame Resolver. Die
+  tatsächlichen Native-Load-/Custom-/LM-Eval-Ausgaben werden geprüft; unbekannte
+  Template-Evidenz begründet keine erfundenen Thinking-Controls.
+- Separate zielgebundene Helfer benötigen Header- oder erfolgreiche Pairing-Evidenz.
+  Fehlende Dateien und ungeklärte Zielbindung in der lokalen Registry bleiben
+  sichtbare Datenblocker und werden nicht durch Dateinamenannahmen freigegeben.
+- Sampling-Recherche ist gezielt und provenancegebunden. Nicht ausreichend belegte
+  Profile enthalten keine unbewiesenen Zahlen und behalten einen offenen Status.
+- GPU-Smokes für bislang unbelegte Paarungen sowie die Identitätsabnahme von
+  TabbyAPI-Aliasen bleiben gesonderte Abnahmen; aus Offline-Tests folgt keine
+  Aussage über ihre reale Backend-Kompatibilität.
 
 ## Aktueller Gesamtstatus
 

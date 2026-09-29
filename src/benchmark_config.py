@@ -25,11 +25,18 @@ from model_identity import (
     decompose_model_identity,
     match_registry_key,
     normalize_lms_model_name,
-    normalize_model_reference,
     normalized_lms_key,
 )
-from quantization import KNOWN_QUANTS, extract_quant_from_text, normalize_quant
+from quantization import KNOWN_QUANTS, extract_quant_from_text
+from runtime_policy import (
+    REASONING_PATTERNS,  # noqa: F401 - compatibility export
+    reasoning_template_controls,
+    resolve_reasoning,
+    resolve_template,
+)
 from utils.terminal import warn
+
+_TEMPLATE_ROOT = Path(__file__).resolve().parents[1] / "doc-git" / "Jinja-Chat-Templates"
 
 BLACKLIST = [
     # Embedding-Modelle (separates Projekt embedding-eval/)
@@ -159,35 +166,6 @@ BENCHMARK_THINKING_DEFAULTS = {
 # Reasoning-Muster fuer enable_thinking-Override via --thinking-Flag
 # Ergänzt 2026-08-06: deckt die Registry-Modelle mit reasoning=thinking ab
 # (auch die, bei denen "think" nur eingebettet ist: mirothinker, ...-thinking-…).
-REASONING_PATTERNS = {
-    "acemath",
-    "deepseek",
-    "gemma",
-    "phi-4-reasoning",
-    "ministral",
-    "nemotron",
-    "apriel",
-    "magistral",
-    "gpt-oss",
-    "reasoning",
-    "think",
-    "r1",
-    "rnj",
-    "qwq",
-    "cascade",
-    "cot",
-    "phi-4",
-    "kimi",
-    "mirothinker",
-    "thinking",
-    "glm-4.7",
-    "glm-4.6v",
-    "qwen3.5",
-    "qwen3.6",
-    "qwen3.8",
-    "qwen3-14b",
-    "qwen3-coder-reap",
-}
 
 # ── gpt-oss: Reasoning-Level / Budget (zentrale Quelle) ──
 # Steuert BOTH Ebenen, damit sie synchron bleiben:
@@ -348,38 +326,15 @@ def _normalize_lms_model_name(name: str) -> str:
 
 
 def _lms_index() -> list[dict[str, Any]]:
-    """Scan the LMS config root (TTL-cached) for config files."""
+    """Inventory every active LMS config using the shared config reader."""
+    from assemble_blueprint import read_lms_configs
+
     key = str(LMS_CONFIG_ROOT)
     now = time.time()
     cached = _LMS_INDEX_CACHE.get(key)
     if cached is not None and now - cached[0] < _LMS_TTL_S:
         return cached[1]
-    entries: list[dict[str, Any]] = []
-    if LMS_CONFIG_ROOT.exists():
-        for publisher_dir in sorted(LMS_CONFIG_ROOT.iterdir()):
-            if not publisher_dir.is_dir():
-                continue
-            publisher = publisher_dir.name
-            for item in sorted(publisher_dir.iterdir()):
-                if item.is_file() and item.suffix.lower() == ".json":
-                    json_path = item
-                    model_dir_name = item.stem
-                elif item.is_dir():
-                    json_files = sorted(item.glob("*.json"))
-                    if not json_files:
-                        continue
-                    json_path = json_files[0]
-                    model_dir_name = item.name
-                else:
-                    continue
-                entries.append(
-                    {
-                        "publisher": publisher,
-                        "dir_name": model_dir_name,
-                        "file_stem": json_path.stem,
-                        "json_path": json_path,
-                    }
-                )
+    entries = read_lms_configs(LMS_CONFIG_ROOT) if LMS_CONFIG_ROOT.exists() else []
     _LMS_INDEX_CACHE[key] = (now, entries)
     return entries
 
@@ -462,78 +417,27 @@ def _registry_sampling_block(model_identifier: str) -> dict[str, Any] | None:
 
 
 def _lms_generation_config(model_identifier: str) -> dict[str, Any] | None:
-    """Generations-Parameter aus der LMS-JSON-Config des Modells.
+    """Import generation extras only from an exact, verified IdentityLink.
 
-    Matching wie registry_tool (3 Phasen, publisher-bewusst). Rueckgabe
-    eines flachen dicts (temperature/top_p/top_k/min_p/enable_thinking/
-    reasoning_effort) oder None, wenn keine Config zum Modell passt.
+    The machine-local Registry's persisted artifact/config pair supplies the
+    join evidence. No LMS process or server is started while resolving request
+    parameters, and missing or ambiguous bindings leave Registry policy alone.
     """
+    from model_identity import same_model_identity
+    from registry_tool import RegistryInventory, _refresh_identity_links
+
     if not model_identifier:
         return None
-    key = _normalized_lms_key(model_identifier)
-    if not key:
+    registry = _load_quant_registry()
+    registry_key = match_registry_key(model_identifier, list(registry))
+    if registry_key is None or not same_model_identity(model_identifier, registry_key):
         return None
-    requested_base = model_identifier.split("@", 1)[0].strip()
-    requested_publisher, requested_model, requested_quant = decompose_model_identity(requested_base)
-    requested_references = {
-        normalize_model_reference(requested_base),
-        normalize_model_reference(requested_model),
-        normalize_model_reference(f"{requested_publisher}/{requested_model}"),
-    }
-    requested_references.discard("")
-
-    def _matches(candidate: str) -> bool:
-        if candidate == key:
-            return True
-        if candidate.startswith(key + "-"):
-            return True
-        if candidate.endswith("-" + key):
-            return True
-        if key.endswith("-" + candidate):
-            return True
-        return False
-
-    exact_matches: list[dict[str, Any]] = []
-    fallback_matches: list[dict[str, Any]] = []
-    for entry in _lms_index():
-        norm_dir = _normalize_lms_model_name(entry["dir_name"])
-        norm_file = _normalize_lms_model_name(entry["file_stem"])
-        entry_references = {
-            normalize_model_reference(entry["dir_name"]),
-            normalize_model_reference(f"{entry['publisher']}/{entry['dir_name']}"),
-            normalize_model_reference(entry["file_stem"]),
-        }
-        if requested_references.intersection(entry_references):
-            exact_matches.append(entry)
-        elif _matches(norm_dir) or _matches(norm_file):
-            fallback_matches.append(entry)
-
-    matches = exact_matches or fallback_matches
-    if requested_quant:
-        def _quant_matches(entry: dict[str, Any]) -> bool:
-            entry_quant = extract_quant_from_text(f"{entry['dir_name']} {entry['file_stem']}")
-            return not entry_quant or normalize_quant(entry_quant) == normalize_quant(requested_quant)
-
-        quant_matches = [
-            entry
-            for entry in matches
-            if _quant_matches(entry)
-        ]
-        if quant_matches:
-            matches = quant_matches
-
-    parameterized = [
-        (str(entry["json_path"]), params)
-        for entry in matches
-        if (params := _lms_params_from_entry(entry))
-    ]
-    # A runtime config is evidence, not a best-effort default.  Never choose
-    # the first variant when more than one JSON file can represent the
-    # requested model; the caller then falls back to the declared Registry
-    # policy instead of importing an arbitrary GUI setting.
-    if len(parameterized) == 1:
-        return parameterized[0][1]
-    return None
+    inventory = RegistryInventory(registry, [], [], _lms_index(), [])
+    _refresh_identity_links(inventory)
+    link = inventory.identity_links.get(registry_key)
+    if link is None or len(link.config_paths) != 1:
+        return None
+    return _lms_params_from_entry({"json_path": link.config_paths[0]})
 
 
 def _lms_params_from_entry(entry: dict[str, Any]) -> dict[str, Any] | None:
@@ -573,26 +477,6 @@ def _lms_params_from_entry(entry: dict[str, Any]) -> dict[str, Any] | None:
 
 
 
-def _word_boundary_match(pattern: str, text: str) -> bool:
-    """Substring match with word-boundary check to avoid false overlaps.
-
-    Returns True if `pattern` is bounded by non-alphanumeric chars
-    or string boundaries (start/end, '-', '_', '/', '.', '@').
-    A digit counts as a boundary when adjacent to the pattern.
-    """
-    if pattern not in text:
-        return False
-    idx = text.find(pattern)
-    while idx != -1:
-        before = text[idx - 1] if idx > 0 else ""
-        after = text[idx + len(pattern)] if idx + len(pattern) < len(text) else ""
-        before_ok = not before or not before.isalnum() or before.isdigit()
-        after_ok = not after or not after.isalnum() or after.isdigit()
-        if before_ok and after_ok:
-            return True
-        idx = text.find(pattern, idx + 1)
-    return False
-
 
 def should_use_unified_kv_cache(model_name: str, model_size_gb: float) -> bool:
     """Determine UKV for a model based on size threshold and special cases.
@@ -627,7 +511,6 @@ def get_model_config(model_identifier: str, category: str = "coding", is_thinkin
     "thinking-default" | "category-default") zur Anzeige.
     """
     cat = category if category in BENCHMARK_CATEGORY_DEFAULTS else "coding"
-    key_lower = model_identifier.lower() if model_identifier else ""
     registry_entry = _registry_entry(model_identifier)
     registry_declares_thinking = (
         registry_entry is not None and registry_entry.get("reasoning") == "thinking"
@@ -636,7 +519,7 @@ def get_model_config(model_identifier: str, category: str = "coding", is_thinkin
     # statt der Kategorie-Defaults (Research 06.08.2026). Der Registry-Block
     # schlaegt auch hier (dokumentierte Ausnahmen: GPT-OSS 1.0/1.0,
     # Gemma-4 1.0/0.95, Nemotron-3-Reasoning 1.0/1.0, ...).
-    is_thinking_model = is_thinking_enabled and any(_word_boundary_match(p, key_lower) for p in REASONING_PATTERNS)
+    is_thinking_model = is_thinking_enabled and resolve_reasoning(registry_entry, model_identifier) == "thinking"
     if is_thinking_model:
         config: dict[str, Any] = dict(BENCHMARK_THINKING_DEFAULTS)
         source = "thinking-default"
@@ -685,6 +568,8 @@ def get_model_config(model_identifier: str, category: str = "coding", is_thinkin
         # of LM Studio GUI fields. Keep it namespaced so callers choose the
         # relevant behavior explicitly.
         config["_benchmark_runtime"] = dict(runtime)
+        if runtime.get("reasoning_strength") in {"low", "medium", "high"}:
+            config["reasoning_strength"] = runtime["reasoning_strength"]
         if isinstance(runtime.get("max_tokens"), int) and runtime["max_tokens"] > 0:
             config["max_tokens"] = runtime["max_tokens"]
         if isinstance(runtime.get("max_thinking_tokens"), int) and runtime["max_thinking_tokens"] > 0:
@@ -699,6 +584,30 @@ def get_model_config(model_identifier: str, category: str = "coding", is_thinkin
     # Thinking-Flag: force enable_thinking=True fuer Reasoning-Modelle (gewinnt)
     if is_thinking_model:
         config["enable_thinking"] = True
+    template_text = None
+    template_name = bp_features.get("template")
+    if template_name:
+        template_path = _TEMPLATE_ROOT / template_name
+        try:
+            template_text = template_path.read_text(encoding="utf-8")
+        except OSError:
+            # A missing selected template cannot prove a capability.
+            template_text = ""
+    else:
+        local = registry_entry.get("local") if isinstance(registry_entry, dict) else None
+        model_path = local.get("model_path") if isinstance(local, dict) else None
+        if model_path:
+            from local_model_resolver import LocalModelResolver, ModelResolutionError
+            from registry_tool import _read_gguf_chat_template
+
+            try:
+                candidate = LocalModelResolver(registry_loader=_load_quant_registry).resolve(model_identifier)
+                template_text = _read_gguf_chat_template(candidate.path) or ""
+            except (ModelResolutionError, OSError, ValueError):
+                template_text = ""
+    config["_reasoning_template_controls"] = reasoning_template_controls(
+        registry_entry, model_identifier, template_text=template_text
+    )
     config["_source"] = source
     return config
 
@@ -723,7 +632,14 @@ def _blueprint_features(model_identifier: str) -> dict[str, Any]:
     if key is None:
         return {}
     bp_name = (reg.get(key) or {}).get("blueprint") or "default_chat"
-    return cast("dict[str, Any]", blueprint_features(bp_name, model_identifier))
+    features = cast("dict[str, Any]", blueprint_features(bp_name, model_identifier))
+    entry = reg.get(key) or {}
+    # Blueprint features have already resolved their map. Honor the same
+    # explicit Registry override used by assembly, validation and providers.
+    template = resolve_template(entry, features, model_identifier)
+    if template:
+        features["template"] = template
+    return features
 
 
 def _sampling_cell(

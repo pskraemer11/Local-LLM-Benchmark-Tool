@@ -107,6 +107,7 @@ from benchmark_config import (
     get_model_config,
 )
 from comparison_manifest import load_comparison_manifest, validate_comparison_manifest
+from model_identity import UniqueMatch, resolve_registry_match, same_model_identity
 from model_manager import (
     configure_provider,
     get_available_models,
@@ -119,6 +120,7 @@ from model_manager import (
     parse_selection,
     unload_all,
 )
+from runtime_policy import reasoning_request_kwargs, resolve_context_length, resolve_template
 
 # Compatibility export for older tests and integrations. Runtime requests use
 # get_api_base() so a CLI-selected provider is not stuck on this import-time
@@ -150,11 +152,9 @@ def _is_reasoning_model(model_identifier: str) -> bool:
     Falls back to False with a warning if no registry data.
     """
     try:
-        from model_identity import normalize_match_identity
-        registry, rnorm = _load_registry_for_context()
-        normalized_key = normalize_match_identity(model_identifier)
-        base_key = normalized_key.split("@")[0]
-        matched_key = rnorm.get(normalized_key) or rnorm.get(base_key)
+        registry, _index = _load_registry_for_context()
+        match = resolve_registry_match(model_identifier, list(registry))
+        matched_key = match.key if isinstance(match, UniqueMatch) else None
         if matched_key:
             entry = registry[matched_key]
             reasoning_val = entry.get("reasoning")
@@ -172,11 +172,9 @@ def _is_reasoning_model(model_identifier: str) -> bool:
 def _check_reasoning_registry(model_identifier: str) -> bool | None:
     """Tri-state: True (thinking), False (instruct), None (missing/unknown)."""
     try:
-        from model_identity import normalize_match_identity
-        registry, rnorm = _load_registry_for_context()
-        normalized_key = normalize_match_identity(model_identifier)
-        base_key = normalized_key.split("@")[0]
-        matched_key = rnorm.get(normalized_key) or rnorm.get(base_key)
+        registry, _index = _load_registry_for_context()
+        match = resolve_registry_match(model_identifier, list(registry))
+        matched_key = match.key if isinstance(match, UniqueMatch) else None
         if matched_key:
             entry = registry[matched_key]
             reasoning_val = entry.get("reasoning")
@@ -286,8 +284,9 @@ def _task_yaml_has_until_sequence(task_name: str) -> bool:
     except (ImportError, AttributeError):
         pass
     import yaml
-    class _NoopLoader(yaml.SafeLoader):
-        pass
+    # Create an isolated SafeLoader subclass without modifying PyYAML's global
+    # constructor table. PyYAML is optional and does not ship typing metadata.
+    noop_loader: Any = type("_NoopLoader", (yaml.SafeLoader,), {})
     def _noop_tag(loader: Any, tag_suffix: Any, node: Any) -> Any:
         # lm_eval YAML files use tags like !function utils.process_results;
         # for the until check the scalar value is all we need.
@@ -296,7 +295,7 @@ def _task_yaml_has_until_sequence(task_name: str) -> bool:
         if isinstance(node, yaml.SequenceNode):
             return loader.construct_sequence(node, deep=True)
         return loader.construct_mapping(node, deep=True)
-    _NoopLoader.add_multi_constructor("!", _noop_tag)
+    noop_loader.add_multi_constructor("!", _noop_tag)
     for p in candidates:
         if os.path.isfile(p):
             try:
@@ -304,7 +303,7 @@ def _task_yaml_has_until_sequence(task_name: str) -> bool:
                     # _NoopLoader ersetzt alle `!tag`-Konstruktionen durch sichere
                     # No-Op-Konstruktoren (Scalar/Sequence/Mapping); yaml.safe_load
                     # scheitert an lm_eval-`!function`-Tags und wuerde das Verhalten aendern.
-                    data = yaml.load(fh, Loader=_NoopLoader)  # noqa: S506 - _NoopLoader ist bewusst sicher (s. o.)
+                    data = yaml.load(fh, Loader=noop_loader)  # noqa: S506 - isolated SafeLoader with no-op tags
                 gen = data.get("generation_kwargs") or {}
                 until = gen.get("until")
                 return bool(until)
@@ -341,7 +340,7 @@ os.makedirs(RESULTS_DIR, exist_ok=True)
 # ── LM-Eval Proxy ──────────────────────────────────────────────
 LMEVAL_PROXY_PORT = 1235
 LMEVAL_PROXY_SCRIPT = os.path.join(SRC_DIR, "tools", "lmeval_proxy.py")
-_lmeval_proxy_proc: subprocess.Popen | None = None
+_lmeval_proxy_proc: subprocess.Popen[bytes] | None = None
 _lmeval_proxy_cleanup_registered = False
 
 
@@ -487,15 +486,15 @@ print(f"[INFO] Repository root:        {PROJECT_ROOT}")
 #   - otherwise (is_custom)   -> run_custom_benchmark()
 # Classification: coding / math / knowledge / agentic
 # Mirrors CAT_WEIGHTS in benchmark_config.py (updated 2026-07-11)
-CUSTOM_BENCHMARKS = [
+CUSTOM_BENCHMARKS: list[BenchmarkDef] = [
     {"key": "1", "name": "DS1000",         "category": "coding",    "file": "data_science.jsonl"},
     {"key": "2", "name": "CoderEval",       "category": "coding",    "file": "codereval_selfcontained.jsonl"},
 ]
-EVALPLUS_BENCHMARKS = [
+EVALPLUS_BENCHMARKS: list[BenchmarkDef] = [
     {"key": "3", "name": "HumanEval+",      "category": "coding",    "dataset": "humaneval"},
     {"key": "4", "name": "MBPP+",           "category": "coding",    "dataset": "mbpp"},
 ]
-LMEVAL_BENCHMARKS = [
+LMEVAL_BENCHMARKS: list[BenchmarkDef] = [
     {"key": "5", "name": "ARC-Challenge",   "category": "knowledge", "task": "arc_challenge_chat"},
     {"key": "6", "name": "HellaSwag",       "category": "knowledge", "task": "hellaswag_gen", "min_limit": 100},
     {"key": "7", "name": "TruthfulQA",      "category": "knowledge", "task": "truthfulqa_gen"},
@@ -506,7 +505,7 @@ LMEVAL_BENCHMARKS = [
 # MMLU-Pro 14 Subsets (lm_eval individual tasks) - removed in v13: too expensive
 # Agentic: tool-eval-bench mit 69 Szenarien
 # (TOOL_EVAL_SCENARIO_IDS in benchmark_config.py)
-AGENTIC_BENCHMARKS = [
+AGENTIC_BENCHMARKS: list[BenchmarkDef] = [
     {"key": "10", "name": "Agentic", "category": "agentic", "pipeline": "agentic"},
 ]
 
@@ -524,13 +523,13 @@ SAFE_CONTEXT_FALLBACK: dict[str, int] = {
 }
 
 # Cached registry data
-_REGISTRY_DATA: dict | None = None
+_REGISTRY_DATA: dict[str, dict[str, Any]] | None = None
 _REGISTRY_NORM: dict[str, str] | None = None
 
-def _load_registry_for_context() -> tuple[dict[str, Any], dict[str, str]]:
+def _load_registry_for_context() -> tuple[dict[str, dict[str, Any]], dict[str, str]]:
     global _REGISTRY_DATA, _REGISTRY_NORM
     if _REGISTRY_DATA is not None:
-        return _REGISTRY_DATA, _REGISTRY_NORM
+        return _REGISTRY_DATA, _REGISTRY_NORM or {}
 
     from pathlib import Path
 
@@ -548,14 +547,20 @@ def _load_registry_for_context() -> tuple[dict[str, Any], dict[str, str]]:
         y = YAML()
         y.preserve_quotes = True
         with open(rpath, encoding="utf-8") as f:
-            data = y.load(f) or {}
+            loaded = y.load(f)
     except (YAMLError, OSError, UnicodeDecodeError) as e:
         print(f"  [WARN] model_registry.yaml fehlerhaft: {e}", file=sys.stderr)
         _REGISTRY_DATA = {}
         _REGISTRY_NORM = {}
         return _REGISTRY_DATA, _REGISTRY_NORM
 
-    valid_keys = [key for key, entry in data.items() if isinstance(entry, dict)]
+    if not isinstance(loaded, dict):
+        print("  [WARN] model_registry.yaml muss eine Modell-Zuordnung enthalten", file=sys.stderr)
+        loaded = {}
+    data: dict[str, dict[str, Any]] = {
+        key: entry for key, entry in loaded.items() if isinstance(key, str) and isinstance(entry, dict)
+    }
+    valid_keys = list(data)
     norm = unique_normalized_index(valid_keys)
     for base_key, registry_key in unique_normalized_index(valid_keys, include_quant=False).items():
         norm.setdefault(base_key, registry_key)
@@ -574,15 +579,15 @@ def _get_safe_context(model_identifier: str) -> int | None:
     from model_identity import normalize_match_identity
 
     # 1. Try registry
-    registry, rnorm = _load_registry_for_context()
+    registry, _index = _load_registry_for_context()
     normalized_key = normalize_match_identity(model_identifier)
-    base_key = normalized_key.split("@")[0]
-    matched_key = rnorm.get(normalized_key) or rnorm.get(base_key)
+    match = resolve_registry_match(model_identifier, list(registry))
+    matched_key = match.key if isinstance(match, UniqueMatch) else None
     if matched_key:
         entry = registry[matched_key]
-        ctx = entry.get("context_length")
-        if ctx is not None:
-            return int(ctx)
+        ctx = resolve_context_length(entry)
+        if isinstance(ctx, int) and not isinstance(ctx, bool) and ctx > 0:
+            return ctx
 
     # 2. Try fallback (exact normalized match)
     for pattern, ctx in SAFE_CONTEXT_FALLBACK.items():
@@ -676,7 +681,7 @@ def resolve_models(available_models: list[dict[str, Any]], model_arg: str | None
     return None
 
 
-def resolve_benchmarks(bench_arg: str | None) -> list[dict[str, Any]] | None:
+def resolve_benchmarks(bench_arg: str | None) -> list[BenchmarkDef] | None:
     if not bench_arg or bench_arg == "all":
         return ALL_BENCHMARKS
 
@@ -721,14 +726,14 @@ def select_models_interactive(available_models: list[dict[str, Any]]) -> list[di
         print("  Invalid input.")
 
 
-def select_benchmarks_interactive() -> list[dict[str, Any]] | None:
+def select_benchmarks_interactive() -> list[BenchmarkDef] | None:
     print("\n" + "=" * 60)
     print("  Benchmark Selection")
     print("=" * 60)
     cat_order = ["coding", "math", "knowledge", "agentic"]
     cat_heading = {"coding": "CODING", "math": "MATH", "knowledge": "KNOWLEDGE", "agentic": "AGENTIC & INSTRUCTION"}
     # Display contiguous benchmark numbers (1..N) without gaps.
-    displayed: list[dict[str, Any]] = []
+    displayed: list[BenchmarkDef] = []
     for cat in cat_order:
         print(f"  --- {cat_heading.get(cat, cat.upper())} ---")
         for b in ALL_BENCHMARKS:
@@ -876,29 +881,9 @@ def _get_evaluation_parameters(model_identifier: str, bench_name: str = "") -> d
         if isinstance(max_thinking_tokens, int) and max_thinking_tokens > 0:
             generation_parameters["max_thinking_tokens"] = max_thinking_tokens
 
-# ── chat_template_kwargs for enable_thinking / reasoning_effort ──
-    #
-    # WICHTIG: chat_template_kwargs ist KEIN OpenAI-Standard-Parameter.
-    #   Er wird von Qwen-Templates (Qwen3, Qwen3.5 und Qwen-basierte Distills)
-    #   und Gemma-4-Minijinja-Templates unterstuetzt.
-    #   Quelle: https://github.com/lmstudio-ai/lmstudio-bug-tracker/issues/1573
-    #   enable_thinking=True fuer Registry-Thinking-Modelle kommt via
-    #   get_model_config() aus der Registry (reasoning: thinking).
-    #   Gemma-4: Kategorie-basierte Steuerung via Blueprint-Feld
-    #   enable_thinking_by_category (Fix 15.08.).
-    #
-    # 2026-08-02: gpt-oss-Override via chat_template_kwargs was removed.
-    # LM Studio controls the GUI-side effort/budget per model; direct
-    # llama.cpp controls effort at server start via --reasoning-effort.
-    #
-    if not _is_gptoss_model(model_identifier):
-        ctw = {}
-        if config.get("enable_thinking") is not None:
-            ctw["enable_thinking"] = config["enable_thinking"]
-        if config.get("reasoning_effort") is not None:
-            ctw["reasoning_effort"] = config["reasoning_effort"]
-        if ctw:
-            generation_parameters["chat_template_kwargs"] = ctw
+    template_kwargs = reasoning_request_kwargs(dict(config))
+    if template_kwargs:
+        generation_parameters["chat_template_kwargs"] = template_kwargs
 
     return generation_parameters
 
@@ -1000,7 +985,7 @@ def _ensure_model_still_loaded(
     model_load_key: str,
     bench_name: str = "",
     provider_context: ProviderContext | None = None,
-) -> None:
+) -> str | None:
     """After EVERY benchmark (Custom/EvalPlus/LM-Eval/Agentic) verify the
     model is still loaded. If not, transparently reload it. This avoids
     silent crashes when a sub-process accidentally unloads the model.
@@ -1014,22 +999,39 @@ def _ensure_model_still_loaded(
         if not is_model_ready(timeout=60):
             label = f" after {bench_name}" if bench_name else ""
             print(f"  [WARN] Provider readiness check timed out{label}")
-        return
+        return None
 
-    candidate_key = model_identifier.lower()
     loaded = get_current_loaded_model()
-    is_ok = False
-    if loaded:
-        lk = loaded["model_identifier"].lower()
-        li = loaded["identifier"].lower()
-        if candidate_key in lk or candidate_key in li or lk in candidate_key or li in candidate_key:
-            is_ok = True
-    if not is_ok:
+    if (
+        loaded
+        and same_model_identity(model_identifier, loaded.get("model_identifier", ""))
+        and loaded.get("runtime_matches") is not False
+    ):
+        instance_id = loaded.get("identifier")
+        if isinstance(instance_id, str) and instance_id:
+            return instance_id
+        raise RuntimeError("loaded identity has no API instance identifier")
+    else:
         label = f" after {bench_name}" if bench_name else ""
         print(f"  [WARN] Model{label} no longer loaded - reloading...")
-        load_model(model_load_key)
+        if loaded and not unload_all():
+            raise RuntimeError(f"could not unload an unverified model{label}")
+        loaded_ok, _instance = load_model(model_load_key)
+        if not loaded_ok:
+            raise RuntimeError(f"could not reload selected model{label}")
         if not is_model_ready(timeout=60):
-            print("  [WARN] Model readiness check timed out")
+            raise RuntimeError(f"model readiness check timed out{label}")
+        verified = get_current_loaded_model()
+        if (
+            not verified
+            or not same_model_identity(model_identifier, verified.get("model_identifier", ""))
+            or verified.get("runtime_matches") is False
+        ):
+            raise RuntimeError(f"loaded identity does not match {model_identifier}{label}")
+        instance_id = verified.get("identifier")
+        if isinstance(instance_id, str) and instance_id:
+            return instance_id
+        raise RuntimeError("verified identity has no API instance identifier")
 
 
 # Returns: dict with pipeline="custom", score (0-1).
@@ -1322,7 +1324,7 @@ def run_evalplus(
     raw_target_path = samples_path.replace(".jsonl", ".raw.jsonl")
     _write_lock = threading.Lock()
 
-    def _gen_one_task(task_id: str, task: dict) -> None:
+    def _gen_one_task(task_id: str, task: dict[str, Any]) -> None:
         prompt = task["prompt"].strip() + "\n"
         outputs = model_obj.codegen(  # noqa: F821 - closure variable from enclosing scope
             prompt,
@@ -1602,18 +1604,22 @@ def run_lmeval(
     base_timeout = (lmeval_base * 2 if is_reasoning_model else lmeval_base) * limit_scale
     timeout_mult = bench.get("timeout_mult", 1)
     total_timeout = base_timeout * timeout_mult
-    elapsed = 0
+    elapsed = 0.0
     stderr = ""
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                 text=True, encoding="utf-8", errors="replace", env=lm_env)
         stdout_lines = []
         stderr_lines = []
+        stdout_stream = proc.stdout
+        stderr_stream = proc.stderr
+        if stdout_stream is None or stderr_stream is None:
+            raise RuntimeError("lm_eval process did not provide its requested output pipes")
         def _stream_stdout() -> None:
             import re as _re
             progress_re = _re.compile(r"(\d+)/(\d+)")
             last_bar_len = [0]
-            for line in iter(proc.stdout.readline, ""):
+            for line in iter(stdout_stream.readline, ""):
                 stdout_lines.append(line)
                 m = progress_re.search(line)
                 if m:
@@ -1632,7 +1638,7 @@ def run_lmeval(
                     if stripped:
                         print(f"  {stripped}")
         def _collect_stderr() -> None:
-            for line in iter(proc.stderr.readline, ""):
+            for line in iter(stderr_stream.readline, ""):
                 stderr_lines.append(line)  # noqa: PERF402 - false positive: kein list-Copy-Muster
         tout = threading.Thread(target=_stream_stdout, daemon=True)
         terr = threading.Thread(target=_collect_stderr, daemon=True)
@@ -2203,6 +2209,9 @@ def _validate_comparison_manifest_for_run(
     if not args.comparison_manifest:
         return None
     manifest = load_comparison_manifest(Path(args.comparison_manifest))
+    if not isinstance(manifest, dict) or any(not isinstance(key, str) for key in manifest):
+        print("[ERROR] Comparison manifest must be a mapping")
+        sys.exit(2)
     errors = validate_comparison_manifest(
         manifest,
         [str(bench["name"]) for bench in benchmarks],
@@ -2233,17 +2242,12 @@ def _start_proxy_if_needed(models: list[AvailableModelInfo], benchmarks: list[Be
 def _check_registry_for_model(model_identifier: str, model_display: str) -> bool | None:
     """Registry-Prüfungen (7 Checks). Gibt is_reasoning zurück oder None (skip)."""
     try:
-        from model_identity import normalize_match_identity
-        registry, rnorm = _load_registry_for_context()
-        normalized_key = normalize_match_identity(model_identifier)
-        base_key = normalized_key.split("@")[0]
-
-        if normalized_key not in rnorm and base_key not in rnorm:
-            print(f"\n  [ERROR] {model_display}: nicht in Registry - "
-                  "`python registry_tool.py sync` ausführen. Überspringe.")
+        registry, _index = _load_registry_for_context()
+        match = resolve_registry_match(model_identifier, list(registry))
+        if not isinstance(match, UniqueMatch):
+            print(f"\n  [ERROR] {model_display}: keine eindeutige Registry-Identität - sync erforderlich.")
             return None
-
-        matched_key = rnorm.get(normalized_key) or rnorm.get(base_key)
+        matched_key = match.key
         reasoning_val = registry[matched_key].get("reasoning")
         if reasoning_val is None:
             print(f"\n  [ERROR] {model_display}: reasoning-Feld fehlt - "
@@ -2264,10 +2268,9 @@ def _check_registry_for_model(model_identifier: str, model_display: str) -> bool
         # `template:`-Feld gilt als veraltet und wird nur als Fallback genutzt.
         tpl = None
         try:
-            from assemble_blueprint import resolve_template_name
             from registry_tool import _load_blueprints
             bp_def = _load_blueprints().get(bp)
-            tpl = resolve_template_name(bp_def, model_identifier)
+            tpl = resolve_template(registry[matched_key], bp_def, model_identifier)
         except ImportError:
             pass
         if not tpl:
@@ -2294,7 +2297,7 @@ def _check_registry_for_model(model_identifier: str, model_display: str) -> bool
         except Exception as exc:
             warn(f"{model_display}: prompt-artifact check skipped ({exc})")
 
-        return (reasoning_val == "thinking") or _is_qwen3_6_model(model_identifier) or _is_qwen3_8_model(model_identifier)
+        return bool(reasoning_val == "thinking")
     except (ImportError, KeyError, OSError, ValueError):
         print("\n  [WARN] Registry nicht lesbar - ohne Reasoning-Info fortfahren.")
         return False
@@ -2305,16 +2308,18 @@ def _load_model(model_info: AvailableModelInfo, model_load_key: str, args: Any) 
     loaded = get_current_loaded_model()
     api_model = None
 
+    desired_identity = model_info.get("registry_key", model_info["key"])
     if loaded:
-        li = loaded["identifier"].lower()
-        lk = loaded["model_identifier"].lower()
-        mk = model_info["key"].lower()
-        if mk in li or mk in lk or li in mk or lk in mk:
+        if (
+            same_model_identity(desired_identity, loaded.get("model_identifier", ""))
+            and loaded.get("runtime_matches") is not False
+        ):
             api_model = loaded["identifier"]
             print(f"  [OK] '{model_info['display']}' already loaded - ID: {api_model}")
         else:
-            print(f"  [INFO] Different model loaded ({loaded['display_name']}) - unloading...")
-            unload_all()
+            print(f"  [INFO] Different or unverified model loaded ({loaded.get('display_name', '')}) - unloading...")
+            if not unload_all():
+                return None
             ok, api_model = load_model(model_load_key)
             if not ok:
                 return None
@@ -2325,19 +2330,26 @@ def _load_model(model_info: AvailableModelInfo, model_load_key: str, args: Any) 
 
     print("  [INFO] Waiting for API readiness...")
     if not is_model_ready(timeout=60):
-        print("  [WARN] Model readiness check timed out - continuing anyway")
+        print("  [ERROR] Model readiness check timed out")
+        return None
+
+    if get_provider_capabilities().can_report_current_model:
+        verified = get_current_loaded_model()
+        if (
+            not verified
+            or not same_model_identity(desired_identity, verified.get("model_identifier", ""))
+            or verified.get("runtime_matches") is False
+        ):
+            print(f"  [ERROR] Loaded identity does not match '{desired_identity}'")
+            return None
+        api_model = verified.get("identifier")
+        if not isinstance(api_model, str) or not api_model:
+            print("  [ERROR] Verified model has no API instance identifier")
+            return None
 
     model_info["_api_model"] = api_model
 
-    # Warn on variant mismatch
-    all_variants = model_info.get("variants") or []
-    if len(all_variants) > 1 and api_model:
-        desired_quant = model_info.get("quant", "").lower()
-        if desired_quant and desired_quant not in api_model.lower():
-            print(f"  [WARN] Requested '@{desired_quant}' but '{api_model}' loaded")
-            print(f"  [WARN] Available variants: {', '.join(v.split('@')[-1] for v in all_variants)}")
-
-    return api_model
+    return api_model if isinstance(api_model, str) else None
 
 
 def _run_benchmarks_for_model(
@@ -2345,14 +2357,16 @@ def _run_benchmarks_for_model(
     benchmarks: list[BenchmarkDef],
     args: Any,
     is_reasoning_model: bool,
-    all_summary: list[dict],
+    all_summary: list[PipelineResult],
     provider_context: ProviderContext | None = None,
     comparison_manifest: dict[str, Any] | None = None,
-) -> list[dict]:
+) -> list[PipelineResult]:
     """Benchmark-Dispatch: Custom/EvalPlus/LM-Eval/Agentic für ein Modell."""
     context = provider_context or get_provider_context()
-    model_results: list[dict] = []
-    model_load_key = model_info.get("model_identifier", model_info["key"])
+    model_results: list[PipelineResult] = []
+    # The catalog key contains the selected variant. model_identifier may
+    # contain only the family base and must not discard the quantization.
+    model_load_key = model_info["key"]
 
     capabilities = (
         context.capabilities
@@ -2389,16 +2403,12 @@ def _run_benchmarks_for_model(
             print("  [INFO] Unloading/reloading model between benchmarks...")
             unload_all()
             time.sleep(2)
-            ok, api_model = load_model(model_load_key)
-            if not ok:
+            api_model = _load_model(model_info, model_load_key, args)
+            if api_model is None:
                 if expected_ids is not None:
                     raise RuntimeError(f"could not reload model before manifest benchmark {bench['name']}")
                 print(f"  [ERROR] Reload before {bench['name']} failed. Skipping.")
                 continue
-            print("  [INFO] Waiting for API re-initialization...")
-            if not is_model_ready(timeout=60):
-                print("  [WARN] Model readiness check timed out - continuing anyway")
-            model_info["_api_model"] = api_model
 
         ep_names = {b["name"] for b in EVALPLUS_BENCHMARKS}
         lmeval_names = {b["name"] for b in LMEVAL_BENCHMARKS}
@@ -2445,8 +2455,14 @@ def _run_benchmarks_for_model(
             elif expected_ids is not None:
                 raise ValueError(f"{bname} did not produce a result for its comparison-manifest selection")
 
-            _ensure_model_still_loaded(model_info["key"], model_load_key, bench_name=bname,
-                                       provider_context=context)
+            verified_api_model = _ensure_model_still_loaded(
+                model_info.get("registry_key", model_info["key"]),
+                model_load_key,
+                bench_name=bname,
+                provider_context=context,
+            )
+            if verified_api_model is not None:
+                model_info["_api_model"] = verified_api_model
         except subprocess.TimeoutExpired:
             if expected_ids is not None:
                 raise
@@ -2459,7 +2475,7 @@ def _run_benchmarks_for_model(
     return model_results
 
 
-def _write_intermediate_summary(model_results: list[dict], model_info: AvailableModelInfo, args: Any) -> None:
+def _write_intermediate_summary(model_results: list[PipelineResult], model_info: AvailableModelInfo, args: Any) -> None:
     """Zwischen-Summary pro Modell via csv_writer."""
     if model_results:
         csv_writer.write_accumulative_summary(
@@ -2473,7 +2489,7 @@ def _write_intermediate_summary(model_results: list[dict], model_info: Available
         )
 
 
-def _print_final_summary(all_summary: list[dict]) -> None:
+def _print_final_summary(all_summary: list[PipelineResult]) -> None:
     """Konsolen-Ausgabe aller Ergebnisse."""
     print("\n" + "=" * 60)
     print("  FINISHED")
@@ -2483,7 +2499,7 @@ def _print_final_summary(all_summary: list[dict]) -> None:
         print(f"  [{s['pipeline']}] {s['model']} / {cat}{s['bench']}")
 
 
-def _write_consolidated_overview(all_summary: list[dict], models: list, args: Any) -> None:
+def _write_consolidated_overview(all_summary: list[PipelineResult], models: list[AvailableModelInfo], args: Any) -> None:
     """Konsolidierte Übersicht (konsolidiert_aktuell.csv) bei Mehrfach-Modell-Läufen."""
     if all_summary and len(models) > 1:
         csv_writer.write_konsolidiert_aktuell(
@@ -2516,11 +2532,11 @@ def main() -> None:
     comparison_manifest = _validate_comparison_manifest_for_run(args, benchmarks)
     _start_proxy_if_needed(models, benchmarks)
 
-    all_summary: list[dict] = []
+    all_summary: list[PipelineResult] = []
 
     for midx, model_info in enumerate(models, 1):
         model_identifier = model_info.get("registry_key", model_info["key"])
-        model_load_key = model_info.get("model_identifier", model_identifier)
+        model_load_key = model_info["key"]
         model_display = model_info["display"]
 
         is_reasoning_model = _check_registry_for_model(model_identifier, model_display)

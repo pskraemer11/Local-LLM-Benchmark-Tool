@@ -529,6 +529,71 @@ class TestSubsampleTasks:
 # ======================================================================
 
 class TestEvaluateCode:
+    @pytest.mark.parametrize(
+        ("generated", "reference", "setup", "expected_score"),
+        [
+            ("answer = initial + 1", "answer = 1", "initial = 0", 1.0),
+            ("answer = 2", "answer = 1", "initial = 0", 0.0),
+            ("pass", "answer = 1", "initial = 0", 0.0),
+            ("answer = 1", "answer = 1\nother = 2", "initial = 0", 0.5),
+            ("initial += 1", "initial = 1", "initial = 0", 1.0),
+            ("pass", "initial = 1", "initial = 0", 0.0),
+            ("answer = inc(0)", "answer = 1", "def inc(x):\n    return x + 1", 1.0),
+            ("values.append(1)", "values.append(1)", "values = []", 1.0),
+            ("pass", "values.append(1)", "values = []", 0.0),
+            ("mutate(values)", "mutate(values)", "values = []\ndef mutate(items):\n    items.append(1)", 1.0),
+            ("pass", "mutate(values)", "values = []\ndef mutate(items):\n    items.append(1)", 0.0),
+            ("answer = 'x' * 1000 + 'correct'", "answer = 'x' * 1000 + 'correct'", "initial = 0", 1.0),
+            ("answer = 'x' * 1000 + 'wrong'", "answer = 'x' * 1000 + 'correct'", "initial = 0", 0.0),
+            ("answer += 'correct'", "answer += 'correct'", "answer = 'x' * 1000", 1.0),
+            ("answer += 'wrong'", "answer += 'correct'", "answer = 'x' * 1000", 0.0),
+            ("values.append(1)", "values.append(1)", "values = [0] * 1000", 1.0),
+            ("values.append(2)", "values.append(1)", "values = [0] * 1000", 0.0),
+            ("answer = np.arange(10000)", "answer = np.arange(10000)", "import numpy as np", 1.0),
+            ("answer = np.arange(10000)\nanswer[5000] = -1", "answer = np.arange(10000)", "import numpy as np", 0.0),
+            ("answer[5000] = -1", "answer[5000] = -1", "import numpy as np\nanswer = np.arange(10000)", 1.0),
+            ("answer[5000] = -2", "answer[5000] = -1", "import numpy as np\nanswer = np.arange(10000)", 0.0),
+            ("answer = [np.arange(10000)]", "answer = [np.arange(10000)]", "import numpy as np", 1.0),
+            ("answer = [np.arange(10000)]\nanswer[0][5000] = -1", "answer = [np.arange(10000)]", "import numpy as np", 0.0),
+            ("answer = pd.DataFrame({'x': range(10000)})", "answer = pd.DataFrame({'x': range(10000)})", "import pandas as pd", 1.0),
+            ("answer = pd.DataFrame({'x': range(10000)})\nanswer.iloc[5000, 0] = -1", "answer = pd.DataFrame({'x': range(10000)})", "import pandas as pd", 0.0),
+            ("answer.iloc[5000, 0] = -1", "answer.iloc[5000, 0] = -1", "import pandas as pd\nanswer = pd.DataFrame({'x': range(10000)})", 1.0),
+            ("answer.iloc[5000, 0] = -2", "answer.iloc[5000, 0] = -1", "import pandas as pd\nanswer = pd.DataFrame({'x': range(10000)})", 0.0),
+            ("answer = pd.Series(range(10000))", "answer = pd.Series(range(10000))", "import pandas as pd", 1.0),
+            ("answer = pd.Series(range(10000))\nanswer.iloc[5000] = -1", "answer = pd.Series(range(10000))", "import pandas as pd", 0.0),
+            ("answer = pd.Index(range(10000))", "answer = pd.Index(range(10000))", "import pandas as pd", 1.0),
+            ("answer = pd.Index([i if i != 5000 else -1 for i in range(10000)])", "answer = pd.Index(range(10000))", "import pandas as pd", 0.0),
+            ("answer = np.array([{'data': np.arange(10000)}], dtype=object)", "answer = np.array([{'data': np.arange(10000)}], dtype=object)", "import numpy as np", 1.0),
+            ("answer = np.array([{'data': np.arange(10000)}], dtype=object)\nanswer[0]['data'][5000] = -1", "answer = np.array([{'data': np.arange(10000)}], dtype=object)", "import numpy as np", 0.0),
+            ("answer = np.arange(10000, dtype=np.float64)", "answer = np.arange(10000)", "import numpy as np", 0.0),
+            ("answer = pd.DataFrame({'y': range(10000)})", "answer = pd.DataFrame({'x': range(10000)})", "import pandas as pd", 0.0),
+            ("answer = pd.Series(range(10000))\nanswer.index = range(1, 10001)", "answer = pd.Series(range(10000))", "import pandas as pd", 0.0),
+        ],
+    )
+    def test_namespace_compares_outputs_in_real_sandbox(self, generated, reference, setup, expected_score):
+        score, detail = evaluate_code(generated, "", [], reference_code=reference, setup_code=setup)
+
+        assert score == expected_score
+        assert detail.startswith("Namespace:")
+
+    @pytest.mark.parametrize(
+        ("generated", "reference", "setup", "expected_error"),
+        [
+            ("answer = 1", "answer = 1", "raise ValueError('bad setup')", "Setup error:"),
+            ("answer = 1", "raise ValueError('bad reference')", "initial = 0", "Reference error:"),
+            ("raise ValueError('bad candidate')", "answer = 1", "initial = 0", "Code error:"),
+            ("answer = 1", "pass", "initial = 0", "Namespace: no comparable reference outputs"),
+            ("answer = []\nanswer.append(answer)", "answer = []\nanswer.append(answer)", "initial = 0", "Reference error: complete namespace hashes are missing"),
+            ("answer = object()", "answer = object()", "initial = 0", "Reference error: complete namespace hashes are missing"),
+            ("answer = np.ma.array([1, 2], mask=[False, True])", "answer = np.ma.array([1, 2], mask=[True, False])", "import numpy as np", "Reference error: complete namespace hashes are missing"),
+        ],
+    )
+    def test_namespace_does_not_pass_without_valid_reference(self, generated, reference, setup, expected_error):
+        score, detail = evaluate_code(generated, "", [], reference_code=reference, setup_code=setup)
+
+        assert score == 0.0
+        assert detail.startswith(expected_error)
+
     def test_empty_generated_returns_zero(self):
         score, msg = evaluate_code("", "f", [])
         assert score == 0.0
@@ -733,22 +798,21 @@ class TestResolveModels:
         assert [model["registry_key"] for model in models] == ["publisher/model@Q5-K-S"]
 
     @patch.object(cb, "get_available_models")
-    def test_registry_mixed_key_matches_lms_base_key(self, mock_get):
+    def test_registry_mixed_key_requires_proven_publisher(self, mock_get):
         # REAP-Fall: Launcher übergibt Registry-Key mit '@mixed', LMS-Key
         # ist der Basis-Key ohne Quant (Fix 13.08.: REAP DS1000/CoderEval).
         mock_get.return_value = [_fake_model("gemma4-26b-a4b-reap-25")]
         args = _Args(model_key="crucible-labs/gemma4-26b-a4b-reap-25@mixed")
-        models = cb._resolve_models(args)
-        assert len(models) == 1
-        assert models[0]["key"] == "gemma4-26b-a4b-reap-25"
+        with pytest.raises(SystemExit):
+            cb._resolve_models(args)
 
     @patch.object(cb, "get_available_models")
-    def test_lms_quant_key_matches_registry_mixed_key(self, mock_get):
+    def test_unknown_mixed_key_cannot_relabel_concrete_quant(self, mock_get):
         # Umgekehrte Richtung: LMS-Key mit Quant (@Q3_K) gegen Registry-@mixed.
         mock_get.return_value = [_fake_model("gemma4-26b-a4b-reap-25@Q3_K")]
         args = _Args(model_key="crucible-labs/gemma4-26b-a4b-reap-25@mixed")
-        models = cb._resolve_models(args)
-        assert len(models) == 1
+        with pytest.raises(SystemExit):
+            cb._resolve_models(args)
 
     @patch.object(cb, "get_available_models")
     def test_unknown_key_errors(self, mock_get):

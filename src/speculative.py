@@ -23,6 +23,14 @@ def _enabled(value: Any) -> bool:
     return value not in (None, 0, "")
 
 
+def registry_speculative_policy(entry: Mapping[str, Any]) -> str:
+    """Choose explicit Registry ownership or the legacy LMS-derived profile."""
+    policy = entry.get("speculative_policy", "lmstudio")
+    if not isinstance(policy, str) or policy not in {"lmstudio", "registry", "disabled"}:
+        raise ValueError(f"unsupported Registry speculative_policy: {policy!r}")
+    return str(policy)
+
+
 def _reference(profile: Mapping[str, Any]) -> str:
     for field in ("draft_model_reference", "draft_gguf"):
         value = profile.get(field)
@@ -46,8 +54,9 @@ def normalize_speculative_profile(profile: Mapping[str, Any]) -> dict[str, Any]:
 
     ``type: mtp`` describes MTP capability of the main model.  ``mode`` says
     whether the MTP layers are integrated in that GGUF or supplied by a
-    non-standalone companion.  ``type: draft`` describes a separate,
-    independently runnable draft LLM and is never an MTP classification.
+    non-standalone companion. ``type: draft`` describes a separate proposal
+    artifact: ``simple`` is an independently runnable LLM; DFlash and DSpark
+    are helpers trained for a particular target. It is never an MTP type.
     """
     raw_type = str(profile.get("type") or "").strip().casefold()
     reference = _reference(profile)
@@ -57,14 +66,16 @@ def normalize_speculative_profile(profile: Mapping[str, Any]) -> dict[str, Any]:
     if raw_type in {"mtp", "draft-mtp"}:
         normalized: dict[str, Any] = {
             "type": "mtp",
-            "mode": "separate" if mode == "separate" or reference else "integrated",
+            "mode": mode
+            if mode and mode not in {"integrated", "separate"}
+            else ("separate" if mode == "separate" or reference else "integrated"),
         }
     elif raw_type in {"draft", "draft-dflash", "draft-dspark", "draft-simple"}:
         if not method and raw_type.startswith("draft-"):
             method = raw_type.removeprefix("draft-")
         if method in {"drafter", "draft", "standard"}:
             method = "simple"
-        if method not in {"dflash", "dspark", "simple"}:
+        if not method:
             method = _draft_method_from_reference(reference)
         normalized = {"type": "draft", "method": method}
     else:
@@ -72,6 +83,9 @@ def normalize_speculative_profile(profile: Mapping[str, Any]) -> dict[str, Any]:
 
     if reference:
         normalized["draft_model_reference"] = reference
+    pairing = profile.get("pairing")
+    if isinstance(pairing, dict):
+        normalized["pairing"] = dict(pairing)
     return normalized
 
 
@@ -115,6 +129,52 @@ def companion_role(profile: Mapping[str, Any]) -> str | None:
     if normalized.get("type") == "draft":
         return "draft"
     return None
+
+
+def lms_speculative_values(entry: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Derive saved LMS load fields for an explicitly Registry-owned policy.
+
+    These are concrete JSON-config values, not unsupported REST load inputs.
+    Callers must validate specialized companion evidence before enabling them.
+    """
+    policy = registry_speculative_policy(entry)
+    if policy == "lmstudio":
+        return None
+    values: dict[str, Any] = dict.fromkeys((
+        "draft_mtp", "draft_simple", "draft_dflash_sidecar",
+        "draft_dspark_sidecar", "draft_mtp_sidecar",
+    ), False)
+    values["draft_model_reference"] = ""
+    if policy == "disabled":
+        return values
+    local = entry.get("local")
+    local_llama = local.get("llama_cpp") if isinstance(local, dict) else None
+    raw_profile = local_llama.get("speculative") if isinstance(local_llama, dict) else None
+    profile = normalize_speculative_profile(raw_profile) if isinstance(raw_profile, dict) else {}
+    if not profile:
+        raise ValueError("Registry-owned speculative policy requires a valid profile")
+    if profile["type"] == "mtp":
+        field = "draft_mtp_sidecar" if profile["mode"] == "separate" else "draft_mtp"
+    else:
+        method = profile["method"]
+        if method not in {"simple", "dspark", "dflash"}:
+            raise ValueError(f"unsupported Registry draft method: {method!r}")
+        field = "draft_simple" if method == "simple" else f"draft_{method}_sidecar"
+    values[field] = True
+    role = companion_role(profile)
+    if role:
+        companions = local.get("companions") if isinstance(local, dict) else None
+        helper = companions.get(role) if isinstance(companions, dict) else None
+        if role == "draft" and not helper and isinstance(companions, dict):
+            helper = companions.get("drafter")
+        if not isinstance(helper, str) or not helper.strip():
+            raise ValueError(f"Registry-owned speculative profile requires {role} companion")
+        values["draft_model_reference"] = helper
+    if isinstance(raw_profile, dict):
+        for field in ("draft_n_max", "draft_n_min", "draft_p_min"):
+            if field in raw_profile:
+                values[field] = raw_profile[field]
+    return values
 
 
 def llama_cpp_spec_type(profile: Mapping[str, Any]) -> str | None:

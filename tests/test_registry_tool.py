@@ -25,6 +25,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import assemble_blueprint as ab
 import registry_tool as rt
+from tests.gguf_fixture import write_gguf
 from registry_tool import (
     _KV_BYTES,
     _LEGACY_MODEL_GB_THRESHOLD_GB,
@@ -280,9 +281,20 @@ def test_build_llama_preset_exports_speculative_profiles_and_companions(
         name: models_root / "publisher" / name / f"{name}.gguf"
         for name in ("integrated-mtp", "separate-mtp", "mtp-sidecar", "dflash-target", "dflash-helper")
     }
-    for path in paths.values():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(b"GGUF fixture")
+    for name, path in paths.items():
+        if name == "mtp-sidecar":
+            write_gguf(path, architecture="qwen35-assistant", hidden_dim=1024, helper="mtp", target_dim=5120,
+                       target_repo="Qwen/Qwen3.6-27B")
+        elif name == "dflash-helper":
+            write_gguf(path, architecture="dflash", helper="dflash", target_repo="Qwen/Qwen3.6-27B")
+        elif name == "integrated-mtp":
+            write_gguf(path, metadata={"qwen35.nextn_predict_layers": 1}, tensors={
+                "token_embd.weight": (5120, 4), "blk.0.attn_q.weight": (5120, 5120),
+                "blk.63.nextn.eh_proj.weight": (10240, 5120),
+                "blk.63.nextn.enorm.weight": (5120,), "blk.63.nextn.hnorm.weight": (5120,),
+            })
+        else:
+            write_gguf(path)
     monkeypatch.setattr(rt, "MODELS_CACHE", models_root)
     registry = {
         "publisher/integrated-mtp@q4_k_m": {
@@ -353,9 +365,8 @@ def test_build_llama_preset_skips_incompatible_companion_bundle(tmp_path: Path, 
     models_root = tmp_path / "models"
     main = models_root / "unsloth" / "qwen3.6-27b-GGUF" / "qwen3.6-27b-Q6_K.gguf"
     helper = models_root / "unsloth" / "qwen3.8-27b-GGUF" / "qwen3.8-27b-dflash2-Q8_0.gguf"
-    for path in (main, helper):
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(b"GGUF fixture")
+    write_gguf(main)
+    write_gguf(helper, architecture="dflash", helper="dflash", target_repo="Qwen/Qwen3.8-27B")
     monkeypatch.setattr(rt, "MODELS_CACHE", models_root)
     registry = {
         "unsloth/qwen3.6-27b@q6_k": {
@@ -373,7 +384,7 @@ def test_build_llama_preset_skips_incompatible_companion_bundle(tmp_path: Path, 
 
     assert "[unsloth/qwen3.6-27b@q6_k]" not in content
     assert len(skipped) == 1
-    assert "Qwen generation mismatch" in skipped[0]
+    assert "target identity is unproven" in skipped[0]
 
 
 def test_local_bundle_validation_reports_companion_mismatch_and_accepts_fix(tmp_path):
@@ -384,6 +395,9 @@ def test_local_bundle_validation_reports_companion_mismatch_and_accepts_fix(tmp_
     for path in (main, wrong, matching, config):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"GGUF fixture")
+    write_gguf(main)
+    write_gguf(wrong, architecture="dflash", helper="dflash", target_repo="Qwen/Qwen3.8-27B")
+    write_gguf(matching, architecture="dflash", helper="dflash", target_repo="Qwen/Qwen3.6-27B")
     entry = {
         "local": {
             "model_path": str(main),
@@ -398,7 +412,7 @@ def test_local_bundle_validation_reports_companion_mismatch_and_accepts_fix(tmp_
 
     errors = rt._registry_local_bundle_errors(registry)
     assert errors["config"] == []
-    assert any("Qwen generation mismatch" in message for message in errors["companion"])
+    assert any("target identity is unproven" in message for message in errors["companion"])
 
     entry["local"]["companions"]["draft"] = str(matching)
     assert rt._registry_local_bundle_errors(registry) == {"config": [], "companion": []}
@@ -696,8 +710,7 @@ class TestHeadlessValidation:
         ):
             errors = rt.cmd_validate(ci=True)
 
-        assert len(errors["reasoning_arch_mismatch"]) == 1
-        assert errors["reasoning_arch_mismatch"][0].startswith("publisher/qwen2-base@q4_k_m:")
+        assert errors["reasoning_arch_mismatch"] == []
 
 
 class TestGuiConfigRegistrySync:
@@ -1447,11 +1460,11 @@ class TestReadGgufArchReasoning:
         assert ctx == 16384
         assert exp is None  # kein expert_count-Key in Mini-GGUF
 
-    def test_no_template_yields_false(self, tmp_path):
+    def test_no_template_yields_unknown(self, tmp_path):
         p = tmp_path / "model.gguf"
         p.write_bytes(_make_mini_gguf(48, 5120, None))
         nl, hd, is_reasoning, ctx, exp = rt._read_gguf_arch(str(p))
-        assert (nl, hd, is_reasoning, ctx) == (48, 5120, False, 16384)
+        assert (nl, hd, is_reasoning, ctx) == (48, 5120, None, 16384)
         assert exp is None
 
     def test_corrupt_file_yields_none(self, tmp_path):
@@ -2095,13 +2108,14 @@ def test_sync_from_configs_keeps_provider_and_quant_variants_separate(tmp_path, 
     assert "ohne eindeutige Zuordnung/alte Configs" in output
 
 
-def test_fill_quant_uses_lms_quantization_without_gguf_path(monkeypatch):
+def test_fill_quant_rejects_lms_quantization_without_gguf_path(monkeypatch, tmp_path):
     registry = {
         "mistralai/ministral-3-14b-reasoning": {"blueprint": "full"},
     }
     saved: dict[str, dict] = {}
     monkeypatch.setattr(rt, "load_registry", lambda: registry)
     monkeypatch.setattr(rt, "save_registry", lambda value: saved.update(value))
+    monkeypatch.setattr(rt, "MODELS_CACHE", tmp_path)
     monkeypatch.setattr(
         rt,
         "_run_lms_ls",
@@ -2117,8 +2131,8 @@ def test_fill_quant_uses_lms_quantization_without_gguf_path(monkeypatch):
 
     rt.cmd_fill_quant()
 
-    assert "mistralai/ministral-3-14b-reasoning@q6_k" in saved
-    assert saved["mistralai/ministral-3-14b-reasoning@q6_k"]["quants"] == "Q6_K"
+    assert saved == {}
+    assert "mistralai/ministral-3-14b-reasoning" in registry
 
 
 def test_rekey_registry_to_exact_lms_identity(monkeypatch):
@@ -2503,7 +2517,7 @@ def test_identity_link_uses_persisted_local_model_config_pair_without_live_model
     )
     monkeypatch.setattr(Path, "is_file", lambda _path: True)
     monkeypatch.setattr("artifact_bundle._has_gguf_magic", lambda _path: True)
-    registry_key = "bartowski/zai-org_glm-4.6v-flash@q6_k_l"
+    registry_key = "bartowski/glm-4.6v-flash@q6_k_l"
     registry = {
         registry_key: {
             "local": {
@@ -2727,6 +2741,9 @@ def test_materialize_local_binding_persists_main_config_and_mtp_companion(tmp_pa
     for path in (main_path, companion_path):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"GGUF test placeholder")
+    write_gguf(main_path, architecture="gemma4", hidden_dim=3840, source_repo="google/gemma-4-12b-it")
+    write_gguf(companion_path, architecture="gemma4-assistant", hidden_dim=1024, helper="mtp", target_dim=3840,
+               target_repo="google/gemma-4-12b-it")
     config_path = (
         tmp_path
         / "configs"
@@ -2792,6 +2809,8 @@ def test_materialize_local_binding_persists_dflash_companion_role(tmp_path, monk
     for path in (main_path, drafter_path):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"GGUF test placeholder")
+    write_gguf(main_path, architecture="muse-glimmer", hidden_dim=6656, source_repo="publisher/muse-glimmer-30b")
+    write_gguf(drafter_path, architecture="dflash", hidden_dim=6656, helper="dflash", target_repo="publisher/muse-glimmer-30b")
     config_path = (
         tmp_path
         / "configs"
@@ -2859,6 +2878,8 @@ def test_sync_does_not_persist_incompatible_dflash_companion(tmp_path, monkeypat
     for path in (main_path, wrong_helper, config_path):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"GGUF fixture")
+    write_gguf(main_path)
+    write_gguf(wrong_helper, architecture="dflash", helper="dflash", target_repo="Qwen/Qwen3.8-27B")
     registry_key = "unsloth/qwen3.6-27b@q6_k"
     registry = {registry_key: {}}
     model = {
@@ -2985,12 +3006,12 @@ def _write_registry(tmp_path, data):
 
 class TestFindGgufArchForKey:
     def test_exact_normalized_match(self):
-        gguf = {"glm-4-7-flash": (61, 5120, True, 131072)}
-        assert rt._find_gguf_arch_for_key("unsloth/glm-4.7-flash", gguf) == (61, 5120, True, 131072)
+        gguf = {"unsloth/glm-4.7-flash@q6_k": (61, 5120, True, 131072)}
+        assert rt._find_gguf_arch_for_key("unsloth/glm-4.7-flash@q6_k", gguf) == (61, 5120, True, 131072)
 
-    def test_quant_strip_match(self):
+    def test_quant_strip_is_not_evidence(self):
         gguf = {"qwen3-14b": (40, 5120, True, 32768)}
-        assert rt._find_gguf_arch_for_key("qwen/qwen3-14b@q4_0", gguf) == (40, 5120, True, 32768)
+        assert rt._find_gguf_arch_for_key("qwen/qwen3-14b@q4_0", gguf) is None
 
     def test_no_match_returns_none(self):
         assert rt._find_gguf_arch_for_key("unknown/model", {"other": (1, 2, False, 3)}) is None
@@ -3027,7 +3048,7 @@ class TestCmdSyncFromGguf:
 
     def test_fixes_drift_from_gguf(self, tmp_path):
         reg = {
-            "unsloth/glm-4.7-flash": {
+            "unsloth/glm-4.7-flash@q6_k": {
                 "arch": "dense",
                 "n_layers": 60,
                 "hidden_dim": 5000,
@@ -3035,11 +3056,11 @@ class TestCmdSyncFromGguf:
                 "reasoning": "instruct",
             }
         }
-        gguf_path = self._gguf_path(tmp_path, "unsloth/GLM-4.7-Flash-GGUF/x.gguf")
-        lms = [self._lms("GLM-4.7-Flash", "unsloth/GLM-4.7-Flash-GGUF/x.gguf")]
+        gguf_path = self._gguf_path(tmp_path, "unsloth/GLM-4.7-Flash-GGUF/GLM-4.7-Flash-Q6_K.gguf")
+        lms = [self._lms("GLM-4.7-Flash", "unsloth/GLM-4.7-Flash-GGUF/GLM-4.7-Flash-Q6_K.gguf")]
         gguf = {gguf_path: (61, 5120, True, 131072)}
         out = self._run(tmp_path, reg, lms, gguf, {gguf_path: True})
-        e = out["unsloth/glm-4.7-flash"]
+        e = out["unsloth/glm-4.7-flash@q6_k"]
         assert e["n_layers"] == 61
         assert e["hidden_dim"] == 5120
         assert e["max_context_length"] == 131072
@@ -3048,7 +3069,7 @@ class TestCmdSyncFromGguf:
 
     def test_conformant_entries_untouched(self, tmp_path):
         reg = {
-            "unsloth/glm-4.7-flash": {
+            "unsloth/glm-4.7-flash@q6_k": {
                 "arch": "moe",
                 "n_layers": 61,
                 "hidden_dim": 5120,
@@ -3056,11 +3077,11 @@ class TestCmdSyncFromGguf:
                 "reasoning": "thinking",
             }
         }
-        gguf_path = self._gguf_path(tmp_path, "unsloth/GLM-4.7-Flash-GGUF/x.gguf")
-        lms = [self._lms("GLM-4.7-Flash", "unsloth/GLM-4.7-Flash-GGUF/x.gguf")]
+        gguf_path = self._gguf_path(tmp_path, "unsloth/GLM-4.7-Flash-GGUF/GLM-4.7-Flash-Q6_K.gguf")
+        lms = [self._lms("GLM-4.7-Flash", "unsloth/GLM-4.7-Flash-GGUF/GLM-4.7-Flash-Q6_K.gguf")]
         gguf = {gguf_path: (61, 5120, True, 131072)}
         out = self._run(tmp_path, reg, lms, gguf, {gguf_path: True})
-        assert out["unsloth/glm-4.7-flash"] == {
+        assert out["unsloth/glm-4.7-flash@q6_k"] == {
             "arch": "moe",
             "n_layers": 61,
             "hidden_dim": 5120,
@@ -3070,11 +3091,11 @@ class TestCmdSyncFromGguf:
         }
 
     def test_models_without_gguf_match_untouched(self, tmp_path):
-        reg = {"unsloth/glm-4.7-flash": {"arch": "dense", "n_layers": 60}}
-        self._gguf_path(tmp_path, "unsloth/GLM-4.7-Flash-GGUF/x.gguf")
-        lms = [self._lms("GLM-4.7-Flash", "unsloth/GLM-4.7-Flash-GGUF/x.gguf")]
+        reg = {"unsloth/glm-4.7-flash@q6_k": {"arch": "dense", "n_layers": 60}}
+        self._gguf_path(tmp_path, "unsloth/GLM-4.7-Flash-GGUF/GLM-4.7-Flash-Q6_K.gguf")
+        lms = [self._lms("GLM-4.7-Flash", "unsloth/GLM-4.7-Flash-GGUF/GLM-4.7-Flash-Q6_K.gguf")]
         out = self._run(tmp_path, reg, lms, {}, {})
-        assert out["unsloth/glm-4.7-flash"]["n_layers"] == 60
+        assert out["unsloth/glm-4.7-flash@q6_k"]["n_layers"] == 60
 
     def test_empty_registry_exits_with_error(self, tmp_path):
         path = _write_registry(tmp_path, {})
@@ -3104,6 +3125,8 @@ class TestPipelineDriftExitCode:
             ),
             patch.object(rt, "cmd_compare"),
             patch.object(rt, "cmd_sync"),
+            patch.object(rt, "cmd_sync_templates"),
+            patch.object(rt, "cmd_quarantine_missing"),
             patch.object(rt, "classify_registry"),
             patch.object(rt, "assemble_prompts"),
             patch.object(rt, "cmd_patch_glm_configs"),
@@ -3137,9 +3160,10 @@ class TestPipelineDriftExitCode:
         }
         assert self._run_pipeline(errors) is None
 
-    def test_non_drift_errors_do_not_exit(self):
-        # template_missing_file etc. sind keine Melde-Konflikte -> kein Exit
-        assert self._run_pipeline({"template_missing_file": ["unsloth/x: fehlt"]}) is None
+    def test_non_drift_blockers_exit(self):
+        with pytest.raises(SystemExit) as error:
+            self._run_pipeline({"template_missing_file": ["unsloth/x: fehlt"]})
+        assert error.value.code == 1
 
     @pytest.mark.parametrize("import_lms_settings", [False, True])
     def test_full_prints_explicit_write_paths_after_previews(self, import_lms_settings, capsys):

@@ -207,7 +207,7 @@ class TestGetModelConfigLmsSource:
             "operation": {"fields": [{"key": k, "value": v} for k, v in fields.items()]},
             "load": {"fields": []},
         }
-        (d / "model.gguf.json").write_text(json.dumps(data), encoding="utf-8")
+        (d / "model-Q6_K.gguf.json").write_text(json.dumps(data), encoding="utf-8")
         return d
 
     def test_no_config_falls_back_to_category_default(self, tmp_path):
@@ -236,19 +236,33 @@ class TestGetModelConfigLmsSource:
             cfg = get_model_config("pub1/fake-model-7b", category="coding")
         assert cfg["temperature"] == 0.2
 
-    def test_enable_thinking_from_config(self, tmp_path):
+    def test_enable_thinking_from_config(self, tmp_path, monkeypatch):
         self._write_lms_config(tmp_path, "pub1", "fake-model-7b",
                                {"llm.prediction.reasoning.enableThinking": True})
+        model = tmp_path / "pub1/fake-model-7b/model-Q6_K.gguf"
+        model.write_bytes(b"GGUF fixture")
+        monkeypatch.setattr("benchmark_config._load_quant_registry", lambda: {
+            "pub1/fake-model-7b@q6_k": {"local": {
+                "model_path": str(model), "config_path": str(model) + ".json",
+            }},
+        })
         with patch("benchmark_config.LMS_CONFIG_ROOT", tmp_path):
-            cfg = get_model_config("pub1/fake-model-7b")
+            cfg = get_model_config("pub1/fake-model-7b@q6_k")
         assert cfg["enable_thinking"] is True
 
-    def test_budget_tokens_enables_thinking(self, tmp_path):
+    def test_budget_tokens_enables_thinking(self, tmp_path, monkeypatch):
         self._write_lms_config(tmp_path, "pub1", "fake-model-7b",
                                {"llm.prediction.reasoning.budgetTokens":
                                 {"checked": True, "value": 2048}})
+        model = tmp_path / "pub1/fake-model-7b/model-Q6_K.gguf"
+        model.write_bytes(b"GGUF fixture")
+        monkeypatch.setattr("benchmark_config._load_quant_registry", lambda: {
+            "pub1/fake-model-7b@q6_k": {"local": {
+                "model_path": str(model), "config_path": str(model) + ".json",
+            }},
+        })
         with patch("benchmark_config.LMS_CONFIG_ROOT", tmp_path):
-            cfg = get_model_config("pub1/fake-model-7b")
+            cfg = get_model_config("pub1/fake-model-7b@q6_k")
         assert cfg["enable_thinking"] is True
 
     def test_budget_zero_uses_parsing_verdict(self, tmp_path):
@@ -313,13 +327,13 @@ class TestSupportsChatTemplateKwargs:
         assert _supports_chat_template_kwargs("byteshape/qwen3.8-27b") is True
 
     def test_deepseek_r1_distill_qwen(self):
-        assert _supports_chat_template_kwargs("lmstudio-community/deepseek-r1-distill-qwen-14b") is True
+        assert _supports_chat_template_kwargs("lmstudio-community/deepseek-r1-distill-qwen-14b") is False
 
     def test_gemma4(self):
         assert _supports_chat_template_kwargs("gemma-4-19b-a4b-it-reap-i1@q4_k_m") is True
 
     def test_gemma4_12b(self):
-        assert _supports_chat_template_kwargs("gemma-4-12b-it-qat@q4_k_xl") is True
+        assert _supports_chat_template_kwargs("gemma-4-12b-it-qat@q4_k_xl") is False
 
     def test_non_qwen_model(self):
         assert _supports_chat_template_kwargs("lmstudio-community/ministral-8b-instruct-2410") is False

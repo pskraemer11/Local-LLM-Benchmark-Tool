@@ -15,6 +15,17 @@ from benchmark_config import (
     is_blacklisted_model_name,
     is_support_model_record,
 )
+from inventory import IdentityLink, RuntimeBinding
+from model_identity import (
+    UniqueMatch,
+    canonicalize_source_identity,
+    decompose_model_identity,
+    normalize_model_reference,
+    resolve_registry_match,
+    same_model_identity,
+)
+from quantization import normalize_quant
+from runtime_policy import resolve_context_length
 from utils.terminal import error, info, ok, warn
 
 from .base import HttpProvider, ProviderCapabilities
@@ -24,6 +35,20 @@ SubprocessRun = Callable[..., Any]
 RegistryOverrides = Callable[[], dict[str, str]]
 RegistryLoader = Callable[[], dict[str, Any]]
 RuntimeLoader = Callable[[str], Mapping[str, Any] | None]
+
+# Names from the concrete LMS config contract. They are accepted only as
+# returned evidence; the native REST load endpoint has no such inputs.
+_SPECULATIVE_FIELDS = {
+    "draft_mtp": "draftMtp",
+    "draft_simple": "draftSimple",
+    "draft_dflash_sidecar": "draftDflashSidecar",
+    "draft_dspark_sidecar": "draftDsparkSidecar",
+    "draft_mtp_sidecar": "draftMtpSidecar",
+    "draft_model_reference": "draftModel",
+    "draft_n_max": "draftMaxTokens",
+    "draft_n_min": "draftMinTokens",
+    "draft_p_min": "draftMinContinueProbability",
+}
 
 
 class LMStudioProvider(HttpProvider):
@@ -239,13 +264,15 @@ class LMStudioProvider(HttpProvider):
             return None
         try:
             entry = data[0]
-            return {
+            return self._with_runtime_context({
                 "identifier": entry.get("identifier", ""),
-                "model_identifier": entry.get("modelKey", entry.get("path", "")),
+                "model_identifier": self._registry_identity_for_native_model(
+                    entry, str(entry.get("modelKey") or "")
+                ),
                 "display_name": entry.get("displayName", ""),
                 "status": entry.get("status", ""),
                 "context_length": entry.get("contextLength"),
-            }
+            })
         except (KeyError, TypeError, IndexError):
             return None
 
@@ -275,52 +302,201 @@ class LMStudioProvider(HttpProvider):
 
             api_key = str(row.get("key") or "")
             model_identifier = self._registry_identity_for_native_model(row, api_key)
-            return {
+            config = instance.get("config")
+            return self._with_runtime_context({
                 "identifier": str(instance.get("id") or api_key),
                 "model_identifier": model_identifier,
                 "display_name": str(row.get("display_name") or api_key),
                 "status": "loaded",
-                "context_length": row.get("context_length") or row.get("max_context_length"),
-            }
+                "context_length": config.get("context_length") if isinstance(config, dict) else None,
+            }, load_config=config)
         return None
 
+    @staticmethod
+    def _context_matches(value: Any, expected: int) -> bool:
+        """An echoed/loaded context must be a positive integer, never a bool."""
+        return isinstance(value, int) and not isinstance(value, bool) and value > 0 and value == expected
+
+    def _with_runtime_context(
+        self, current: dict[str, Any], *, load_config: Any = None
+    ) -> dict[str, Any]:
+        """Expose whether this already-loaded instance meets Registry policy."""
+        runtime = self._runtime_loader(current["model_identifier"]) if self._runtime_loader is not None else None
+        expected = runtime.get("context_length") if runtime else None
+        if runtime is not None and expected is not None:
+            if isinstance(expected, int) and not isinstance(expected, bool) and expected > 0:
+                expected = resolve_context_length({
+                    "context_length": expected,
+                    "max_context_length": runtime.get("max_context_length") or runtime.get("native_context_length"),
+                })
+            current["runtime_matches"] = (
+                isinstance(expected, int)
+                and not isinstance(expected, bool)
+                and expected > 0
+                and self._context_matches(current.get("context_length"), expected)
+            )
+        speculative_expected = runtime.get("_speculative_expected") if runtime else None
+        if speculative_expected is not None:
+            current["runtime_matches"] = current.get("runtime_matches", True) and self._speculative_matches(
+                speculative_expected, self._speculative_values(load_config)
+            )
+        return current
+
+    @staticmethod
+    def _speculative_values(config: Any) -> dict[str, Any]:
+        """Extract recognized effective fields, retaining conflicting aliases."""
+        if not isinstance(config, Mapping):
+            return {}
+        values: dict[str, Any] = {}
+        for key, native_key in _SPECULATIVE_FIELDS.items():
+            dotted_key = f"llm.load.llama.speculativeDecoding.{native_key}"
+            observed = [config[field] for field in (key, dotted_key) if field in config]
+            if observed:
+                # An invalid sentinel makes contradictory aliases fail the
+                # typed comparison, instead of silently choosing one value.
+                values[key] = observed[0] if all(
+                    type(value) is type(observed[0]) and value == observed[0] for value in observed
+                ) else object()
+        return values
+
+    @staticmethod
+    def _speculative_value_matches(key: str, actual: Any, expected: Any) -> bool:
+        if isinstance(expected, bool):
+            return isinstance(actual, bool) and actual is expected
+        if key == "draft_model_reference":
+            if not isinstance(actual, str) or not isinstance(expected, str):
+                return False
+            if not expected:
+                return actual == ""
+            # A helper is either a complete identity or the exact physical
+            # artifact path. Never substitute a basename or missing quant.
+            if Path(expected).is_absolute():
+                return Path(actual).is_absolute() and os.path.normcase(os.path.normpath(actual)) == os.path.normcase(
+                    os.path.normpath(expected)
+                )
+            return all(decompose_model_identity(expected)) and same_model_identity(actual, expected)
+        return not isinstance(actual, bool) and type(actual) is type(expected) and actual == expected
+
+    @classmethod
+    def _speculative_matches(cls, expected: Any, *configs: Mapping[str, Any]) -> bool:
+        """Require complete effective evidence and reject every contradiction.
+
+        Saved user defaults are intentionally excluded: they can differ from
+        the configuration of an existing or newly returned loaded instance.
+        """
+        if expected is None:
+            return True
+        if not isinstance(expected, Mapping) or not expected:
+            return False
+        required = {
+            "draft_mtp", "draft_simple", "draft_dflash_sidecar", "draft_dspark_sidecar",
+            "draft_mtp_sidecar", "draft_model_reference",
+        }
+        if not required.issubset(expected):
+            return False
+        for key, value in expected.items():
+            if key not in _SPECULATIVE_FIELDS:
+                return False
+            observed = [config[key] for config in configs if key in config]
+            if not observed or not all(cls._speculative_value_matches(key, actual, value) for actual in observed):
+                return False
+        return True
+
     def _registry_identity_for_native_model(self, native_model: dict[str, Any], api_key: str) -> str:
-        """Resolve the loaded LMS row to its full Registry identity when possible."""
+        """Canonicalize identity evidence from the loaded row itself.
+
+        An installed catalog entry proves which artifacts are available, but
+        cannot prove which quantization a base-key loaded instance uses.
+        Consequently neither registry uniqueness nor catalog iteration may
+        supply a missing identity component at this boundary.
+        """
         publisher = str(native_model.get("publisher") or "")
         quantization = native_model.get("quantization")
         quant = str(quantization.get("name") or "") if isinstance(quantization, dict) else ""
         try:
-            from model_identity import UniqueMatch, canonicalize_source_identity, resolve_registry_match
-
             registry = self._registry_loader() if self._registry_loader else {}
-            canonical = canonicalize_source_identity(api_key, publisher=publisher, quant=quant)
-            resolved = resolve_registry_match(canonical, list(registry)) if registry else None
-            if isinstance(resolved, UniqueMatch):
-                return resolved.key
+            reference = str(native_model.get("selected_variant") or native_model.get("selectedVariant") or api_key)
+            base = canonicalize_source_identity(api_key, publisher=publisher).split("@", 1)[0]
+            variant_base = canonicalize_source_identity(reference, publisher=publisher).split("@", 1)[0]
+            if normalize_model_reference(base) != normalize_model_reference(variant_base):
+                return ""
+            embedded_quant = decompose_model_identity(reference)[2]
+            api_quant = decompose_model_identity(api_key)[2]
+            concrete_quants = {
+                normalized
+                for value in (quant, embedded_quant, api_quant)
+                if (normalized := normalize_quant(value)) not in {"", "?", "unknown", "none"}
+            }
+            if len(concrete_quants) > 1:
+                return ""
+            proven_quant = next(iter(concrete_quants), "")
+            canonical = canonicalize_source_identity(reference, publisher=publisher, quant=proven_quant)
+            matches = [key for key in registry if same_model_identity(canonical, key)]
+            return matches[0] if len(matches) == 1 else canonical
         except (ImportError, TypeError, ValueError):
-            registry = {}
-            canonical = api_key
+            return api_key
 
-        installed_models = self.list_models()
-        matched_model = next(
-            (
-                model
-                for model in installed_models
-                if str(model.get("model_identifier") or "").casefold() == api_key.casefold()
-            ),
-            None,
-        )
-        if matched_model is None:
-            return canonical
-
-        reference = str(matched_model.get("key") or api_key)
-        publisher = str(matched_model.get("publisher") or publisher)
-        try:
-            canonical = canonicalize_source_identity(reference, publisher=publisher)
-            resolved = resolve_registry_match(canonical, list(registry)) if registry else None
-            return resolved.key if isinstance(resolved, UniqueMatch) else canonical
-        except (ImportError, TypeError, ValueError):
-            return reference
+    def _loaded_binding_for_identity(
+        self,
+        data: dict[str, Any] | None,
+        requested: str,
+        instance_id: str | None = None,
+        *,
+        registry_key: str | None = None,
+    ) -> tuple[str, IdentityLink] | None:
+        """Bind one exact loaded instance and its runtime to the selected identity."""
+        if not isinstance(data, dict) or not isinstance(data.get("models"), list):
+            return None
+        selected_identity = registry_key or requested
+        complete_request = all(decompose_model_identity(selected_identity))
+        is_namespace_alias = False
+        if registry_key is not None and not same_model_identity(requested, registry_key):
+            alias_match = resolve_registry_match(requested, [registry_key])
+            is_namespace_alias = (
+                isinstance(alias_match, UniqueMatch)
+                and alias_match.stage == "publisher-alias-namespace-exact"
+            )
+            if not is_namespace_alias:
+                return None
+        matches: list[tuple[str, IdentityLink]] = []
+        for row in data["models"]:
+            if not isinstance(row, dict):
+                continue
+            identity = self._registry_identity_for_native_model(row, str(row.get("key") or ""))
+            link = IdentityLink(registry_key=identity)
+            identity_matches = (
+                same_model_identity(selected_identity, link.registry_key)
+                if complete_request
+                else normalize_model_reference(selected_identity) == normalize_model_reference(link.registry_key)
+            )
+            if not identity_matches:
+                continue
+            instances = row.get("loaded_instances", [])
+            if not isinstance(instances, list):
+                continue
+            for instance in instances:
+                candidate = str(instance.get("id") or "") if isinstance(instance, dict) else ""
+                if candidate and (instance_id is None or candidate == instance_id):
+                    if is_namespace_alias:
+                        # An accepted namespace alias must also occur on this
+                        # exact loaded row. A registry alias alone is never
+                        # evidence that the selected publisher was loaded.
+                        aliases = (row.get("key"), row.get("selected_variant"), row.get("selectedVariant"), candidate)
+                        if not any(
+                            normalize_model_reference(requested) == normalize_model_reference(str(alias or ""))
+                            for alias in aliases
+                        ):
+                            continue
+                    config = instance.get("config")
+                    link = IdentityLink(
+                        registry_key=link.registry_key,
+                        runtime_bindings=(RuntimeBinding(
+                            context_length=config.get("context_length") if isinstance(config, dict) else None,
+                            speculative=tuple(self._speculative_values(config).items()),
+                        ),),
+                    )
+                    matches.append((candidate, link))
+        return matches[0] if len(matches) == 1 else None
 
     def has_assembled_system_prompt(self, model_identifier: str) -> bool | None:
         """Check whether the LM Studio JSON config already contains a prompt."""
@@ -355,8 +531,28 @@ class LMStudioProvider(HttpProvider):
         payload: dict[str, Any] = {"model": model_identifier, "echo_load_config": True}
         if gpu_offload is not None:
             payload["gpu_offload"] = gpu_offload
+        requested_context: int | None = None
+        selected_identity: str | None = None
+        speculative_expected: Any = None
         if self._runtime_loader is not None:
             runtime = self._runtime_loader(model_identifier) or {}
+            speculative_expected = runtime.get("_speculative_expected")
+            registry_key = runtime.get("_registry_key")
+            if registry_key is not None:
+                if not isinstance(registry_key, str) or not all(decompose_model_identity(registry_key)):
+                    warn(f"Invalid Registry identity for '{model_identifier}'")
+                    return False, None
+                selected_identity = registry_key
+            context_length = runtime.get("context_length")
+            if context_length is not None:
+                if not isinstance(context_length, int) or isinstance(context_length, bool) or context_length <= 0:
+                    warn(f"Invalid Registry context for '{model_identifier}'")
+                    return False, None
+                requested_context = resolve_context_length({
+                    "context_length": context_length,
+                    "max_context_length": runtime.get("max_context_length") or runtime.get("native_context_length"),
+                })
+                payload["context_length"] = requested_context
             num_experts = runtime.get("num_experts")
             if isinstance(num_experts, int) and not isinstance(num_experts, bool) and num_experts > 0:
                 # This is the selected runtime value, not the immutable
@@ -366,18 +562,61 @@ class LMStudioProvider(HttpProvider):
             result = self._native_request("/api/v1/models/load", method="POST", payload=payload, timeout=180)
             if result is not None and result.get("status") == "loaded":
                 instance_id = result.get("instance_id", model_identifier)
+                binding = None
+                if (
+                    all(decompose_model_identity(model_identifier))
+                    or selected_identity is not None
+                    or requested_context is not None
+                    or speculative_expected is not None
+                ):
+                    binding = self._loaded_binding_for_identity(
+                        self._native_request("/api/v1/models"),
+                        model_identifier,
+                        str(instance_id),
+                        registry_key=selected_identity,
+                    )
+                    if binding is None:
+                        warn(f"Loaded instance does not prove the selected identity '{model_identifier}'")
+                        return False, None
+                    instance_id = binding[0]
                 load_time = result.get("load_time_seconds", 0)
                 load_config = result.get("load_config", {})
+                if not isinstance(load_config, dict):
+                    load_config = {}
+                if requested_context is not None:
+                    context_matches = binding is not None and self._context_matches(
+                        binding[1].runtime_bindings[0].context_length, requested_context
+                    ) and (
+                        "context_length" not in load_config
+                        or self._context_matches(load_config["context_length"], requested_context)
+                    )
+                    if not context_matches:
+                        warn(f"Loaded context does not match requested {requested_context} for '{model_identifier}'")
+                        return False, None
+                if speculative_expected is not None and (
+                    binding is None
+                    or not self._speculative_matches(
+                        speculative_expected,
+                        self._speculative_values(load_config),
+                        dict(binding[1].runtime_bindings[0].speculative),
+                    )
+                ):
+                    warn(f"Loaded speculative configuration is unverified or conflicts with Registry policy for '{model_identifier}'")
+                    return False, None
                 ok(f"Loaded in {load_time:.1f}s (np={load_config.get('parallel', '?')})")
                 info(f"Instance ID: {instance_id}")
                 return True, instance_id
             if result is not None:
-                models_data = self._native_request("/api/v1/models")
-                if models_data:
-                    for model in models_data.get("models", []):
-                        if model.get("key") == model_identifier or model_identifier in model.get("key", ""):
-                            for instance in model.get("loaded_instances", []):
-                                return True, instance.get("id", model_identifier)
+                binding = self._loaded_binding_for_identity(
+                    self._native_request("/api/v1/models"), model_identifier, registry_key=selected_identity
+                )
+                if binding is not None and (
+                    requested_context is None
+                    or self._context_matches(binding[1].runtime_bindings[0].context_length, requested_context)
+                ) and self._speculative_matches(
+                    speculative_expected, dict(binding[1].runtime_bindings[0].speculative)
+                ):
+                    return True, binding[0]
                 status = str(result.get("status", "unknown"))
                 detail = result.get("error") or result.get("message") or status
                 warn(f"LM Studio rejected model load for '{model_identifier}': {detail}")

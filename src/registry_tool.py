@@ -86,7 +86,7 @@ import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
@@ -133,7 +133,6 @@ y.indent(mapping=2, sequence=4, offset=2)
 # ── assemble_blueprint helpers ─────────────────────────────────────
 from artifact_bundle import validate_companion_binding, validate_config_gguf_pair
 from assemble_blueprint import (
-    _ARCH_REASONING_MAP,
     _registry_quant,
     assemble_prompts,
     blueprint_features,
@@ -146,7 +145,6 @@ from assemble_blueprint import (
     find_registry_matches_for_config,
     normalize_model_name,
     read_lms_configs,
-    resolve_template_name,
     validate_prompts,
 )
 from benchmark_config import (
@@ -184,7 +182,8 @@ from model_paths import configured_gguf_roots
 from model_registry import ModelRegistry
 from parameter_bindings import config_sync_fields
 from providers.llama_cpp_args import build_server_command
-from quantization import KNOWN_QUANTS, extract_quant_from_text, normalize_quant
+from quantization import KNOWN_QUANTS, extract_quant_from_text, is_known_quant, normalize_quant
+from runtime_policy import resolve_template
 from sampling_research import (
     RESEARCH_STATUSES,
     compact_sampling_block,
@@ -192,7 +191,7 @@ from sampling_research import (
     research_sampling_report,
     validate_sampling_block,
 )
-from speculative import companion_role, normalize_speculative_profile
+from speculative import companion_role, normalize_speculative_profile, registry_speculative_policy
 
 
 class RegistryInventory(InventorySnapshot):  # type: ignore[misc]
@@ -337,7 +336,7 @@ def _run_sampling_research(model: dict[str, Any]) -> dict[str, Any]:
         report.setdefault("sampling_research_status", "confirmed")
         report.setdefault("sampling_evidence", [])
         return report
-    return research_sampling_report(model)
+    return cast("dict[str, Any]", research_sampling_report(model))
 
 
 def _apply_sampling_report(entry: dict[str, Any], report: dict[str, Any]) -> bool:
@@ -411,7 +410,10 @@ def apply_sampling_review(
 
 def load_lms_json(path: str | Path) -> list[Any]:
     with open(path, encoding="utf-8-sig") as f:
-        return json.load(f)
+        data = json.load(f)
+    if not isinstance(data, list) or any(not isinstance(row, dict) for row in data):
+        raise ValueError("LM Studio inventory must be a JSON list of model objects")
+    return data
 
 
 def _run_lms_ls() -> list[dict[str, Any]]:
@@ -442,17 +444,46 @@ def _run_lms_ls() -> list[dict[str, Any]]:
     return []
 
 
-def _collect_registry_inventory() -> RegistryInventory:
+def _validate_gguf_snapshot(path: Path) -> tuple[Path, ...]:
+    """Reject stale or incomplete file snapshots before any Registry mutation."""
+    lines = [line.strip() for line in path.read_text(encoding="utf-8-sig").splitlines() if line.strip()]
+    listed: set[Path] = set()
+    roots = [root.resolve() for root in _gguf_roots() if root.is_dir()]
+    covered_roots: set[Path] = set()
+    for line in lines:
+        file = Path(line)
+        if not file.is_absolute() or file.suffix.lower() != ".gguf" or not file.is_file():
+            raise ValueError(f"Invalid or deleted GGUF snapshot file: {line}")
+        resolved = file.resolve(strict=True)
+        owners = [root for root in roots if resolved.is_relative_to(root)]
+        if not owners:
+            raise ValueError(f"GGUF snapshot file is outside configured model roots: {line}")
+        if resolved in listed:
+            raise ValueError(f"Duplicate GGUF snapshot file: {line}")
+        listed.add(resolved)
+        covered_roots.update(owners)
+    if not listed:
+        raise ValueError("GGUF snapshot is empty")
+    actual = {file.resolve() for root in covered_roots for file in root.rglob("*.gguf") if file.is_file()}
+    if actual != listed:
+        raise ValueError(f"GGUF snapshot differs from disk: {len(actual - listed)} unlisted, {len(listed - actual)} stale files")
+    return tuple(sorted(covered_roots))
+
+
+def _collect_registry_inventory(
+    model_list: Path | None = None, gguf_list: Path | None = None,
+) -> RegistryInventory:
     """Read Registry, LM Studio, and config data once for one run.
 
     The potentially large local GGUF tree is scanned lazily only when a step
     needs physical-file facts or quarantine evidence.
     """
+    snapshot_roots = _validate_gguf_snapshot(gguf_list) if gguf_list is not None else None
     registry = load_registry()
-    raw_lms_models = _run_lms_ls()
+    raw_lms_models = load_lms_json(model_list) if model_list is not None else _run_lms_ls()
     lms_models = _benchmark_lms_models(raw_lms_models)
     configs = read_lms_configs(CONFIG_ROOT)
-    snapshot = RegistryInventory(registry, raw_lms_models, lms_models, configs, [])
+    snapshot = RegistryInventory(registry, raw_lms_models, lms_models, configs, [], gguf_roots=snapshot_roots)
     _refresh_identity_links(snapshot)
     return snapshot
 
@@ -479,11 +510,14 @@ def _refresh_identity_links(inventory: RegistryInventory) -> None:
                 continue
             registry_key = getattr(candidate, "registry_key", None)
             if isinstance(registry_key, str) and registry_key in registry_keys:
+                owner, _, quant = decompose_model_identity(registry_key)
+                if owner != evidence.publisher or normalize_quant(quant) != normalize_quant(evidence.quant):
+                    continue
                 artifact_by_key.setdefault(registry_key, []).append(candidate)
                 continue
             identity = evidence.identity
             match = resolve_registry_match(identity, registry_keys)
-            if isinstance(match, UniqueMatch):
+            if isinstance(match, UniqueMatch) and decompose_model_identity(match.key)[0] == evidence.publisher:
                 artifact_by_key.setdefault(match.key, []).append(candidate)
 
     local_artifact_owners: dict[str, set[str]] = {}
@@ -491,7 +525,7 @@ def _refresh_identity_links(inventory: RegistryInventory) -> None:
         local = entry.get("local") if isinstance(entry, dict) else None
         model_path = local.get("model_path") if isinstance(local, dict) else None
         if isinstance(model_path, (str, os.PathLike)) and str(model_path).strip():
-            local_artifact_owners.setdefault(_path_identity(model_path), set()).add(registry_key)
+            local_artifact_owners.setdefault(_path_identity(Path(model_path)), set()).add(registry_key)
 
     persisted_config_owners: dict[str, set[str]] = {}
     for registry_key, entry in inventory.registry.items():
@@ -553,6 +587,9 @@ def _refresh_identity_links(inventory: RegistryInventory) -> None:
                 candidate
                 for candidate in candidates
                 if _lms_path_matches_candidate(linked_models[0], candidate.path)
+                and candidate.identity_evidence.publisher == decompose_model_identity(registry_key)[0]
+                and normalize_quant(candidate.identity_evidence.quant) == normalize_quant(_registry_quant(registry_key))
+                and candidate.registry_key in (None, registry_key)
             )
             if _lms_has_concrete_artifact_path(linked_models[0]):
                 linked_artifacts = path_matches
@@ -620,11 +657,12 @@ def _refresh_identity_links(inventory: RegistryInventory) -> None:
             persisted_local_binding,
         ) = joined[registry_key]
         runtime_records: list[RuntimeBinding] = []
+        runtime_config: dict[str, Any] | None
         if persisted_local_binding:
-            config = matching_configs[0]
-            if config_owners.get(_path_identity(str(config.get("json_path") or ""))) != {registry_key}:
-                config = None
-            runtime_records.append(_build_runtime_binding(config))
+            runtime_config = matching_configs[0]
+            if config_owners.get(_path_identity(str(runtime_config.get("json_path") or ""))) != {registry_key}:
+                runtime_config = None
+            runtime_records.append(_build_runtime_binding(runtime_config))
         elif len(linked_artifacts) == 1:
             # Dynamic imports require a one-to-one LMS-model/GGUF/config link.
             # A physical GGUF identity can establish the join without a live
@@ -632,13 +670,13 @@ def _refresh_identity_links(inventory: RegistryInventory) -> None:
             # local GGUFs/configs but no installed LM Studio runtime. Zero,
             # multiple, or globally reused configs remain diagnostics only.
             artifact = linked_artifacts[0] if len(linked_artifacts) == 1 else None
-            config = matching_configs[0] if len(matching_configs) == 1 and artifact else None
-            if config is not None:
-                config_path = _path_identity(str(config.get("json_path") or ""))
+            runtime_config = matching_configs[0] if len(matching_configs) == 1 and artifact else None
+            if runtime_config is not None:
+                config_path = _path_identity(str(runtime_config.get("json_path") or ""))
                 if config_owners.get(config_path) != {registry_key}:
-                    config = None
+                    runtime_config = None
             runtime_records.append(
-                _build_runtime_binding(config)
+                _build_runtime_binding(runtime_config)
             )
         else:
             # Keep all source rows visible for diagnostics, but do not invent
@@ -723,7 +761,11 @@ def _lms_logical_model_matches_registry_key(model: dict[str, Any], registry_key:
         return False
     if lms_quant != registry_quant:
         return False
-    return str(normalize_for_config(lms_model)) == str(normalize_for_config(registry_model))
+    from model_identity import normalize_artifact_model_name
+
+    return bool(normalize_artifact_model_name(lms_model, lms_quant) == normalize_artifact_model_name(
+        registry_model, registry_quant
+    ))
 
 
 def _config_matches_artifact(config: dict[str, Any], artifact_path: Path) -> bool:
@@ -781,7 +823,15 @@ def _registry_local_config_matches(
         except OSError:
             return True, model_path, ()
         registry_quant = _registry_quant(registry_key)
-        artifact_quant = extract_quant_from_text(model_path.name)
+        from gguf_evidence import resolve_artifact_quant
+        from local_model_resolver import LocalModelResolver
+
+        resolver = LocalModelResolver()
+        resolver.model_roots = _gguf_roots()
+        physical_reference = resolver._model_base_id(model_path)
+        artifact_quant = resolve_artifact_quant(model_path, publisher=decompose_model_identity(physical_reference)[0])
+        if not registry_quant or not artifact_quant:
+            return True, model_path, ()
         pair_errors = validate_config_gguf_pair(
             model_path,
             config_path,
@@ -793,6 +843,23 @@ def _registry_local_config_matches(
         for config in configs:
             if _path_identity(config.get("json_path") or "") != _path_identity(config_path):
                 continue
+            registry_publisher, registry_model, _ = decompose_model_identity(registry_key)
+            config_publisher = str(config.get("publisher") or "").casefold()
+            if config_publisher and config_publisher != registry_publisher:
+                # A declared model-scoped Hub namespace can intentionally
+                # differ from the physical package owner. Its complete
+                # namespace must already be preserved in the Registry key.
+                config_namespace = f"{config_publisher}/{config.get('dir_name') or ''}"
+                if str(raw_config_scope) != "model" or (
+                    normalize_model_reference(registry_model) != normalize_model_reference(config_namespace)
+                ):
+                    continue
+            else:
+                from local_model_resolver import LocalModelResolver
+
+                reference = f"{config_publisher}/{config.get('dir_name') or ''}"
+                if LocalModelResolver._match_registry(reference, artifact_quant, {registry_key: entry}) != registry_key:
+                    continue
             config_quant = config.get("quant") or extract_quant_from_text(
                 f"{config.get('dir_name', '')} {config.get('file_name', '')}"
             )
@@ -806,10 +873,10 @@ def _registry_local_config_matches(
             candidates.append({**config, "_registry_config_scope": str(raw_config_scope)})
         return True, model_path, tuple(candidates)
 
-    candidates = tuple(
+    artifact_configs = tuple(
         config for config in configs if _config_matches_artifact(config, model_path)
     )
-    return True, model_path, candidates
+    return True, model_path, artifact_configs
 
 
 def _physical_registry_matches_lms_model(
@@ -827,7 +894,7 @@ def _physical_registry_matches_lms_model(
     """
     lms_identity = _canonical_lms_key(model)
     _lms_publisher, lms_model, lms_quant = decompose_model_identity(lms_identity)
-    if not lms_model or not lms_quant or lms_quant == "?":
+    if not lms_model:
         return ()
     model_name = str(normalize_for_config(lms_model))
     matches: set[str] = set()
@@ -836,15 +903,25 @@ def _physical_registry_matches_lms_model(
         evidence = getattr(candidate, "identity_evidence", None)
         path = getattr(candidate, "path", None)
         if (
-            not isinstance(registry_key, str)
-            or registry_key not in registry_keys
-            or not isinstance(evidence, ArtifactIdentityEvidence)
+            not isinstance(evidence, ArtifactIdentityEvidence)
             or not evidence.is_complete
             or not isinstance(path, Path)
         ):
             continue
+        # A fill-quant stage may have replaced the key since this immutable
+        # artifact snapshot was collected. Join its complete evidence again;
+        # an unknown LMS quant must not downgrade a proven GGUF identity.
+        if registry_key not in registry_keys:
+            match = resolve_registry_match(evidence.identity, registry_keys)
+            if not isinstance(match, UniqueMatch):
+                continue
+            registry_key = match.key
+        if not isinstance(registry_key, str):
+            continue
         _publisher, _candidate_model, candidate_quant = decompose_model_identity(registry_key)
-        if normalize_quant(candidate_quant) != normalize_quant(lms_quant):
+        if normalize_quant(candidate_quant) != normalize_quant(evidence.quant):
+            continue
+        if is_known_quant(lms_quant) and normalize_quant(candidate_quant) != normalize_quant(lms_quant):
             continue
         if str(normalize_for_config(evidence.model_name)) != model_name:
             continue
@@ -932,6 +1009,19 @@ def _materialize_local_bindings(inventory: RegistryInventory) -> int:
             local["model_path"] = main_path
             changed += 1
 
+        policy = registry_speculative_policy(entry)
+        if policy == "disabled":
+            local_llama = local.get("llama_cpp")
+            if isinstance(local_llama, dict) and "speculative" in local_llama:
+                del local_llama["speculative"]
+                changed += 1
+            companions = local.get("companions")
+            if isinstance(companions, dict):
+                for role in ("mtp", "draft", "drafter"):
+                    if role in companions:
+                        del companions[role]
+                        changed += 1
+
         bindings = [binding for binding in link.runtime_bindings if binding.config_path is not None]
         if len(bindings) != 1:
             continue
@@ -944,6 +1034,8 @@ def _materialize_local_bindings(inventory: RegistryInventory) -> int:
             local["config_scope"] = binding.config_scope
             changed += 1
 
+        if policy in {"disabled", "registry"}:
+            continue
         speculative = dict(binding.speculative)
         normalized = normalize_speculative_profile(speculative)
         local_llama = local.get("llama_cpp")
@@ -964,6 +1056,19 @@ def _materialize_local_bindings(inventory: RegistryInventory) -> int:
             if role is not None:
                 companion = _resolve_local_companion(reference) if reference else None
                 if companion is not None:
+                    previous = local_llama.get("speculative")
+                    previous_companions = local.get("companions")
+                    previous_path = previous_companions.get(role) if isinstance(previous_companions, dict) else None
+                    if (
+                        isinstance(previous, dict)
+                        and isinstance(previous.get("pairing"), dict)
+                        and previous.get("type") == normalized.get("type")
+                        and previous.get("method") == normalized.get("method")
+                        and previous.get("mode") == normalized.get("mode")
+                        and isinstance(previous_path, str)
+                        and _path_identity(previous_path) == _path_identity(companion)
+                    ):
+                        normalized["pairing"] = previous["pairing"]
                     bundle_errors = validate_companion_binding(main_path, companion, normalized)
                     if bundle_errors:
                         print(
@@ -971,6 +1076,8 @@ def _materialize_local_bindings(inventory: RegistryInventory) -> int:
                             + "; ".join(bundle_errors)
                         )
                         companion = None
+                    elif "pairing" in normalized:
+                        local_speculative["pairing"] = normalized["pairing"]
                 if companion is not None:
                     companions = local.setdefault("companions", {})
                     if not isinstance(companions, dict):
@@ -1019,10 +1126,13 @@ def _ensure_gguf_inventory(inventory: RegistryInventory) -> list[Any]:
         # scan. Re-evaluate the immutable artifact evidence against the latest
         # in-memory Registry without rescanning the filesystem.
         _refresh_identity_links(inventory)
-        return inventory.gguf_candidates
+        return cast("list[Any]", inventory.gguf_candidates)
     from local_model_resolver import LocalModelResolver
 
-    roots: tuple[Path | None, ...] = (None, Path.home() / ".lmstudio" / "hub" / "models")
+    roots: tuple[Path | None, ...] = inventory.gguf_roots if inventory.gguf_roots is not None else (
+        *_gguf_roots(),
+        *((Path.home() / ".lmstudio" / "hub" / "models",) if MODELS_CACHE == _DEFAULT_MODELS_CACHE else ()),
+    )
     candidates_by_path: dict[str, Any] = {}
     seen_roots: set[str] = set()
     for root in roots:
@@ -1051,14 +1161,16 @@ def _ensure_gguf_inventory(inventory: RegistryInventory) -> list[Any]:
     # Refresh after the scan so config links are based on the complete
     # path-derived artifact identity, not on a publisherless filename guess.
     _refresh_identity_links(inventory)
-    return inventory.gguf_candidates
+    return cast("list[Any]", inventory.gguf_candidates)
 
 
 def _configure_utf8_output() -> None:
     """Make direct CLI output safe for Windows consoles and CI runners."""
     for stream in (sys.stdout, sys.stderr):
         try:
-            stream.reconfigure(encoding="utf-8", errors="replace")
+            reconfigure = getattr(stream, "reconfigure", None)
+            if callable(reconfigure):
+                reconfigure(encoding="utf-8", errors="replace")
         except (AttributeError, ValueError):
             # Test doubles and already-closed streams may not support reconfigure.
             pass
@@ -1370,6 +1482,7 @@ def build_llama_preset(
         ("flash_attn", "flash-attn"),
         ("cont_batching", "cont-batching"),
         ("jinja", "jinja"),
+        ("chat_template_file", "chat-template-file"),
         ("reasoning_format", "reasoning-format"),
         ("reasoning_effort", "reasoning-effort"),
         ("reasoning_budget", "reasoning-budget"),
@@ -1639,7 +1752,7 @@ def _normalize_variants(key: str) -> set[str]:
     **exact** comparisons, never for fuzzy word matching.
     """
     # Konsolidiert in model_identity.py (Fix 2026-08-09).
-    return normalize_variants(key)
+    return cast("set[str]", normalize_variants(key))
 
 
 def _quant_variant(key: str) -> str:
@@ -1647,7 +1760,7 @@ def _quant_variant(key: str) -> str:
 
     Keeps the quant, so keys with different quantizations stay distinct.
     """
-    return normalize_model_name(key)
+    return str(normalize_model_name(key))
 
 
 def _resolve_exact(reg_key: str, lms_path_map: dict[str, str]) -> str:
@@ -1701,7 +1814,7 @@ def cmd_compare(inventory: RegistryInventory | None = None) -> dict[str, Any]:
         physical_matches = physical_matches_by_model.get(id(model), ())
         return len(physical_matches) == 1 and physical_matches[0] == registry_key
 
-    new_models: list[dict] = []
+    new_models: list[dict[str, Any]] = []
     for model in lms:
         if not any(model_matches_registry(model, key) for key in registry_keys):
             new_models.append(model)
@@ -1838,7 +1951,7 @@ def _registry_key_installed(
 
 
 def _missing_registry_keys(
-    lms: list[dict], registry: dict[str, Any] | None = None
+    lms: list[dict[str, Any]], registry: dict[str, Any] | None = None
 ) -> list[str]:
     """Registry-Keys ohne passendes installiertes LMS-Modell.
 
@@ -1891,7 +2004,7 @@ def _config_claimed_by_other(
     cfg: dict[str, Any],
     key: str,
     reg: dict[str, Any],
-    cfgs: list[dict],
+    cfgs: list[dict[str, Any]],
 ) -> str | None:
     """Registry-Key, der dieselbe Config (publisher/dir_name) referenziert.
 
@@ -1914,6 +2027,7 @@ def _config_claimed_by_other(
 def cmd_quarantine_missing(
     dry_run: bool = True,
     inventory: RegistryInventory | None = None,
+    move_configs: bool = True,
 ) -> int:
     """Registry-Einträge nicht-installierter Modelle in Quarantäne verschieben.
 
@@ -1960,7 +2074,7 @@ def cmd_quarantine_missing(
 
     remaining = {key: value for key, value in reg.items() if key not in quarantined}
     planned_moves: list[tuple[str, Path, Path]] = []
-    for key in quarantined:
+    for key in quarantined if move_configs else []:
         for config in find_all_configs_for_registry_key(key, cfgs):
             claimed = _config_claimed_by_other(config, key, remaining, cfgs)
             if claimed:
@@ -2212,7 +2326,7 @@ def cmd_add(
             nt += " | Vision"
         if m.get("tools"):
             nt += " | Tool-Use"
-        entry = {
+        entry: dict[str, Any] = {
             "publisher": pub,
             "hf_url": f"https://huggingface.co/{canonical_base}",
             "arch": classification,
@@ -2255,8 +2369,10 @@ def cmd_add(
                 entry["reasoning"] = "instruct"
 
         if research_web:
-            research_model = dict(m)
-            research_model.update({"modelKey": canonical, "hf_url": entry["hf_url"]})
+            research_inventory = RegistryInventory({**reg, canonical: entry}, models, models, [], [])
+            _ensure_gguf_inventory(research_inventory)
+            _refresh_identity_links(research_inventory)
+            research_model = _sampling_research_model(canonical, entry, research_inventory)
             report = _run_sampling_research(research_model)
             if _apply_sampling_report(entry, report):
                 print(
@@ -2288,16 +2404,56 @@ def cmd_add(
     return result
 
 
-def _research_missing_sampling(reg: dict[str, Any], force: bool = False) -> list[str]:
+def _sampling_research_model(
+    model_key: str,
+    entry: dict[str, Any],
+    inventory: RegistryInventory,
+) -> dict[str, Any]:
+    """Bind web roots to the concrete artifact proven by the IdentityLink."""
+    repositories: list[str] = []
+    link = inventory.identity_links.get(model_key)
+    if link is not None and len(link.artifact_evidence) == 1:
+        evidence = link.artifact_evidence[0]
+        publisher, _, quant = decompose_model_identity(model_key)
+        reference = evidence.source_reference.split("@", 1)[0]
+        if (
+            evidence.is_complete and reference.count("/") == 1
+            and evidence.publisher == publisher
+            and normalize_quant(evidence.quant) == normalize_quant(quant)
+        ):
+            repositories.append(reference)
+    return {
+        **entry,
+        "modelKey": model_key,
+        "publisher": entry.get("publisher") or model_key.split("/", 1)[0],
+        "proven_hf_repositories": repositories,
+    }
+
+
+def _research_missing_sampling(
+    reg: dict[str, Any],
+    force: bool = False,
+    *,
+    inventory: RegistryInventory | None = None,
+    model_keys: set[str] | None = None,
+) -> list[str]:
     """Research sampling incrementally, or every candidate when forced."""
+    if inventory is None:
+        inventory = RegistryInventory(reg, [], [], [], [])
+    inventory.registry = reg
+    _ensure_gguf_inventory(inventory)
+    _refresh_identity_links(inventory)
     unresolved: list[str] = []
     changed = False
     for model_key, entry in reg.items():
+        if model_keys is not None and model_key not in model_keys:
+            continue
         if not isinstance(entry, dict):
             continue
         if not force and "sampling" in entry:
             continue
-        sampling_block = entry.get("sampling") if isinstance(entry.get("sampling"), dict) else {}
+        raw_sampling = entry.get("sampling")
+        sampling_block = raw_sampling if isinstance(raw_sampling, dict) else {}
         if not force and (
             entry.get("sampling_research_status")
             or sampling_block.get("sampling_research_status")
@@ -2305,14 +2461,7 @@ def _research_missing_sampling(reg: dict[str, Any], force: bool = False) -> list
             continue
         if not is_registry_candidate({"modelKey": model_key}):
             continue
-        model = dict(entry)
-        model.update(
-            {
-                "modelKey": model_key,
-                "publisher": entry.get("publisher") or model_key.split("/", 1)[0],
-                "hf_url": entry.get("hf_url") or f"https://huggingface.co/{model_key.split('@', 1)[0]}",
-            }
-        )
+        model = _sampling_research_model(model_key, entry, inventory)
         report = _run_sampling_research(model)
         confirmed = _apply_sampling_report(entry, report)
         changed = True
@@ -2761,7 +2910,7 @@ def _loaded_lms_expert_values(
                 continue
             config = instance.get("config")
             value = config.get("num_experts") if isinstance(config, dict) else None
-            if isinstance(value, bool):
+            if isinstance(value, bool) or value is None:
                 continue
             try:
                 parsed = int(value)
@@ -3064,7 +3213,7 @@ def _canonical_key(mk: str, pub: str) -> str:
     s = _clean_lms_model_reference(mk, pub).lower()
     s = re.sub(r"\.gguf$", "", s)
     s = re.sub(r"-(gguf|mxpr4)$", "", s)
-    return canonicalize_source_identity(s, publisher=pub)
+    return str(canonicalize_source_identity(s, publisher=pub))
 
 
 def _benchmark_lms_models(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -3239,7 +3388,7 @@ def _canonical_lms_key(model: dict[str, Any]) -> str:
     quant = _quant_from_lms_record(model)
     if quant:
         publisher_name, model_name, _existing_quant = decompose_model_identity(base)
-        return build_model_identity(publisher_name, model_name, quant)
+        return str(build_model_identity(publisher_name, model_name, quant))
     if "@" in selected:
         return _canonical_key(selected, publisher)
     return base
@@ -3390,107 +3539,31 @@ def _read_gguf_header_details(
     This intentionally reads only GGUF metadata. ``gguf.GGUFReader`` may map the
     entire tensor file and is therefore unsuitable for parallel inventory scans.
     """
-    _GGUF_SIZES = {0: 1, 1: 1, 2: 2, 3: 2, 4: 4, 5: 4, 6: 4, 7: 1, 10: 8, 11: 8, 12: 8}
-
-    def _skip_value(f: Any, vt: int) -> None:
-        """Properly skip a GGUF metadata value of the given type."""
-        if vt in _GGUF_SIZES:
-            f.read(_GGUF_SIZES[vt])
-        elif vt == 8:  # STRING
-            s_raw = f.read(8)
-            if len(s_raw) < 8:
-                return
-            s_len = int.from_bytes(s_raw, "little")
-            if s_len > 100_000 or s_len < 0:
-                return
-            f.read(s_len)
-        elif vt == 9:  # ARRAY
-            raw = f.read(4)
-            if len(raw) < 4:
-                return
-            elem_type = int.from_bytes(raw, "little")
-            raw = f.read(8)
-            if len(raw) < 8:
-                return
-            arr_len = int.from_bytes(raw, "little")
-            for _ in range(arr_len):
-                _skip_value(f, elem_type)
+    from gguf_evidence import read_gguf_evidence
 
     try:
-        with open(model_path, "rb") as f:
-            if f.read(4) != b"GGUF":
-                return None, None, None, None, None, None
-            f.read(4 + 8 + 8)  # version, tensor_count, metadata_count
-            block_count = embedding_length = context_length = expert_count = None
-            chat_template = base_architecture = None
-            for _ in range(10_000):
-                raw = f.read(8)
-                if len(raw) < 8:
-                    break
-                key_len = int.from_bytes(raw, "little")
-                if key_len > 500 or key_len < 1:
-                    break
-                key = f.read(key_len).decode("utf-8", errors="replace")
-                raw = f.read(4)
-                if len(raw) < 4:
-                    break
-                val_type = int.from_bytes(raw, "little")
+        metadata = read_gguf_evidence(model_path).metadata
+        architecture = metadata.get("general.architecture")
+        architecture = architecture.strip().lower() if isinstance(architecture, str) else None
 
-                val: str | int | None
-                if val_type == 8:
-                    s_raw = f.read(8)
-                    s_len = int.from_bytes(s_raw, "little")
-                    val = f.read(s_len).decode("utf-8", errors="replace")
-                elif val_type == 4:  # UINT32 - common for block_count/embedding_length
-                    val = int.from_bytes(f.read(4), "little")
-                elif val_type == 9:  # ARRAY (skip)
-                    _skip_value(f, val_type)
-                    val = None
-                elif val_type in (0, 1, 7):  # U8, I8, BOOL
-                    val = int.from_bytes(f.read(1), "little")
-                elif val_type in (2, 3):  # U16, I16
-                    val = int.from_bytes(f.read(2), "little")
-                elif val_type in (5, 6):  # I32, F32
-                    val = int.from_bytes(f.read(4), "little")
-                elif val_type in (10, 11, 12):  # U64, I64, F64
-                    val = int.from_bytes(f.read(8), "little")
-                else:
-                    val = None
+        def integer(suffix: str) -> int | None:
+            values = [
+                value for key, value in metadata.items()
+                if key.endswith(suffix) and isinstance(value, int) and not isinstance(value, bool)
+                and (not architecture or key == f"{architecture}{suffix}")
+            ]
+            return values[0] if len(values) == 1 else None
 
-                if key == "general.architecture" and isinstance(val, str):
-                    base_architecture = val.strip().lower() or None
-                elif key.endswith(".block_count") and isinstance(val, int):
-                    block_count = val
-                elif key.endswith(".embedding_length") and isinstance(val, int):
-                    embedding_length = val
-                elif key.endswith(".context_length") and isinstance(val, int):
-                    context_length = val
-                elif key.endswith(".expert_count") and isinstance(val, int):
-                    expert_count = val
-                elif key == "tokenizer.chat_template" and isinstance(val, str):
-                    chat_template = val
-                # Erst abbrechen, wenn ALLE vier Werte gelesen sind: tokenizer.chat_template
-                # steht im GGUF-Header meist NACH block_count/embedding_length/context_length.
-                # expert_count (MoE) folgt dem gleichen arch.*-Präfix und ist in der Regel
-                # ebenfalls schon gelesen; fehlt der Key, bleibt es None (dense Model).
-                if (
-                    block_count is not None
-                    and embedding_length is not None
-                    and context_length is not None
-                    and chat_template is not None
-                ):
-                    break
-        is_reasoning = _detect_reasoning_from_template(chat_template) if chat_template else False
+        template = metadata.get("tokenizer.chat_template")
+        reasoning = (
+            _detect_reasoning_from_template(template)
+            if isinstance(template, str) and template.strip() else None
+        )
         return (
-            block_count,
-            embedding_length,
-            is_reasoning,
-            context_length,
-            expert_count,
-            base_architecture,
+            integer(".block_count"), integer(".embedding_length"), reasoning,
+            integer(".context_length"), integer(".expert_count"), architecture,
         )
     except (OSError, ValueError, struct.error):
-        # GGUF header parse failures (corrupt file, unsupported version, etc.)
         return None, None, None, None, None, None
 
 
@@ -3526,7 +3599,7 @@ def _read_gguf_header_snapshot(
         details = _read_gguf_header_details(str(resolved_path))
         cached = (details[:5], details[5])
         inventory.gguf_header_cache[cache_key] = cached
-    return cached
+    return cast("tuple[tuple[int | None, int | None, bool | None, int | None, int | None], str | None]", cached)
 
 
 _REASONING_TOKEN_RE = re.compile(
@@ -3554,7 +3627,7 @@ def _gguf_quant_from_header(gguf_path: str) -> str | None:
 
     quant = extract_quant_from_text(fname)
     if quant:
-        return quant.upper()
+        return str(quant.upper())
 
     # Fallback: try to extract after the last hyphen if it looks like a quant
     parts = fname.rsplit("-", 1)
@@ -3578,15 +3651,12 @@ def _detect_reasoning_from_template(template: str) -> bool:
 
 def _read_gguf_chat_template(model_path: str | Path) -> str | None:
     """Read the embedded ``tokenizer.chat_template`` from a GGUF file."""
-    try:
-        from gguf import GGUFReader
+    from gguf_evidence import read_gguf_evidence
 
-        field = GGUFReader(str(model_path)).fields.get("tokenizer.chat_template")
-        if field is None:
-            return None
-        value = field.contents()
+    try:
+        value = read_gguf_evidence(model_path).metadata.get("tokenizer.chat_template")
         return value if isinstance(value, str) and value.strip() else None
-    except (ImportError, KeyError, OSError, ValueError, RuntimeError):
+    except (OSError, ValueError):
         return None
 
 
@@ -3600,7 +3670,7 @@ def _gguf_roots() -> tuple[Path, ...]:
     if MODELS_CACHE != _DEFAULT_MODELS_CACHE:
         # Existing callers and tests patch MODELS_CACHE to isolate a scan.
         return (MODELS_CACHE,)
-    return _DEFAULT_GGUF_ROOTS
+    return cast("tuple[Path, ...]", _DEFAULT_GGUF_ROOTS)
 
 
 def _find_gguf_relative_path(relative_path: str | Path) -> Path | None:
@@ -3611,45 +3681,17 @@ def _find_gguf_relative_path(relative_path: str | Path) -> Path | None:
     return result.path if result.is_unique else None
 
 # ── GGUF expert_count check (for MoE detection) ───────────────────
-# Cache: model_path -> bool (has experts / MoE)
-_GGUF_EXPERT_CACHE: dict[str, bool] = {}
-_GGUF_MOE_READER_LOCK: Any = None  # lazy import for threading
-
-
 def _gguf_has_experts(model_path: str) -> bool:
     """Read GGUF header and return True if expert_count > 0 (MoE).
 
-    Uses the 'gguf' library. The GGUF stores expert_count in an
+    Uses the shared bounded header reader. The GGUF stores expert_count in an
     architecture-specific key like ``{arch}.expert_count`` (e.g.
     ``ernie4_5-moe.expert_count``). Dense models have no such key.
-    Results are cached in _GGUF_EXPERT_CACHE.
+    Header evidence is cached by file size and modification time; weights
+    are never mapped and replacement files cannot reuse stale counts.
     """
-    if model_path in _GGUF_EXPERT_CACHE:
-        return _GGUF_EXPERT_CACHE[model_path]
-    try:
-        import gguf
-
-        reader = gguf.GGUFReader(model_path)
-        arch_field = reader.fields.get("general.architecture")
-        if arch_field is None:
-            _GGUF_EXPERT_CACHE[model_path] = False
-            return False
-        arch_bytes = arch_field.parts[-1]
-        if isinstance(arch_bytes, (bytes, bytearray)):
-            arch = arch_bytes.decode("utf-8", errors="replace")
-        else:
-            arch = bytes(arch_bytes).decode("utf-8", errors="replace")
-        ec_field = reader.fields.get(f"{arch}.expert_count")
-        if ec_field is not None:
-            val_arr = ec_field.parts[-1]
-            result = bool(val_arr is not None and len(val_arr) > 0 and int(val_arr[0]) > 0)
-        else:
-            result = False
-        _GGUF_EXPERT_CACHE[model_path] = result
-        return result
-    except Exception:
-        _GGUF_EXPERT_CACHE[model_path] = False
-        return False
+    count = _read_gguf_header_details(model_path)[4]
+    return count is not None and count > 0
 
 
 def cmd_fill_arch(
@@ -3670,43 +3712,11 @@ def cmd_fill_arch(
         print("[ERROR] Leere Registry")
         sys.exit(1)
 
-    print("[2] LM Studio-Modelle scannen ...")
-    if lms_models is None:
-        lms_models = inventory.lms_models if inventory is not None else _benchmark_lms_models(_run_lms_ls())
-    paths_by_base: dict[str, set[str]] = {}
-    for m in lms_models:
-        rp = m.get("path", "")
-        if not rp:
-            continue
-        full_path = _find_gguf_relative_path(rp)
-        if full_path is None:
-            continue
-        full_path = str(full_path)
-        key = normalize_model_name(m.get("modelKey", "")).lower()
-        base = key.split("@")[0]
-        paths_by_base.setdefault(base, set()).add(full_path)
-    unique = {
-        base: next(iter(paths))
-        for base, paths in paths_by_base.items()
-        if len(paths) == 1
+    headers = _identity_gguf_headers(reg, lms_models, inventory)
+    gguf_arch = {
+        key: (facts[0], facts[1], facts[2], facts[3])
+        for key, (facts, _family) in headers.items() if facts[0] and facts[1]
     }
-    print(f"  -> {len(unique)} einzigartige Modelle (von {len(lms_models)} GGUF-Dateien)")
-
-    print("[3] GGUF-Header parallel lesen oder aus gemeinsamem Snapshot beziehen ...")
-    gguf_arch: dict[str, tuple[int, int, bool | None, int | None]] = {}
-    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
-        fut_to_base = {
-            pool.submit(_read_gguf_header_snapshot, p, inventory): b for b, p in unique.items()
-        }
-        for i, fut in enumerate(concurrent.futures.as_completed(fut_to_base), 1):
-            base = fut_to_base[fut]
-            (nl, hd, is_reasoning, ctx, _), _architecture_family = fut.result()
-            if nl and hd:
-                gguf_arch[base] = (nl, hd, is_reasoning, ctx)
-            if i % 10 == 0:
-                print(f"     ({i}/{len(unique)})")
-    cached_headers = len(inventory.gguf_header_cache) if inventory is not None else 0
-    print(f"  -> {len(gguf_arch)} mit n_layers/hidden_dim/context_length; {cached_headers} Header im Lauf-Cache")
 
     total = len([k for k, v in reg.items() if isinstance(v, dict)])
     updated = skipped_has = skipped_no = 0
@@ -3754,15 +3764,18 @@ def cmd_fill_arch(
         save_registry(reg)
 
 
-def cmd_fill_quant(lms_models: list[dict[str, Any]] | None = None) -> None:
-    """Fill missing @quant in registry keys from GGUF headers (Source of Truth).
+def cmd_fill_quant(
+    lms_models: list[dict[str, Any]] | None = None,
+    inventory: RegistryInventory | None = None,
+) -> None:
+    """Fill missing or unknown @quant from a unique physical IdentityLink.
 
-    For registry entries without @quant (base entries), reads the installed
-    GGUF header to determine the actual quantization. Renames the key to
-    publisher/model@quant and sets the quants field.
+    For registry entries without a known quantization (including ``@?``),
+    reads the installed GGUF evidence to determine the actual quantization.
+    Renames the key to publisher/model@quant and sets the quants field.
 
     Source of Truth: GGUF header (via lms ls path -> file -> header parse).
-    Base entries without @quant are ambiguous — the triple
+    Entries without a known @quant are ambiguous — the triple
     (publisher, model, quant) is the unique identity.
     """
     reg = load_registry()
@@ -3772,60 +3785,50 @@ def cmd_fill_quant(lms_models: list[dict[str, Any]] | None = None) -> None:
 
     if lms_models is None:
         lms_models = _benchmark_lms_models(_run_lms_ls())
-    if not lms_models:
-        print("[WARN] lms ls lieferte keine Modelle - fill-quant übersprungen")
-        return
+    from local_model_resolver import LocalModelResolver
+    from quantization import is_known_quant
 
-    # Build lookup: normalized base key -> GGUF path
-    lms_paths_by_base: dict[str, set[str]] = {}
-    lms_publishers_by_base: dict[str, set[str]] = {}
-    for m in lms_models:
-        mk = str(m.get("modelKey", "")).lower()
-        rp = m.get("path", "")
-        if not rp:
+    inventory = inventory or RegistryInventory(reg, lms_models, lms_models, [], [])
+    candidates = _ensure_gguf_inventory(inventory)
+    proposed: dict[str, set[str]] = {}
+    for key, entry in reg.items():
+        if not isinstance(entry, dict):
             continue
-        full_path = _find_gguf_relative_path(rp)
-        if full_path is None:
+        publisher, model_name, quant = decompose_model_identity(key)
+        if not publisher or not model_name or is_known_quant(quant):
             continue
-        full_path = str(full_path)
-        base = normalize_model_name(mk).split("@")[0]
-        lms_paths_by_base.setdefault(base, set()).add(full_path)
-        pub = str(m.get("publisher", "")).strip().lower()
-        lms_publishers_by_base.setdefault(base, set()).add(pub)
-    lms_by_base = {
-        base: next(iter(paths))
-        for base, paths in lms_paths_by_base.items()
-        if len(paths) == 1
-    }
-    lms_pub_base = {
-        base: next(iter(publishers))
-        for base, publishers in lms_publishers_by_base.items()
-        if len(publishers) == 1
-    }
+        for candidate in candidates:
+            evidence = candidate.identity_evidence
+            if not evidence.is_complete or evidence.publisher != publisher or not is_known_quant(evidence.quant):
+                continue
+            full_key = str(build_model_identity(publisher, model_name, evidence.quant))
+            if LocalModelResolver._match_registry(evidence.source_reference, evidence.quant, {full_key: entry}) == full_key:
+                proposed.setdefault(key, set()).add(full_key)
+
+    joined_registry = dict(reg)
+    for key, keys in proposed.items():
+        for full_key in keys:
+            joined_registry.setdefault(full_key, reg[key])
+    full_inventory = RegistryInventory(joined_registry, lms_models, lms_models, [], candidates, True)
+    _refresh_identity_links(full_inventory)
 
     updated = 0
     for key in list(reg.keys()):
         if not isinstance(reg[key], dict):
             continue
-        if "@" in key:
-            continue  # already has quant
-
-        lms_record = _lms_record_for_registry_key(key, lms_models)
-        base = normalize_model_name(key)
-        gguf_path = lms_by_base.get(base)
-        quant = _quant_from_lms_record(lms_record) if lms_record is not None else None
-        if quant is None and gguf_path is not None:
-            # Fallback for older LMS records without quantization metadata.
-            quant = _gguf_quant_from_header(gguf_path)
-        if not quant:
-            print(f"  [SKIP] {key}: Quant konnte aus LMS/GGUF nicht gelesen werden")
+        if is_known_quant(decompose_model_identity(key)[2]):
             continue
 
-        new_key = _canonical_lms_key(lms_record) if lms_record is not None else ""
-        if not new_key:
-            pub = lms_pub_base.get(base, key.split("/")[0] if "/" in key else "")
-            model_part = base.split("/", 1)[1] if "/" in base else base
-            new_key = build_model_identity(pub, model_part, quant)
+        identities = proposed.get(key, set())
+        if len(identities) != 1:
+            print(f"  [SKIP] {key}: keine eindeutige vollständige GGUF-Identität")
+            continue
+        new_key = next(iter(identities))
+        link = full_inventory.identity_links.get(new_key)
+        if link is None or len(link.artifact_evidence) != 1:
+            print(f"  [SKIP] {key}: GGUF-Artefaktbindung fehlt oder ist mehrdeutig")
+            continue
+        quant = decompose_model_identity(new_key)[2]
 
         # Don't overwrite if new key already exists
         if new_key in reg and new_key != key:
@@ -3846,15 +3849,37 @@ def cmd_fill_quant(lms_models: list[dict[str, Any]] | None = None) -> None:
 # ── sync-from-gguf command (Auto-Fix, Feld-Ownership) ───────────────
 
 
-def _find_gguf_arch_for_key(reg_key: str, gguf_arch: dict[str, tuple[int, int, bool | None, int | None]]) -> (
-    tuple[int, int, bool | None, int | None] | None
-):
-    """Find GGUF architecture facts without selecting an ambiguous file."""
-    normalized_key = normalize_model_name(reg_key)
-    found = gguf_arch.get(normalized_key)
-    if not found:
-        found = gguf_arch.get(normalized_key.split("@")[0])
-    return found
+def _identity_gguf_headers(
+    reg: dict[str, Any],
+    lms_models: list[dict[str, Any]] | None = None,
+    inventory: RegistryInventory | None = None,
+) -> dict[str, tuple[tuple[int | None, int | None, bool | None, int | None, int | None], str | None]]:
+    """Read headers only through an unambiguous, complete IdentityLink."""
+    if inventory is None:
+        models = lms_models if lms_models is not None else _benchmark_lms_models(_run_lms_ls())
+        inventory = RegistryInventory(reg, models, models, [], [])
+    else:
+        inventory.registry = reg
+    _ensure_gguf_inventory(inventory)
+    paths: dict[str, str] = {}
+    for key, link in inventory.identity_links.items():
+        evidence = link.artifact_evidence
+        if len(evidence) != 1 or not evidence[0].is_complete:
+            continue
+        publisher, _, quant = decompose_model_identity(key)
+        if publisher != evidence[0].publisher or normalize_quant(quant) != normalize_quant(evidence[0].quant):
+            continue
+        paths[key] = str(evidence[0].path)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+        futures = {key: pool.submit(_read_gguf_header_snapshot, path, inventory) for key, path in paths.items()}
+        return {key: future.result() for key, future in futures.items()}
+
+
+def _find_gguf_arch_for_key(
+    reg_key: str, gguf_arch: dict[str, tuple[int, int, bool | None, int | None]]
+) -> tuple[int, int, bool | None, int | None] | None:
+    """Compatibility lookup; facts must be indexed by the complete Registry key."""
+    return gguf_arch.get(reg_key)
 
 
 def cmd_sync_from_gguf(
@@ -3878,54 +3903,15 @@ def cmd_sync_from_gguf(
         print("[ERROR] Leere Registry")
         sys.exit(1)
 
-    print("[2] LM Studio-Modelle scannen ...")
-    if lms_models is None:
-        lms_models = inventory.lms_models if inventory is not None else _benchmark_lms_models(_run_lms_ls())
-    paths_by_base: dict[str, set[str]] = {}
-    for m in lms_models:
-        rp = m.get("path", "")
-        if not rp:
-            continue
-        full_path = _find_gguf_relative_path(rp)
-        if full_path is None:
-            continue
-        full_path = str(full_path)
-        if _is_support_file(rp):
-            continue
-        key = normalize_model_name(m.get("modelKey", "")).lower()
-        base = key.split("@")[0]
-        paths_by_base.setdefault(base, set()).add(full_path)
-    unique = {
-        base: next(iter(paths))
-        for base, paths in paths_by_base.items()
-        if len(paths) == 1
+    headers = _identity_gguf_headers(reg, lms_models, inventory)
+    gguf_arch = {
+        key: (facts[0], facts[1], facts[2], facts[3])
+        for key, (facts, _family) in headers.items() if facts[0] and facts[1]
     }
-    print(f"  -> {len(unique)} einzigartige Modelle (von {len(lms_models)} GGUF-Dateien)")
-
-    print("[3] GGUF-Header parallel lesen oder aus gemeinsamem Snapshot beziehen ...")
-    gguf_arch: dict[str, tuple[int, int, bool | None, int | None]] = {}
-    gguf_family: dict[str, str] = {}
-    gguf_moe: dict[str, bool] = {}
-    gguf_max_experts: dict[str, int] = {}
-    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
-        fut_to_base = {
-            pool.submit(_read_gguf_header_snapshot, p, inventory): b for b, p in unique.items()
-        }
-        for i, fut in enumerate(concurrent.futures.as_completed(fut_to_base), 1):
-            base = fut_to_base[fut]
-            (nl, hd, is_reasoning, ctx, exp), architecture_family = fut.result()
-            if architecture_family:
-                gguf_family[base] = architecture_family
-            if nl and hd:
-                gguf_arch[base] = (nl, hd, is_reasoning, ctx)
-            if exp is not None:
-                gguf_moe[base] = bool(exp)
-                if exp > 0:
-                    gguf_max_experts[base] = int(exp)
-            if i % 10 == 0:
-                print(f"     ({i}/{len(unique)})")
-    cached_headers = len(inventory.gguf_header_cache) if inventory is not None else 0
-    print(f"  -> {len(gguf_arch)} mit n_layers/hidden_dim/context_length; {cached_headers} Header im Lauf-Cache")
+    gguf_family = {key: family for key, (_facts, family) in headers.items() if family}
+    gguf_moe = {key: bool(facts[4]) for key, (facts, _family) in headers.items() if facts[4] is not None}
+    gguf_max_experts = {key: int(facts[4]) for key, (facts, _family) in headers.items() if facts[4]}
+    print(f"  -> {len(headers)} eindeutig gebundene GGUF-Header")
 
     print("[4] Registry-Einträge mit GGUF-Quelle abgleichen (Auto-Fix) ...")
     fixes: list[str] = []
@@ -3936,30 +3922,23 @@ def cmd_sync_from_gguf(
         if not found:
             continue
 
-        nl, hd, is_reasoning, ctx = found
+        nl, hd, _is_reasoning, ctx = found
         # arch: moe/mtp/dense aus GGUF expert_count
-        base = normalize_model_name(key).split("@")[0]
-        architecture_family = gguf_family.get(base)
+        architecture_family = gguf_family.get(key)
         if architecture_family and entry.get("architecture_family") != architecture_family:
             old = entry.get("architecture_family")
             entry["architecture_family"] = architecture_family
             fixes.append(
                 f"{key}: architecture_family {old!r} -> {architecture_family!r} (GGUF general.architecture)"
             )
-        exp = gguf_moe.get(base)
+        exp = gguf_moe.get(key)
         expected_arch = "moe" if exp else None
         if expected_arch is not None and entry.get("arch") != expected_arch:
             old = entry.get("arch")
             entry["arch"] = expected_arch
             fixes.append(f"{key}: arch {old!r} -> {expected_arch!r} (GGUF expert_count={exp})")
 
-        max_experts = gguf_max_experts.get(base)
-        if max_experts is None:
-            for gguf_key, gguf_value in gguf_max_experts.items():
-                normalized_key = normalize_model_name(key)
-                if normalized_key in gguf_key or gguf_key in normalized_key:
-                    max_experts = gguf_value
-                    break
+        max_experts = gguf_max_experts.get(key)
         if max_experts is not None and entry.get("max_experts") != max_experts:
             old = entry.get("max_experts")
             entry["max_experts"] = max_experts
@@ -4010,44 +3989,8 @@ def cmd_fill_reasoning(
         print("[ERROR] Leere Registry")
         sys.exit(1)
 
-    print("[2] LM Studio-Modelle scannen ...")
-    if lms_models is None:
-        lms_models = inventory.lms_models if inventory is not None else _benchmark_lms_models(_run_lms_ls())
-    unique: dict[str, str] = {}
-    for m in lms_models:
-        rp = m.get("path", "")
-        if not rp:
-            continue
-        full_path = _find_gguf_relative_path(rp)
-        if full_path is None:
-            continue
-        full_path = str(full_path)
-        if _is_support_file(rp):
-            continue
-        key = normalize_model_name(m.get("modelKey", "")).lower()
-        base = key.split("@")[0]
-        if base not in unique:
-            unique[base] = full_path
-    print(f"  -> {len(unique)} einzigartige Modelle")
-
-    print("[3] GGUF-Reasoning aus gemeinsamem GGUF-Header-Snapshot lesen ...")
-    gguf_reasoning: dict[str, bool] = {}
-    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
-        fut_to_base = {
-            pool.submit(_read_gguf_header_snapshot, p, inventory): b for b, p in unique.items()
-        }
-        for i, fut in enumerate(concurrent.futures.as_completed(fut_to_base), 1):
-            base = fut_to_base[fut]
-            (_, _, is_reasoning, _, _), _architecture_family = fut.result()
-            if is_reasoning is not None:
-                gguf_reasoning[base] = is_reasoning
-            if i % 10 == 0:
-                print(f"     ({i}/{len(unique)})")
-    cached_headers = len(inventory.gguf_header_cache) if inventory is not None else 0
-    print(
-        f"  -> {len(gguf_reasoning)} mit tokenizer.chat_template (reasoning-auswertbar); "
-        f"{cached_headers} Header im Lauf-Cache"
-    )
+    headers = _identity_gguf_headers(reg, lms_models, inventory)
+    gguf_reasoning = {key: facts[2] for key, (facts, _family) in headers.items() if facts[2] is not None}
 
     total = len([k for k, v in reg.items() if isinstance(v, dict)])
     updated = skipped_has = skipped_no_match = 0
@@ -4059,13 +4002,8 @@ def cmd_fill_reasoning(
         if entry.get("reasoning") is not None:
             skipped_has += 1
             continue
-        normalized_key = normalize_model_name(key)
-        found_base = unique.get(normalized_key)
-        if not found_base:
-            base = normalized_key.split("@")[0]
-            found_base = unique.get(base)
-        if found_base and found_base in gguf_reasoning:
-            entry["reasoning"] = "thinking" if gguf_reasoning[found_base] else "instruct"
+        if key in gguf_reasoning:
+            entry["reasoning"] = "thinking" if gguf_reasoning[key] else "instruct"
             updated += 1
         else:
             skipped_no_match += 1
@@ -4073,6 +4011,9 @@ def cmd_fill_reasoning(
     print(
         f"[OK] fill-reasoning: {updated} reasoning gesetzt, {skipped_has} bereits vorhanden, {skipped_no_match} kein GGUF-Match ({len(gguf_reasoning)} GGUF-Dateien ausgewertet)"
     )
+
+    if updated:
+        save_registry(reg)
 
 
 # ── sync-templates command ─────────────────────────────────────────
@@ -4104,16 +4045,8 @@ def _registry_template_name(model_key: str) -> str | None:
     """
     reg = load_registry()
     entry = reg.get(model_key) or {}
-    if entry.get("template_policy") == "explicit_file":
-        tpl = entry.get("template")
-        return str(tpl) if tpl else None
     bp_name = entry.get("blueprint") or "default_chat"
-    bp = _load_blueprints().get(bp_name) or {}
-    name = resolve_template_name(bp, model_key)
-    if name:
-        return name
-    tpl = entry.get("template")
-    return str(tpl) if tpl else None
+    return cast("str | None", resolve_template(entry, _load_blueprints().get(bp_name), model_key))
 
 
 def cmd_sync_templates(
@@ -4421,7 +4354,7 @@ def _write_repro_issues(reg: dict[str, RegistryEntry], errors: dict[str, list[st
     print(f"[REPRO] {len(hub_diffs)} hub deviations, {len(hub_missing)} without hub model.yaml documented.")
 
 
-def _gguf_drift_errors(reg: dict[str, Any]) -> list[str]:
+def _gguf_drift_errors(reg: dict[str, Any], inventory: RegistryInventory | None = None) -> list[str]:
     """GGUF-Header vs. Registry: auto_fix-Felder (Feld-Ownership) abgleichen.
 
     Liest die GGUF-Header (via lms ls, parallel) und meldet Abweichungen bei
@@ -4429,40 +4362,13 @@ def _gguf_drift_errors(reg: dict[str, Any]) -> list[str]:
     'sync-from-gguf' (kein Schreiben hier - validate bleibt read-only).
     reasoning wird bewusst nicht geprueft (Interpretationsspielraum).
     """
-    try:
-        lms_models = _benchmark_lms_models(_run_lms_ls())
-    except Exception as e:  # lms nicht erreichbar: Check ueberspringen
-        print(f"[WARN] gguf_header_drift uebersprungen (lms ls fehlgeschlagen: {e})")
-        return []
-
-    unique: dict[str, str] = {}
-    for m in lms_models:
-        rp = m.get("path", "")
-        if not rp:
-            continue
-        full_path = _find_gguf_relative_path(rp)
-        if full_path is None:
-            continue
-        full_path = str(full_path)
-        key = normalize_model_name(m.get("modelKey", "")).lower()
-        base = key.split("@")[0]
-        if base not in unique:
-            unique[base] = full_path
-
-    gguf_arch: dict[str, tuple[int, int, bool | None, int | None]] = {}
-    gguf_moe: dict[str, bool] = {}
-    gguf_max_experts: dict[str, int] = {}
-    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
-        fut_to_base = {pool.submit(_read_gguf_arch, p): b for b, p in unique.items()}
-        for fut in concurrent.futures.as_completed(fut_to_base):
-            base = fut_to_base[fut]
-            nl, hd, is_reasoning, ctx, exp = fut.result()
-            if nl and hd:
-                gguf_arch[base] = (nl, hd, is_reasoning, ctx)
-            if exp is not None:
-                gguf_moe[base] = bool(exp)
-                if exp > 0:
-                    gguf_max_experts[base] = int(exp)
+    headers = _identity_gguf_headers(reg, inventory=inventory)
+    gguf_arch = {
+        key: (facts[0], facts[1], facts[2], facts[3])
+        for key, (facts, _family) in headers.items() if facts[0] and facts[1]
+    }
+    gguf_moe = {key: bool(facts[4]) for key, (facts, _family) in headers.items() if facts[4] is not None}
+    gguf_max_experts = {key: int(facts[4]) for key, (facts, _family) in headers.items() if facts[4]}
 
     out: list[str] = []
     for key, entry in reg.items():
@@ -4471,10 +4377,9 @@ def _gguf_drift_errors(reg: dict[str, Any]) -> list[str]:
         found = _find_gguf_arch_for_key(key, gguf_arch)
         if not found:
             continue
-        nl, hd, is_reasoning, ctx = found
-        base = normalize_model_name(key).split("@")[0]
-        exp = gguf_moe.get(base)
-        max_experts = gguf_max_experts.get(base)
+        nl, hd, _is_reasoning, ctx = found
+        exp = gguf_moe.get(key)
+        max_experts = gguf_max_experts.get(key)
 
         if exp is True and entry.get("arch") != "moe":
             out.append(
@@ -4521,8 +4426,8 @@ def cmd_validate(
 
     def configs_for_key(model_key: str) -> list[dict[str, Any]]:
         if identity_links is not None:
-            return configs_for_registry_key(model_key, cfgs, identity_links)
-        return find_all_configs_for_registry_key(model_key, cfgs)
+            return cast("list[dict[str, Any]]", configs_for_registry_key(model_key, cfgs, identity_links))
+        return cast("list[dict[str, Any]]", find_all_configs_for_registry_key(model_key, cfgs))
 
     linked_config_keys: dict[str, str] = {}
     if identity_links is not None:
@@ -4644,7 +4549,8 @@ def cmd_validate(
     for model_key, entry in reg.items():
         if not isinstance(entry, dict):
             continue
-        sampling_block = entry.get("sampling") if isinstance(entry.get("sampling"), dict) else {}
+        raw_sampling = entry.get("sampling")
+        sampling_block = raw_sampling if isinstance(raw_sampling, dict) else {}
         status = entry.get("sampling_research_status") or sampling_block.get("sampling_research_status")
         if status is not None and status not in RESEARCH_STATUSES:
             errors["sampling_research_status_invalid"].append(f"{model_key}: {status!r}")
@@ -4698,6 +4604,12 @@ def cmd_validate(
         elif not entry.get("file_size_bytes"):
             continue
         if not configs_for_key(model_key):
+            if identity_links is not None and has_declared_config and not any(
+                message.startswith(f"{model_key}:") for message in errors["local_config_pair_invalid"]
+            ):
+                errors["local_config_pair_invalid"].append(
+                    f"{model_key}: declared local GGUF/JSON binding does not prove the complete model identity"
+                )
             rk = normalize_model_name(model_key)
             errors["registry_no_config"].append(f"{model_key}: keine passende Config-JSON gefunden (normalized: {rk})")
 
@@ -4706,32 +4618,13 @@ def cmd_validate(
         if not isinstance(entry, dict):
             continue
         reasoning = entry.get("reasoning")
-        arch_raw = entry.get("architecture_family") or entry.get("arch", "")
-        if not reasoning or not arch_raw:
-            continue
-        model_name = str(model_key).casefold().replace("_", "-")
-        if "deepseek-r1" in model_name:
-            # Distilled DeepSeek-R1 models can use a Qwen2 GGUF base while
-            # retaining the R1 reasoning contract. The GGUF architecture is
-            # an implementation detail here, not the fine-tune's behavior.
-            continue
-        # Several GGUF bases are implementation families, not reasoning
-        # contracts: e.g. ``deepseek2`` contains both GLM and Moonlight,
-        # ``llama`` contains instruct and reasoning derivatives, and Gemma-4
-        # has category-dependent thinking.  Only Qwen's name exceptions and
-        # GPT-OSS have a stable architecture-level reasoning contract here.
-        arch_normalized = str(arch_raw).lower().replace(".", "")
-        if not (arch_normalized.startswith("qwen") or arch_normalized == "gpt-oss"):
-            continue
-        detected = None
-        arch_lower = arch_normalized  # normalize: "Qwen3.5" → "qwen35"
-        for arch_key, rtype in _ARCH_REASONING_MAP.items():
-            if arch_key in arch_lower:
-                detected = rtype
-                break
-        if detected is not None and reasoning != detected:
+        from runtime_policy import resolve_reasoning
+
+        # Explicit Registry policy is authoritative. Architecture defaults
+        # cannot reject a fine-tune's declared reasoning behavior.
+        if reasoning and resolve_reasoning(entry, model_key) != reasoning:
             errors["reasoning_arch_mismatch"].append(
-                f"{model_key}: reasoning={reasoning}, aber Architektur '{arch_raw}' erwartet '{detected}'"
+                f"{model_key}: unsupported reasoning policy {reasoning!r}"
             )
 
     # ── Check 8: LM Studio runtime evidence vs. Registry ───────────
@@ -4812,6 +4705,7 @@ def cmd_validate(
             and isinstance(max_experts, int)
             and not isinstance(max_experts, bool)
             and max_experts > 0
+            and isinstance(cfg_experts, int)
             and cfg_experts > max_experts
         ):
             errors["runtime_experts_exceed_max"].append(
@@ -4857,7 +4751,7 @@ def cmd_validate(
     # unveraenderlichen GGUF-Headern; Abweichungen werden gemeldet (fixbar
     # durch 'sync-from-gguf'). reasoning bleibt bewusst außen vor
     # (Interpretationsspielraum, wird nur als fill-if-missing behandelt).
-    gguf_drift_errors = [] if ci else _gguf_drift_errors(reg)
+    gguf_drift_errors = [] if ci else _gguf_drift_errors(reg, inventory)
     errors["gguf_header_drift"] = gguf_drift_errors
 
     # ── Report ─────────────────────────────────────────────────────
@@ -4903,6 +4797,11 @@ def _registry_local_bundle_errors(registry: dict[str, Any]) -> dict[str, list[st
     for model_key, entry in registry.items():
         if not isinstance(entry, dict):
             continue
+        try:
+            speculative_policy = registry_speculative_policy(entry)
+        except ValueError as exc:
+            errors["companion"].append(f"{model_key}: {exc}")
+            continue
         local = entry.get("local")
         if not isinstance(local, dict):
             continue
@@ -4927,11 +4826,13 @@ def _registry_local_bundle_errors(registry: dict[str, Any]) -> dict[str, list[st
 
         local_llama = local.get("llama_cpp")
         speculative = local_llama.get("speculative") if isinstance(local_llama, dict) else None
+        if speculative_policy == "disabled":
+            continue
         if not isinstance(speculative, dict):
             continue
         normalized = normalize_speculative_profile(speculative)
         role = companion_role(normalized)
-        if role is None:
+        if not speculative:
             continue
         companions = local.get("companions")
         companion_path = companions.get(role) if isinstance(companions, dict) else None
@@ -4942,7 +4843,7 @@ def _registry_local_bundle_errors(registry: dict[str, Any]) -> dict[str, list[st
             for message in validate_companion_binding(
                 main_path if isinstance(main_path, str) else None,
                 companion_path if isinstance(companion_path, str) else None,
-                normalized,
+                speculative,
             )
         )
     return errors
@@ -5082,12 +4983,12 @@ def cmd_sync(
 
     if refresh_sampling:
         print("[sampling] Explizite Websuche für alle Registry-Kandidaten ...")
-        _research_missing_sampling(load_registry(), force=True)
+        _research_missing_sampling(load_registry(), force=True, inventory=inventory)
     else:
         print("[sampling] Websuche ausgelassen; nur lokale Bestandsdaten verwendet")
 
     print("[fill-quant] fehlende @quant-Suffixe aus GGUF-Headern ergänzen ...")
-    cmd_fill_quant(lms_models=lms)
+    cmd_fill_quant(lms_models=lms, inventory=inventory)
 
     print("[fill-arch] n_layers/hidden_dim + reasoning aus GGUF-Headern in Registry ...")
     cmd_fill_arch(lms_models=lms, inventory=inventory)
@@ -5142,6 +5043,8 @@ def cmd_pipeline(
     refresh_sampling: bool = False,
     import_lms_settings: bool = False,
     write_prompts: bool = False,
+    model_list: Path | None = None,
+    gguf_list: Path | None = None,
 ) -> None:
     """Ein-Aufruf-Wartungspipeline (ersetzt sync_model_configs.ps1).
 
@@ -5154,7 +5057,8 @@ def cmd_pipeline(
     ignore_drift: beendet full NICHT mit Exit-Code 1, auch wenn Melde-Konflikte
     (Feld-Ownership: Config-Felder, GGUF-Header-Drift) offen sind.
     """
-    inventory = _collect_registry_inventory()
+    inventory = (_collect_registry_inventory(model_list, gguf_list)
+                 if model_list is not None or gguf_list is not None else _collect_registry_inventory())
     _ensure_gguf_inventory(inventory)
     print(
         f"[INVENTUR] LM Studio: {len(inventory.lms_models)} passende Modelle "
@@ -5211,19 +5115,19 @@ def cmd_pipeline(
         validate_prompts()
         print("[6a] Registry-Drift-Validierung (Feld-Ownership) ...")
         errors = cmd_validate(inventory=inventory)
-        open_drift = {k: v for k, v in errors.items() if k in _DRIFT_CHECKS and v}
+        open_drift = _blocking_validation_errors(errors)
+        if ignore_drift:
+            open_drift = {key: items for key, items in open_drift.items() if key not in _DRIFT_CHECKS}
         if open_drift:
             total_open = sum(len(v) for v in open_drift.values())
             print(f"\n{'=' * 60}")
-            print(f"[DRIFT] {total_open} offene Melde-Konflikte (Feld-Ownership):")
+            print(f"[VALIDATION] {total_open} offene blockierende Vertragsverletzungen:")
             for check, items in open_drift.items():
                 print(f"  - {check}: {len(items)}")
-            print("  Beheben: sync-from-gguf (auto-fix) laeuft bereits; Config-Felder")
-            print("  manuell entscheiden oder --ignore-drift fuer reinen Status.")
+            print("  Identitäts-, Template-, Bundle- und Runtime-Verträge vor dem Start beheben.")
             print(f"{'=' * 60}")
-            if not ignore_drift:
-                print("[ERROR] pipeline full mit Exit-Code 1 (offene Melde-Konflikte)")
-                sys.exit(1)
+            print("[ERROR] pipeline full mit Exit-Code 1 (offene Vertragsverletzungen)")
+            sys.exit(1)
         else:
             print("[DRIFT] Keine offenen Melde-Konflikte - konvergiert.")
 
@@ -5235,7 +5139,7 @@ def cmd_pipeline(
 # GGUF-Varianten die Reasoning-Effort-Felder idempotent nach (mit Backup).
 
 _PRE_LOCK_PATH = PROJECT_ROOT / "ergebnisse" / ".benchmark.lock"
-_PRE_EFFORT_FIELD = {
+_PRE_EFFORT_FIELD: dict[str, Any] = {
     "key": "ext.virtualModel.customField.openai.gptOss20b.reasoningEffort",
     "value": GPTOSS_REASONING_EFFORT,
 }
@@ -5243,7 +5147,7 @@ _PRE_PARSING_FIELD = {
     "key": "llm.prediction.reasoning.parsing",
     "value": {"enabled": False, "startString": " thinking", "endString": " response"},
 }
-_PRE_BUDGET_FIELD = {
+_PRE_BUDGET_FIELD: dict[str, Any] = {
     "key": "llm.prediction.reasoning.budgetTokens",
     "value": {"checked": True, "value": GPTOSS_REASONING_BUDGET},
 }
@@ -5278,8 +5182,8 @@ def _pre_backup_path(path: str) -> str:
 
 def gptoss_patch_config(path: str, dry_run: bool = False) -> tuple[bool, list[str], list[str], str | None]:
     """Gpt-oss-Config patchen. Returns (changed, added_keys, updated_keys, backup_path)."""
-    with open(path, encoding="utf-8") as f:
-        data = json.load(f)
+    with open(path, encoding="utf-8") as input_file:
+        data = json.load(input_file)
     missing = gptoss_missing_fields(data)
     present = {f.get("key"): f for f in data.get("operation", {}).get("fields", [])}
     to_overwrite = [
@@ -5296,8 +5200,8 @@ def gptoss_patch_config(path: str, dry_run: bool = False) -> tuple[bool, list[st
     by_key = {f["key"]: f for f in data["operation"]["fields"]}
     for f in to_overwrite:
         by_key[f["key"]]["value"] = f["value"]
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    with open(path, "w", encoding="utf-8") as output_file:
+        json.dump(data, output_file, ensure_ascii=False, indent=2)
     return True, [m["key"] for m in missing], [f["key"] for f in to_overwrite], backup
 
 
@@ -5569,7 +5473,7 @@ def _run_public_cli(arguments: list[str]) -> bool:
     )
     subparsers = parser.add_subparsers(dest="command")
 
-    subparsers.add_parser("status", help="Read-only model inventory and Registry report")
+    status_parser = subparsers.add_parser("status", help="Read-only model inventory and Registry report")
 
     sync_parser = subparsers.add_parser(
         "sync", help="Refresh Registry data and report proposed LM Studio settings"
@@ -5610,6 +5514,15 @@ def _run_public_cli(arguments: list[str]) -> bool:
     validate_parser.add_argument("--ci", "--headless", action="store_true", help="skip local LM Studio state")
     validate_parser.add_argument("--verbose", action="store_true")
     validate_parser.add_argument("--repro", action="store_true")
+    for inventory_parser in (status_parser, sync_parser, full_parser, validate_parser):
+        inventory_parser.add_argument(
+            "--model-list", type=Path,
+            help="read a saved `lms ls --json` list instead of querying the live CLI",
+        )
+        inventory_parser.add_argument(
+            "--gguf-list", type=Path,
+            help="verify an absolute GGUF file list against disk before reading or changing the Registry",
+        )
 
     preset_parser = subparsers.add_parser("preset", help="Export a derived llama.cpp preset INI")
     preset_parser.add_argument("path", nargs="?", help="output path (defaults to the project export folder)")
@@ -5630,13 +5543,18 @@ def _run_public_cli(arguments: list[str]) -> bool:
         return True
 
     args = parser.parse_args(arguments)
+    snapshot_options = {
+        name: value for name in ("model_list", "gguf_list")
+        if (value := getattr(args, name, None)) is not None
+    }
     if args.command == "status":
-        cmd_pipeline("status")
+        cmd_pipeline("status", **snapshot_options)
     elif args.command == "sync":
         cmd_pipeline(
             "sync",
             refresh_sampling=args.refresh_sampling,
             import_lms_settings=args.import_lms_settings,
+            **snapshot_options,
         )
     elif args.command == "full":
         cmd_pipeline(
@@ -5645,9 +5563,13 @@ def _run_public_cli(arguments: list[str]) -> bool:
             refresh_sampling=args.refresh_sampling,
             import_lms_settings=args.import_lms_settings,
             write_prompts=args.write_prompts,
+            **snapshot_options,
         )
     elif args.command == "validate":
-        inventory = None if args.ci else _collect_registry_inventory()
+        if args.ci and (args.model_list is not None or args.gguf_list is not None):
+            parser.error("--ci cannot be combined with local inventory snapshots")
+        inventory = (None if args.ci else _collect_registry_inventory(args.model_list, args.gguf_list)
+                     if args.model_list is not None or args.gguf_list is not None else _collect_registry_inventory())
         if inventory is not None:
             _ensure_gguf_inventory(inventory)
         errors = cmd_validate(
@@ -5860,14 +5782,14 @@ def main() -> None:
     elif cmd == "validate":
         flags = set(sys.argv[2:])
         ci = "--ci" in flags or "--headless" in flags
-        inventory = None if ci else _collect_registry_inventory()
-        if inventory is not None:
-            _ensure_gguf_inventory(inventory)
+        validation_inventory = None if ci else _collect_registry_inventory()
+        if validation_inventory is not None:
+            _ensure_gguf_inventory(validation_inventory)
         errors = cmd_validate(
             verbose="--verbose" in flags,
             repro="--repro" in flags,
             ci=ci,
-            inventory=inventory,
+            inventory=validation_inventory,
         )
         has_blocking_errors = bool(_blocking_validation_errors(errors))
         sys.exit(1 if has_blocking_errors else 0)

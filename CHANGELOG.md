@@ -2,6 +2,28 @@
 
 Zentrales Änderungslog für das Local-LLM-Benchmark-Tool. Neueste Einträge zuerst.
 
+## Registry-Folgereview, R13 und Typechecks korrigiert (29.09.2026)
+
+- **FIX/TEST:** R13 im Namespace-Fallback behoben: korrekter Sandbox-Aufruf, Setup-Zustand aus demselben Worker und vollständiger typisierter Zustandsvergleich. Lange Arrays, DataFrames und verschachtelte Werte werden vollständig verglichen; nicht belegbar vergleichbare Werte scheitern geschlossen.
+- **TYPECHECK:** Die 119 Vollbaum-mypy-Fehler in Registry-CLI, Launcher, Assembly, Custom-Benchmark und lokalem Embedding-Runner korrigiert. Keine Typregeln gelockert; `python -m mypy .` prüft 51 Quelldateien fehlerfrei. Der ignorierte Embedding-Runner bleibt lokal.
+- **CONTRACTS:** `fill-quant` nutzt eindeutige physische Evidenz und `IdentityLink`. Frische Pairing-Nachweise bleiben bei erneutem Sync erhalten. Integriertes MTP benötigt tatsächliche NextN-Tensoren; nichtleere Helper-Profile ohne Typ blockieren. DFlash-/DSpark-Ziellayer beziehen sich auf Decoder-Layer ohne angehängte NextN-Layer.
+- **INVENTORY:** `--model-list` und `--gguf-list` erlauben die ausdrücklich gewählten lokalen Snapshots. Die GGUF-Liste wird gegen aktuelle Dateien und konfigurierte Roots auf Vollständigkeit geprüft; nicht erfasste Roots werden nicht zusätzlich eingemischt. CLI-Hilfe und negative Tests ergänzt.
+- **LOCAL DATA:** Registry mit den neuen Listen abgeglichen; 14 gelöschte Modelle mit vollständiger Policy archiviert, neue Qwen-Quantisierung aufgenommen, zwei ungültige JSON-Bindungen entfernt und vier reale MTP-/DSpark-Pairings verknüpft. Externe LM-Studio-Dateien bleiben erhalten. Offene Backend-/Bindungsfälle stehen im [Folgereview](doc-git/Review-Artifacts/Code-Review_registry_Fixes_2026-09-29.md).
+- **GATES:** Pre-Commit verwendet Ruff über denselben Python-Interpreter. CLI-Fallback-Tests isolieren die Native-API eines parallel laufenden LM Studio. Alte unzugängliche Testverzeichnisse sind ignoriert; keine fremden Dateien gelöscht.
+
+## Registry-Review-Checkpoint dokumentiert (29.09.2026)
+
+- **DOC:** [COMPACTIONS.md](COMPACTIONS.md), Checkpoint 29.09.2026 / 01:34, ergänzt: gemeinsame Vertragsgrenzen der R01–R12-Fixes, Abnahme vom 28.09., verbleibende lokale Datenblocker und neuer offener R13/P2. Bestehende Checkpoints bleiben erhalten; kein Commit/Push.
+
+## Registry-Review R01–R12 korrigiert (28.09.2026)
+
+- **IDENTITÄT:** Konkrete Publisher-/Modell-/Quant-Identitäten bleiben beim Matching, GGUF-Sync, JSON-Import und Load erhalten. `IdentityLink` bindet Header und Konfigurationen eindeutig; persistierte Pfade können keine fremde Quantisierung oder Variante umetikettieren. Native LM-Studio-Instanzen müssen Identität und geladenen Benchmark-Kontext nachweisen.
+- **RUNTIME:** Gemeinsame Resolver für Kontext, Reasoning und Template-Priorität steuern Assembly, Custom-/LM-Eval-Requests und Provider. Explizite Registry-Policy gewinnt; Template-Controls werden aus dem ausgewählten Datei-/GGUF-Template abgeleitet. `fill-reasoning` ergänzt fehlende Klassifikation aus belegten Headern; fehlende Template-Evidenz bleibt unbekannt.
+- **VALIDIERUNG:** Pipeline-Endstatus blockiert sämtliche Vertragsfehler; `--ignore-drift` ignoriert ausschließlich Drift. Ein gemeinsamer begrenzter GGUF-Reader liest sämtliche Metadaten und Tensorbeschreibungen ohne Gewichte zu mappen, einschließlich spät angeordneter MoE-Felder.
+- **COMPANIONS:** Gewöhnliche Drafter werden anhand Tokenizer-/Token-Tabellen geprüft. DFlash, DSpark und separate MTP-Helfer brauchen passende Header und Zielidentität oder eine datei-/fingerprintgebundene Pairing-Evidenz. Unbekannte Methoden/Modi und Provider-Overrides, die validierte Helfer austauschen, blockieren.
+- **SAMPLING/DATA:** Webquellen sind an das eindeutig belegte Artefakt und explizite Quantisierungsbeziehungen gebunden; fremde Suchtreffer, Finetune-Abstammung und benachbarte Modellabschnitte bestätigen keine Profile. Gezielt betroffene Sampling-Profile der aktuellen lokalen Registry erneut recherchiert und technische Header-Abweichungen korrigiert; Backups und Quellenbericht erhalten.
+- **SCOPE:** Root-`utils/` bleibt gitignoriert und ist zusätzlich vom mypy-Vollbaum ausgeschlossen. Bestehende fremde Änderungen im Arbeitsbaum bleiben erhalten. Tests und erneute Review sind im ergänzenden Abschlussbericht dokumentiert; Entscheidungen und Folgearbeit im [Compaction-Checkpoint vom 29.09.2026](COMPACTIONS.md).
+
 Hinweise:
 - Stand: 06.08.2026 — umgezogen aus §20 der `doc-git/Architecture, Flow & ChangeLog_en.md` (dort nur noch Verweis).
 - Commit-Hashes beziehen sich auf `main`.
@@ -759,3 +781,9 @@ Die Hooks erzeugen CHANGELOG-Eintraege nicht automatisch; dieser Eintrag dokumen
 | 22.09. | `src/registry_tool.py`                                                                            | **FIX:** `patch-glm-configs` documents and enforces ownership boundaries: it repairs reasoning fields but never creates or removes the user-owned LM Studio Structured-Output field. |
 | 22.09. | `src/custom_benchmark.py`                                                                         | **FIX:** A missing GLM Structured-Output policy no longer produces an implicit response format; explicit requests remain provider-specific and other LM Studio defaults stay compatible. |
 | 22.09. | `tests/test_assemble_blueprint.py`, `tests/test_prio2.py`, `tests/test_registry_tool.py`, GLM hint | **TEST/DOC:** Cover opt-in behavior and document the corrected GLM/LM Studio policy.                                                                                        |
+## Aktueller Modellbestand, Thinking-Budgets und Load-Policy (29.09.2026)
+
+- **IDENTITÄT/DATEIEN:** Elf Neuzugänge synchronisiert, acht gelöschte Modelle einschließlich jrell reversibel archiviert. Millies Forkformat aus Header und Tensor-Typen als `q2_sym32k4` aufgelöst; `fill-quant`, Sync und JSON-Import erhalten die vollständige Identität auch bei unbekanntem LMS-Quant.
+- **RUNTIME:** Explizite Registry-Policy hält Drafter deaktiviert oder erhält ausgewählte Helper. Gemma-MTP und Muse-DSpark an vorhandene erfolgreiche LM-Studio-Logs gebunden. Load und Reuse prüfen tatsächliche Instanz-/Echo-Evidenz einschließlich typstrenger Flags; fehlende Belege bleiben blockierend.
+- **BUDGETS/ARTEFAKTE:** Muse-Blueprint und Template setzen kurze Reasoning-Stärke, 512 Thinking- und 8192 Gesamt-Tokens. Streaming verarbeitet Usage-Chunks, zählt Reasoning korrekt und bricht mit absoluter Deadline ab; terminale Fehler werden nicht wiederholt. Assembly/Klassifikation schreiben atomar. 54 aktuell gebundene JSON-Prompts und die tatsächliche Preset-Datei mit 57 Modellabschnitten geprüft und gesichert. Bestätigte Expertenwerte 18/32 übernommen; zwei fehlende GPT-OSS-Harmony-Templates ergänzt.
+- **REVIEW:** KV-Kernel-Matrix beider installierten Backends anhand Dateien, Upstream-Code und vorhandenen Logs geprüft. Ergebnisse, Nachreview und verbleibende lokale Vertragslücken im [Runtime-/KV-Bericht](doc-git/Review-Artifacts/Registry-Update_Runtime-and-KV_2026-09-29.md); Entscheidungen im Compaction-Checkpoint vom 29.09.2026 / 14:30.

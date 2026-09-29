@@ -50,7 +50,8 @@ from model_identity import (
     normalize_model_name,
 )
 from quantization import extract_quant_from_text, normalize_quant
-from speculative import classify_lms_speculative_values
+from runtime_policy import resolve_template
+from speculative import classify_lms_speculative_values, companion_role, lms_speculative_values
 
 # === Pfade ===
 _SRC_DIR = Path(__file__).parent
@@ -622,19 +623,7 @@ def resolve_template_name(bp_def: dict[str, Any] | None, model_name: str = "") -
     and hyphens are treated as interchangeable (registry keys normalize dots
     to hyphens, e.g. ``granite-4.1-30b`` -> ``granite-4-1-30b``).
     """
-    if not isinstance(bp_def, dict):
-        return None
-    tpl_map = bp_def.get("template_map")
-    if isinstance(tpl_map, dict):
-        name_lower = model_name.lower() if model_name else ""
-        norm_lower = re.sub(r"[.\s]", "-", name_lower)
-        for pattern, fname in tpl_map.items():
-            pat = str(pattern).lower()
-            pat_norm = re.sub(r"[.\s]", "-", pat)
-            if (pat and pat in name_lower) or (pat_norm and pat_norm in norm_lower):
-                return str(fname)
-    tpl = bp_def.get("template")
-    return str(tpl) if tpl else None
+    return cast("str | None", resolve_template({}, bp_def, model_name))
 
 
 _BLUEPRINT_DEFS_CACHE: dict[str, Any] | None = None
@@ -1039,7 +1028,12 @@ def classify_registry() -> None:
         existing_reasoning = entry.get("reasoning")
         reasoning = classify_reasoning(model_name, notes, arch, existing_reasoning)
         capabilities = classify_capabilities(model_name, arch, notes)
-        blueprint = select_blueprint(reasoning, capabilities, arch, model_name)
+        if entry.get("blueprint_policy") == "registry":
+            blueprint = entry.get("blueprint")
+            if not isinstance(blueprint, str) or blueprint not in blueprints:
+                raise ValueError(f"Invalid explicit blueprint for {model_name}: {blueprint!r}")
+        else:
+            blueprint = select_blueprint(reasoning, capabilities, arch, model_name)
 
         # Custom-Template-Detection: Blueprint-Definition ist SSOT; das
         # Registry-`template:`-Feld gilt als veraltet und wird ignoriert.
@@ -1070,14 +1064,11 @@ def classify_registry() -> None:
 
         updated_count += 1
 
-    # Write updated registry
-    with open(REGISTRY_PATH, "w", encoding="utf-8") as f:
-        yaml_ruamel.dump(registry, f)
+    # The Registry is authoritative and is replaced only after classification
+    # completes, using the same atomic writer as the remaining sync stages.
+    from registry_tool import save_registry
 
-    # Normalize blank lines (no blanks within entries, one between entries)
-    from registry_tool import _format_blank_lines
-
-    _format_blank_lines(REGISTRY_PATH)
+    save_registry(registry, REGISTRY_PATH)
 
     print(f"[OK] Updated {updated_count} models in {REGISTRY_PATH}")
 
@@ -1406,7 +1397,7 @@ def assemble_prompts(
                     with open(json_path, encoding="utf-8-sig") as f:
                         data = json.load(f)
 
-                    tpl_name = resolve_template_name(bp, model_name) or entry.get("template")
+                    tpl_name = resolve_template(entry, bp, model_name)
                     tpl_content = None
                     if tpl_name:
                         tpl_path = TEMPLATE_DIR / tpl_name
@@ -1414,6 +1405,32 @@ def assemble_prompts(
                             tpl_content = tpl_path.read_text(encoding="utf-8")
 
                     fields = data.setdefault("operation", {}).setdefault("fields", [])
+                    speculative_values = lms_speculative_values(entry)
+                    if speculative_values is not None:
+                        local = entry.get("local", {})
+                        profile = local.get("llama_cpp", {}).get("speculative", {})
+                        role = companion_role(profile)
+                        if entry.get("speculative_policy") != "disabled":
+                            from artifact_bundle import validate_companion_binding
+
+                            companion = local.get("companions", {}).get(role)
+                            if role == "draft" and not companion:
+                                companion = local.get("companions", {}).get("drafter")
+                            errors = validate_companion_binding(local.get("model_path"), companion, profile)
+                            if errors:
+                                print(f"[WARN] {model_name}: speculative JSON fields unchanged: {'; '.join(errors)}")
+                                speculative_values = None
+                        if speculative_values is not None:
+                            load_fields = data.setdefault("load", {}).setdefault("fields", [])
+                            reverse_fields = {value: key for key, value in _LMS_SPECULATIVE_FIELDS.items()}
+                            for key, value in speculative_values.items():
+                                field_key = reverse_fields[key]
+                                for field in load_fields:
+                                    if field.get("key") == field_key:
+                                        field["value"] = value
+                                        break
+                                else:
+                                    load_fields.append({"key": field_key, "value": value})
                     found_system_prompt = False
                     found_pt = False
                     parsing_cfg = bp.get("reasoning_parsing")
@@ -1452,13 +1469,25 @@ def assemble_prompts(
                         fields.append({"key": "llm.prediction.reasoning.budgetTokens",
                                        "value": {"checked": True, "value": budget}})
 
+                    if bp.get("sync_prediction_limit") is True and isinstance(runtime_cfg, dict):
+                        maximum = runtime_cfg.get("max_tokens")
+                        if isinstance(maximum, int) and not isinstance(maximum, bool) and maximum > 0:
+                            for field in fields:
+                                if field.get("key") == "llm.prediction.maxPredictedTokens":
+                                    field["value"] = {"checked": True, "value": maximum}
+                                    break
+                            else:
+                                fields.append({"key": "llm.prediction.maxPredictedTokens",
+                                               "value": {"checked": True, "value": maximum}})
+
                     # ``llm.prediction.structured`` is intentionally not
                     # written here. Structured output is a request-level API
                     # choice for benchmarks; changing this GUI default would
                     # affect interactive LM Studio use.
 
-                    with open(json_path, "w", encoding="utf-8") as f:
-                        json.dump(data, f, indent=2, ensure_ascii=False)
+                    from registry_tool import _atomic_write_text
+
+                    _atomic_write_text(Path(json_path), json.dumps(data, indent=2, ensure_ascii=False) + "\n")
 
                     written += 1
                 except Exception as e:

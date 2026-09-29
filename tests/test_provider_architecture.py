@@ -155,6 +155,7 @@ def test_lmstudio_current_model_falls_back_to_native_loaded_instances() -> None:
             {
                 "key": "ternary-bonsai-27b@?",
                 "publisher": "prism-ml",
+                "quantization": {"name": "Q2_G64"},
                 "display_name": "Ternary Bonsai 27B Q2 G64",
                 "loaded_instances": [{"id": "ternary-bonsai-27b@?"}],
             }
@@ -228,6 +229,12 @@ def test_lmstudio_load_passes_registry_expert_count_to_native_api() -> None:
 
     def request(endpoint: str, **kwargs: object) -> dict[str, object]:
         calls.append({"endpoint": endpoint, **kwargs})
+        if endpoint == "/api/v1/models":
+            return {"models": [{
+                "key": "ggml-org/gpt-oss-20b",
+                "quantization": {"name": "MXFP4"},
+                "loaded_instances": [{"id": "gpt-oss-instance"}],
+            }]}
         return {
             "status": "loaded",
             "instance_id": "gpt-oss-instance",

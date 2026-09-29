@@ -178,54 +178,21 @@ if ($SkipGguf) {
     $ggufScript = @'
 import os
 import sys
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 
 PROJECT = Path.cwd()  # Skript laeuft immer mit cwd=Projektroot (Set-Location)
 sys.path.insert(0, str(PROJECT / "src"))
 
-from benchmark_config import is_support_file  # noqa: E402
-from registry_tool import MODELS_CACHE, _get_all_ggufs, _read_gguf_arch, load_registry  # noqa: E402
+from registry_tool import _collect_registry_inventory, _identity_gguf_headers  # noqa: E402
 
-
-def norm(s: str) -> str:
-    return s.lower().replace("_", "-").replace(".", "-").replace("\\", "/")
-
-
-reg = load_registry()
-bases: dict[str, list[str]] = {}
-for key, entry in reg.items():
-    if not isinstance(entry, dict):
-        continue
-    base = norm(key.split("@")[0])
-    bases.setdefault(base, []).append(key)
-
-hits: dict[str, tuple[Path, tuple]] = {}
-with ThreadPoolExecutor(max_workers=8) as pool:
-    futures = {}
-    for path in _get_all_ggufs():
-        if is_support_file(path):
-            continue
-        futures[pool.submit(_read_gguf_arch, str(path))] = path
-    for fut in as_completed(futures):
-        path = futures[fut]
-        nl, hd, _is_reasoning, ctx, _exp = fut.result()
-        if not nl or not hd:
-            continue
-        rel = path.relative_to(MODELS_CACHE)
-        if len(rel.parts) < 2:
-            continue
-        folder = norm(str(rel.parent))
-        best = None
-        for base in bases:
-            if folder == base or base in folder:
-                if best is None or len(base) > len(best):
-                    best = base
-        if best is None:
-            continue
-        for key in bases[best]:
-            hits.setdefault(key, (path, (nl, hd, ctx)))
+inventory = _collect_registry_inventory()
+reg = inventory.registry
+headers = _identity_gguf_headers(reg, inventory=inventory)
+hits = {
+    key: (inventory.identity_links[key].artifact_paths[0], (facts[0], facts[1], facts[3]))
+    for key, (facts, _family) in headers.items() if facts[0] and facts[1]
+}
 
 errors = []
 for key, (path, (nl, hd, ctx)) in sorted(hits.items()):

@@ -176,6 +176,11 @@ class TestCheckApiAvailable:
 class TestGetCurrentLoadedModel:
     """Query `lms ps --json` for the currently loaded model."""
 
+    @pytest.fixture(autouse=True)
+    def isolate_native_model_inventory(self, mocker):
+        """CLI fallback tests must never query the user's running LM Studio."""
+        mocker.patch("providers.lmstudio_provider.LMStudioProvider._native_request", return_value=None)
+
     def test_returns_none_on_lms_failure(self, mocker):
         # lms command not found
         mocker.patch("subprocess.run", side_effect=FileNotFoundError())

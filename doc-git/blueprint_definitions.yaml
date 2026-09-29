@@ -10,6 +10,23 @@ blueprints:
       - instruct_scaffolding
       - safety_block
       - output_style_default
+  muse_reasoning_low:
+    description: Muse-Glimmer mit begrenztem Reasoning und Gesamtbudget
+    role: You are a helpful AI assistant. Keep reasoning brief and give the final answer promptly.
+    role_template: You are {name}, a {arch} model{params_label} by {publisher}, optimized for {capabilities}{type_label}. Keep reasoning brief and give the final answer promptly.
+    modules:
+      - safety_block
+      - output_style_default
+    sync_prediction_limit: true
+    reasoning_parsing:
+      enabled: true
+      startString: '<|start|>assistant to=self<|message|>'
+      endString: '<|eom|>'
+    benchmark_runtime:
+      max_tokens: 8192
+      max_thinking_tokens: 512
+      reasoning_budget_tokens: 512
+      reasoning_strength: low
   coding_agent:
     description: Coding-spezialisierter Assistent
     role: You are an expert software engineer with strong coding skills.

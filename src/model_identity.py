@@ -266,6 +266,21 @@ def normalize_match_base_identity(key: str) -> str:
     return normalize_model_name(key).split("@", 1)[0]
 
 
+def normalize_artifact_model_name(model_name: str, quant: str) -> str:
+    """Remove packaging tokens backed by this artifact's selected quantization.
+
+    Training and fine-tune variants (including QAT) remain part of identity.
+    A quant token is removed only when it agrees with the file evidence.
+    """
+    normalized = normalize_model_name(model_name)
+    tokens = ["gguf"]
+    if quant:
+        tokens.append(normalize_quant(quant).replace("_", "-"))
+    for token in sorted(tokens, key=len, reverse=True):
+        normalized = re.sub(rf"(?:(?<=-)|^){re.escape(token)}(?=-|$)", "", normalized)
+    return re.sub(r"-+", "-", normalized).strip("-")
+
+
 def normalize_match_identity(key: str, *, include_quant: bool = True) -> str:
     """Normalize the historical publisher-stripped matching namespace."""
     normalized = normalize_model_name(key)
@@ -537,6 +552,14 @@ def resolve_registry_match(name: str, keys: list[str]) -> RegistryMatch:
     if not name or not keys:
         return Unmatched(name)
 
+    # A requested concrete quant is a constraint, not a hint. Every alias
+    # stage below operates on the same restricted candidate set.
+    requested_quant = normalize_quant(decompose_model_identity(name)[2])
+    if requested_quant:
+        keys = [key for key in keys if normalize_quant(decompose_model_identity(key)[2]) == requested_quant]
+        if not keys:
+            return Unmatched(name)
+
     def unique_stage(normalized: str, normalizer: Callable[[str], str], stage: str) -> RegistryMatch | None:
         candidates = tuple(key for key in keys if normalizer(key) == normalized)
         if len(candidates) == 1:
@@ -565,11 +588,17 @@ def resolve_registry_match(name: str, keys: list[str]) -> RegistryMatch:
     if namespace_alias is not None:
         return namespace_alias
 
+    if requested_quant and decompose_model_identity(name)[0]:
+        return Unmatched(name)
+
     # Publisherless exact matching remains supported only when it is unique.
     norm = normalize_match_identity(name)
     publisherless_exact = unique_stage(norm, normalize_match_identity, "publisherless-exact")
     if publisherless_exact is not None:
         return publisherless_exact
+
+    if requested_quant:
+        return Unmatched(name)
 
     # Remove only quantization first. This preserves discriminating markers
     # such as ``-qat`` and can safely resolve a unique repack/variant even if
@@ -629,3 +658,12 @@ def match_registry_key(name: str, keys: list[str]) -> str | None:
     """Compatibility wrapper returning a key only for a unique match."""
     result = resolve_registry_match(name, keys)
     return result.key if isinstance(result, UniqueMatch) else None
+
+
+def same_model_identity(left: str, right: str) -> bool:
+    """Compare proven complete triples; an API instance alias proves nothing."""
+    if not all(decompose_model_identity(left)) or not all(decompose_model_identity(right)):
+        return False
+    if decompose_model_identity(left)[2] in {"?", "unknown", "none"} or decompose_model_identity(right)[2] in {"?", "unknown", "none"}:
+        return False
+    return normalize_registry_identity(left) == normalize_registry_identity(right)

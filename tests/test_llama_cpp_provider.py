@@ -142,9 +142,9 @@ def test_provider_lists_registry_eligible_local_ggufs(tmp_path: Any) -> None:
 def test_incompatible_registry_companion_fails_before_server_start(tmp_path: Any, monkeypatch: Any) -> None:
     main_path = tmp_path / "unsloth" / "qwen3.6-27b-GGUF" / "qwen3.6-27b-Q6_K.gguf"
     helper_path = tmp_path / "unsloth" / "qwen3.8-27b-GGUF" / "qwen3.8-27b-dflash2-Q8_0.gguf"
-    for path in (main_path, helper_path):
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(b"GGUF fixture")
+    from tests.gguf_fixture import write_gguf
+    write_gguf(main_path, source_repo="Qwen/Qwen3.6-27B")
+    write_gguf(helper_path, architecture="dflash", helper="dflash", target_repo="Qwen/Qwen3.8-27B")
     executable = tmp_path / "llama-server.exe"
     executable.write_bytes(b"test executable")
     registry: dict[str, Any] = {
@@ -178,7 +178,7 @@ def test_incompatible_registry_companion_fails_before_server_start(tmp_path: Any
     try:
         provider.load_model("unsloth/qwen3.6-27b@q6_k")
     except ValueError as exc:
-        assert "Qwen generation mismatch" in str(exc)
+        assert "target identity" in str(exc)
     else:
         raise AssertionError("incompatible companion must block llama-server startup")
 

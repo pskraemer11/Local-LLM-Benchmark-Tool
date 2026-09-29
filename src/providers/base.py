@@ -137,8 +137,24 @@ class HttpProvider:
 
     def chat_completions(self, payload: dict[str, Any], timeout: int = 120) -> Any | None:
         """Call the provider's OpenAI-compatible chat endpoint."""
-        return self.request_json("/chat/completions", method="POST", payload=payload, timeout=timeout)
+        response = self.request_json("/chat/completions", method="POST", payload=payload, timeout=timeout)
+        self._check_completion_budget(payload, response)
+        return response
 
     def completions(self, payload: dict[str, Any], timeout: int = 120) -> Any | None:
         """Call the provider's OpenAI-compatible text-completion endpoint."""
-        return self.request_json("/completions", method="POST", payload=payload, timeout=timeout)
+        response = self.request_json("/completions", method="POST", payload=payload, timeout=timeout)
+        self._check_completion_budget(payload, response)
+        return response
+
+    @staticmethod
+    def _check_completion_budget(payload: dict[str, Any], response: Any) -> None:
+        """Reject a proven server overrun; usage already includes reasoning."""
+        usage = response.get("usage") if isinstance(response, dict) else None
+        count = usage.get("completion_tokens") if isinstance(usage, dict) else None
+        budget = payload.get("max_tokens")
+        if (
+            isinstance(budget, int) and not isinstance(budget, bool) and budget > 0
+            and isinstance(count, int) and not isinstance(count, bool) and count > budget
+        ):
+            raise ProviderError(f"Server exceeded max_tokens: reported {count}, requested {budget}")

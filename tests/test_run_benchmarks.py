@@ -50,6 +50,34 @@ def test_provider_child_environment_sets_tool_eval_api_key(monkeypatch):
     assert child_env["TOOL_EVAL_API_KEY"] == "local-test-token"
 
 
+@pytest.mark.parametrize("text", ["- unexpected-list\n", "unexpected-scalar\n"])
+def test_registry_context_loader_rejects_non_mapping_yaml(monkeypatch, mocker, text):
+    monkeypatch.setattr(rb, "_REGISTRY_DATA", None)
+    monkeypatch.setattr(rb, "_REGISTRY_NORM", None)
+    mocker.patch("pathlib.Path.exists", return_value=True)
+    mocker.patch("builtins.open", mocker.mock_open(read_data=text))
+
+    assert rb._load_registry_for_context() == ({}, {})
+    assert rb._check_reasoning_registry("publisher/model@q4_k_m") is None
+
+
+def test_task_until_loader_handles_lmeval_function_tags_without_global_registration(monkeypatch, tmp_path):
+    import yaml
+
+    task_path = tmp_path / "local_task.yaml"
+    task_path.write_text(
+        "process_results: !function module.process\ngeneration_kwargs:\n  until: ['STOP']\n",
+        encoding="utf-8",
+    )
+    original_constructors = dict(yaml.SafeLoader.yaml_multi_constructors)
+    monkeypatch.setattr(rb, "LMEVAL_TASKS_DIR", str(tmp_path))
+
+    assert rb._task_yaml_has_until_sequence("local_task") is True
+    task_path.write_text("generation_kwargs:\n  until: []\n", encoding="utf-8")
+    assert rb._task_yaml_has_until_sequence("local_task") is False
+    assert yaml.SafeLoader.yaml_multi_constructors == original_constructors
+
+
 class TestCustomComparisonManifest:
     @staticmethod
     def _run_custom(
@@ -136,7 +164,7 @@ def test_launcher_unloads_model_when_manifest_execution_fails(monkeypatch):
 def _patch_gpt_oss_registry(mocker):
     import benchmark_config as bc
 
-    registry = dict(bc._load_quant_registry())
+    registry = {key: entry for key, entry in bc._load_quant_registry().items() if "gpt-oss-20b" not in key.lower()}
     gpt_entry = {
         "blueprint": "gptoss_reasoning",
         "reasoning": "thinking",
@@ -146,12 +174,10 @@ def _patch_gpt_oss_registry(mocker):
             for category in ("coding", "knowledge", "agentic", "math")
         },
     }
-    # The production registry uses the actual GGUF publisher (ggml-org),
-    # while older tests used the original OpenAI publisher.  Override every
-    # current GPT-OSS entry so matching remains deterministic for both forms.
-    matching_keys = [key for key in registry if "gpt-oss-20b" in key.lower()]
-    for key in matching_keys or ["openai/gpt-oss-20b@mxfp4"]:
-        registry[key] = dict(gpt_entry)
+    # Give this request its own exact publisher/quant fixture. A newly
+    # installed GPT-OSS variant from another publisher must not make these
+    # request-output tests depend on the user's changing local inventory.
+    registry["unsloth/gpt-oss-20b@mxfp4"] = dict(gpt_entry)
     mocker.patch.object(bc, "_load_quant_registry", return_value=registry)
 
 
@@ -433,7 +459,7 @@ class TestLmevalParams:
             "operation": {"fields": [{"key": k, "value": v} for k, v in fields.items()]},
             "load": {"fields": []},
         }
-        (d / "model.gguf.json").write_text(json.dumps(data), encoding="utf-8")
+        (d / "model-Q6_K.gguf.json").write_text(json.dumps(data), encoding="utf-8")
         return d
 
     # Region: Shape-Check - Required Keys ----------------------------------
@@ -474,7 +500,14 @@ class TestLmevalParams:
     def test_registry_sampling_replaces_model_overrides(self, mocker):
         # MODEL_TEMP_OVERRIDES sind entfernt; stattdessen entscheidet
         # Registry-Sampling (Modell x Kategorie) ueber die Defaults.
-        _patch_gpt_oss_registry(mocker)
+        import benchmark_config as bc
+        mocker.patch.object(bc, "_load_quant_registry", return_value={
+            "unsloth/phi-4@q5_k_m": {"sampling": {"coding": {"temperature": 1.0, "top_p": 1.0}}},
+            "unsloth/gpt-oss-20b@mxfp4": {"sampling": {"coding": {"temperature": 1.0, "top_p": 1.0}}},
+            "unsloth/qwen3-coder-30b-a3b-instruct@q3_k_s": {"sampling": {"coding": {
+                "temperature": 0.7, "top_p": 0.8, "top_k": 20, "repetition_penalty": 1.05,
+            }}},
+        })
         expected = {
             "unsloth/phi-4": 1.0,  # Registry-Sampling, coding
             "unsloth/gpt-oss-20b": 1.0,  # Zeile gpt-oss
@@ -542,7 +575,7 @@ class TestLmevalParams:
             assert "reasoning" not in params or params.get("reasoning") != "off"
 
     # Region: LMS-JSON-Config liefert nur Nicht-Temperatur-Felder ----------
-    def test_lms_temp_ignored_non_temp_merged(self, tmp_path):
+    def test_lms_temp_ignored_non_temp_merged(self, tmp_path, mocker):
         # JSON-temperature zaehlt nicht mehr (2026-08-06); min_p aus der
         # Config wird weiterhin uebernommen.
         self._write_lms_config(
@@ -550,8 +583,15 @@ class TestLmevalParams:
         )
         import benchmark_config as bc
 
+        model_path = tmp_path / "pub1" / "fake-model-7b" / "model-Q6_K.gguf"
+        model_path.write_bytes(b"GGUF fixture")
+        registry = {"pub1/fake-model-7b@q6_k": {
+            "architecture_family": "qwen3",
+            "local": {"model_path": str(model_path), "config_path": str(model_path) + ".json"},
+        }}
+        mocker.patch.object(bc, "_load_quant_registry", return_value=registry)
         with patch.object(bc, "LMS_CONFIG_ROOT", tmp_path):
-            params = _get_evaluation_parameters("pub1/fake-model-7b", "coding")
+            params = _get_evaluation_parameters("pub1/fake-model-7b@q6_k", "coding")
         assert params["temperature"] == 0.2
         assert params["min_p"] == 0.02
 
@@ -568,22 +608,32 @@ class TestLmevalParams:
                 params = _get_evaluation_parameters("pub1/fake-model-7b", bench)
                 assert params["temperature"] == temp, bench
 
-    def test_lms_thinking_enabled_emits_chat_template_kwargs(self, tmp_path):
+    def test_lms_thinking_enabled_emits_chat_template_kwargs(self, tmp_path, mocker):
         self._write_lms_config(tmp_path, "pub1", "fake-model-7b", {"llm.prediction.reasoning.enableThinking": True})
         import benchmark_config as bc
 
+        model_path = tmp_path / "pub1" / "fake-model-7b" / "model-Q6_K.gguf"
+        model_path.write_bytes(b"GGUF fixture")
+        registry = {"pub1/fake-model-7b@q6_k": {
+            "architecture_family": "qwen3",
+            "local": {"model_path": str(model_path), "config_path": str(model_path) + ".json"},
+        }}
+        (tmp_path / "fixture.jinja").write_text("{% if enable_thinking %}think{% endif %}", encoding="utf-8")
+        mocker.patch.object(bc, "_blueprint_features", return_value={"template": "fixture.jinja"})
+        mocker.patch.object(bc, "_TEMPLATE_ROOT", tmp_path)
+        mocker.patch.object(bc, "_load_quant_registry", return_value=registry)
         with patch.object(bc, "LMS_CONFIG_ROOT", tmp_path):
-            params = _get_evaluation_parameters("pub1/fake-model-7b", "coding")
+            params = _get_evaluation_parameters("pub1/fake-model-7b@q6_k", "coding")
         chat_template_kwargs = params.get("chat_template_kwargs", {})
         assert chat_template_kwargs.get("enable_thinking") is True
 
     # Region: --thinking Flag + REASONING_PATTERNS ---------------------
-    def test_thinking_flag_with_reasoning_pattern_enables_thinking(self, monkeypatch):
+    def test_thinking_flag_does_not_invent_unknown_template_control(self, monkeypatch):
         monkeypatch.setattr(rb, "IS_THINKING_ENABLED", True)
         # "r1" ist in REASONING_PATTERNS, "deepseek-r1-distill" ebenfalls
         params = _get_evaluation_parameters("r1-distill-7b", "coding")
         chat_template_kwargs = params.get("chat_template_kwargs", {})
-        assert chat_template_kwargs.get("enable_thinking") is True
+        assert chat_template_kwargs == {}
         # Und reasoning="off" darf NICHT gesetzt sein (Native API entfernt)
         assert "reasoning" not in params or params.get("reasoning") != "off"
 
@@ -713,23 +763,26 @@ class TestParseSubsetScore:
 
 
 class TestEnsureModelStillLoaded:
+    identity = "publisher/qwen3.6-30b@q4_k_m"
+
     def test_already_loaded_does_nothing(self, capsys):
         loaded = {
-            "model_identifier": "qwen3.6-30b",
-            "identifier": "qwen3.6-30b@q4_k_m",
+            "model_identifier": self.identity,
+            "identifier": "arbitrary-instance",
         }
         with patch.object(rb, "get_current_loaded_model", return_value=loaded):
             with patch.object(rb, "load_model") as ld:
                 with patch.object(rb, "is_model_ready") as w:
-                    _ensure_model_still_loaded("qwen3.6-30b", "qwen3.6-30b")
+                    _ensure_model_still_loaded(self.identity, self.identity)
                     ld.assert_not_called()
                     w.assert_not_called()
 
     def test_reload_called_when_unloaded(self, capsys):
-        with patch.object(rb, "get_current_loaded_model", return_value=None):
-            with patch.object(rb, "load_model") as ld:
+        verified = {"model_identifier": self.identity, "identifier": "new-instance"}
+        with patch.object(rb, "get_current_loaded_model", side_effect=[None, verified]):
+            with patch.object(rb, "load_model", return_value=(True, "new-instance")) as ld:
                 with patch.object(rb, "is_model_ready", return_value=True) as w:
-                    _ensure_model_still_loaded("qwen3.6-30b", "qwen3.6-30b")
+                    _ensure_model_still_loaded(self.identity, self.identity)
                     ld.assert_called_once()
                     w.assert_called_once()
 
@@ -738,18 +791,22 @@ class TestEnsureModelStillLoaded:
             "model_identifier": "some-other-model",
             "identifier": "some-other-model@q4_k_m",
         }
-        with patch.object(rb, "get_current_loaded_model", return_value=loaded):
-            with patch.object(rb, "load_model") as ld:
+        verified = {"model_identifier": self.identity, "identifier": "new-instance"}
+        with patch.object(rb, "get_current_loaded_model", side_effect=[loaded, verified]):
+            with patch.object(rb, "unload_all", return_value=True), patch.object(
+                rb, "load_model", return_value=(True, "new-instance")
+            ) as ld:
                 with patch.object(rb, "is_model_ready", return_value=True) as w:
-                    _ensure_model_still_loaded("qwen3.6-30b", "qwen3.6-30b")
+                    _ensure_model_still_loaded(self.identity, self.identity)
                     ld.assert_called_once()
                     w.assert_called_once()
 
     def test_warning_printed_when_model_lost(self, capsys):
-        with patch.object(rb, "get_current_loaded_model", return_value=None):
-            with patch.object(rb, "load_model"):
+        verified = {"model_identifier": self.identity, "identifier": "new-instance"}
+        with patch.object(rb, "get_current_loaded_model", side_effect=[None, verified]):
+            with patch.object(rb, "load_model", return_value=(True, "new-instance")):
                 with patch.object(rb, "is_model_ready", return_value=True):
-                    _ensure_model_still_loaded("qwen3.6-30b", "qwen3.6-30b", "MATH-500")
+                    _ensure_model_still_loaded(self.identity, self.identity, "MATH-500")
                     out = capsys.readouterr().out
                     assert "[WARN]" in out
                     assert "MATH-500" in out
@@ -1205,10 +1262,9 @@ class TestCheckRegistryForModel:
         reg, norm = self._registry(blueprint="default_chat")
         with (
             patch.object(rb, "_load_registry_for_context", return_value=(reg, norm)),
-            patch(
-                "assemble_blueprint.resolve_template_name", return_value="google_gemma-4-26B-A4B-it_chat_template.jinja"
-            ),
-            patch("registry_tool._load_blueprints", return_value={"default_chat": {}}),
+            patch("registry_tool._load_blueprints", return_value={"default_chat": {
+                "template": "google_gemma-4-26B-A4B-it_chat_template.jinja",
+            }}),
             patch("registry_tool.TEMPLATE_DIR", tmp_path),
         ):
             (tmp_path / "google_gemma-4-26B-A4B-it_chat_template.jinja").write_text("{{ x }}", encoding="utf-8")
@@ -1219,8 +1275,7 @@ class TestCheckRegistryForModel:
         reg, norm = self._registry(blueprint="default_chat")
         with (
             patch.object(rb, "_load_registry_for_context", return_value=(reg, norm)),
-            patch("assemble_blueprint.resolve_template_name", return_value="missing.jinja"),
-            patch("registry_tool._load_blueprints", return_value={"default_chat": {}}),
+            patch("registry_tool._load_blueprints", return_value={"default_chat": {"template": "missing.jinja"}}),
             patch("registry_tool.TEMPLATE_DIR", tmp_path),
         ):
             result = rb._check_registry_for_model("unsloth/gemma-4-26b-a4b-it", "Gemma 4")
