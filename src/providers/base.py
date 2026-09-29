@@ -14,6 +14,8 @@ from typing import Any, Protocol
 from urllib import request as urllib_request
 from urllib.error import HTTPError, URLError
 
+from generation_limits import generation_usage_violation
+
 
 @dataclass(frozen=True)
 class ProviderCapabilities:
@@ -151,10 +153,6 @@ class HttpProvider:
     def _check_completion_budget(payload: dict[str, Any], response: Any) -> None:
         """Reject a proven server overrun; usage already includes reasoning."""
         usage = response.get("usage") if isinstance(response, dict) else None
-        count = usage.get("completion_tokens") if isinstance(usage, dict) else None
-        budget = payload.get("max_tokens")
-        if (
-            isinstance(budget, int) and not isinstance(budget, bool) and budget > 0
-            and isinstance(count, int) and not isinstance(count, bool) and count > budget
-        ):
-            raise ProviderError(f"Server exceeded max_tokens: reported {count}, requested {budget}")
+        violation = generation_usage_violation(payload, usage)
+        if violation is not None:
+            raise ProviderError(f"{violation.error_type}: {violation.detail}")

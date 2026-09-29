@@ -36,7 +36,7 @@ from runtime_policy import (
 )
 from utils.terminal import warn
 
-_TEMPLATE_ROOT = Path(__file__).resolve().parents[1] / "doc-git" / "Jinja-Chat-Templates"
+_TEMPLATE_ROOT = Path(__file__).resolve().parents[1] / "docs" / "Jinja-Chat-Templates"
 
 BLACKLIST = [
     # Embedding-Modelle (separates Projekt embedding-eval/)
@@ -119,7 +119,7 @@ def is_registry_candidate(model: dict[str, Any]) -> bool:
 # Kategorie im Registry-Block vorhanden ist. JSON-temperature/top_p bleiben
 # GUI-only und werden fuer Benchmarks ignoriert. MODEL_TEMP_OVERRIDES und der Knowledge-Floor wurden entfernt
 # (Punkte 3+4, Transparenz-Refactor 05.08.2026).
-# Temperaturen: Recherche 06.08.2026 (doc-git/Temperature Recommondations_en.md).
+# Temperaturen: Recherche 06.08.2026 (docs/Temperature Recommondations_en.md).
 # Instruct-Modelle nutzen Kategorie-Defaults (coding 0.2, knowledge 0.6,
 # agentic 0.6, math 0.7); Reasoning/Thinking-Modelle (im --thinking-Lauf)
 # nutzen BENCHMARK_THINKING_DEFAULTS (pauschal 0.6/0.95).
@@ -236,7 +236,7 @@ def _load_quant_registry() -> dict[str, Any]:
         return _QUANT_REGISTRY_CACHE
     from pathlib import Path as _Path
 
-    registry_path = _Path(__file__).resolve().parent.parent / "doc-git" / "model_registry.yaml"
+    registry_path = _Path(__file__).resolve().parent.parent / "data" / "model_registry.yaml"
     try:
         from ruamel.yaml import YAML
         from ruamel.yaml.error import YAMLError
@@ -286,7 +286,7 @@ MMLU_PRO_SUBSETS = [
 
 # ── Registry-Sampling (SSOT) ──
 # Recherchierte modell- und kategorieabhaengige Werte liegen in
-# doc-git/model_registry.yaml. Nicht dokumentierte Modelle verwenden die
+# data/model_registry.yaml. Nicht dokumentierte Modelle verwenden die
 # generischen Kategorie-/Thinking-Defaults darunter.
 
 # ── LM Studio JSON-Configs: GUI-Quelle fuer Generations-Parameter ──
@@ -405,7 +405,7 @@ def _registry_sampling_block(model_identifier: str) -> dict[str, Any] | None:
 
     Deterministisches Registry-Matching (match_registry_key), Rueckgabe des
     verschachtelten sampling-Dicts oder None. SSOT seit 2026-08-11/13
-    (Migration, siehe doc-git/Planung/registry_sampling.md).
+    (Migration, siehe docs/Planung/registry_sampling.md).
     """
     entry = _registry_entry(model_identifier)
     if entry is None:

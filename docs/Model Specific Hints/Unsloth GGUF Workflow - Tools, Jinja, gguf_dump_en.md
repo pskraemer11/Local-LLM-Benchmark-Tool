@@ -75,10 +75,10 @@ Tokenizer, Template) — nützlich z.B. zum Vergleich GGUF-Template vs. Hub-Temp
   (von HuggingFace, Beispielaufrufe in `models/templates/README.md`).
 
 ### Bezug zur lokalen Doku/Registry
-- Lokale Jinja-Overrides: `doc-git/Jinja-Chat-Templates/` (z.B. `gpt-oss-20b_harmony.jinja`,
+- Lokale Jinja-Overrides: `docs/Jinja-Chat-Templates/` (z.B. `gpt-oss-20b_harmony.jinja`,
   `gemma4_12b_template_minijinja.jinja`, `phi-4_template_unsloth.jinja`).
 - `Gemma 4 - Consolidated Model Hints`: 4 parallele Generations-Quellen
-  (GGUF vs. Hub vs. doc-git vs. JSON-Config) → mögliche Divergenz; Hub-Jinja ist
+  (GGUF vs. Hub vs. docs vs. JSON-Config) → mögliche Divergenz; Hub-Jinja ist
   für Gemma-4 autoritativ (`~/.lmstudio/hub/models/google/*.jinja`).
 - Gemma-4-`chat_template_kwargs`-Trick wirkt NICHT (Thinking hard-verdrahtet im
   GGUF-Jinja), siehe `thinking-config_en.md`.
@@ -110,7 +110,7 @@ im Log; Template-Erkennung testbar mit `./build/bin/test-chat ../minja/build/tes
 - **gguf_dump.py** (0.19.0) im venv einsatzbereit → Voll-Inspktion von GGUF-Metadaten
   und eingebetteten Chat-Templates ohne `registry_tool`-Umweg.
 - **Jinja-Templates:** GGUF-`tokenizer.chat_template` ist die SSOT für llama.cpp;
-  lokale Overrides in `doc-git/Jinja-Chat-Templates/` dokumentiert. Bei
+  lokale Overrides in `docs/Jinja-Chat-Templates/` dokumentiert. Bei
   Template-Problemen: `test-chat-template` (llama.cpp) oder `gguf_dump --json` zur
   Extraktion nutzen.
 - **llama.cpp-Tools:** für Ad-hoc-Inferenz/Verifikation eines einzelnen GGUF

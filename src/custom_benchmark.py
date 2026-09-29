@@ -81,6 +81,13 @@ import requests
 import csv_writer as csv_writer
 from benchmark_config import EXCLUDE_KEYWORDS, get_model_config
 from comparison_manifest import canonical_task_id
+from generation_limits import (
+    TERMINAL_GENERATION_ERRORS,
+    GenerationLimitError,
+    RepetitionGuard,
+    generation_usage_violation,
+    reported_reasoning_tokens,
+)
 
 # Model management from shared module (is NOT initiated from here)
 # NOTE: This script imports the constants and helper functions from
@@ -649,8 +656,7 @@ def load_jsonl(filepath: str) -> list[dict[str, Any]]:
 
 def _reported_reasoning_tokens(usage: dict[str, Any]) -> int | None:
     """Read exact reasoning usage when the OpenAI-compatible server reports it."""
-    details = usage.get("completion_tokens_details")
-    value = details.get("reasoning_tokens") if isinstance(details, dict) else None
+    value = reported_reasoning_tokens(usage)
     return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
 
 
@@ -678,12 +684,14 @@ def _stream_chat_completion(
     max_retries: int = MAX_RETRIES,
     *,
     total_timeout: float = 120,
+    reasoning_budget: int | None = None,
 ) -> tuple[str | None, float, int, int, float, int, bool, str | None, str | None]:
     """Consume SSE within one absolute deadline and the reported output budget.
 
     completion_tokens already includes reasoning; do not add its breakdown a
-    second time. Without server usage, text estimates remain diagnostics and
-    cannot prove an exact token limit. The absolute deadline still applies.
+    second time. Reported reasoning usage must also satisfy the local budget.
+    Without server usage, text estimates remain diagnostics and cannot prove
+    an exact token limit. A repeated-block guard and the deadline still apply.
     """
     started = time.monotonic()
     deadline = started + total_timeout
@@ -695,7 +703,7 @@ def _stream_chat_completion(
         current_start_timeout = min(start_timeout * (RETRY_MULTIPLIER ** attempt), remaining)
         result: dict[str, Any] = {
             "content": "", "thinking": "", "done": False, "error": None,
-            "usage": {}, "finish_reason": None, "response": None, "budget_exceeded": False,
+            "usage": {}, "finish_reason": None, "response": None, "violation": None,
         }
         result_lock = threading.Lock()
         cancel_event = threading.Event()
@@ -705,6 +713,8 @@ def _stream_chat_completion(
             """Accumulate transport deltas and close the response at a proven cap."""
             sess = None
             resp = None
+            content_guard = RepetitionGuard()
+            reasoning_guard = RepetitionGuard()
             try:
                 sess = requests.Session()
                 options = body.get("stream_options")
@@ -736,25 +746,46 @@ def _stream_chat_completion(
                     if not isinstance(delta, dict):
                         delta = {}
                     usage = chunk.get("usage")
+                    content_delta = delta.get("content")
+                    content_delta = content_delta if isinstance(content_delta, str) else ""
+                    reasoning_delta = _extract_reasoning_delta(delta)
+                    repetition = content_guard.feed(content_delta) or reasoning_guard.feed(reasoning_delta)
                     with result_lock:
                         if isinstance(usage, dict):
                             result["usage"] = usage
                         if choice.get("finish_reason"):
                             result["finish_reason"] = choice["finish_reason"]
-                        if isinstance(delta.get("content"), str):
-                            result["content"] += delta["content"]
-                        result["thinking"] += _extract_reasoning_delta(delta)
+                        result["content"] += content_delta
+                        result["thinking"] += reasoning_delta
+                        result["violation"] = generation_usage_violation(
+                            body, result["usage"], reasoning_budget=reasoning_budget,
+                        )
+                        if repetition:
+                            result["error_type"] = "repetition_loop"
+                            result["error"] = "Four consecutive substantial output blocks repeated"
                         count = result["usage"].get("completion_tokens")
                         at_limit = (
-                            isinstance(max_tokens_requested, int) and max_tokens_requested > 0
+                            isinstance(max_tokens_requested, int) and not isinstance(max_tokens_requested, bool)
+                            and max_tokens_requested > 0
                             and isinstance(count, int) and not isinstance(count, bool)
                             and count >= max_tokens_requested
                         )
                         if at_limit:
                             result["finish_reason"] = "length"
-                            result["budget_exceeded"] = count > max_tokens_requested
+                        terminal = result["violation"] is not None or repetition
+                    if terminal:
+                        cancel_event.set()
+                        _cancel_stream_response(resp)
+                        break
                     if at_limit:
                         break
+                if content_guard.finish() or reasoning_guard.finish():
+                    with result_lock:
+                        if result["violation"] is None and result.get("error_type") is None:
+                            result["error_type"] = "repetition_loop"
+                            result["error"] = "Four consecutive substantial output blocks repeated"
+                    cancel_event.set()
+                    _cancel_stream_response(resp)
             except (requests.exceptions.RequestException, ConnectionError, TimeoutError, ValueError, KeyError, TypeError) as exc:
                 err_text = str(exc)
                 response = getattr(exc, "response", None)
@@ -763,7 +794,8 @@ def _stream_chat_completion(
                     if response_text:
                         err_text += f" | body={response_text[:300]}"
                 with result_lock:
-                    result["error"] = err_text
+                    if result.get("error_type") is None and result["violation"] is None:
+                        result["error"] = err_text
             finally:
                 try:
                     if resp is not None:
@@ -813,7 +845,8 @@ def _stream_chat_completion(
             usage = result["usage"]
             finish_reason = result["finish_reason"]
             error_detail = result["error"]
-            budget_exceeded = result["budget_exceeded"]
+            violation = result["violation"]
+            terminal_error = result.get("error_type")
         if error_detail and time.monotonic() >= deadline:
             stop_reason = "Absolute streaming deadline reached"
         content, thinking_estimate = strip_thinking_tokens(raw_content)
@@ -824,8 +857,10 @@ def _stream_chat_completion(
         tokens_out = reported_output if isinstance(reported_output, int) else len((raw_content + " " + thinking).split())
         tps = tokens_out / elapsed if elapsed > 0 else 0
         truncated = finish_reason == "length"
-        if budget_exceeded:
-            return None, elapsed, tokens_in, tokens_out, tps, thinking_tokens, True, "output_budget_exceeded", "Server exceeded requested max_tokens"
+        if violation is not None:
+            return None, elapsed, tokens_in, tokens_out, tps, thinking_tokens, True, violation.error_type, violation.detail
+        if terminal_error:
+            return None, elapsed, tokens_in, tokens_out, tps, thinking_tokens, True, terminal_error, error_detail
         if stop_reason:
             return None, elapsed, tokens_in, tokens_out, tps, thinking_tokens, True, "timeout", stop_reason
         if error_detail:
@@ -909,6 +944,8 @@ def _non_streaming_fallback(
     body: dict[str, Any],
     timeout: int,
     headers: dict[str, str] | None = None,
+    *,
+    reasoning_budget: int | None = None,
 ) -> tuple[str | None, int, int, int, bool]:
     """Non-streaming fallback, if streaming fails."""
     try:
@@ -930,6 +967,9 @@ def _non_streaming_fallback(
         content, think_tags = strip_thinking_tokens(raw_content)
         thinking_tokens += think_tags
         usage = result.get("usage", {})
+        violation = generation_usage_violation(body, usage, reasoning_budget=reasoning_budget)
+        if violation is not None:
+            raise GenerationLimitError(violation, usage)
         exact_reasoning = _reported_reasoning_tokens(usage)
         if exact_reasoning is not None:
             thinking_tokens = exact_reasoning
@@ -1039,8 +1079,10 @@ def generate_answer(cfg: GenerationConfig) -> tuple[str | None, float, int, int,
     streamed_reasoning_only = False
     stream_metrics = (0.0, 0, 0, 0, False)
     if cfg.is_streaming:
-        content, elapsed, t_in, t_out, tps, think_tok, truncated, err_type, err_detail = _stream_chat_completion(url, headers, body, total_timeout=cfg.timeout)
-        if err_type in {"timeout", "output_budget_exceeded"}:
+        content, elapsed, t_in, t_out, tps, think_tok, truncated, err_type, err_detail = _stream_chat_completion(
+            url, headers, body, total_timeout=cfg.timeout, reasoning_budget=cfg.max_thinking_tokens,
+        )
+        if err_type in TERMINAL_GENERATION_ERRORS:
             return content, elapsed, t_in, t_out, tps, think_tok, truncated, err_type, err_detail
         if content and content.strip():
             return content, elapsed, t_in, t_out, tps, think_tok, truncated, err_type, err_detail
@@ -1073,9 +1115,19 @@ def generate_answer(cfg: GenerationConfig) -> tuple[str | None, float, int, int,
         else:
             warn(f"Streaming failed ({err_detail}), fallback without streaming...")
     start = time.time()
-    content, t_in, t_out, think_tok, truncated = _non_streaming_fallback(
-        url, {**body, "stream": False}, cfg.timeout, headers=headers
-    )
+    try:
+        content, t_in, t_out, think_tok, truncated = _non_streaming_fallback(
+            url, {**body, "stream": False}, cfg.timeout, headers=headers,
+            reasoning_budget=cfg.max_thinking_tokens,
+        )
+    except GenerationLimitError as exc:
+        elapsed = time.time() - start
+        prompt_count = exc.usage.get("prompt_tokens")
+        completion_count = exc.usage.get("completion_tokens")
+        t_in = prompt_count if isinstance(prompt_count, int) and not isinstance(prompt_count, bool) else 0
+        t_out = completion_count if isinstance(completion_count, int) and not isinstance(completion_count, bool) else 0
+        think_tok = _reported_reasoning_tokens(exc.usage) or 0
+        return None, elapsed, t_in, t_out, t_out / elapsed if elapsed > 0 else 0, think_tok, True, exc.violation.error_type, exc.violation.detail
     elapsed = time.time() - start
     if cfg.max_tokens and t_out > cfg.max_tokens:
         return None, elapsed, t_in, t_out, 0, think_tok, True, "output_budget_exceeded", "Server exceeded requested max_tokens"
@@ -2194,7 +2246,7 @@ def benchmark_model(model_info: Any, tasks: list[dict[str, Any]], task_type: str
                                       native_model_identifier=native_identifier)
                     if result is not None and result.get("error_type") is None:
                         break
-                    if result is not None and result.get("error_type") in {"timeout", "output_budget_exceeded"}:
+                    if result is not None and result.get("error_type") in TERMINAL_GENERATION_ERRORS:
                         # A terminal generation limit must not start the same
                         # expensive reasoning request again at the task layer.
                         break

@@ -44,6 +44,7 @@ from typing import Any, cast
 from ruamel.yaml import YAML
 
 from benchmark_config import GPTOSS_REASONING_EFFORT, is_blacklisted_model_name, is_support_file
+from kv_cache_policy import KVCachePolicyError, normalize_kv_pair, runtime_kv_pair
 from model_identity import (
     _arch_reasoning_map,
     normalize_for_config,
@@ -58,10 +59,10 @@ _SRC_DIR = Path(__file__).parent
 PROJECT_ROOT = _SRC_DIR.parent
 sys.path.insert(0, str(_SRC_DIR))
 
-REGISTRY_PATH = PROJECT_ROOT / "doc-git" / "model_registry.yaml"
-BLUEPRINT_PATH = PROJECT_ROOT / "doc-git" / "blueprint_definitions.yaml"
+REGISTRY_PATH = PROJECT_ROOT / "data" / "model_registry.yaml"
+BLUEPRINT_PATH = PROJECT_ROOT / "docs" / "blueprint_definitions.yaml"
 CONFIG_ROOT = Path.home() / ".lmstudio" / ".internal" / "user-concrete-model-default-config"
-TEMPLATE_DIR = PROJECT_ROOT / "doc-git" / "Jinja-Chat-Templates"
+TEMPLATE_DIR = PROJECT_ROOT / "docs" / "Jinja-Chat-Templates"
 INVENTORY_PATH = PROJECT_ROOT / "prompt_inventory.csv"
 
 # === Reasoning Keywords ===
@@ -953,15 +954,11 @@ def read_lms_configs(config_root: Path) -> list[dict[str, Any]]:
                             elif isinstance(v, str):
                                 use_unified_kv = v.lower() == "true"
                         elif k == "llm.load.llama.kCacheQuantizationType":
-                            if isinstance(value, dict):
-                                value = value.get("value")
-                            if isinstance(value, str) and value:
-                                k_cache = value.lower()
+                            k_cache = value
                         elif k == "llm.load.llama.vCacheQuantizationType":
-                            if isinstance(value, dict):
-                                value = value.get("value")
-                            if isinstance(value, str) and value:
-                                v_cache = value.lower()
+                            v_cache = value
+
+                    k_cache, v_cache = normalize_kv_pair(k_cache, v_cache)
 
                     models.append(
                         {
@@ -984,11 +981,41 @@ def read_lms_configs(config_root: Path) -> list[dict[str, Any]]:
                             "json_path": json_path,
                         }
                     )
+                except KVCachePolicyError as e:
+                    raise KVCachePolicyError(f"Invalid KV-cache config {json_path}: {e}") from e
                 except Exception as e:
                     print(f"[WARN] Error parsing {json_path}: {e}")
 
     _LMS_CONFIGS_CACHE[key] = (now, models)
     return models
+
+
+def apply_kv_cache_fields(data: dict[str, Any], k_cache: Any = None, v_cache: Any = None) -> bool:
+    """Set only the two enabled LMS KV load fields; leave unrelated values intact."""
+    cache_pair = runtime_kv_pair(k_cache, v_cache)
+    if "load" not in data:
+        return False
+    load = data.get("load")
+    if not isinstance(load, dict) or not isinstance(load.get("fields", []), list):
+        raise KVCachePolicyError("Invalid LM Studio load fields")
+    load_fields = load.get("fields", [])
+    if not all(isinstance(field, dict) for field in load_fields):
+        raise KVCachePolicyError("Invalid LM Studio load field")
+    data.setdefault("load", load)
+    load.setdefault("fields", load_fields)
+    changed = False
+    for side, value in zip(("k", "v"), cache_pair, strict=True):
+        field_key = f"llm.load.llama.{side}CacheQuantizationType"
+        cache_value = {"checked": True, "value": value}
+        matches = [field for field in load_fields if field.get("key") == field_key]
+        for field in matches:
+            if field.get("value") != cache_value:
+                field["value"] = dict(cache_value)
+                changed = True
+        if not matches:
+            load_fields.append({"key": field_key, "value": cache_value})
+            changed = True
+    return changed
 
 
 def classify_registry() -> None:
@@ -1405,6 +1432,7 @@ def assemble_prompts(
                             tpl_content = tpl_path.read_text(encoding="utf-8")
 
                     fields = data.setdefault("operation", {}).setdefault("fields", [])
+                    apply_kv_cache_fields(data, entry.get("k_cache"), entry.get("v_cache"))
                     speculative_values = lms_speculative_values(entry)
                     if speculative_values is not None:
                         local = entry.get("local", {})

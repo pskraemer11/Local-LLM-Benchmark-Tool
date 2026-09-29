@@ -83,7 +83,7 @@ haben die höchste Priorität. Sampling, Structured Output, Seed, Stop-Bedingung
 und `reasoning-format` bleiben Modell-/Benchmark-Policy bzw. Request-Ebene
 und gehören nicht in einen allgemeinen Hardware-Default.
 
-Die Registry `doc-git\model_registry.yaml` bleibt die Single Source of Truth
+Die Registry `data\model_registry.yaml` bleibt die Single Source of Truth
 für Modellidentität, GGUF-Zuordnung, Kontext/KV-Policy, Templates,
 Reasoning-Verhalten und Sampling-Evidenz. Das llama.cpp-Preset ist ein daraus
 abgeleitetes Laufzeitartefakt. Es wird erzeugt oder aktualisiert mit:

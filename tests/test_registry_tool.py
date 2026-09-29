@@ -233,7 +233,7 @@ def test_fix_ctx_only_fills_missing_or_zero_values(monkeypatch) -> None:
 
     rt.cmd_fix_ctx()
 
-    expected = rt._default_ctx_from_size(4_000_000_000, rt._NP_POLICY, "q8_0", "iq4_nl")
+    expected = rt._default_ctx_from_size(4_000_000_000, rt._NP_POLICY)
     assert registry["publisher/missing"]["context_length"] == expected
     assert registry["publisher/zero"]["context_length"] == expected
     assert registry["publisher/existing"]["context_length"] == 12345
@@ -774,8 +774,8 @@ class TestGuiConfigRegistrySync:
         assert entry["offload"] == 0.75
         assert entry["useUnifiedKvCache"] is True
         assert entry["context_length"] == 8192
-        assert entry["k_cache"] == "q5_1"
-        assert entry["v_cache"] == "q5_1"
+        assert entry["k_cache"] == "q4_0"
+        assert entry["v_cache"] == "q4_0"
         save_registry.assert_called_once_with(registry)
 
     def test_write_context_mode_only_persists_context(self, tmp_path):
@@ -1045,7 +1045,7 @@ class TestGuiConfigRegistrySync:
 
         configs = rt.read_lms_configs(root)
 
-        assert configs[0]["k_cache"] == "q5_1"
+        assert configs[0]["k_cache"] == "q8_0"
         assert configs[0]["v_cache"] == "q8_0"
         assert configs[0]["num_experts"] == 24
 
@@ -1667,7 +1667,7 @@ class TestCmdQuarantineMissing:
         assert "mradermacher/nemotron-cascade-14b-thinking" in rt.load_registry(reg_path)
         assert source_config.exists()
         assert not list((tmp_path / "configs").glob("_quarantine_missing_*"))
-        assert not list((tmp_path / "doc-git" / "Review-Artifacts").glob("quarantine_registry_*.yaml"))
+        assert not list((tmp_path / "docs" / "Review-Artifacts").glob("quarantine_registry_*.yaml"))
 
     def test_no_lms_data_aborts(self, tmp_path, monkeypatch):
         reg_path = self._setup(
@@ -2405,7 +2405,7 @@ def test_identity_link_binds_runtime_config_to_one_gguf_artifact(tmp_path):
     assert runtime.use_unified_kv is True
     assert runtime.num_parallel == 4
     assert runtime.k_cache == "q8_0"
-    assert runtime.v_cache == "q5_1"
+    assert runtime.v_cache == "q8_0"
 
 
 def test_canonical_lms_identity_recovers_quant_from_path_when_selected_variant_is_unknown():
@@ -3228,7 +3228,7 @@ def test_lm_studio_local_findings_are_advisory_for_backend_validation() -> None:
     }
 
 
-def test_assemble_adds_system_prompt_without_touching_load_fields(tmp_path, monkeypatch):
+def test_assemble_adds_system_prompt_and_normalizes_default_kv_pair(tmp_path, monkeypatch):
     config_root = tmp_path / "configs"
     publisher_dir = config_root / "mistralai"
     publisher_dir.mkdir(parents=True)
@@ -3280,7 +3280,16 @@ def test_assemble_adds_system_prompt_without_touching_load_fields(tmp_path, monk
     fields = written["operation"]["fields"]
     assert next(field["value"] for field in fields if field["key"] == "custom.field") == "keep"
     assert next(field["value"] for field in fields if field["key"] == "llm.prediction.systemPrompt")
-    assert written["load"]["fields"] == original_load_fields
+    cache_values = {field["key"]: field["value"] for field in written["load"]["fields"]}
+    assert cache_values["llm.load.llama.kCacheQuantizationType"] == {
+        "checked": True,
+        "value": "q8_0",
+    }
+    assert cache_values["llm.load.llama.vCacheQuantizationType"] == {
+        "checked": True,
+        "value": "q8_0",
+    }
+    assert len(written["load"]["fields"]) == len(original_load_fields)
 
 
 # =========================================================================

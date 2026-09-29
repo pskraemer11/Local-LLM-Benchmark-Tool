@@ -3,7 +3,7 @@
 This guide reflects the current provider-split architecture in the benchmark stack.
 
 - GGUF headers are the technical source of truth for model architecture facts.
-- `model_registry.yaml` is the source of truth for benchmark policy and provider-neutral runtime values.
+- `data/model_registry.yaml` is the SSOT database for model identity, benchmark policy and provider-neutral runtime values. Documentation, blueprints and templates live under `docs/`.
 - Provider artifacts such as LM Studio JSON configs, TabbyAPI config, or Unsloth server arguments are derived runtime data.
 
 ## 1. Resolution model

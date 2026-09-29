@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
+from kv_cache_policy import kv_cache_type, runtime_kv_pair
 from parameter_bindings import llama_cpp_value_bindings, parameter_binding
 
 if TYPE_CHECKING:
@@ -21,11 +22,7 @@ REASONING_FORMATS = frozenset({"auto", "none", "deepseek", "deepseek-legacy"})
 
 def normalize_cache_type(value: Any) -> str | None:
     """Normalize and validate a llama.cpp KV-cache type."""
-    if not isinstance(value, str):
-        return None
-    normalized = value.strip().casefold().replace("-", "_")
-    normalized = CACHE_TYPE_ALIASES.get(normalized, normalized)
-    return normalized if normalized in SUPPORTED_CACHE_TYPES else None
+    return cast("str | None", kv_cache_type(value))
 
 
 def _as_bool(value: Any, default: bool = True) -> bool:
@@ -76,8 +73,8 @@ def build_runtime_args(
         ("cache_type_k", parameter_binding("k_cache")),
         ("cache_type_v", parameter_binding("v_cache")),
     )
-    for key, binding in cache_bindings:
-        value = normalize_cache_type(runtime.get(key))
+    cache_pair = runtime_kv_pair(runtime.get("cache_type_k"), runtime.get("cache_type_v"))
+    for (_key, binding), value in zip(cache_bindings, cache_pair, strict=True):
         if value is not None and binding is not None and binding.llama_cpp_flag is not None:
             args.extend([binding.llama_cpp_flag, value])
 

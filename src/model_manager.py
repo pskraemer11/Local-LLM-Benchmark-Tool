@@ -427,7 +427,7 @@ def _load_registry_data() -> dict[str, Any]:
         return _REGISTRY_CACHE
     from ruamel.yaml import YAML
     from ruamel.yaml.error import YAMLError
-    rpath = Path(__file__).resolve().parent.parent / "doc-git" / "model_registry.yaml"
+    rpath = Path(__file__).resolve().parent.parent / "data" / "model_registry.yaml"
     if not rpath.exists():
         _REGISTRY_CACHE = {}
         return _REGISTRY_CACHE

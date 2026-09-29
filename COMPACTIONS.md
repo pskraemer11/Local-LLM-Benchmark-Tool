@@ -10,10 +10,10 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 ## Important Details
 - Nutzer-Entscheidungen aus den 3 Konzept-Fragen:
   1. Artefakte: `repro_issues.md` + `lint_issues.md` werden committet; `validate_errors.log` + `pre_review_checks_*.log` → `.gitignore` (transient).
-  2. CHANGELOG: **Root `CHANGELOG.md`** (neu); §20 „Version Changelog" aus `doc-git/Architecture, Flow & ChangeLog_en.md` (Z. ~1312) wandert vollständig dorthin, Architecture-Doku behält nur Verweis. Eintrag-Format: Datum | Datei(en) | Entscheidung/Fix + Zeilen `Grund:`/`Quelle:`.
+  2. CHANGELOG: **Root `CHANGELOG.md`** (neu); §20 „Version Changelog" aus `docs/Architecture, Flow & ChangeLog_en.md` (Z. ~1312) wandert vollständig dorthin, Architecture-Doku behält nur Verweis. Eintrag-Format: Datum | Datei(en) | Entscheidung/Fix + Zeilen `Grund:`/`Quelle:`.
   3. Push-Gate: **pre-push-Hook + CI-Fix** (nach Erklärung von Hook/CI gewählt; Hook bricht `git push` bei Fehlern ab, CI läuft nach Push auf GitHub als Sicherheitsnetz).
 - Zusatz-Anmerkung des Nutzers: Artefakte ersetzen **nicht** den Review-Bericht; CHANGELOG entlastet README (reiner Quickstart); Fehler treten auch im laufenden Betrieb auf (z. B. Benchmark-Runs), nicht nur bei Reviews; Verfahren muss einfach/sicher sein („nichts vergessen" bei vielen Schritten).
-- Geplante Dateien laut Konzept/Todo: `CHANGELOG.md` (Root), `doc-git/Review-Prozess.md`, `doc-git/Reviews/_templates/{Phase1-Prompt.md, Phase2-Prompt.md, Review-Report-Template.md}` (konsolidiert aus `Doku-intern/Review-Checkliste (Single-Entwickler).md` + `Doku-intern/Review Prompt für Benchmarktest.md` + Heise-Prinzipien), `doc-git/Review-Artifacts/` (repro_issues.md + lint_issues.md als Snapshot je Review), `scripts/pre-push.ps1` + Installer (via `core.hooksPath`), `.gitignore`-Ergänzung, `.github/workflows/review.yml`-Fix.
+- Geplante Dateien laut Konzept/Todo: `CHANGELOG.md` (Root), `docs/Review-Prozess.md`, `docs/Reviews/_templates/{Phase1-Prompt.md, Phase2-Prompt.md, Review-Report-Template.md}` (konsolidiert aus `Doku-intern/Review-Checkliste (Single-Entwickler).md` + `Doku-intern/Review Prompt für Benchmarktest.md` + Heise-Prinzipien), `docs/Review-Artifacts/` (repro_issues.md + lint_issues.md als Snapshot je Review), `scripts/pre-push.ps1` + Installer (via `core.hooksPath`), `.gitignore`-Ergänzung, `.github/workflows/review.yml`-Fix.
 - Umsetzungsreihenfolge: validate-Erweiterung (──repro/--verbose) → Skript v2 → Hook → CI-Fix → CHANGELOG (§20-Umzug) → Templates → Prozess-Doku/Artefakte/gitignore → End-to-End-Test (Gate-Lauf, Hook-Test, CI-YAML-Syntax).
 - Für `--repro`: Nutzung von `src/tools/gguf_full_metadata_reader.py` (nutzt `from gguf import GGUFReader`); Vergleichsquellen: `~/.lmstudio/hub/models/{publisher}/{model}/model.yaml`, JSON-Configs, `model_registry.yaml`, GGUF-Header.
 - Offene Kleinigkeit aus Konzept: `gguf`-Paket verfügbar? → **geklärt: installiert** (`C:\Users\pskra\AppData\Local\Programs\Python\Python314\Lib\site-packages\gguf\__init__.py`); ebenso ruamel.yaml + psutil OK.
@@ -28,7 +28,7 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
   - `pre_review_checks_20260806_132030.log` zeigt Bug #1: Skript ruft `registry_tool.py validation` (falsch) statt `validate` → `[ERROR] Unknown command: validation`.
   - Bug #2 (bekannt): Skript-Schritt 4 ruft gelöschtes `src\tools\_check_gguf_ctx.py` auf.
   - **Neuer Bug #3**: `ruff check .` bricht mit `unknown field 'tool'` ab — verursacht durch `--config .\.pyproject.toml` im Skript: die Root-`pyproject.toml` enthält jetzt nur `[tool.pytest.ini_options]`, keinen `[tool.ruff]`-Block (Ruff-Configs liegen in `.ruff.toml` + `.pyproject.toml` versteckt).
-- Frühere Sitzung (Kontext für CHANGELOG/Review): Review-Berichte von 2026-06-28 bis 2026-08-03 in `doc-git/Reviews/` (10 Stück, Format: ISO/IEC 9126, Artefakt-Referenzen, Commit-Hashes, P0/P1/P2-Priorisierung).
+- Frühere Sitzung (Kontext für CHANGELOG/Review): Review-Berichte von 2026-06-28 bis 2026-08-03 in `docs/Reviews/` (10 Stück, Format: ISO/IEC 9126, Artefakt-Referenzen, Commit-Hashes, P0/P1/P2-Priorisierung).
 
 ### Active
 - Todo 1 „Baseline: ruff/mypy-Status, gguf-Paket, pre_review-Log auswerten" fast fertig — ruff-Status noch unklar, weil `ruff check .` am Config-Fehler abstürzt; mypy-Status noch nicht gelaufen.
@@ -39,7 +39,7 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 
 ## Next Move
 1. Ruff-Config-Problem verifizieren/lösen: `ruff check .` **ohne** `--config` testen (nutzt dann auto-detect von `.ruff.toml`); ggf. Doppel-Config-Konflikt `.ruff.toml` ↔ verstecktes `.pyproject.toml` prüfen; Fehlerbehebungs-Entscheidung für v2-Skript festhalten.
-2. Todo 2: `validate` in `src/registry_tool.py` erweitern — `--verbose` (Detail je Prüfpunkt) + `--repro` (schreibt `doc-git/Review-Artifacts/repro_issues.md` mit Diskrepanzen Registry ↔ JSON-Configs ↔ `hub/models/*/model.yaml` ↔ GGUF-Header via `gguf_full_metadata_reader.py`).
+2. Todo 2: `validate` in `src/registry_tool.py` erweitern — `--verbose` (Detail je Prüfpunkt) + `--repro` (schreibt `docs/Review-Artifacts/repro_issues.md` mit Diskrepanzen Registry ↔ JSON-Configs ↔ `hub/models/*/model.yaml` ↔ GGUF-Header via `gguf_full_metadata_reader.py`).
 3. Todo 3: `pre_review_checks.ps1` v2 schreiben — ① Git-Status/Branch-Info ② `validate` (immer zusätzlich in `validate_errors.log`) ③ `ruff check` + `mypy` → `lint_issues.md` ④ `pytest tests/` ⑤ `validate --repro` → `repro_issues.md`; harte Stopps bei Exit-Code ≠ 0; Bug `validation`→`validate` fixen; toten `_check_gguf_ctx.py`-Aufruf ersetzen; `--config`-Flag korrigieren.
 4. Danach gemäß Todo-Liste: pre-push-Hook + Installer (`scripts/hooks/`, `core.hooksPath`), CI-Fix (`review.yml`: Runner `windows-2025`, Deps via `[project]`-Metadaten ergänzen oder `requirements.txt`), CHANGELOG.md (§20-Umzug + neue Einträge), `_templates/` + `Review-Prozess.md`, `.gitignore` + `Review-Artifacts/`-Initialisierung, abschließender End-to-End-Test.
 
@@ -49,11 +49,11 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 - `pyproject.toml` (Root, neu) — nur `[tool.pytest.ini_options]`; Ursache des ruff-Config-Fehlers im Skript
 - `.ruff.toml`, `.pyproject.toml` (versteckt) — Ruff/pylint/mypy-Configs (aus Mistral/Vibe https://chat.mistral.ai/work/e4dd489b-946d-412d-9538-ec17a803c108), entstehen als neue Dateien bereits committet (a276f160)
 - `.github/workflows/review.yml` — aktuell kaputt: `runs-on: Windows 11` (ungültig), `pip install -e .` scheitert (kein `[project]`-Block), fehlende Deps (ruamel.yaml/psutil/gguf)
-- `doc-git/Architecture, Flow & ChangeLog_en.md` — §20 „Version Changelog" (Z. ~1312) wandert in CHANGELOG.md; Verweis statt §20
+- `docs/Architecture, Flow & ChangeLog_en.md` — §20 „Version Changelog" (Z. ~1312) wandert in CHANGELOG.md; Verweis statt §20
 - `src/tools/gguf_full_metadata_reader.py` — GGUF-Metadaten-Extraktion für `--repro`
-- `doc-git/Reviews/` (10 Berichte) + `Doku-intern/Review-Checkliste (Single-Entwickler).md`, `Doku-intern/Review Prompt für Benchmarktest.md` — Quelle für `_templates/`-Konsolidierung
+- `docs/Reviews/` (10 Berichte) + `Doku-intern/Review-Checkliste (Single-Entwickler).md`, `Doku-intern/Review Prompt für Benchmarktest.md` — Quelle für `_templates/`-Konsolidierung
 - `C:\Users\pskra\.lmstudio\hub\models\{publisher}\{model}\model.yaml` — Vergleichsquelle für `--repro`
-- `.gitignore` — Ergänzen: `validate_errors.log`, `pre_review_checks_*.log`; `doc-git/Review-Artifacts/` wird committet
+- `.gitignore` — Ergänzen: `validate_errors.log`, `pre_review_checks_*.log`; `docs/Review-Artifacts/` wird committet
 
 ================= Compaction 06.08.2026 / 20:42 ===========
 ## Objective
@@ -70,12 +70,12 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 - **Ergebnis Baseline**: `ruff check .` → „All checks passed!" (0 Fehler, Ausgangslage 531); `python -m pytest -q` → 741 passed (4.19–4.61 s); `mypy .` → 195 Fehler in 13 Dateien (informativ; Top: custom_benchmark 40, run_benchmarks 36, assemble_blueprint 23, consolidate_results 22, gguf_full_metadata_reader 22; Top-Kategorien: type-arg 51, assignment 24, attr-defined 22, var-annotated 18).
 - Wichtige Fixes: B023 **echter Thread-Bug** in `custom_benchmark.py` (~Z. 589–599: Closures eingefroren als Default-Argumente `result_lock`/`result`/`cancel_event`/`current_start_timeout`, danach ANN001-Typannotationen `threading.Lock`/`dict[str, Any]`/`threading.Event`); Re-Export `USE_UNIFIED_KV_CACHE_THRESHOLD_GB as _USE_UNIFIED_KV_CACHE_THRESHOLD_GB` + `# noqa: F401` in `registry_tool.py` wiederhergestellt (Tests importieren ihn); S506-noqa in `run_benchmarks.py` Z. 300 („_NoopLoader ist bewusst sicher – yaml.safe_load scheitert an lm_eval-`!function`-Tags"); B007-Bereinigung via `_`/`.values()`; B905 `strict=True`; TYPE_CHECKING-Blöcke in 5 Dateien.
 - Bekannte Skript-Bugs für v2-Rewrite (noch offen): `registry_tool.py validation` (falscher Befehl) + toter `src\tools\_check_gguf_ctx.py`-Aufruf.
-- Geplante Artefakte/Doku unverändert (CHANGELOG.md Root, `doc-git/Review-Prozess.md`, `doc-git/Reviews/_templates/`, `doc-git/Review-Artifacts/`, `scripts/pre-push.ps1` + Installer via `core.hooksPath`, `.github/workflows/review.yml`-Fix, `.gitignore` um `validate_errors.log`/`pre_review_checks_*.log`).
+- Geplante Artefakte/Doku unverändert (CHANGELOG.md Root, `docs/Review-Prozess.md`, `docs/Reviews/_templates/`, `docs/Review-Artifacts/`, `scripts/pre-push.ps1` + Installer via `core.hooksPath`, `.github/workflows/review.yml`-Fix, `.gitignore` um `validate_errors.log`/`pre_review_checks_*.log`).
 
 ## Work State
 ### Completed
 - **Todo 1 (Baseline) komplett**: ruff 531→0 Fehler; Config-Durcheinander gelöst; B023-Bug behoben; Suite grün; mypy-Status geklärt (informativ); 5 untracked alte `pre_review_checks_*.log` bleiben uncommittet.
-- `pyproject.toml` enthält jetzt: `[tool.pytest.ini_options]`, `[tool.ruff]` (line-length 120, target py314, exclusions für Archiv/simple_evals/tests/Legacy), `[tool.ruff.lint]` select/ignore/fixable (ignore: ANN401, B008, B011, S101, S311, PERF203, PERF401, FBT001, FBT002, FBT003, S310, S603, S607), `[tool.ruff.lint.per-file-ignores]`, `[tool.ruff.format]`, `[tool.pylint.main]`, `[tool.mypy]` (strict=true, exclude: simple_evals/, Archiv/, Doku-intern/, doc-git/, backups/, lm_eval_tasks/, human[-_]eval, ds1000_official/, ergebnisse/, runs/, logs/, tests/).
+- `pyproject.toml` enthält jetzt: `[tool.pytest.ini_options]`, `[tool.ruff]` (line-length 120, target py314, exclusions für Archiv/simple_evals/tests/Legacy), `[tool.ruff.lint]` select/ignore/fixable (ignore: ANN401, B008, B011, S101, S311, PERF203, PERF401, FBT001, FBT002, FBT003, S310, S603, S607), `[tool.ruff.lint.per-file-ignores]`, `[tool.ruff.format]`, `[tool.pylint.main]`, `[tool.mypy]` (strict=true, exclude: simple_evals/, Archiv/, Doku-intern/, docs/, backups/, lm_eval_tasks/, human[-_]eval, ds1000_official/, ergebnisse/, runs/, logs/, tests/).
 - `src/tools/gguf_full_metadata_reader.py` & `src/tools/lmeval_proxy.py`: `Optional[str]`/`Optional[bytes]`-Typen ergänzt (RUF013-Fix).
 
 ### Active
@@ -86,7 +86,7 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 
 ## Next Move
 1. `cmd_validate`-Funktion komplett lesen (Z. 1656–1830+), um Ergebnisstruktur (`errors`-Dict, exit/report-Logik) für `--verbose`-Detailausgabe und `--repro`-Artefakt zu verstehen.
-2. Argument-Parsing/Dispatch um `--verbose`/`--repro` erweitern; `--repro` nutzt `hub/models/*/model.yaml` + `GGUFReader` (`src/tools/gguf_full_metadata_reader.py`) → schreibt `doc-git/Review-Artifacts/repro_issues.md`.
+2. Argument-Parsing/Dispatch um `--verbose`/`--repro` erweitern; `--repro` nutzt `hub/models/*/model.yaml` + `GGUFReader` (`src/tools/gguf_full_metadata_reader.py`) → schreibt `docs/Review-Artifacts/repro_issues.md`.
 3. Danach: `pre_review_checks.ps1` v2 (Gate: validate→log, ruff→lint_issues.md, mypy informativ, pytest, `--repro`→repro_issues.md, CHANGELOG-Erinnerung; Fix `validation`→`validate`, toten gguf-Aufruf ersetzen, ohne `--config`).
 
 ## Relevant Files
@@ -96,16 +96,16 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 - `src/custom_benchmark.py` — B023-Fix (~Z. 589–599), `_TaskProgress` (~Z. 1832–1870, Einrückungs-Fix enthalten).
 - `src/run_benchmarks.py` — S506-noqa Z. 300; F821-noqas für `model_obj` (~Z. 1140–1150).
 - `.github/workflows/review.yml` — weiterhin kaputt (Runner `Windows 11` ungültig → `windows-2025`, `pip install -e .` ohne `[project]`, fehlende Deps ruamel.yaml/psutil/gguf).
-- `doc-git/Architecture, Flow & ChangeLog_en.md` — §20 „Version Changelog" (~Z. 1312) → CHANGELOG.md-Umzug offen.
+- `docs/Architecture, Flow & ChangeLog_en.md` — §20 „Version Changelog" (~Z. 1312) → CHANGELOG.md-Umzug offen.
 - `src/tools/gguf_full_metadata_reader.py` — für `--repro` (Type-Fix enthalten).
 
 ==================== Compaction 06.08.2026 / 23:15 =======================
 *OC:
 ## Objective
-- Review-Gate-Tooling etablieren (abgeschlossen: Todos 1–3, Planung 18, BLACKLIST-Feinschliffe) und Dokumentation vereinheitlichen: neue deutsche Review-HowTo in `Doku-intern`, alle Publikations-Dokumente in `doc-git` vollständig auf Englisch umstellen (`Reviews/` bleibt ausdrücklich unangetastet).
+- Review-Gate-Tooling etablieren (abgeschlossen: Todos 1–3, Planung 18, BLACKLIST-Feinschliffe) und Dokumentation vereinheitlichen: neue deutsche Review-HowTo in `Doku-intern`, alle Publikations-Dokumente in `docs` vollständig auf Englisch umstellen (`Reviews/` bleibt ausdrücklich unangetastet).
 
 ## Important Details
-- `doc-git/` = alles zur Veröffentlichung (GitHub); `Doku-intern/` = intern (deutsch).
+- `docs/` = alles zur Veröffentlichung (GitHub); `Doku-intern/` = intern (deutsch).
 - `Reviews/` NICHT anpassen (Nutzer-Entscheid). `Review-Artifacts/` wird als Publikations-Artefakt weiterhin übersetzt.
 - F2LLM: gesamte Familie inkl. 14B bleibt geblacklistet (Embedding per HF-Cards, `Feature Extraction`); trotz „Reasoning"-Anzeige in LMS (Qwen3-Backbone + Chat-Template) — Nutzer bestätigt: „Passt schon!".
 - Qwen3.5/3.6: Dual-Mode, Default Thinking (`enableThinking.defaultValue: true`); Punkt 18 abgeschlossen.
@@ -127,24 +127,24 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 
 ### Active
 - **Architecture-Datei in Arbeit (selbst, batch-edit)**: bisher ~24 Edit-Blöcke x4 Sprachen fertig; **offen der Rest aus `arch_lines.txt`**; aktueller Read-Punkt Z. 790–1033 (nach Edit 4); Z. 795, 799, 800–801, 820–850 (Struktur-Gate + consolidate_results + _write_tbl) fertig — **Rest der Treffer-Liste (Z. > 860, Details in `arch_lines.txt`) noch nicht übersetzt**.
-- `Planung.md` und `Temperature Recommondations.md` sind uncommittet im Working Tree (git status: `M doc-git/Planung.md`, `M "doc-git/Temperature Recommondations.md"`).
+- `Planung.md` und `Temperature Recommondations.md` sind uncommittet im Working Tree (git status: `M docs/Planung.md`, `M "docs/Temperature Recommondations.md"`).
 
 ### Blocked
 - (none)
 
 ## Next Move
-1. `doc-git/Architecture, Flow & ChangeLog_en.md` zu Ende übersetzen: Read-Reste (ab Z. 860/`arch_lines.txt`) + Zeilen außerhalb der Edit-Blöcke, dann lang_scan, Commits „docs: … englisch".
+1. `docs/Architecture, Flow & ChangeLog_en.md` zu Ende übersetzen: Read-Reste (ab Z. 860/`arch_lines.txt`) + Zeilen außerhalb der Edit-Blöcke, dann lang_scan, Commits „docs: … englisch".
 2. Kleine Dateien übersetzen: `A-B-Vergleich*` (2, 29+63 Treffer), `Modell Specific Hints/*` (x3 Dateien inkl. Ordnerumbenennung, 4 Dateien: GPT-OSS-Harmony/README, Qwen3.6-Fix, phi-4), `HowTo-Install-and-Configure-New-LLM_en.md` (19), `Model-Parameters-and-Benchmarks_en.md` (Check).
 3. Code/Umbennungen: `registry_tool.py` `_write_repro_issues` + `pre_review_checks.ps1` GGUF-Check auf Englisch („kein"/„gefunden" vs. „none"/„found"), Artefakte neu generieren; `git mv` „Temperature Recommondations.md"→„..._en.md", „A-B-Vergleich …"→„A-B-Comparison …", Ordner „Modell Specific Hints"→„Model Specific Hints" (Code-Referenzen prüfen); `HowTo-Review-Gate_de.md` committen.
 4. Finale Verifikation: lang_scan → 0 Mischungen (mit 3-Treffer-Schwelle), ruff, pytest (741), validate; Commits mit `docs:`.
 
 ## Relevant Files
 - `Doku-intern/HowTo-Review-Gate_de.md` — neu, deutsch, committet noch nicht.
-- `doc-git/Architecture, Flow & ChangeLog_en.md` — Übersetzung in Arbeit (noch ~Reste aus `arch_lines.txt`).
-- `doc-git/Temperature Recommondations.md` + `doc-git/Planung.md` — übersetzt, uncommittet, Umbenennung nur für Temperature auf `_en` geplant (nicht Planung; Dateiname bleibt).
-- `doc-git/A-B-Vergleich*` (2 Dateien) + `doc-git/Modell Specific Hints/` (4 .md) — kleine Übersetzungen offen.
+- `docs/Architecture, Flow & ChangeLog_en.md` — Übersetzung in Arbeit (noch ~Reste aus `arch_lines.txt`).
+- `docs/Temperature Recommondations.md` + `docs/Planung.md` — übersetzt, uncommittet, Umbenennung nur für Temperature auf `_en` geplant (nicht Planung; Dateiname bleibt).
+- `docs/A-B-Vergleich*` (2 Dateien) + `docs/Modell Specific Hints/` (4 .md) — kleine Übersetzungen offen.
 - `src/benchmark_config.py` — BLACKLIST-Änderungen committet (`ff8898f`, `87e5186`, `e8de48c`); Referenzen auf „Modell Specific Hints" prüfen (Datei-Doku).
-- `doc-git/Review-Artifacts/repro_issues.md` — bei Umstellung `registry_tool.py` neu generieren (deutsche Meldungen).
+- `docs/Review-Artifacts/repro_issues.md` — bei Umstellung `registry_tool.py` neu generieren (deutsche Meldungen).
 - `src/registry_tool.py` — `_write_repro_issues` (deutsche Strings: „kein", „gefunden", „Hub-Abweichungen") → auf Englisch.
 - `pre_review_checks.ps1` — GGUF-Check-Abschnitt (deutsche Meldungen) → auf Englisch.
 
@@ -158,7 +158,7 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 
 ## Important Details
 - **Entscheidung (User, question-Tool):** Blueprint-Datei als einzige Quelle — `template:` + `stop_strings:` verpflichtend pro Blueprint; Registry-`template:`-Feld deaktivieren/ignorieren. Grund: Viele Familien (GLM, phi, Granite, GPT-OSS, Magistral, Qwen3.6) brauchen spezielle Templates/Prompts/Stop-Strings; Info ging bisher bei `model_registry.py`-Überarbeitungen verloren.
-- **Gemma-4-Umstellung:** Alle 6 Einträge `blueprint: gemma_reasoning` (12B/19B/26B je eigenes Template aus `doc-git\Jinja-Chat-Templates\`), inkl. REAP-25 (vorher fälschlich `reasoning_assistant`, weil `select_blueprint` nur `"gemma-4"` mit Bindestrich erkennt, REAP-Key `gemma4-26b-a4b-reap-25` ohne). `assemble` geschrieben, `validate` 68/68 OK.
+- **Gemma-4-Umstellung:** Alle 6 Einträge `blueprint: gemma_reasoning` (12B/19B/26B je eigenes Template aus `docs\Jinja-Chat-Templates\`), inkl. REAP-25 (vorher fälschlich `reasoning_assistant`, weil `select_blueprint` nur `"gemma-4"` mit Bindestrich erkennt, REAP-Key `gemma4-26b-a4b-reap-25` ohne). `assemble` geschrieben, `validate` 68/68 OK.
 - **Ist-Zustand (vor Umbau):** Kein Blueprint hatte `template:`; nur 9/48 Registry-Modelle mit `template:`; `benchmark_config.py` baut nur Sampling-Parameter; Stop-Strings hartkodiert in `custom_benchmark.py` (STOP_TOKENS_CODING/DEFAULT); Template-Konsumenten: `assemble_blueprint.py` Z.950, `registry_tool.py` (sync-templates Z.1949, validate Z.2232+), `run_benchmarks.py` Z.1946.
 - **Umbau bereits umgesetzt:** `blueprint_definitions.yaml` um `template:`/`template_map:`/`stop_strings:`/`reasoning_parsing:` pro Blueprint erweitert (gemma_map 12b/19b/26b, gptoss→gpt-oss-20b_harmony.jinja, phi4→phi-4_template_unsloth.jinja, granite→granite-4.1-30b/-4.0-h-tiny, magistral/ministral→[THINK]/[ANSWER], gemma parsing enabled:false).
 - **Probelauf:** `run.gemma4-probelauf.yaml` (unsloth/gemma-4-26b-a4b-it@iq3_s) schlug fehl: Lauf-Key ≠ Registry-Key, `[ERROR] No model found`. Keys aus `lms ls --json` `modelKey`; korrektes Format noch zu klären.
@@ -187,8 +187,8 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 6. Gemma-4-Änderungen + AGENTS.md committen (fremde Diffs LM-Studio-API-References.md/.ods nicht committen).
 
 ## Relevant Files
-- `doc-git\blueprint_definitions.yaml`: erweitert (Template/Stop/Parsing pro Blueprint)
-- `doc-git\model_registry.yaml`: 6 Gemma-4-Einträge → gemma_reasoning
+- `docs\blueprint_definitions.yaml`: erweitert (Template/Stop/Parsing pro Blueprint)
+- `data\model_registry.yaml`: 6 Gemma-4-Einträge → gemma_reasoning
 - `src\assemble_blueprint.py`: Template-Leser Z.950/356, classify Z.578, select_blueprint Z.298 („gemma-4"-Hyphen-Falle)
 - `src\registry_tool.py`: sync-templates Z.1949, validate Z.2232+, TEMPLATE_DIR Z.1934
 - `src\run_benchmarks.py`: Template-Check Z.1946, resolve_models Z.610+
@@ -229,8 +229,8 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 4. CHANGELOG-Eintrag zum Refactor schreiben.
 
 ## Relevant Files
-- `doc-git\blueprint_definitions.yaml`: SSOT — template/template_map/stop_strings/reasoning_parsing pro Blueprint
-- `doc-git\model_registry.yaml`: 9 template:-Felder entfernt, Gemma-4-Einträge gemma_reasoning
+- `docs\blueprint_definitions.yaml`: SSOT — template/template_map/stop_strings/reasoning_parsing pro Blueprint
+- `data\model_registry.yaml`: 9 template:-Felder entfernt, Gemma-4-Einträge gemma_reasoning
 - `src\assemble_blueprint.py`: resolve_template_name/blueprint_features/load_blueprint_defs, classify_registry, select_blueprint
 - `src\registry_tool.py`: _registry_template_name/_load_blueprints, sync-templates, validate
 - `src\benchmark_config.py`: _blueprint_features, get_model_config (stop/reasoning_parsing)
@@ -250,12 +250,12 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 - **`select_blueprint`-Fix:** erkennt jetzt auch `gemma4` ohne Bindestrich (REAP-Key-Falle, z.B. `gemma4-26b-a4b-reap-25`).
 - **`resolve_template_name` robust:** Punkte↔Bindestriche austauschbar (nötig für `granite-4.1-30b`-Muster gegen Registry-Key `granite-4-1-30b`).
 - **Modell-Set für den Probelauf (Registry-Keys):** mradermacher/gemma-4-19b-a4b-it-reap-i1@q4_k_m, mradermacher/gemma-4-26b-a4b-it-i1@iq4_xs, unsloth/gemma-4-26b-a4b-it@iq3_s, unsloth/gemma-4-12b-it-qat@q4_k_xl, mradermacher/gemma-4-26b-a4b-it-heretic-i1@iq3_m, crucible-labs/gemma4-26b-a4b-reap-25@mixed, openai/gpt-oss-20b@mxfp4, ibm-granite/granite-4-0-h-tiny@q8_0, ibm-granite/granite-4-1-30b@q3_k_s, unsloth/phi-4@q5_k_m, unsloth/glm-4-7-flash@q3_k_s, zai-org/glm-4.6v-flash@q6_k, ibm-granite/granite-4-1-8b@q6_k.
-- **Templates vorhanden** in `doc-git\Jinja-Chat-Templates\`: gemma4_12b/19b/26b minijinja, gpt-oss-20b_harmony.jinja (+gpt-oss-20b-template_unsloth.jinja), granite-4.0-h-tiny/4.1-30b, phi-4_template_unsloth.jinja, google_gemma-4-12B/26B chat_templates. **KEIN GLM-Template existiert** — User hat GLM explizit genannt (GLM braucht laut Hints stattdessen `reasoning.parsing: enabled:true` mit ` thinking`/` response`); Frage: GLM trotzdem in den Lauf?
+- **Templates vorhanden** in `docs\Jinja-Chat-Templates\`: gemma4_12b/19b/26b minijinja, gpt-oss-20b_harmony.jinja (+gpt-oss-20b-template_unsloth.jinja), granite-4.0-h-tiny/4.1-30b, phi-4_template_unsloth.jinja, google_gemma-4-12B/26B chat_templates. **KEIN GLM-Template existiert** — User hat GLM explizit genannt (GLM braucht laut Hints stattdessen `reasoning.parsing: enabled:true` mit ` thinking`/` response`); Frage: GLM trotzdem in den Lauf?
 - **Granite-8b hat kein Template** (Datei existiert nicht; BP-Map nur granite-4.0 + granite-4.1-30b). google/gemma-4-12b-q4_0-Config hat leeres promptTemplate (vorbestehendes Publisher-Zuordnungsproblem, kein Registry-Key unter `google/`).
 - **Stop-Strings nur für modellspezifische Blueprints** (gptoss/magistral/ministral/nemotron/apriel/phi4) — default_chat/coding_agent/reasoning_* bewusst ohne, sonst würde lm-eval `until` für alle Modelle setzen.
 - **Lauf-Keys:** Registry-Key ≠ Lauf-Key; Keys kommen aus `lms ls --json` Feld `modelKey` (z.B. `gemma-4-26b-a4b-it-qat-nvfp4`, `unsloth/gpt-oss-20b`). Früheres Blocking-Problem: Registry-Key `unsloth/gemma-4-26b-a4b-it@iq3_s` wurde von `run_benchmarks` nicht aufgelöst.
 - **Compaction-Anweisung (User):** Compactions regelmäßig/Anlass-bezogen in `C:\Users\pskra\Python-Projekte\Benchmarks\Doku-intern\compaction\compactions.md` schreiben, **hinten anhängen** — Datei angelegt (2 Blöcke: 14.08. 11:30 + 14:30). PowerShell-Here-Strings mit Backticks/`<|…|>` problematisch → Write/Edit-Tool nutzen.
-- **Commit-Politik:** Fremde Diffs (`doc-git\Developer-Docs\LM-Studio-API-References.md`, `Zusammenfassung_Benchmarks_kombiniert.ods`) nicht committen. Gemma-4-Registry + AGENTS.md + Blueprint-Refactor + Tests noch nicht committet.
+- **Commit-Politik:** Fremde Diffs (`docs\Developer-Docs\LM-Studio-API-References.md`, `Zusammenfassung_Benchmarks_kombiniert.ods`) nicht committen. Gemma-4-Registry + AGENTS.md + Blueprint-Refactor + Tests noch nicht committet.
 - **Vorbestehend:** 3 `test_model_manager.py`-Fehler (HTTP/Umgebung, Baseline-stash-verifiziert, nicht vom Refactor verursacht). Tests gesamt: 817 passed.
 - Verifikationslauf 4 war erfolgreich (Commits `8ed30dfb`, `6253a014`, `38cc0e0`); AGENTS.md enthält neue Abschnitte „Wichtige Pfade" + „LM Studio Doku / Links".
 
@@ -283,10 +283,10 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 
 ## Relevant Files
 - `run.gemma4-probelauf.yaml`: aktuelle Spec (nur unsloth/gemma-4-26b-a4b-it@iq3_s) zum Erweitern
-- `doc-git\blueprint_definitions.yaml`: SSOT — template/template_map/stop_strings/reasoning_parsing pro Blueprint
-- `doc-git\model_registry.yaml`: 9 template:-Felder entfernt, 6 Gemma-4-Einträge `gemma_reasoning`, 13 Modelle der Ziel-Familien
-- `doc-git\Jinja-Chat-Templates\`: verfügbare Templates (kein GLM)
-- `doc-git\Model Specific Hints\`: GLM (parsing enabled:true), GPT-OSS Harmony, Magistral, Granite
+- `docs\blueprint_definitions.yaml`: SSOT — template/template_map/stop_strings/reasoning_parsing pro Blueprint
+- `data\model_registry.yaml`: 9 template:-Felder entfernt, 6 Gemma-4-Einträge `gemma_reasoning`, 13 Modelle der Ziel-Familien
+- `docs\Jinja-Chat-Templates\`: verfügbare Templates (kein GLM)
+- `docs\Model Specific Hints\`: GLM (parsing enabled:true), GPT-OSS Harmony, Magistral, Granite
 - `src\assemble_blueprint.py`, `src\registry_tool.py`, `src\benchmark_config.py`, `src\run_benchmarks.py`: Refactor-Stand (geänderte Leser-Quellen)
 - `src\model_manager.py` (Z. 397+), `src\type_defs.py` (`AvailableModelInfo`): Key-Auflösung `lms ls --json`/`modelKey`
 - `tests\test_assemble_blueprint.py`, `tests\test_registry_tool.py`, `tests\test_run_benchmarks.py`: +13 neue Tests
@@ -503,7 +503,7 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 =============== Compaction 17.08.2026 / 18:48 ================
 ## Objective
 - (Current) Provider-Schicht fuer die Benchmark Suite beginnen und LM-Studio-Abhaengigkeit schrittweise entkoppeln.
-- (Completed) Detaillierte Zwischenplanung in PLANUNG.md dokumentiert und aus doc-git verschoben; Phase-1-Providergrenze implementiert.
+- (Completed) Detaillierte Zwischenplanung in PLANUNG.md dokumentiert und aus docs verschoben; Phase-1-Providergrenze implementiert.
 
 ## Important Details
 - **Context:** Der bestehende Launcher importiert weiterhin stabile Funktionen aus model_manager.py. LM Studio besitzt neben OpenAI-kompatibler Inferenz native CLI-/REST-Lifecycle-Funktionen; TabbyAPI hat eigene /model-Endpunkte; OpenAI-Kompatibilitaet standardisiert Load/Unload nicht.
@@ -641,7 +641,7 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 - (Current) Den Zustand sauber festhalten, damit die naechsten Provider-Schritte ohne Rueckfall in die alte LM-Studio-Kopplung weitergehen koennen.
 
 ## Important Details
-- Architekturentscheid: Der GGUF-Header definiert die Modellarchitektur und ihre technischen Grenzen; `doc-git/model_registry.yaml` definiert Benchmark-Metadaten, Sampling, Reasoning, Quantisierung und Kontextpolitik; LM-Studio-JSON-Konfigurationen sind nicht mehr globale Laufzeit-Wahrheit.
+- Architekturentscheid: Der GGUF-Header definiert die Modellarchitektur und ihre technischen Grenzen; `data/model_registry.yaml` definiert Benchmark-Metadaten, Sampling, Reasoning, Quantisierung und Kontextpolitik; LM-Studio-JSON-Konfigurationen sind nicht mehr globale Laufzeit-Wahrheit.
 - `src/model_registry.py` loest Registry-Aliase auf und leitet provider-spezifische Runtime-Views ab, inklusive nativer vs. Benchmark-Kontextlaengen und technischer Grenzpruefung.
 - `src/model_manager.py` delegiert Runtime-Auswahl jetzt an `ModelRegistry` und haelt die LM-Studio-spezifische Logik nur noch als schmale Provider-Schnittstelle fuer das zusammengesetzte Systemprompt-Artefakt.
 - `src/providers/lmstudio_provider.py` prueft das LM-Studio-Artefakt fuer das assemblete Systemprompt; `src/run_benchmarks.py` nutzt dafuer jetzt diesen Provider-Hook statt direkt LM-Studio-JSON-Dateien auszuwerten.
@@ -666,7 +666,7 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 - `src/run_benchmarks.py`
 - `tests/test_model_registry.py`
 - `tests/test_provider_architecture.py`
-- `doc-git/model_registry.yaml`
+- `data/model_registry.yaml`
 
 =============== Compaction 19.08.2026 / 16:00 ================
 ## Objective
@@ -700,7 +700,7 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 - `.github/workflows/review.yml`: Review-/Registry-Gate.
 - `pre_review_checks.ps1`: gemeinsames Pre-Review-Gate.
 - `src/registry_tool.py`: headless Registry-Validierung.
-- `AGENTS.md`, `doc-git/HowTo-Review-Gate_de.md`: dauerhafte Betriebsdokumentation.
+- `AGENTS.md`, `docs/HowTo-Review-Gate_de.md`: dauerhafte Betriebsdokumentation.
 
 =============== Compaction 20.08.2026 / 14:20 ================
 ## Objective
@@ -846,7 +846,7 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 - `src/registry_tool.py`: Einmal-Status, Refresh-Schalter, Validierung und manueller Schreibpfad.
 - `src/benchmark_config.py`: Lokale Nutzung von Web-/manuell bestätigten Sampling-Profilen.
 - `.codex/skills/registry-sampling-review/SKILL.md`: Manuelle Codex-Eskalation.
-- `doc-git/Planung/registry_sampling.md`: Architektur- und Betriebsdokumentation. Siehe CHANGELOG-Eintrag `Registry Sampling Onboarding`.
+- `docs/Planung/registry_sampling.md`: Architektur- und Betriebsdokumentation. Siehe CHANGELOG-Eintrag `Registry Sampling Onboarding`.
 
 =============== Compaction 19.09.2026 / 16:45 ================
 ## Objective
@@ -885,7 +885,7 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 
 ## Work State
 ### Completed / Active / Blocked
-- Completed: README und `doc-git/Architecture, Flow & ChangeLog_en.md` vollständig auf Nutzerworkflow, Datenstruktur, Sampling-Onboarding, Provider, Ergebnisse und Prüfungen ausgerichtet.
+- Completed: README und `docs/Architecture, Flow & ChangeLog_en.md` vollständig auf Nutzerworkflow, Datenstruktur, Sampling-Onboarding, Provider, Ergebnisse und Prüfungen ausgerichtet.
 - Verification: CLI-Hilfe für beide Programme, zentrale Dokumentbegriffe und `git diff --check` geprüft.
 - Active: Dokumentationsänderung für fokussierten Commit vorbereitet.
 - Blocked: Keine technische Blockade.
@@ -897,7 +897,7 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 
 ## Relevant Files
 - `README.md`: Einsteigerorientierter Setup-, Registry- und Benchmark-Workflow.
-- `doc-git/Architecture, Flow & ChangeLog_en.md`: Datenhoheit, Kontrollfluss, Pipeline-Semantik und Architektur.
+- `docs/Architecture, Flow & ChangeLog_en.md`: Datenhoheit, Kontrollfluss, Pipeline-Semantik und Architektur.
 - `CHANGELOG.md`: Eintrag `User-facing Workflow Documentation` für diesen Vorgang.
 
 =============== Compaction 19.09.2026 / 21:51 ================
@@ -928,7 +928,7 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 
 ## Relevant Files
 - `.githooks/pre_commit.ps1`, `.githooks/pre_push.ps1`, `pre_review_checks.ps1`: stabile per-run Pytest-Basis und drift-tolerante CI-Registry-Prüfung.
-- `src/registry_tool.py`, `src/sampling_research.py`, `doc-git/model_registry.yaml`: Registry-/Sampling-Onboarding und Policy.
+- `src/registry_tool.py`, `src/sampling_research.py`, `data/model_registry.yaml`: Registry-/Sampling-Onboarding und Policy.
 - `src/task_manifest.py`, `src/evalplus_task_worker.py`, `tests/test_task_manifest.py`: neue Integritäts-/Worker-Pfade mit Tests.
 
 =============== Compaction 20.09.2026 / 00:40 ================
@@ -982,8 +982,8 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 ## Relevant Files
 - `.gitignore`: Lokale, regenerierbare Analyse- und Hilfsartefakte aus dem Versionsumfang ausgeschlossen.
 - `src/model_paths.py`, `src/local_model_resolver.py`, `src/registry_tool.py`: Konfigurierbare GGUF-Suche und Registry-/Pipeline-Anpassungen.
-- `src/sampling_research.py`, `doc-git/model_registry.yaml`: Kategoriebezogene Sampling-Evidenz und Registry-SSOT.
-- `README.md`, `doc-git/Architecture, Flow & ChangeLog_en.md`, `PLANUNG.md`: Datenfluss-, Architektur- und Planungsdokumentation.
+- `src/sampling_research.py`, `data/model_registry.yaml`: Kategoriebezogene Sampling-Evidenz und Registry-SSOT.
+- `README.md`, `docs/Architecture, Flow & ChangeLog_en.md`, `PLANUNG.md`: Datenfluss-, Architektur- und Planungsdokumentation.
 - `CHANGELOG.md`: Eintrag `Worktree Reconciliation and GitHub Push` für diesen Vorgang.
 
 =============== Compaction 20.09.2026 / 21:09 ================
@@ -1010,8 +1010,8 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 ## Relevant Files
 - `src/sampling_research.py`: generationstreue Granite-Quellen, kompakte Evidence und begrenzte terminale Quellenlisten.
 - `tests/test_sampling_research.py`: Tests für kompakte Evidence, Granite-Generationstrennung und Quellenbegrenzung.
-- `doc-git/model_registry.yaml`: durch den Refresh erzeugte Sampling- und aktuelle Inventardaten.
-- `doc-git/Temperature Recommondations_en.md`: Dokumentation des neuen Evidence-Schemas.
+- `data/model_registry.yaml`: durch den Refresh erzeugte Sampling- und aktuelle Inventardaten.
+- `docs/Temperature Recommondations_en.md`: Dokumentation des neuen Evidence-Schemas.
 - `CHANGELOG.md`: Eintrag `Generation-Safe Sampling Evidence` für diese Änderung.
 
 =============== Compaction 21.09.2026 / 01:33 ================
@@ -1040,7 +1040,7 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 - `src/assemble_blueprint.py`: Quarantänefilter und symmetrisches Config-/Registry-Matching.
 - `src/registry_tool.py`: `--write-context`, Registry-Synchronisierung und Dry-Run-Quarantäne in `pipeline full`.
 - `tests/test_assemble_blueprint.py`, `tests/test_registry_tool.py`: Regressionen für Quarantänefilterung, Matching und Config-Sync.
-- `README.md`, `doc-git/Architecture, Flow & ChangeLog_en.md`, `CHANGELOG.md`: Benutzer- und Workflow-Dokumentation.
+- `README.md`, `docs/Architecture, Flow & ChangeLog_en.md`, `CHANGELOG.md`: Benutzer- und Workflow-Dokumentation.
 
 =============== Compaction 21.09.2026 / 12:05 ================
 ## Objective
@@ -1086,7 +1086,7 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 
 ## Work State
 ### Completed / Active / Blocked
-- Completed: GLM-Dokumentation in `doc-git/Model Specific Hints/` sowie den internen `Doku-intern/Modellspezifisches/GLM (Z.AI)`-Notizen ergänzt; `PLANUNG.md` und `CHANGELOG.md` aktualisiert; `git diff --check` ohne inhaltliche Fehler.
+- Completed: GLM-Dokumentation in `docs/Model Specific Hints/` sowie den internen `Doku-intern/Modellspezifisches/GLM (Z.AI)`-Notizen ergänzt; `PLANUNG.md` und `CHANGELOG.md` aktualisiert; `git diff --check` ohne inhaltliche Fehler.
 - Active: Mehrere Code-, Registry-, Test- und Dokumentationsänderungen liegen uncommittet im Worktree; vorhandene fremde Änderungen insbesondere in `src/model_manager.py` und `src/run_benchmarks.py` bleiben erhalten.
 - Blocked: Keine technische Blockade, aber der GLM-Leerinhalt ist noch nicht behoben; ein vorschneller Wechsel von `json_schema` zu `json_object` wäre durch die LM-Studio-API widerlegt.
 
@@ -1097,7 +1097,7 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 4. Vor Commit/Push Scope, staged Diff und die verpflichtenden `.githooks` prüfen.
 
 ## Relevant Files
-- `doc-git/Model Specific Hints/GLM 4.5 - 4.7_Structured Output_en.md`: LM-Studio-`json_schema`-Vertrag, lokale 400-Antwort und llama.cpp-Migrationshinweis.
+- `docs/Model Specific Hints/GLM 4.5 - 4.7_Structured Output_en.md`: LM-Studio-`json_schema`-Vertrag, lokale 400-Antwort und llama.cpp-Migrationshinweis.
 - `Doku-intern/Modellspezifisches/GLM (Z.AI)/`: interne GLM-Befunde, Familiengrenzen, API- und `--reasoning-format`-Hinweise.
 - `PLANUNG.md`: neue A/B- und Provider-Aufgaben für `--reasoning-format` und GUI-Override-Abgrenzung.
 - `src/custom_benchmark.py`: aktueller API-/Extraktionspfad; möglicher nächster Diagnosepunkt für rohe `message`-Felder.
@@ -1133,7 +1133,7 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 - `PLANUNG.md`: Hybridarchitektur, Installationsbereinigung, PATH-Policy, Migrationsphasen und Abnahmekriterien.
 - `CHANGELOG.md`: Eintrag `llama.cpp-Preset-Grenze und Vulkan-Installation bereinigt`.
 - `src/providers/`: Zielort für den neuen direkten llama.cpp-Provider; noch nicht implementiert.
-- `doc-git/model_registry.yaml`: fachliche Registry-Quelle, nicht durch eine Runtime-INI zu ersetzen.
+- `data/model_registry.yaml`: fachliche Registry-Quelle, nicht durch eine Runtime-INI zu ersetzen.
 
 =============== Compaction 21.09.2026 / direct llama.cpp provider ================
 ## Objective
@@ -1309,7 +1309,7 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 ## Relevant Files
 - `src/sampling_research.py`: Benchmark-Aliase und partielle Samplingprofile.
 - `src/benchmark_config.py`: Fallback für offiziell nicht angegebene Gegenwerte.
-- `doc-git/model_registry.yaml`: bestätigte GLM-4.7-Basispolicy.
+- `data/model_registry.yaml`: bestätigte GLM-4.7-Basispolicy.
 - `src/registry_tool.py`: llama.cpp-Preset-Export und idempotentes Merge.
 - `PLANUNG.md`, `CHANGELOG.md`: Konfigurationshierarchie und Verifikation.
 
@@ -1484,8 +1484,8 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 - `PLANUNG.md`: Phasen, Abnahmekriterien und noch zu bereinigende Statusmarkierungen.
 - `src/providers/llama_cpp_provider.py`, `src/run_benchmarks.py`: direkter Backendpfad.
 - `src/benchmark_config.py`, `src/registry_tool.py`: Auxiliary-Filter und Registry-Import.
-- `doc-git/model_registry.yaml`: Millie-Identität und MoE-Runtimewerte.
-- `README.md`, `doc-git/Architecture, Flow & ChangeLog_en.md`: Backend- und Workflow-Doku.
+- `data/model_registry.yaml`: Millie-Identität und MoE-Runtimewerte.
+- `README.md`, `docs/Architecture, Flow & ChangeLog_en.md`: Backend- und Workflow-Doku.
 
 ============== Compaction 22.09.2026 / Commit checkpoint ==============
 ## Objective
@@ -1530,7 +1530,7 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 - `CHANGELOG.md`: Kurzprotokoll der konkreten Änderungen; verweist auf diesen
   Compaction-Checkpoint.
 - `PLANUNG.md`: aktueller Migrations- und Abnahmestatus.
-- `src/`, `tests/`, `doc-git/`: zusammengehöriger Implementierungs-, Test- und
+- `src/`, `tests/`, `docs/`: zusammengehöriger Implementierungs-, Test- und
   Dokumentationsstand des aktuellen Checkpoints.
 
 =============== Compaction 23.09.2026 / Commit checkpoint ================
@@ -1557,7 +1557,7 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 ## Relevant Files
 - `src/registry_tool.py`: Hub-Quellenauflösung für lokale GGUF-Dateien.
 - `tests/test_registry_tool.py`: Regressionstest für den RNJ-1-Repository-Alias.
-- `doc-git/model_registry.yaml`, `CHANGELOG.md`, `PLANUNG.md`: bereinigter und dokumentierter Projektstand.
+- `data/model_registry.yaml`, `CHANGELOG.md`, `PLANUNG.md`: bereinigter und dokumentierter Projektstand.
 
 =============== Compaction 23.09.2026 / Regression-Fix und Push ================
 ## Objective
@@ -1689,14 +1689,14 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
   Fallbacks wurden entfernt.
 - **Phase 6 — Facade and documentation:** `registry_tool.py` bleibt als
   stabile CLI-Fassade bestehen; wiederverwendbare Grenzen liegen in fokussierten
-  Modulen. `doc-git/Architecture, Flow & ChangeLog_en.md` verweist auf die
+  Modulen. `docs/Architecture, Flow & ChangeLog_en.md` verweist auf die
   offizielle [HuggingFace Model Card Metadata Interoperability
   Consideration](https://github.com/ggml-org/llama.cpp/wiki/HuggingFace-Model-Card-Metadata-Interoperability-Consideration).
   Die Entscheidung ist bewusst dort dokumentiert, weil der Link Metadaten-
   Interoperabilitaet beschreibt, nicht die vollstaendige Runtime-Parameter-
-  Abbildung. `LOCAL-LLM-ENVIRONMENT.md` bleibt die zentrale Hardware-/Backend-
-  Faktenquelle und wird nicht mit Projektarchitektur vermischt.
-- **Data safety:** `doc-git/model_registry.yaml` und lokale LM-Studio-
+  Abbildung. `$HOME/.agents/skills/local-llm-runner/SKILL.md` ist die zentrale
+  Hardware-/Backend-Faktenquelle und wird nicht mit Projektarchitektur vermischt.
+- **Data safety:** `data/model_registry.yaml` und lokale LM-Studio-
   Artefakte wurden nicht automatisch umgeschrieben. Mehrdeutige Evidenz bleibt
   sichtbar und fail-closed.
 
@@ -1743,7 +1743,7 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
   migrierte Consumers und CLI-Fassade.
 - `docs/keystone/refactors/2026-09-24-model-identity-synchronization.md`:
   Phasenplan, Invarianten, Beweis- und Rollback-Regeln.
-- `doc-git/Architecture, Flow & ChangeLog_en.md`, `CHANGELOG.md`:
+- `docs/Architecture, Flow & ChangeLog_en.md`, `CHANGELOG.md`:
   Architektur-/Interoperabilitaetsentscheidung und Aenderungsnachweis.
 
 =============== Compaction 24.09.2026 / 19:41 ================
@@ -1859,7 +1859,7 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 3. Commit-SHA, Remote-SHA, Arbeitsbaum und Hook-Ergebnisse berichten.
 
 ## Relevant Files
-- `doc-git/Architecture, Flow & ChangeLog_en.md`: erweiterter Daten- und
+- `docs/Architecture, Flow & ChangeLog_en.md`: erweiterter Daten- und
   Abgleichsvertrag.
 - `src/inventory.py`, `src/registry_tool.py`, `src/model_identity.py`:
   Implementierung der Join-Grenzen.
@@ -1873,7 +1873,7 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
   sein.
 
 ## Important Details
-- `doc-git/model_registry.yaml` wurde aus dem Git-Index entfernt; die lokale
+- `data/model_registry.yaml` wurde aus dem Git-Index entfernt; die lokale
   Datei ist weiterhin vorhanden und durch `.gitignore` ignoriert. Die
   erreichbaren GitHub-Refs/Versionen wurden auf absolute User-Pfade geprueft;
   keine veroeffentlichte Version mit solchen Pfaden wurde gefunden, daher war
@@ -1921,7 +1921,7 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 - `src/custom_benchmark.py`: exakte quantisierte Modellauswahl.
 - `tests/test_artifact_bundle.py`, `tests/test_comparison_manifest.py` und
   geaenderte Resolver-/Provider-Tests: positive und negative Regressionen.
-- `PLANUNG.md`, `README.md`, `doc-git/Architecture, Flow & ChangeLog_en.md`:
+- `PLANUNG.md`, `README.md`, `docs/Architecture, Flow & ChangeLog_en.md`:
   Entscheidung und Betriebsvertrag; `CHANGELOG.md`: konkrete Aenderungen.
 - `COMPACTIONS.md`: dieser vor Commit/Push erzeugte Arbeitsstand.
 
@@ -1989,7 +1989,7 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 - `src/custom_benchmark.py`: explizite Modell-/Quant-Aufloesung.
 - `src/registry_tool.py`, `src/model_registry.py`: GGUF/JSON- und Companion-
   Bindungen.
-- `doc-git/model_registry.yaml`: lokale absolute Pfade und Bundle-Daten.
+- `data/model_registry.yaml`: lokale absolute Pfade und Bundle-Daten.
 - `tests/test_model_manager.py`: zwei Korrekturen an Testvertrag/Isolation.
 - `CHANGELOG.md`: Verweis auf diesen Checkpoint.
 
@@ -2044,10 +2044,10 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
    ausdrücklicher Beauftragung, mit geprüftem Scope und Repository-Hooks.
 
 ## Relevant Files
-- `doc-git/Review-Artifacts/Code-Review_registry_2026-09-28.md`: ursprüngliche Befunde.
-- `doc-git/Review-Artifacts/Code-Review_registry_Fixes_2026-09-28.md`: Fix-Nachweise,
+- `docs/Review-Artifacts/Code-Review_registry_2026-09-28.md`: ursprüngliche Befunde.
+- `docs/Review-Artifacts/Code-Review_registry_Fixes_2026-09-28.md`: Fix-Nachweise,
   Pairing-Vertrag, Datenblocker und R13 mit Reproduktion.
-- `doc-git/Review-Artifacts/Sampling-Identity-Refresh_2026-09-28.md`: Quellen und Werte.
+- `docs/Review-Artifacts/Sampling-Identity-Refresh_2026-09-28.md`: Quellen und Werte.
 - `src/model_identity.py`, `src/gguf_evidence.py`, `src/runtime_policy.py`,
   `src/speculative.py`, `src/registry_tool.py`: gemeinsame Vertragsgrenzen.
 - `src/custom_benchmark.py`: offener R13; `CHANGELOG.md`: konkrete Änderungen.
@@ -2158,7 +2158,7 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
   kein Ausschluss der fehlgeschlagenen Tests.
 - **Verifikation ohne Datenverlust:** Git-Archiv in einem ignorierten lokalen
   Quellcode-Snapshot erstellt und nur fünf Fixture-/Testdateien aktualisiert.
-  Dort fehlt `doc-git/model_registry.yaml` vollständig. Die produktive Registry
+  Dort fehlt `data/model_registry.yaml` vollständig. Die produktive Registry
   wurde dafür weder gelöscht noch verschoben.
 
 ## Work State
@@ -2199,3 +2199,73 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 
 ## Next Move
 1. Letzte CI-Korrektur committen/pushen und tatsächliche Run-Ergebnisse prüfen.
+
+=============== Compaction 29.09.2026 / 17:28 ================
+## Objective
+- Neue Benutzeranforderung: KV-Paare auf zwei unterstützte Quantisierungen
+  beschränken, wiederholende Generationen abfangen und Runtime-Daten von
+  Dokumentation trennen. Vorherige Veröffentlichung `cd7c0609` besitzt grüne
+  Linux-/Windows-CI und CodeQL.
+
+## Important Details
+- **Metrik:** K+V-Bits, q5_1=5,5 und q4_1=4,5; Zielsumme 8 oder 16.
+  Gleichstand bei 12 wird auf q4_0/q4_0 abgerundet. Floatpaare ergeben q8_0.
+- **Grenzen:** gemeinsamer Resolver an JSON-Import, Registry-Save, Preset und
+  Provider-Aufrufen; kein unterschiedlicher lokaler Rundungsalgorithmus.
+- **Wiederholung:** Server-Usage kann erst am Ende erscheinen. Exaktes
+  Tokenlimit lässt sich daraus während der Generation nicht beweisen;
+  unabhängige Schleifenerkennung soll bereits den Stream abbrechen.
+- **Migration:** Registry inhaltlich identisch nach data/ verschoben, alle
+  81 Dateien erhalten, docs/keystone bleibt bestehen. Fremde Dokumentänderungen
+  wurden gesichert und nur ihre Pfadverweise angepasst. Details im CHANGELOG.
+
+## Work State
+- Completed: Migration, Verweisscan, 91 fokussierte Tests und statische Checks.
+- Active: getrennte KV- und Budget-Codearbeiten, anschließend Integration und
+  unabhängiger Nachreview. Root besitzt sämtliche realen Datenwrites.
+- Constraints: keine GPU-, Load-/Unload- oder echten Generationstests.
+
+## Next Move
+1. KV-/Budget-Code integrieren, reale Registry und abgeleitete Dateien sichern
+   und aktualisieren, danach vollständiges Gate und Nachreview abschließen.
+
+=============== Compaction 29.09.2026 / 18:37 ================
+## Objective
+- KV-Normalisierung, Stream-Abbruch und Pfadmigration für Commit und Push
+  fertigstellen.
+
+## Important Details
+- Gemeinsame Bit-Summe: bis 12 K+V-Bits `q4_0/q4_0`, darüber `q8_0/q8_0`;
+  FP16/BF16/FP32 und fehlende Runtime-Policy führen auf Q8/Q8. Tie rundet ab.
+- `fmt` prüft die Registry-Wurzel und nutzt den normalisierenden atomaren
+  Writer. Kontextschätzung, llama.cpp, Unsloth, Preset-Export und LM-Studio-
+  Assembly teilen denselben ausführbaren Default.
+- Wiederholende Python-/JavaScript-Endlosschleifen werden im Stream erkannt;
+  Usage-Limits und Deadlines bleiben zusätzliche Endbedingungen.
+- `data/model_registry.yaml`, LM-Studio-Configs und `preset.ini` enthalten
+  maschinenbezogene lokale Daten und bleiben gitignored. 61 Registry-Paare:
+  50 Q8/Q8, 11 Q4/Q4; 52 Configs geprüft, 24 geändert, 7 ungebunden belassen.
+- Review-Nachprüfung: PASS. Vollständige Testsuite: 1.610 passed; Ruff und
+  fokussierter mypy-Scope sauber.
+
+## Work State
+- Completed: Code, Datenpfad-Migration, Dokumentation, Regressionen und
+  unabhängige Review-Befunde.
+- Completed: Pre-Commit-Hook (Ruff, Registry-/Dateigates, 174 fokussierte
+  Tests) und Commit-Message-Hook bestanden; Commit wurde erstellt.
+- Active: Pre-Push-Hook, Push sowie GitHub-CI für den tatsächlichen Commit
+  verifizieren.
+- Constraints: keine Modell-Lade-/Unload-Aufrufe, GPU-Läufe oder Generierung.
+
+## Next Move
+1. Exakt aufgabenspezifische staged Änderungen prüfen und ohne Skip committen.
+2. Pre-Push-Hook ausführen, nach `origin/main` pushen und Remote-CI prüfen.
+
+## Relevant Files
+- `src/kv_cache_policy.py`: zentrale Auswahl und Q8/Q8 Runtime-Default.
+- `src/registry_tool.py`, `src/assemble_blueprint.py`: Registry-, Preset- und
+  LM-Studio-Konfigurationsgrenzen.
+- `src/generation_limits.py`, `src/custom_benchmark.py`: Wiederholungs- und
+  Tokenbudget-Endbedingungen.
+- `docs/Review-Artifacts/Registry-Update_Runtime-and-KV_2026-09-29.md`:
+  Review-Evidenz und lokale Grenzen.

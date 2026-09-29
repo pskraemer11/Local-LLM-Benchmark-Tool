@@ -98,8 +98,8 @@ def test_provider_starts_offline_server_with_local_model(tmp_path: Path, monkeyp
     assert command[command.index("--ctx-size") + 1] == "32768"
     assert command[command.index("--parallel") + 1] == "4"
     assert command[command.index("--gpu-layers") + 1] == "all"
-    assert command[command.index("--cache-type-k") + 1] == "q8_0"
-    assert command[command.index("--cache-type-v") + 1] == "iq4_nl"
+    assert command[command.index("--cache-type-k") + 1] == "q4_0"
+    assert command[command.index("--cache-type-v") + 1] == "q4_0"
     assert "--kv-unified" in command
     assert command[command.index("--chat-template-file") + 1].endswith(
         "gpt-oss-20b-template_unsloth.jinja"

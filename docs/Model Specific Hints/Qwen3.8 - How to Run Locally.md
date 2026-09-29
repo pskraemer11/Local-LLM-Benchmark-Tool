@@ -31,7 +31,7 @@ The upstream guide's raw model defaults remain useful for direct llama.cpp/Unslo
 
 ### Blueprint, template and reasoning behavior
 
-Qwen3.8 uses the shared `reasoning_coding` blueprint. This blueprint supplies coding-oriented role and output guidance without adding a generic chain-of-thought scaffold; the native Qwen template controls thinking behavior. There is no separate Qwen3.8 Jinja template in `doc-git/Jinja-Chat-Templates`, so the GGUF-embedded/LM Studio template remains authoritative.
+Qwen3.8 uses the shared `reasoning_coding` blueprint. This blueprint supplies coding-oriented role and output guidance without adding a generic chain-of-thought scaffold; the native Qwen template controls thinking behavior. There is no separate Qwen3.8 Jinja template in `docs/Jinja-Chat-Templates`, so the GGUF-embedded/LM Studio template remains authoritative.
 
 For local API execution, distinguish thinking from direct instruct execution explicitly. Use the thinking template/request mode for reasoning, math and agentic tasks when the benchmark policy selects it; use the non-thinking mode for direct coding or knowledge answers when selected. A small output budget can be consumed by reasoning before a final answer is emitted, so benchmark runs must account for reasoning tokens.
 

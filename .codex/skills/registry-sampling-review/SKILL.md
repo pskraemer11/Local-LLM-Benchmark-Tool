@@ -12,7 +12,7 @@ It is a manual escalation path, not part of a benchmark run.
 ## Boundaries
 
 - Work in `C:\Users\pskra\Python-Projekte\Benchmarks`.
-- Treat `doc-git/model_registry.yaml` as the Registry source of truth, but do
+- Treat `data/model_registry.yaml` as the Registry source of truth, but do
   not edit it directly.
 - Do not inspect or modify LM Studio JSON configuration files for this task.
 - OCR, MTP-drafter and embedding models are outside the Registry benchmark scope.

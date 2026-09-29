@@ -1,6 +1,6 @@
 # Code-Review – LLM Benchmark Suite
 **Date:** 2026-07-12
-**Scope:** Active Python code in project root + `doc-git/` + `Doku-intern/` + LM Studio Server Logs (3 most recent from 2026-07-12)
+**Scope:** Active Python code in project root + `docs/` + `Doku-intern/` + LM Studio Server Logs (3 most recent from 2026-07-12)
 **Methodology:** Static analysis + Cross-reference with README, architecture docs, model profiles and log data
 
 **Prio-1-Fix-Status (2026-07-12):**
@@ -67,7 +67,7 @@ The project is a mature, well-structured benchmark suite for local LLMs via LM S
 
 ### 2.1 Positive Aspects
 
-**Clear layer separation** (see `doc-git/Architektur+Flow_Python-Benchmark-Skript_v24.md:59-123`):
+**Clear layer separation** (see `docs/Architektur+Flow_Python-Benchmark-Skript_v24.md:59-123`):
 ```
 Launcher (run_benchmarks.py)   → orchestrates, load/unload
 ├── custom_benchmark.py        → subprocess for DS1000/CoderEval
@@ -390,7 +390,7 @@ With 100+ models or SS=100, the system becomes noticeably slower:
 - Lines 115-127 "Thinking Mode" section is outdated — mentions `--thinking` activation for MathQA/MMLU-Pro (no longer existing benchmarks)
 - Lines 130-145 Project Structure matches the current directory structure
 
-### 6.2 `doc-git/Architektur+Flow_Python-Benchmark-Skript_v24.md`
+### 6.2 `docs/Architektur+Flow_Python-Benchmark-Skript_v24.md`
 
 - Line 1: "As of 2026-07-12 (v33)" — **Version confusion**: README says v13, file says v33. Documentation inconsistency
 - Line 17: "Removed: BBH, PandasEval, MMLU-Pro" — correct
@@ -402,14 +402,14 @@ With 100+ models or SS=100, the system becomes noticeably slower:
 - Line 142: "BBH (too expensive, 8x multiplier)" — BBH is removed, but still implemented in `download_real_benchmarks.py` (lines 231-292)
 - **Review 2026-06-28 section (lines 125-146):** Very detailed, good history. But "Type Hints 55+20+27 = 102 functions" (line 129) — current numbers should be verified (v13 likely has more)
 
-### 6.3 `doc-git/thinking_config.md`
+### 6.3 `docs/thinking_config.md`
 
 - Lines 23-41: Current patterns are correct for v13
 - Lines 42-57: `--thinking` flag behavior is very clearly documented
 - Lines 58-72: "Since v13 centralized in `_get_lmeval_params()`" — **incorrect** as noted in D2 above
 - Line 85: "MathQA `20→512`, HellaSwag `20→100`" — these YAML changes are not findable in the repo (`lm_eval_tasks/` only contains `mathqa_gen/utils.py`)
 
-### 6.4 `doc-git/Parallel-Slots-Optimierung.md`
+### 6.4 `docs/Parallel-Slots-Optimierung.md`
 
 - Lines 30-37: Dense vs MoE recommendation (np=1 vs np=4) — excellent empirical data
 - Lines 42-55: LCP/LRU mechanism correctly explained

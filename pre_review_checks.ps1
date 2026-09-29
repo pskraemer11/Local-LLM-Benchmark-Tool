@@ -4,7 +4,7 @@
 
 .DESCRIPTION
     Fuehrt die Gate-Checks vor einem Review/Commit aus und erzeugt
-    Transparenz-Artefakte in doc-git\Review-Artifacts\:
+    Transparenz-Artefakte in docs\Review-Artifacts\:
 
       1. registry_tool.py validate --ci --repro
          -> repro_issues.md (statische Registry-Pruefung und Hub-Abgleich)
@@ -84,7 +84,7 @@ $pytestBaseTemp = Join-Path $pytestTempRoot "base"
 $artifactsDir = if ($NoArtifacts) {
     Join-Path $runTemp "review-artifacts"
 } else {
-    Join-Path $projectPath "doc-git\Review-Artifacts"
+    Join-Path $projectPath "docs\Review-Artifacts"
 }
 if (-not (Test-Path -LiteralPath $artifactsDir)) {
     New-Item -ItemType Directory -Path $artifactsDir -Force | Out-Null
@@ -206,7 +206,7 @@ for key, (path, (nl, hd, ctx)) in sorted(hits.items()):
         if rv is not None and int(rv) != gguf_val:
             errors.append(f"- **{key}**: {label} Registry={rv} vs GGUF={gguf_val} ({path})")
 
-artifact_root = Path(os.environ.get("BENCHMARK_REVIEW_ARTIFACTS_DIR", str(PROJECT / "doc-git" / "Review-Artifacts")))
+artifact_root = Path(os.environ.get("BENCHMARK_REVIEW_ARTIFACTS_DIR", str(PROJECT / "docs" / "Review-Artifacts")))
 artifact_root.mkdir(parents=True, exist_ok=True)
 out = artifact_root / "gguf_issues.md"
 lines = [

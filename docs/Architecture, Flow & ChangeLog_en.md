@@ -53,10 +53,10 @@ model_registry.yaml + provider ──> run_benchmarks.py
 
 | Data                                  | Authority                                      | Used by                                   | Write policy                                      |
 | ------------------------------------- | ---------------------------------------------- | ----------------------------------------- | ------------------------------------------------- |
-| doc-git/model_registry.yaml           | Benchmark policy and provider-neutral metadata | Registry tool, launcher, model resolution | Updated by registry maintenance                   |
+| data/model_registry.yaml           | Benchmark policy and provider-neutral metadata | Registry tool, launcher, model resolution | Updated by registry maintenance                   |
 | GGUF header and filename              | Model architecture and native limits           | Registry tool, resolver                   | Read-only source                                  |
-| doc-git/blueprint_definitions.yaml    | Prompt blueprint definitions                   | Assembly and validation                   | Maintained as project policy                      |
-| doc-git/Jinja-Chat-Templates/         | Explicit template files                        | Prompt assembly                           | Maintained as project assets                      |
+| docs/blueprint_definitions.yaml    | Prompt blueprint definitions                   | Assembly and validation                   | Maintained as project policy                      |
+| docs/Jinja-Chat-Templates/         | Explicit template files                        | Prompt assembly                           | Maintained as project assets                      |
 | LM Studio config JSONs                | LM Studio runtime state                        | Drift checks, explicit Registry import, and IdentityLink prompt assembly | Read as evidence; `full` previews, `full --write-prompts` writes only uniquely joined prompt/template fields |
 | llama.cpp `config.ini`                | Hardware-wide llama.cpp defaults               | Direct CLI/server processes               | User/system runtime configuration                 |
 | llama.cpp `preset.ini`                | Derived model router catalog                   | Direct server provider                    | Generated from Registry; preserve custom sections |
@@ -354,7 +354,7 @@ display path are deliberately absent from this persisted projection. They are
 useful inputs to the join, but they are neither needed by `llama-server.exe`
 nor authoritative over the exact local GGUF and its header.
 
-The Registry file itself is machine-local: `doc-git/model_registry.yaml` is
+The Registry file itself is machine-local: `data/model_registry.yaml` is
 ignored by Git and is not shipped as a populated download. A fresh installation
 generates it with `registry_tool.py full` from the local GGUF inventory; when
 LM Studio is installed, its inventory and JSON configs provide additional
@@ -1048,8 +1048,9 @@ Benchmarks/
 │   ├── csv_writer.py
 │   └── consolidate_results.py
 ├── tests/
-├── doc-git/
-│   ├── model_registry.yaml
+├── data/
+│   └── model_registry.yaml
+├── docs/
 │   ├── blueprint_definitions.yaml
 │   ├── Jinja-Chat-Templates/
 │   └── Architecture, Flow & ChangeLog_en.md
@@ -1111,4 +1112,4 @@ and all four benchmark pipelines share the provider and result boundaries
 described above.
 
 Historical implementation details and code-review records remain in Git
-history, doc-git/Reviews/, and the other focused documents under doc-git/.
+history, docs/Reviews/, and the other focused documents under docs/.

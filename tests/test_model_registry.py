@@ -119,16 +119,17 @@ def test_model_registry_derives_provider_specific_runtime(tmp_path: Path) -> Non
 
     assert tabbyapi_runtime["max_seq_len"] == 32768
     assert tabbyapi_runtime["cache_size"] == 32768
-    assert tabbyapi_runtime["cache_mode"] == "FP16"
+    assert tabbyapi_runtime["cache_mode"] == "8,8"
     assert unsloth_runtime["context_length"] == 32768
-    assert unsloth_runtime["cache_type_k"] == "f16"
-    assert unsloth_runtime["cache_type_v"] == "f16"
+    assert unsloth_runtime["cache_type_k"] == "q8_0"
+    assert unsloth_runtime["cache_type_v"] == "q8_0"
     assert unsloth_runtime["kv_unified"] is True
     assert unsloth_runtime["chat_template_file"] == str(
         tmp_path / "gpt-oss-20b-template_unsloth.jinja"
     )
     assert llama_runtime["context_length"] == 32768
-    assert llama_runtime["cache_type_k"] == "f16"
+    assert llama_runtime["cache_type_k"] == "q8_0"
+    assert llama_runtime["cache_type_v"] == "q8_0"
     assert llama_runtime["kv_unified"] is True
     assert llama_runtime["reasoning_format"] == "deepseek"
     assert llama_runtime["reasoning_effort"] == "medium"

@@ -104,8 +104,8 @@ def test_provider_resolves_local_registry_model_and_builds_cuda_server_command(t
     assert "--no-ui" in command
     assert "--no-webui" not in command
     assert command[command.index("--ctx-size") + 1] == "32768"
-    assert command[command.index("--cache-type-k") + 1] == "q8_0"
-    assert command[command.index("--cache-type-v") + 1] == "iq4_nl"
+    assert command[command.index("--cache-type-k") + 1] == "q4_0"
+    assert command[command.index("--cache-type-v") + 1] == "q4_0"
     assert command[command.index("--reasoning-format") + 1] == "deepseek"
     assert command[command.index("--reasoning-budget") + 1] == "4096"
     assert command[command.index("--reasoning-effort") + 1] == "medium"

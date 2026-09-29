@@ -14,22 +14,22 @@ data foundations, suggest fixes, but never edit code yourself.
 
 ## Workflow
 0. **GATE CHECK** — Verify artifacts exist before proceeding:
-   - Check for `doc-git/Review-Artifacts/repro_issues.md`
-   - Check for `doc-git/Review-Artifacts/lint_issues.md`
-   - Check for `doc-git/Review-Artifacts/gguf_issues.md`
+   - Check for `docs/Review-Artifacts/repro_issues.md`
+   - Check for `docs/Review-Artifacts/lint_issues.md`
+   - Check for `docs/Review-Artifacts/gguf_issues.md`
    - If any are missing: **WARN** the user: "Review artifacts missing — please run `.\pre_review_checks.ps1` first" and **stop**.
    - If artifacts exist but are stale (>24h old): **WARN** but continue.
 
 1. Read the Review-Gate artifacts:
-   - `doc-git/Review-Artifacts/repro_issues.md` (registry / GGUF / provider-runtime drift)
-   - `doc-git/Review-Artifacts/lint_issues.md` (ruff/mypy)
-   - `doc-git/Review-Artifacts/gguf_issues.md` (registry vs. GGUF headers)
+   - `docs/Review-Artifacts/repro_issues.md` (registry / GGUF / provider-runtime drift)
+   - `docs/Review-Artifacts/lint_issues.md` (ruff/mypy)
+   - `docs/Review-Artifacts/gguf_issues.md` (registry vs. GGUF headers)
 2. Determine the change scope: `git status`, `log`, `diff` since the commit under review.
-3. Validate `doc-git/model_registry.yaml` against installed models and provider runtime (`lms ls --json` and registry-resolved runtime where relevant):
+3. Validate `data/model_registry.yaml` against installed models and provider runtime (`lms ls --json` and registry-resolved runtime where relevant):
    completeness and consistency of benchmark policy.
-4. Code quality: logic and regressions in `src/` and `tests/`, docs in `doc-git/`.
+4. Code quality: logic and regressions in `src/` and `tests/`, docs in `docs/`.
    Orientation: ISO/IEC 9126 (functionality, reliability, maintainability).
-5. Earlier reviews (`doc-git/Reviews/`, at least the two most recent) as context —
+5. Earlier reviews (`docs/Reviews/`, at least the two most recent) as context —
    do not regress on already-fixed findings.
 6. If benchmark outputs are in doubt: the current `Doku-intern/Benchmark Run*.md` /
    `Terminalausgabe Benchmark*.md` and `~\.lmstudio\server-logs\`.

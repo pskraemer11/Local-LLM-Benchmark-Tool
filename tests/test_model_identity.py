@@ -339,7 +339,7 @@ class TestFieldOwnership:
         from ruamel.yaml import YAML
 
         fixture = Path(__file__).parent / "fixtures" / "registry_ownership.yaml"
-        private_registry = Path(__file__).parent.parent / "doc-git" / "model_registry.yaml"
+        private_registry = Path(__file__).parent.parent / "data" / "model_registry.yaml"
         paths = [fixture]
         if private_registry.is_file():
             paths.append(private_registry)

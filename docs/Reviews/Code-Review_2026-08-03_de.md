@@ -3,7 +3,7 @@
 > **Status:** Review nach Phase p8-Umsetzung (MTP-Drafter-Schutz, Qwen-Klassifikation, phi-4-Override, Struktur-Gate, Agentic-Safety, Run-Spec)
 > **Methodologie:** [ISO/IEC 9126](https://de.wikipedia.org/wiki/ISO/IEC_9126) - die 6 Hauptmerkmale: Functionality, Reliability, Usability, Efficiency, Maintainability, Portability.
 > **Scope:** 10 Haupt-Skripte (10.966 LOC) + Tests (704 gruen) + YAML-Registry (70 Eintraege) + Live-Check gegen `lms ls` (76 Modelle) + Server-Logs 2026-07/08 + Terminalausgabe Run 03.08.2026.
-> **Vorgaenger-Reviews:** `doc-git/Reviews/Code-Review_2026-08-02_de.md` (Umsetzungslog), `Code-Review_2026-07-28_de.md`, `Code-Review_2026-07-27_de.md` (8.5/10)
+> **Vorgaenger-Reviews:** `docs/Reviews/Code-Review_2026-08-02_de.md` (Umsetzungslog), `Code-Review_2026-07-28_de.md`, `Code-Review_2026-07-27_de.md` (8.5/10)
 
 > ✅ **UMSETZUNG ABGESCHLOSSEN – Commit `3a0af33f` (03.08.2026, Branch `main`):**
 > Alle Befunde F1–F5 umgesetzt (siehe §3 und Changelog in `Architecture, Flow & ChangeLog_en.md`).

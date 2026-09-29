@@ -5,7 +5,7 @@ Status: 2026-08-13. Legend: [ ] open, [~] in progress, [x] done/checked.
 ## Ziel
 
 Eine robuste, zentrale Quelle (Register) für Architekturtyp und Sampling-Parameter (temperature/top_p/top_k/min_p/enable_thinking)
-pro Modell in `doc-git/model_registry.yaml` (SSOT), die von allen Lesern (zum Senden an lokale Provider per API- oder Server-Aufruf) genutzt wird.
+pro Modell in `data/model_registry.yaml` (SSOT), die von allen Lesern (zum Senden an lokale Provider per API- oder Server-Aufruf) genutzt wird.
 
 Die erste Migrationsstufe lag teilweise noch hard codiert in `MODEL_CATEGORY_SAMPLING`
 (`src/benchmark_config.py`), einer zentralen Ausnahme-Tabelle (Research 06.08.2026).
@@ -14,7 +14,7 @@ Die erste Migrationsstufe lag teilweise noch hard codiert in `MODEL_CATEGORY_SAM
 
 Entscheidung (Nutzer, 11.08.): **Option B** (Registry-Felder, SSOT), **Variante A** (flach).
 
-Schema pro Modell in `doc-git/model_registry.yaml`:
+Schema pro Modell in `data/model_registry.yaml`:
 
 ```yaml
 model_key@quant:
@@ -83,11 +83,11 @@ model_key@quant:
 
 - [x] **1. Spezifikation finalisieren** — Variante A (flach pro Modell), Kategorien coding/knowledge/agentic/math + thinking-Unterblock. Datenmodell siehe Abschnitt A.
 - [x] **2. Schema-Design finalisieren** — verschachteltes dict pro Kategorie, Validierungsregeln definiert (Abschnitt A).
-- [x] **3. Migration umsetzen** — 17 von 47 Registry-Modellen mit `sampling:`-Block ergänzt (4 als Pilot einzeln, 14 gebündelt per Skript, 1 Block entfernt). Jede Änderung im Migration-Log (`doc-git/Planung/registry_sampling_log.md`) protokolliert.
+- [x] **3. Migration umsetzen** — 17 von 47 Registry-Modellen mit `sampling:`-Block ergänzt (4 als Pilot einzeln, 14 gebündelt per Skript, 1 Block entfernt). Jede Änderung im Migration-Log (`docs/Planung/registry_sampling_log.md`) protokolliert.
 - [x] **4. Lesepfade implementieren** — `get_model_config`/`_sampling_cell` lesen die Registry-`sampling:`-Felder (Precedence: Registry → Kategorie-/Thinking-Defaults). Quelle via `_source` (`registry-sampling` | `thinking-default` | `category-default`).
 - [x] **5. `MODEL_CATEGORY_SAMPLING` vollständig ablösen** — alle 35 noch zuordenbaren Tabellenzeilen in 35 Registry-Einträge migriert; der hardcodierte Tabellen-Fallback und sein Reader wurden entfernt.
 - [x] **6. Tests** — Registry-/Default-Regressionen angepasst und der Reader gegen den vollständigen Registry-Pfad verifiziert.
-- [x] **7. Rollout / Doku** — CHANGELOG-Eintrag, `doc-git/Planung/registry_sampling.md` (diese Datei), `thinking-config_en.md` + `Temperature Recommondations_en.md` Referenz aktualisiert, HowTo (Abschnitt G).
+- [x] **7. Rollout / Doku** — CHANGELOG-Eintrag, `docs/Planung/registry_sampling.md` (diese Datei), `thinking-config_en.md` + `Temperature Recommondations_en.md` Referenz aktualisiert, HowTo (Abschnitt G).
 
 ## C. Betroffene Modelle (Ist-Stand 20.08.)
 
@@ -127,7 +127,7 @@ kein reguläres Benchmark-Textmodell); dort greifen die generischen Kategorie-/T
 
 ## E. Governance / Logging
 
-- Migration-Log: `doc-git/Planung/registry_sampling_log.md` — protokolliert jede Änderung (Was, Warum, betroffene Modelle).
+- Migration-Log: `docs/Planung/registry_sampling_log.md` — protokolliert jede Änderung (Was, Warum, betroffene Modelle).
 - CHANGELOG.md: Eintrag „Registry Sampling (SSOT) – Plan & Migration" bei Abschluss von Schritt 4–7.
 
 ## F. Rollout-Plan
@@ -141,7 +141,7 @@ kein reguläres Benchmark-Textmodell); dort greifen die generischen Kategorie-/T
 Einem Modell recherchierte Sampling-Parameter geben (SSOT = Registry):
 
 1. Recherchierte Werte eintragen (z.B. in `Temperature Recommondations_en.md` dokumentieren).
-2. In `doc-git/model_registry.yaml` nach der `arch:`-Zeile des Modell-Blocks einfügen:
+2. In `data/model_registry.yaml` nach der `arch:`-Zeile des Modell-Blocks einfügen:
    ```yaml
    sampling:
      coding:
@@ -162,7 +162,7 @@ Einem Modell recherchierte Sampling-Parameter geben (SSOT = Registry):
      Migration ist ein separater Runtime-Kontrakt-Schritt.
 3. Verifizieren: `python src/registry_tool.py validate` (keine neuen Probleme), Tests
    (`python -m pytest tests/test_benchmark_config.py -q`).
-4. Migration-Log-Eintrag ergänzen (`doc-git/Planung/registry_sampling_log.md`).
+4. Migration-Log-Eintrag ergänzen (`docs/Planung/registry_sampling_log.md`).
 
 ## H. Onboarding-Recherche und manuelle Eskalation (2026-09-19)
 

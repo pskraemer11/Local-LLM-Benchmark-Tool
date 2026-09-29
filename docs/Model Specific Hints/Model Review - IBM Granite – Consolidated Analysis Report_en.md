@@ -4,7 +4,7 @@
 Repeat this research (previously on Gemma-4) on system prompts, chat templates, config and yaml files using the chat history from
 "C:\Users\pskra\Python-Projekte\Benchmarks\Doku-intern\Konsolidierte_Compaction-Chronik_20260615-20260713.md" for the Granite models.
 Cross-reference the data from the three ~\.lmstudio folders for .\models, .\hub and .internal\user-concrete-model-default-config as well as
-the files in the doc-git folder with the entries in model_registry.yaml.
+the files in the docs folder with the entries in model_registry.yaml.
 
 This update adds a fresh review of the locally available Granite 4.2 model and preserves the earlier Granite 4.0/4.1 findings as historical context.
 
@@ -126,7 +126,7 @@ This config has an empty `operation.fields` array – no system prompt was writt
 
 ## 5. Historical Chat Template Situation
 
-### Jinja templates in `doc-git/Jinja-Chat-Templates/`:
+### Jinja templates in `docs/Jinja-Chat-Templates/`:
 - `granite-4.1-30b_template.jinja` (71 lines) ✅ – correct
 - `granite-4.0-h-tiny_template.jinja` (72 lines) ✅ – correct (minimal difference: comment + different condition on line 45)
 

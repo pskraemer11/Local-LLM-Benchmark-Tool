@@ -15,8 +15,8 @@ not replaced by prompt assembly. No GLM-4.7 streaming or structured-output
 exception is applied to Gemma-4.
 
 > Status: 2026-07-29
-> Sources: 8 documents from `doc-git/Model Specific Hints/`,
-> `doc-git/Jinja-Chat-Templates/`, `doc-git/model_registry.yaml`, `doc-git/Architecture-and-Flow.md`
+> Sources: 8 documents from `docs/Model Specific Hints/`,
+> `docs/Jinja-Chat-Templates/`, `data/model_registry.yaml`, `docs/Architecture-and-Flow.md`
 
 ---
 ## Capabilities
@@ -133,9 +133,9 @@ Three generations exist in parallel:
 
 1. **GGUF-embedded** (Original in `tokenizer_config.json`) – 270-line macro version
 2. **Hub Jinja override** (`~/.lmstudio/hub/models/google/*.jinja`) – **authoritative source**
-3. **doc-git copies** – partially outdated (contain unconditional `<|think|>`, `<|channel>thought`)
+3. **docs copies** – partially outdated (contain unconditional `<|think|>`, `<|channel>thought`)
 
-**Recommended action:** Regularly synchronize doc-git copies with hub overrides.
+**Recommended action:** Regularly synchronize docs copies with hub overrides.
 
 ### 4.4 `enable_thinking` Control in the Template
 
@@ -296,7 +296,7 @@ In LM Studio, `model_max_length` must be checked (not automatically read from GG
 
 ```
 02.07.   12B MiniJinja template created
-04.07.   All 3 templates in doc-git/; 7 tag corrections (<|turn|>system → <|turn>system)
+04.07.   All 3 templates in docs/; 7 tag corrections (<|turn|>system → <|turn>system)
 04.07.   Thinking parameterizable (CLI, extra_body)
 05.07.   HTTP 500 due to duplicate GGUF instance; enableThinking=false set
 08.07.   Hub templates updated via Google Docs (26B: gated <|think|>)
@@ -323,7 +323,7 @@ Note: Agentic score of the 26B UD (28%) is low – other models (Devstral, Minis
 
 ## 9. Error Sources (Review Findings)
 
-1. **Divergence of Jinja templates** (GGUF vs. Hub vs. doc-git vs. JSON config) – all 4 generations can exist in parallel.
+1. **Divergence of Jinja templates** (GGUF vs. Hub vs. docs vs. JSON config) – all 4 generations can exist in parallel.
 2. **`promptTemplate` in JSON configs** – embedded copy of the template at the time can overwrite hub override (LMS priority unclear).
 3. **`enable_thinking=False` is ignored** (07/11) – Workaround via system prompt override.
 4. **lm_eval 0% problem** with `bartowski/google_gemma-4-26b-a4b-it` – no HF entry for lm_eval (GGUF only).

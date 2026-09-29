@@ -2,7 +2,7 @@
 
 ``model_registry.py`` is the provider-neutral runtime reader. It resolves
 aliases, context limits, cache policy, reasoning and locally stored sampling
-blocks from ``doc-git/model_registry.yaml``. It does not perform web research,
+blocks from ``data/model_registry.yaml``. It does not perform web research,
 modify the Registry, or write LM Studio configuration files. New-model
 onboarding is handled by ``registry_tool.py add/sync``; unresolved web evidence
 is reviewed through the project sampling-review workflow.
@@ -20,6 +20,7 @@ from typing import Any, cast
 from ruamel.yaml import YAML
 
 from artifact_bundle import validate_companion_binding
+from kv_cache_policy import normalize_kv_pair
 from model_identity import UniqueMatch, resolve_registry_match
 from providers.llama_cpp_args import normalize_cache_type
 from runtime_policy import resolve_context_length, resolve_template
@@ -28,8 +29,8 @@ from speculative import companion_role, llama_cpp_spec_type, normalize_speculati
 RegistryLoader = Callable[[], dict[str, Any]]
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
-_DEFAULT_REGISTRY_PATH = _PROJECT_ROOT / "doc-git" / "model_registry.yaml"
-_DEFAULT_TEMPLATE_ROOT = _PROJECT_ROOT / "doc-git" / "Jinja-Chat-Templates"
+_DEFAULT_REGISTRY_PATH = _PROJECT_ROOT / "data" / "model_registry.yaml"
+_DEFAULT_TEMPLATE_ROOT = _PROJECT_ROOT / "docs" / "Jinja-Chat-Templates"
 _TABBYAPI_CACHE_MODES = {
     "fp16": "FP16",
     "f16": "FP16",
@@ -108,10 +109,11 @@ class ResolvedRegistryEntry:
         benchmark_context_length = self.benchmark_context_length()
         if benchmark_context_length is not None:
             runtime["context_length"] = benchmark_context_length
-        for key in ("k_cache", "v_cache"):
-            value = self.entry.get(key)
-            if isinstance(value, str) and value.strip():
-                runtime[key] = value.strip()
+        cache_pair = normalize_kv_pair(self.entry.get("k_cache"), self.entry.get("v_cache"))
+        runtime.update({
+            key: value for key, value in zip(("k_cache", "v_cache"), cache_pair, strict=True)
+            if value is not None
+        })
         unified_kv = self.entry.get("useUnifiedKvCache")
         if isinstance(unified_kv, bool):
             runtime["useUnifiedKvCache"] = unified_kv
@@ -166,6 +168,9 @@ class ResolvedRegistryEntry:
             from speculative import lms_speculative_values
 
             overrides = {}
+            for field in ("k_cache", "v_cache"):
+                if field in runtime:
+                    overrides[field] = runtime[field]
             context_length = runtime.get("context_length")
             if isinstance(context_length, int) and context_length > 0:
                 overrides["context_length"] = context_length
@@ -173,6 +178,10 @@ class ResolvedRegistryEntry:
             if isinstance(runtime_experts, int) and runtime_experts > 0:
                 overrides["num_experts"] = runtime_experts
             overrides.update({key: value for key, value in explicit.items() if value is not None})
+            cache_pair = normalize_kv_pair(overrides.get("k_cache"), overrides.get("v_cache"))
+            if cache_pair[0] is not None:
+                overrides["k_cache"], overrides["v_cache"] = cache_pair
+                overrides["_kv_cache_expected"] = cache_pair
             context_length = resolve_context_length({**self.entry, "context_length": overrides.get("context_length")})
             if context_length is not None:
                 overrides["context_length"] = context_length
@@ -195,10 +204,9 @@ class ResolvedRegistryEntry:
             context_length = runtime.get("context_length")
             if isinstance(context_length, int) and context_length > 0:
                 overrides["context_length"] = context_length
-            k_cache = self._normalize_cache_type(runtime.get("k_cache"))
+            k_cache, v_cache = normalize_kv_pair(runtime.get("k_cache"), runtime.get("v_cache"))
             if k_cache is not None:
                 overrides["cache_type_k"] = k_cache
-            v_cache = self._normalize_cache_type(runtime.get("v_cache"))
             if v_cache is not None:
                 overrides["cache_type_v"] = v_cache
             unified_kv = runtime.get("useUnifiedKvCache")
@@ -318,6 +326,9 @@ class ResolvedRegistryEntry:
                             f"for {self.registry_key}"
                         )
             overrides.update({key: value for key, value in explicit.items() if value is not None})
+            cache_pair = normalize_kv_pair(overrides.get("cache_type_k"), overrides.get("cache_type_v"))
+            if cache_pair[0] is not None:
+                overrides["cache_type_k"], overrides["cache_type_v"] = cache_pair
             return overrides
 
         return {key: value for key, value in explicit.items() if value is not None}

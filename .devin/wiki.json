@@ -2,11 +2,11 @@
   "$schema": "https://docs.devin.ai/deepwiki/wiki.schema.json",
   "repo_notes": [
     {
-      "content": "Local benchmark suite for LLMs (German project, English code). Goal: reproducible local benchmarks on an NVIDIA RTX 5060 Ti with 16 GB VRAM, finding the Pareto frontier of parameter count, GGUF quantization, KV-cache/context settings and parallel execution. Python 3.12 is the supported runtime. Since v13.0.6 all production Python modules live in src/; document src/, tests/, doc-git/ and the versioned workflow files, while treating unrelated root-level legacy scripts as non-canonical.",
+      "content": "Local benchmark suite for LLMs (German project, English code). Goal: reproducible local benchmarks on an NVIDIA RTX 5060 Ti with 16 GB VRAM, finding the Pareto frontier of parameter count, GGUF quantization, KV-cache/context settings and parallel execution. Python 3.12 is the supported runtime. Since v13.0.6 all production Python modules live in src/; document src/, tests/, docs/ and the versioned workflow files, while treating unrelated root-level legacy scripts as non-canonical.",
       "author": "pskraemer11"
     },
     {
-      "content": "Configuration is data-driven and lives in doc-git/: model_registry.yaml is the source of truth for benchmark metadata and provider-neutral runtime policy (quantization, benchmark context, sampling, reasoning, blueprint and template policy); blueprint_definitions.yaml defines prompt blueprints and doc-git/Jinja-Chat-Templates contains explicit templates. GGUF headers are the source of truth for immutable technical facts such as architecture and native context limits. LM Studio JSON files are backend-local artifacts, never the global source of truth. registry_tool.py commands sync/compare/validate/rm and validate --ci are the main maintenance entrypoints.",
+      "content": "Runtime configuration is data-driven: data/model_registry.yaml is the SSOT database for benchmark metadata and provider-neutral runtime policy (quantization, benchmark context, sampling, reasoning, blueprint and template policy); docs/blueprint_definitions.yaml defines prompt blueprints and docs/Jinja-Chat-Templates contains explicit templates. GGUF headers are the source of truth for immutable technical facts such as architecture and native context limits. LM Studio JSON files are backend-local artifacts, never the global source of truth. registry_tool.py commands sync/compare/validate/rm and validate --ci are the main maintenance entrypoints.",
       "author": "pskraemer11"
     },
     {
@@ -35,7 +35,7 @@
     },
     {
       "title": "Source Layout (src/)",
-      "purpose": "Describe the current source layout: src/run_benchmarks.py as launcher, src/model_manager.py as provider facade, src/model_registry.py as runtime resolver, src/providers/ for LM Studio, TabbyAPI, OpenAI-compatible and Unsloth implementations, src/local_model_resolver.py for local GGUF inventory, plus registry, blueprint, benchmark and result modules. Cover tests/, doc-git/ and versioned .githooks/ as operationally relevant areas.",
+      "purpose": "Describe the current source layout: src/run_benchmarks.py as launcher, src/model_manager.py as provider facade, src/model_registry.py as runtime resolver, src/providers/ for LM Studio, TabbyAPI, OpenAI-compatible and Unsloth implementations, src/local_model_resolver.py for local GGUF inventory, plus registry, blueprint, benchmark and result modules. Cover tests/, docs/ and versioned .githooks/ as operationally relevant areas.",
       "parent": "Overview"
     },
     {

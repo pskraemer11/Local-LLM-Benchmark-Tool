@@ -1,68 +1,64 @@
 # Registry-, Runtime- und KV-Nachreview vom 29.09.2026
 
-Basis sind die Befunde R01–R13 und der abgeschlossene Bericht
-`Code-Review_registry_Fixes_2026-09-29.md`. Dieser Bericht ergänzt die späteren
-Benutzerentscheidungen und den erneut geänderten Modellbestand. Neue GPU-Läufe,
-Modellladeaufrufe und Generierungen wurden ausdrücklich ausgeschlossen.
+Basis sind die Befunde R01–R13 und der abgeschlossene Bericht `Code-Review_registry_Fixes_2026-09-29.md`.
+Dieser Bericht ergänzt die späteren Benutzerentscheidungen und den erneut geänderten Modellbestand.
+Neue GPU-Läufe, Modellladeaufrufe und Generierungen wurden ausdrücklich ausgeschlossen.
 
 ## Ergebnis der Änderungen
 
-- Der tatsächlich ausgeführte `py -3.12 src/registry_tool.py sync` führt nach elf
-  Neuzugängen und acht archivierten Löschungen 61 Registry-Einträge. Dazu gehört
-  die Löschung des jrell-Qwen3.8-Modells. Keine externe JSON wurde verschoben oder
-  gelöscht; historische Registry-Einträge und Dateisicherungen bleiben lokal.
-  Der abschließende frische Inventarabgleich archivierte außerdem den inzwischen
-  gelöschten Intel-Qwen3.5 und Tiel-Coder. Physisch vorhandene Modelle mit
-  abweichendem LMS-Index bleiben erhalten.
-- Millie ist `llmsforall/millie-35b-a3b-11gb@q2_sym32k4`. Die gemeinsamen Resolver
-  verlangen Publisher `llmsforall`, Dateityp 56 und tatsächliche Tensor-Typen 56.
-  Der reale Header enthält außerdem Typ 55 und F32-Tensoren. Die mittlere
-  Gewichtsdichte ist keine Standard-Q2-/Q3-Quantisierung. `fill-quant` korrigiert
-  auch `@?`; ein folgender Sync/JSON-Import behält genau eine vollständige Identität.
+- Der tatsächlich ausgeführte `py -3.12 src/registry_tool.py sync` führt nach elf Neuzugängen und
+  acht archivierten Löschungen 61 Registry-Einträge. Dazu gehört die Löschung des jrell-Qwen3.8-Modells.
+  Keine externe JSON wurde verschoben oder gelöscht; historische Registry-Einträge und Dateisicherungen bleiben lokal.
+  Der abschließende frische Inventarabgleich archivierte außerdem den inzwischen gelöschten Intel-Qwen3.5
+  und Tiel-Coder. Physisch vorhandene Modelle mit abweichendem LMS-Index bleiben erhalten.
+
+- Millie ist `llmsforall/millie-35b-a3b-11gb@q2_sym32k4`.
+  Die gemeinsamen Resolver verlangen Publisher `llmsforall`, Dateityp 56 und tatsächliche Tensor-Typen 56.
+  Der reale Header enthält außerdem Typ 55 und F32-Tensoren. Die mittlere Gewichtsdichte ist keine
+  Standard-Q2-/Q3-Quantisierung. `fill-quant` korrigiert auch `@?`;
+  ein folgender Sync/JSON-Import behält genau eine vollständige Identität.
   Millie benötigt weiterhin den Publisher-Fork; eine vollständige Registry-ID
   bestätigt keine Kompatibilität mit dem installierten Standardbackend.
+
 - `speculative_policy: disabled` hält Byteshapes Qwen3.8 dauerhaft ohne Helper.
-  `registry` erhält ausdrücklich ausgewählte Helfer trotz abweichender GUI-Werte;
-  die bisherige Ableitung bleibt als Standard `lmstudio` erhalten. Gespeicherte
-  JSON-Felder schalten alle fünf Algorithmen eindeutig um; der llama.cpp-Preset
-  enthält für den deaktivierten Fall `spec-type = none`.
-- Gemma REAP126 mit dem Unsloth-MTP-Q8_0 und Muse NVFP4 mit Anbeeld-Muse-DSpark
-  sind an vorhandene erfolgreiche LM-Studio-Logabschnitte, genaue Dateipfade und
-  aktuelle Header-Fingerprints gebunden. Draft-Tokens wurden in diesen historischen
-  Läufen akzeptiert. Dateimodifikationszeiten liegen vor den Läufen. Die Logs
-  enthalten keine damaligen Dateihashes; diese historische Einschränkung bleibt
-  in den lokalen Evidenzdateien dokumentiert. Das bestätigt die dort beobachtete
-  LM-Studio-Paarung, nicht einen neuen Test mit standalone llama.cpp.
-- Muse verwendet `muse_reasoning_low`, ein Gesamtbudget von 8192 und ein
-  Reasoning-Budget von 512 Tokens. Das tatsächliche GGUF-Template erwartet
-  `reasoning_strength`; die abgeleitete Template-Datei ändert ausschließlich
-  dessen Default von `high` auf `low`. Request-Kwargs, Blueprint-Systemprompt,
+  `registry` erhält ausdrücklich ausgewählte Helfer trotz abweichender GUI-Werte; die bisherige Ableitung
+  bleibt als Standard `lmstudio` erhalten. Gespeicherte JSON-Felder schalten alle fünf Algorithmen
+  eindeutig um; der llama.cpp-Preset enthält für den deaktivierten Fall `spec-type = none`.
+
+- Gemma REAP126 mit dem Unsloth-MTP-Q8_0 und Muse NVFP4 mit Anbeeld-Muse-DSpark sind an vorhandene
+  erfolgreiche LM-Studio-Logabschnitte, genaue Dateipfade und aktuelle Header-Fingerprints gebunden.
+  Draft-Tokens wurden in diesen historischen Läufen akzeptiert.
+  Dateimodifikationszeiten liegen vor den Läufen. Die Logs enthalten keine damaligen Dateihashes;
+  diese historische Einschränkung bleibt in den lokalen Evidenzdateien dokumentiert.
+  Das bestätigt die dort beobachtete LM-Studio-Paarung, nicht einen neuen Test mit standalone llama.cpp.
+
+- Muse verwendet `muse_reasoning_low`, ein Gesamtbudget von 8192 und ein Reasoning-Budget von 512 Tokens.
+  Das tatsächliche GGUF-Template erwartet `reasoning_strength`; die abgeleitete Template-Datei ändert
+  ausschließlich dessen Default von `high` auf `low`. Request-Kwargs, Blueprint-Systemprompt,
   JSON-Template, Reasoning-Parser und gespeicherte Budgets wurden überprüft.
   Explizite Blueprints überleben die Klassifikation über `blueprint_policy: registry`.
-- Streaming verarbeitet reine Usage-Chunks mit `choices=[]`, verlangt
-  `stream_options.include_usage`, zählt gemeldete Completion-Tokens einschließlich
-  Reasoning genau einmal und besitzt eine absolute Deadline. Der bisherige
-  Default von 120000 Sekunden ist auf 120 Sekunden korrigiert. Socket-Abbruch,
-  Budgetüberschreitungen in Streaming/Nonstreaming/HTTP-Providern und die äußere
-  Benchmark-Retry-Schleife teilen den terminalen Fehlervertrag. Budget-/Timeoutfehler
-  starten keine weitere vollständige Generation. Ohne laufende Server-Usage oder
-  Token-IDs lässt sich der genaue Abbruch beim 8192. Token clientseitig nicht beweisen.
 
-Die Assembly hat zunächst 53 eindeutig gebundene JSON-Dateien gesichert,
-geschrieben und ihre Systemprompts geprüft. Zwei während des Abschlusses neu
-gespeicherte Configs wurden separat gesichert und mit denselben Resolvern
-assembliert; der frische Endbestand enthält 54 geprüfte Systemprompts.
-Die vollständig gebundenen gespeicherten Expertenwerte 18 für Byteshape
-Qwen3-30B-A3B und 32 für FreedomAISVR GPT-OSS wurden übernommen und vom Benutzer
-ausdrücklich bestätigt. Alle aktuellen Qwen3-30B-A3B-Profile verwenden 18,
-alle GPT-OSS-Profile 32. Zwei fehlende GPT-OSS-Harmony-Templates wurden aus
-der vorhandenen Blueprint-/Registry-Policy ergänzt und in den JSONs geprüft.
-Für sieben Registry-Einträge existiert
-keine eindeutige Config-Bindung; zwei davon sind ausgeschlossene F2LLM-Embedding-
-Einträge. Die tatsächliche `$HOME/.config/llama.cpp/preset.ini` wurde mit
-`preset --merge-existing` aktualisiert: 57 Modellabschnitte, erhaltene globale
-und manuelle Abschnitte, vier explizit ausgelassene Profile. Lokale Registry,
-Preset und JSONs bleiben maschinenbezogene, nicht veröffentlichte Dateien.
+- Streaming verarbeitet reine Usage-Chunks mit `choices=[]`, verlangt `stream_options.include_usage`,
+  zählt gemeldete Completion-Tokens einschließlich Reasoning genau einmal und besitzt eine absolute Deadline.
+  Der bisherige Default von 120000 Sekunden ist auf 120 Sekunden korrigiert.
+  Socket-Abbruch, Budgetüberschreitungen in Streaming/Nonstreaming/HTTP-Providern und die äußere
+  Benchmark-Retry-Schleife teilen den terminalen Fehlervertrag. Budget-/Timeoutfehler starten
+  keine weitere vollständige Generation. Ohne laufende Server-Usage oder Token-IDs lässt sich der
+  genaue Abbruch beim 8192. Token clientseitig nicht beweisen.
+
+Die Assembly hat zunächst 53 eindeutig gebundene JSON-Dateien gesichert, geschrieben und ihre Systemprompts geprüft.
+Zwei während des Abschlusses neu gespeicherte Configs wurden separat gesichert und mit denselben Resolvern assembliert;
+der frische Endbestand enthält 54 geprüfte Systemprompts.
+
+Die vollständig gebundenen gespeicherten Expertenwerte 18 für Byteshape Qwen3-30B-A3B und 32 für FreedomAISVR GPT-OSS
+wurden übernommen und vom Benutzer ausdrücklich bestätigt.
+Alle aktuellen Qwen3-30B-A3B-Profile verwenden 18, alle GPT-OSS-Profile 32.
+Zwei fehlende GPT-OSS-Harmony-Templates wurden aus der vorhandenen Blueprint-/Registry-Policy ergänzt und in den JSONs geprüft.
+
+Für sieben Registry-Einträge existiert keine eindeutige Config-Bindung; zwei davon sind ausgeschlossene F2LLM-Embedding-Einträge.
+Die tatsächliche `$HOME/.config/llama.cpp/preset.ini` wurde mit `preset --merge-existing` aktualisiert: 57 Modellabschnitte,
+erhaltene globale und manuelle Abschnitte, vier explizit ausgelassene Profile. Lokale Registry, Preset und JSONs bleiben maschinenbezogene,
+nicht veröffentlichte Dateien.
 
 ## KV-Cache-Evidenz
 
@@ -168,3 +164,41 @@ prüft nun explizit einen geänderten Zeitstempel und behält die ursprüngliche
 True-/False-Assertions bei. Kein Sleep, Cache-Reset oder Produktionswechsel.
 34 Header-/Runtime-Tests bestanden; unabhängiger Nachreview: PASS, Einzeltest
 ebenfalls bestanden. Abschließende Remote-Prüfung folgt für diesen Fix.
+
+## KV-Paarvertrag und Wiederholungsschutz (29.09.2026)
+
+Der gemeinsame Resolver bewertet K- und V-Quantisierung anhand der Summe beider
+Bitwerte. Bis einschließlich 12 wird `q4_0/q4_0`, darüber `q8_0/q8_0`
+geschrieben. Gleichstände und unklare Zuordnungen runden ab; FP16-, BF16- und
+FP32-Paare werden zu Q8. Derselbe Resolver liegt am JSON-Import, Registry-Save,
+Preset-Save und vor LM-Studio-/llama.cpp-Providerargumenten.
+
+Die lokale Registry enthält 61 Einträge: 50 normalisierte Q8-Paare und 11 Q4-
+Paare; 23 bestehende Paare änderten sich. Von 52 eindeutig gebundenen
+LM-Studio-Configs wurden 24 aktualisiert und alle 52 nach dem Schreiben geprüft.
+Sieben nicht bindbare Identitäten blieben unverändert. Das llama.cpp-Preset
+enthält 56 Modellabschnitte und wurde vollständig auf die zwei Zielpaare
+geprüft. Registry, Configs und Preset sind maschinenbezogene Runtime-Dateien;
+ihre lokalen Inhalte werden nicht ins Git-Repository veröffentlicht.
+
+Die unabhängige Prüfung fand Lücken an mehreren Schreib- und Laufzeitgrenzen,
+die vor dem Commit geschlossen wurden: `fmt` validiert die Registry-Wurzel und
+schreibt über den normalisierenden atomaren Writer. Bei fehlendem KV-Paar
+verwenden Kontextschätzung, llama.cpp-/Unsloth-Launcher, Preset-Export und
+LM-Studio-Assembly dieselbe explizite Q8/Q8-Vorgabe. Die JSON-Assembly ergänzt
+die beiden KV-Felder in einer vorhandenen `load.fields`-Liste und erhält alle
+übrigen Werte; Configs ohne Load-Bereich bleiben unberührt. Regressionstests
+belegen diese Verträge.
+
+Ein Wiederholungsschutz erkennt kurze konstante `while True`-/`while (true)`-
+Schleifen in ausdrücklich markierten Python-/JavaScript-Codeblöcken beim
+Streamen. Tests decken kurze und längere Schleifen sowie Prosa-Gegenbeispiele
+ab. Gemeldete Reasoning-/Gesamt-Usage und absolute Deadlines bleiben zusätzliche
+Grenzen; wenn ein Backend weder Zwischenstände meldet noch auf den Streamabbruch
+reagiert, kann lokaler Code bereits serverseitig erzeugten Verbrauch nicht
+rückwirkend begrenzen.
+
+Die vollständige lokale Testsuite bestand mit **1.610 Tests**. Unabhängiger
+Nachreview: **PASS**, keine offenen KV-Blocker. Ruff und der fokussierte mypy-
+Scope sind sauber; Commit-/Push-Hooks werden für diesen Stand ausgeführt. Es
+fanden keine Modelllade- oder Generierungsläufe statt.

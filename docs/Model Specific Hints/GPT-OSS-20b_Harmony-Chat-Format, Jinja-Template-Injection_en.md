@@ -13,7 +13,7 @@ and 24.07.2026 was thereby overwritten several times.
 ## Fix (28.07.2026) — Alle bekannten Bugs behoben
 
 ### Bug 1: Missing Harmony template
-Template `doc-git/Jinja-Chat-Templates/gpt-oss-20b_harmony.jinja` (17221 characters)
+Template `docs/Jinja-Chat-Templates/gpt-oss-20b_harmony.jinja` (17221 characters)
 was injected into all configs:
 
 | Config                                   | Vorher                     | Nachher                                |
@@ -112,7 +112,7 @@ budget of 4096. This budget is sent only for GPT-OSS requests; it is not
 copied to unrelated models and is separate from LM Studio's GUI profile.
 
 ## Template-Quelle
-`doc-git/Jinja-Chat-Templates/gpt-oss-20b_harmony.jinja`
+`docs/Jinja-Chat-Templates/gpt-oss-20b_harmony.jinja`
 
 ## Template scope
 
@@ -270,7 +270,7 @@ OpenAI-compatible endpoint after the Harmony configuration review:
   content.
 
 The active LM Studio prompt template is byte-for-byte identical to
-`doc-git/Jinja-Chat-Templates/gpt-oss-20b_harmony.jinja` after normalizing
+`docs/Jinja-Chat-Templates/gpt-oss-20b_harmony.jinja` after normalizing
 Windows line endings. The two project template files currently have identical
 content as well; their separate names are retained for explicit policy
 selection, not because their current text differs. The active config also has
@@ -299,7 +299,7 @@ field in `--gen_kwargs` for GPT-OSS and explicitly keeps
 the entire ordinary `max_tokens` budget and leave an empty final channel.
 
 The downloaded `ggml-org` variant was also missing from
-`doc-git/model_registry.yaml`, even though the code and tests already had a
+`data/model_registry.yaml`, even though the code and tests already had a
 GPT-OSS policy. It is now registered as
 `ggml-org/gpt-oss-20b@mxfp4` with the local GGUF facts, the
 `gptoss_reasoning` blueprint, Harmony policy, and a 32768-token benchmark

@@ -3,7 +3,7 @@
 > **Status:** Comprehensive review prior to next Phase p12 (presumably adding registry tooling improvements)
 > **Methodology:** [ISO/IEC 9126](https://de.wikipedia.org/wiki/ISO/IEC_9126) — the 6 main characteristics: Functionality, Reliability, Usability, Efficiency, Maintainability, Portability.
 > **Scope:** 9 main scripts (8,274 LOC) + 16 test files (547 tests green) + YAML registry (111 entries). As of 20.07.2026.
-> **Previous Reviews:** see `doc-git/Code-Review-2026-07-18.md` (Prio 1–6) — these are already addressed or in planning.
+> **Previous Reviews:** see `docs/Code-Review-2026-07-18.md` (Prio 1–6) — these are already addressed or in planning.
 
 ---
 
@@ -140,7 +140,7 @@ Effort for use and operation.
 
 | Sub-characteristic | Rating | Finding                                                                                         |
 | ------------------ | :----: | ----------------------------------------------------------------------------------------------- |
-| Understandability  | 8/10   | Extensive `doc-git/` documentation (README, Architecture, HowTo, Datasets, thinking-config)     |
+| Understandability  | 8/10   | Extensive `docs/` documentation (README, Architecture, HowTo, Datasets, thinking-config)     |
 | Learnability       | 7/10   | Quick start in README, CLI table; but: no tutorial notebook                                     |
 | Operability        | 7/10   | Interactive + non-interactive mode, `--seed` for reproducibility; but: no GUI                   |
 | Attractiveness     | 6/10   | Terminal output functional, but ASCII-only; no color coding for scores/errors                   |
@@ -149,7 +149,7 @@ Effort for use and operation.
 **Strengths:**
 
 - **README**: clear structure with goals, features, quick start, CLI table, architecture diagram, weighting table.
-- **`doc-git/` directory** with 7 Markdown documents (Architecture-and-Flow, HowTo-Install, Datasets, thinking-config, Review-Gemma4-Prompt-Formatting, Parallel-Slots-Optimization, Code-Review-2026-07-18).
+- **`docs/` directory** with 7 Markdown documents (Architecture-and-Flow, HowTo-Install, Datasets, thinking-config, Review-Gemma4-Prompt-Formatting, Parallel-Slots-Optimization, Code-Review-2026-07-18).
 - **Doku-intern/ directory** with all terminal outputs + benchmark runs historized (15+ files).
 - **Interactive mode**: `python run_benchmarks.py` starts menu; `python registry_tool.py` with `cmd_*` functions.
 - **Reproducibility**: `--seed` in both pipelines, `manifest.json` tracking in `_ensure_model_still_loaded` etc.
@@ -268,7 +268,7 @@ Suitability for transfer to other environments.
 
 | Prio | Finding                                                                                                  | Category                      | Effort     | File                                                               |
 | :---: | -------------------------------------------------------------------------------------------------------- | ----------------------------- | ---------- | ------------------------------------------------------------------ |
-| *P1* | Registry drift between LMS and `model_registry.yaml` (3 missing, now fixed §1.3)                         | Functionality/Maintainability | Medium     | `doc-git/model_registry.yaml`                                      |
+| *P1* | Registry drift between LMS and `model_registry.yaml` (3 missing, now fixed §1.3)                         | Functionality/Maintainability | Medium     | `data/model_registry.yaml`                                      |
 | *P1* | Hardcoded `http://127.0.0.1:1234/v1` in `--base-url`                                                     | Portability                   | Trivial    | `run_benchmarks.py:1002`                                           |
 | *P1* | 16 `except Exception:` swallow programming errors                                                        | Reliability                   | Medium     | multiple scripts                                                   |
 | *P2* | `_types.py` renamed to `type_defs.py` (was conflict with CPython built-in `_types` module!)              | Maintainability               | Done (p11) | `type_defs.py`                                                     |

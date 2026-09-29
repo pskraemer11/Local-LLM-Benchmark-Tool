@@ -101,14 +101,14 @@ if ($jsonFiles.Count -gt 0) {
     Invoke-Checked "python" $jsonArgs
 }
 
-if ($staged -contains "doc-git/model_registry.yaml") {
+if ($staged -contains "data/model_registry.yaml") {
     Invoke-Checked "python" @("src/registry_tool.py", "validate", "--ci")
 }
 
 # A registry/provider change gets a focused regression test before commit.
 $needsRegistryTest = $staged -contains "src/registry_tool.py" -or
     $staged -contains "tests/test_registry_tool.py" -or
-    $staged -contains "doc-git/model_registry.yaml"
+    $staged -contains "data/model_registry.yaml"
 if ($needsRegistryTest) {
     Invoke-Checked "python" @("-m", "pytest", "tests/test_registry_tool.py", "-q", "--tb=short", "--basetemp", $commitPytestBase)
 }

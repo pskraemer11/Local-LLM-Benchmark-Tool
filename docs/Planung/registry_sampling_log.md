@@ -1,7 +1,7 @@
 # Migration-Log: Registry-Sampling (SSOT)
 
-Protokoll der Änderungen an `doc-git/model_registry.yaml` (Sampling-Felder, Variante A).
-Siehe Plan: `doc-git/Planung/registry_sampling.md`.
+Protokoll der Änderungen an `data/model_registry.yaml` (Sampling-Felder, Variante A).
+Siehe Plan: `docs/Planung/registry_sampling.md`.
 
 ## 2026-08-13 – Phase 2: Recherchierte Werte + Reader-Umbau (Lesepfade)
 
@@ -98,7 +98,7 @@ damit alle 47 Registry-Modelle über eine Sampling-Zeile verfügen. `field_owner
 **Was:** Die 5 beim `validate` gemeldeten Altlasten bereinigt (Registry ist SSOT, Änderungen
 wirken auf künftige Benchmark-Läufe).
 
-**Änderungen an `doc-git/model_registry.yaml`:**
+**Änderungen an `data/model_registry.yaml`:**
 - `unsloth/qwen3-30b-a3b-instruct-2507` → `unsloth/qwen3-30b-a3b-instruct-2507@q3_k_s`
   (missing_quant; Quant laut LMS GUI/GGUF), `context_length` 43690 → 49152 (Config-Wert).
 - `intel/qwen3-30b-a3b-instruct-2507-q2ks-mixed-autoround@q2_k` → `@q2_k_s`
@@ -137,8 +137,8 @@ wirken auf künftige Benchmark-Läufe).
 ## Git-Status (13.08., vor evtl. Commit)
 
 **Uncommitted (Migration + C4):**
-- `M src/benchmark_config.py` (Registry-Sampling-Reader), `M src/model_identity.py` (`_QUANT_DIR_SUFFIXES` 3-teilig), `M tests/test_benchmark_config.py` (7 neue Tests), `M tests/test_model_identity.py` (2 neue/angepasste Tests), `M doc-git/model_registry.yaml` (sampling-Blöcke + C4-Fixes), `M doc-git/Planung.md`, `M CHANGELOG.md`, `M doc-git/thinking-config_en.md`, `M doc-git/Temperature Recommondations_en.md`, `?? doc-git/Planung/` (Plan + Log + ToDos).
-- **Pre-existing (nicht Teil dieser Arbeit):** `M src/consolidate_results.py`, `M src/field_owner.py`, `D doc-git/Review-Artifacts/quarantine_registry_20260811_*.yaml` (9 Stück), `?? doc-git/Review-Artifacts/quarantine_registry_2026081[23]_*.yaml` (neu), `D doc-git/Developer-Docs/Compaction-Workflow.md`, `D doc-git/Model Specific Hints/GPT-OSS-20b_Harmony-Template-Injection_en.md` + `?? .../GPT-OSS-20b_Harmony-Chat-Format, Jinja-Template-Injection_en.md` (Umbenennung, offene C5-Entscheidung).
+- `M src/benchmark_config.py` (Registry-Sampling-Reader), `M src/model_identity.py` (`_QUANT_DIR_SUFFIXES` 3-teilig), `M tests/test_benchmark_config.py` (7 neue Tests), `M tests/test_model_identity.py` (2 neue/angepasste Tests), `M data/model_registry.yaml` (sampling-Blöcke + C4-Fixes), `M docs/Planung.md`, `M CHANGELOG.md`, `M docs/thinking-config_en.md`, `M docs/Temperature Recommondations_en.md`, `?? docs/Planung/` (Plan + Log + ToDos).
+- **Pre-existing (nicht Teil dieser Arbeit):** `M src/consolidate_results.py`, `M src/field_owner.py`, `D docs/Review-Artifacts/quarantine_registry_20260811_*.yaml` (9 Stück), `?? docs/Review-Artifacts/quarantine_registry_2026081[23]_*.yaml` (neu), `D docs/Developer-Docs/Compaction-Workflow.md`, `D docs/Model Specific Hints/GPT-OSS-20b_Harmony-Template-Injection_en.md` + `?? .../GPT-OSS-20b_Harmony-Chat-Format, Jinja-Template-Injection_en.md` (Umbenennung, offene C5-Entscheidung).
 - HEAD: `41cb059e` (MTP-Drafter-Erkennung + MTP aus Registry entfernt).
 
 ---
@@ -183,7 +183,7 @@ wirken auf künftige Benchmark-Läufe).
 ## 2026-08-20 – Phase 2: Vollständige Registry-Sampling-Umstellung
 
 **Ziel:** Die recherchierten modell-/kategorieabhängigen Sampling-Werte dürfen nicht länger
-aus einer parallelen Python-Tabelle gelesen werden. `doc-git/model_registry.yaml` ist für
+aus einer parallelen Python-Tabelle gelesen werden. `data/model_registry.yaml` ist für
 `temperature`/`top_p` die einzige Laufzeitquelle.
 
 **Migration:**

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from benchmark_config import is_blacklisted_model_name
+from kv_cache_policy import runtime_kv_pair
 from local_model_resolver import LocalModelResolver, ModelResolutionError
 from providers.llama_cpp_args import normalize_cache_type
 from utils.terminal import warn
@@ -233,10 +234,9 @@ class UnslothServerProvider(HttpProvider):
         # speed-first 4-slot policy used throughout the local suite.
         parallel = os.environ.get("UNSLOTH_SERVER_PARALLEL") or runtime.get("parallel")
         args.extend(["--parallel", str(int(parallel or _DEFAULT_SERVER_PARALLEL))])
-        for key, option in (("cache_type_k", "--cache-type-k"), ("cache_type_v", "--cache-type-v")):
-            value = self._normalize_cache_type(runtime.get(key))
-            if value is not None:
-                args.extend([option, value])
+        cache_pair = runtime_kv_pair(runtime.get("cache_type_k"), runtime.get("cache_type_v"))
+        for option, value in zip(("--cache-type-k", "--cache-type-v"), cache_pair, strict=True):
+            args.extend([option, value])
         unified_kv = runtime.get("kv_unified", True)
         args.append("--kv-unified" if unified_kv else "--no-kv-unified")
         template_file = runtime.get("chat_template_file")

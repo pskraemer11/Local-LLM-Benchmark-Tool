@@ -3,7 +3,7 @@
 > **Status:** Comprehensive review after Phase p7 (Bare-Except Reduction, Registry Enhancements, GPT-OSS MoE, Intel AutoRound)
 > **Methodology:** [ISO/IEC 9126](https://de.wikipedia.org/wiki/ISO/IEC_9126) — the 6 main characteristics: Functionality, Reliability, Usability, Efficiency, Maintainability, Portability.
 > **Scope:** 9 main scripts (9,790 LOC) + 14 test files (564 tests green) + YAML registry (115 entries). As of 27.07.2026.
-> **Previous Reviews:** `doc-git/Reviews/Code-Review_2026-07-20.md` (7.75/10), `doc-git/Code-Review-2026-07-18.md` (Prio 1-6)
+> **Previous Reviews:** `docs/Reviews/Code-Review_2026-07-20.md` (7.75/10), `docs/Code-Review-2026-07-18.md` (Prio 1-6)
 
 ---
 
@@ -178,7 +178,7 @@ Reliability under defined conditions.
 
 | Sub-characteristic | Rating | Finding                                                       |
 | ------------------ | -----: | ------------------------------------------------------------- |
-| Understandability  | 8/10   | Extensive `doc-git/` documentation                            |
+| Understandability  | 8/10   | Extensive `docs/` documentation                            |
 | Learnability       | 7/10   | Quick start in README, CLI table; no tutorial notebook        |
 | Operability        | 7/10   | Interactive + non-interactive mode; no GUI                    |
 | Attractiveness     | [6/10] | Terminal output ASCII-only                                    |

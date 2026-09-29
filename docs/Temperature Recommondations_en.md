@@ -1,6 +1,6 @@
 # Temperature Recommendations per Model and Task
 
-**Status:** 2026-09-20 · **Method:** Official Hugging Face model cards, vendor docs/blogs and the reproducible Registry sampling pipeline. The current per-model values and evidence are stored in `doc-git/model_registry.yaml`; this document explains the policy and summarizes the current snapshot.
+**Status:** 2026-09-20 · **Method:** Official Hugging Face model cards, vendor docs/blogs and the reproducible Registry sampling pipeline. The current per-model values and evidence are stored in `data/model_registry.yaml`; this document explains the policy and summarizes the current snapshot.
 
 > **Current-state notice:** The Registry is the source of truth for per-model and per-category sampling. The detailed tables farther below preserve the historical research baseline from 2026-08-06 and are retained as an audit trail; they must not be used to reconstruct current values when they differ from the Registry.
 
@@ -79,7 +79,7 @@ template requirements, not by every GGUF architecture-family spelling.
 
 Validation on 2026-09-20 found no missing Registry blueprint, no missing
 template file and no invalid blueprint definition. Therefore
-`doc-git/blueprint_definitions.yaml` does not require a new architecture-class
+`docs/blueprint_definitions.yaml` does not require a new architecture-class
 entry for the current sampling research. It should only change when a family
 introduces a distinct prompt template, stop protocol, reasoning parser or
 category-specific thinking control.
@@ -149,7 +149,7 @@ however differentiate per category (coding 0.2, knowledge 0.6, agentic 0.6, math
 A per-category differentiation can therefore **not be expressed** via the JSON config.
 
 **Solution (decision, option "table > defaults, JSON temp ignored"):**
-1. **Registry `sampling:` field** (`doc-git/model_registry.yaml`, SSOT since 13.08.):
+1. **Registry `sampling:` field** (`data/model_registry.yaml`, SSOT since 13.08.):
    per-category `temperature`/`top_p` block (model × category). The former
    2026-08-06 migration covered 17 models; the current Registry snapshot above
    supersedes that count. Missing categories fall back to the table.

@@ -18,6 +18,7 @@ _SRC_DIR = Path(__file__).resolve().parents[1]
 _PROJECT_ROOT = _SRC_DIR.parent
 sys.path.insert(0, str(_SRC_DIR))
 
+from kv_cache_policy import KVCachePolicyError, normalize_kv_pair
 from registry_tool import _KV_BYTES, load_registry
 
 CONFIG_ROOT = Path.home() / ".lmstudio" / ".internal" / "user-concrete-model-default-config"
@@ -74,8 +75,11 @@ def read_full_configs(config_root: Path) -> list[dict[str, Any]]:
                     off = _read_config_value(ld_fields, "llm.load.llama.acceleration.offloadRatio")
                     np_val = _read_config_value(ld_fields, "llm.load.numParallelSessions")
                     ukv = _read_config_value(ld_fields, "llm.load.useUnifiedKvCache")
-                    k_cache = _read_config_value(ld_fields, "llm.load.llama.kCacheQuantizationType")
-                    v_cache = _read_config_value(ld_fields, "llm.load.llama.vCacheQuantizationType")
+                    load_values = {field.get("key"): field.get("value") for field in ld_fields}
+                    k_cache, v_cache = normalize_kv_pair(
+                        load_values.get("llm.load.llama.kCacheQuantizationType"),
+                        load_values.get("llm.load.llama.vCacheQuantizationType"),
+                    )
                     models.append({
                         "publisher": publisher,
                         "dir_name": model_dir_name,
@@ -88,6 +92,8 @@ def read_full_configs(config_root: Path) -> list[dict[str, Any]]:
                         "v_cache": v_cache,
                         "json_path": json_path,
                     })
+                except KVCachePolicyError:
+                    raise
                 except (OSError, json.JSONDecodeError, KeyError, ValueError) as e:
                     print(f"[WARN] Error parsing {json_path}: {e}")
     return models
@@ -219,8 +225,7 @@ def main() -> None:
         # np ist eine feste Benchmark-Policy (SS<=5 → 1, sonst 4), kein
         # Registry-Feld mehr. Für die KV-Schätzung wird der Standard angenommen.
         np_reg = 4
-        k_reg = str(entry.get("k_cache", "q8_0")) if entry.get("k_cache") else "q8_0"
-        v_reg = str(entry.get("v_cache", "iq4_nl")) if entry.get("v_cache") else "iq4_nl"
+        k_reg, v_reg = normalize_kv_pair(entry.get("k_cache"), entry.get("v_cache"))
         ukv_reg = entry.get("useUnifiedKvCache", False)
         off_reg = entry.get("offload", 1.0) or 1.0
         ctx_reg = entry.get("context_length")

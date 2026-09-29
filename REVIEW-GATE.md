@@ -17,7 +17,7 @@ und ersetzt die bisherige manuelle Checkliste für den Review-Ablauf.
    wenn im konfigurierten Git-Hook-Pfad ausdrücklich ein entsprechender Hook
    eingerichtet wurde; dieser Hook ist nicht Bestandteil dieses Dokuments.
 
-3. **Transparenz-Artefakte** — `doc-git/Review-Artifacts/` werden bei jedem
+3. **Transparenz-Artefakte** — `docs/Review-Artifacts/` werden bei jedem
    Gate-Lauf neu erzeugt und committet (reproduzierbarer Nachweis).
 
 **Regeln, die dabei immer gelten:**
@@ -131,15 +131,15 @@ Führe einen Code-Review der Änderungen seit <COMMIT-HASH> durch (git log / git
 Vorgehen:
 1. Phase 1 (Gate) läuft bereits separat — du musst pre_review_checks.ps1
    NICHT ausführen. Lies aber die aktuellen Artefakte:
-   - doc-git/Review-Artifacts/repro_issues.md
-   - doc-git/Review-Artifacts/lint_issues.md
-   - doc-git/Review-Artifacts/gguf_issues.md
+   - docs/Review-Artifacts/repro_issues.md
+   - docs/Review-Artifacts/lint_issues.md
+   - docs/Review-Artifacts/gguf_issues.md
 2. Prüfe die Änderungen (git status, git diff, git log) auf:
    - Korrektheit der Registry-Einträge (model_registry.yaml) gegen GGUF-Header
      und Hub-model.yaml — Source of Truth sind die GGUF-Dateien; die
      Registry ist editierbar; Hub-Dateien werden nie angefasst.
    - Logik/Regressionen im geänderten Code (src/, tests/).
-   - Dokumentations-Änderungen (doc-git/, CHANGELOG.md).
+   - Dokumentations-Änderungen (docs/, CHANGELOG.md).
 3. Regeln:
    - Die Mistral-Regelliste ist nur ein Vorschlag. Bei Unklarheiten frag
      nach, statt zu raten.

@@ -158,7 +158,7 @@ _KNOWN_PUBLISHERS: set[str] | None = None
 def _get_registry_data() -> tuple[list[str], dict[str, list[tuple[str, str]]], set[str]]:
     """Cached registry keys, base->(publisher, model) map and known publishers.
 
-    The registry (doc-git/model_registry.yaml) is the single source of truth
+    The registry (data/model_registry.yaml) is the single source of truth
     for the canonical identity triple (publisher, model, quant). Falls back
     to empty data on error so consolidation still works without the file.
     """

@@ -16,6 +16,7 @@ from benchmark_config import (
     is_support_model_record,
 )
 from inventory import IdentityLink, RuntimeBinding
+from kv_cache_policy import KVCachePolicyError, kv_cache_type, normalize_kv_pair
 from model_identity import (
     UniqueMatch,
     canonicalize_source_identity,
@@ -340,7 +341,72 @@ class LMStudioProvider(HttpProvider):
             current["runtime_matches"] = current.get("runtime_matches", True) and self._speculative_matches(
                 speculative_expected, self._speculative_values(load_config)
             )
+        cache_matches, cache_verified = self._kv_cache_matches(
+            self._requested_kv_pair(runtime or {}), self._effective_kv_values(load_config)
+        )
+        current["kv_cache_verified"] = cache_verified
+        if not cache_matches:
+            current["runtime_matches"] = False
         return current
+
+    @staticmethod
+    def _requested_kv_pair(runtime: Mapping[str, Any]) -> tuple[str | None, str | None]:
+        pair: tuple[str | None, str | None]
+        expected = runtime.get("_kv_cache_expected")
+        if expected is not None:
+            if not isinstance(expected, (tuple, list)) or len(expected) != 2:
+                raise KVCachePolicyError("Invalid internal KV-cache pair")
+            pair = normalize_kv_pair(*expected)
+            if tuple(expected) != pair:
+                raise KVCachePolicyError("Internal KV-cache pair must already be normalized")
+        else:
+            pair = normalize_kv_pair(runtime.get("k_cache"), runtime.get("v_cache"))
+        return pair
+
+    @staticmethod
+    def _effective_kv_values(config: Any) -> dict[str, Any]:
+        """Read available loaded KV types without rewriting what actually ran."""
+        if not isinstance(config, Mapping):
+            return {}
+        values: dict[str, Any] = {}
+        for side in ("k", "v"):
+            key = f"{side}_cache"
+            aliases = (
+                key, f"cache_type_{side}", f"{side}CacheQuantizationType",
+                f"llama{side.upper()}CacheQuantizationType", f"llama_{side}_cache_quantization_type",
+                f"llm.load.llama.{side}CacheQuantizationType",
+            )
+            observed = [config[alias] for alias in aliases if alias in config]
+            if not observed:
+                continue
+            try:
+                cache_types = [kv_cache_type(value) for value in observed]
+                values[key] = cache_types[0] if all(value == cache_types[0] for value in cache_types) else "invalid"
+            except KVCachePolicyError:
+                values[key] = "invalid"
+        return values
+
+    @staticmethod
+    def _kv_cache_matches(expected: tuple[str | None, str | None], *configs: Mapping[str, Any]) -> tuple[bool, bool]:
+        """Reject observed mismatches; missing backend metadata stays unverified.
+
+        Native REST and the LMS CLI do not document KV load inputs/echoes.
+        Saved defaults cannot prove a loaded instance's actual configuration.
+        """
+        observed_sides: list[str | None] = []
+        for index, side in enumerate(("k_cache", "v_cache")):
+            observed = [config[side] for config in configs if side in config]
+            if any(value not in {"q4_0", "q8_0"} for value in observed):
+                return False, False
+            if len(set(observed)) > 1:
+                return False, False
+            value = observed[0] if observed else None
+            if value is not None and expected[index] is not None and value != expected[index]:
+                return False, False
+            observed_sides.append(value)
+        if all(observed_sides) and observed_sides[0] != observed_sides[1]:
+            return False, False
+        return True, all(observed_sides)
 
     @staticmethod
     def _speculative_values(config: Any) -> dict[str, Any]:
@@ -488,11 +554,14 @@ class LMStudioProvider(HttpProvider):
                         ):
                             continue
                     config = instance.get("config")
+                    cache_values = self._effective_kv_values(config)
                     link = IdentityLink(
                         registry_key=link.registry_key,
                         runtime_bindings=(RuntimeBinding(
                             context_length=config.get("context_length") if isinstance(config, dict) else None,
                             speculative=tuple(self._speculative_values(config).items()),
+                            k_cache=cache_values.get("k_cache"),
+                            v_cache=cache_values.get("v_cache"),
                         ),),
                     )
                     matches.append((candidate, link))
@@ -534,8 +603,10 @@ class LMStudioProvider(HttpProvider):
         requested_context: int | None = None
         selected_identity: str | None = None
         speculative_expected: Any = None
+        cache_expected: tuple[str | None, str | None] = (None, None)
         if self._runtime_loader is not None:
             runtime = self._runtime_loader(model_identifier) or {}
+            cache_expected = self._requested_kv_pair(runtime)
             speculative_expected = runtime.get("_speculative_expected")
             registry_key = runtime.get("_registry_key")
             if registry_key is not None:
@@ -603,6 +674,19 @@ class LMStudioProvider(HttpProvider):
                 ):
                     warn(f"Loaded speculative configuration is unverified or conflicts with Registry policy for '{model_identifier}'")
                     return False, None
+                cache_configs = [self._effective_kv_values(load_config)]
+                if binding is not None:
+                    bound_runtime = binding[1].runtime_bindings[0]
+                    cache_configs.append({
+                        key: value for key, value in (("k_cache", bound_runtime.k_cache), ("v_cache", bound_runtime.v_cache))
+                        if value is not None
+                    })
+                cache_matches, cache_verified = self._kv_cache_matches(cache_expected, *cache_configs)
+                if not cache_matches:
+                    warn(f"Loaded KV-cache configuration conflicts with the supported pair for '{model_identifier}'")
+                    return False, None
+                if cache_expected[0] is not None and not cache_verified:
+                    info("LM Studio did not report complete effective KV metadata; saved defaults remain unverified")
                 ok(f"Loaded in {load_time:.1f}s (np={load_config.get('parallel', '?')})")
                 info(f"Instance ID: {instance_id}")
                 return True, instance_id
@@ -610,7 +694,14 @@ class LMStudioProvider(HttpProvider):
                 binding = self._loaded_binding_for_identity(
                     self._native_request("/api/v1/models"), model_identifier, registry_key=selected_identity
                 )
-                if binding is not None and (
+                bound_cache = binding[1].runtime_bindings[0] if binding is not None else None
+                cache_matches, _cache_verified = self._kv_cache_matches(cache_expected, {
+                    key: value for key, value in (
+                        ("k_cache", bound_cache.k_cache if bound_cache else None),
+                        ("v_cache", bound_cache.v_cache if bound_cache else None),
+                    ) if value is not None
+                })
+                if binding is not None and cache_matches and (
                     requested_context is None
                     or self._context_matches(binding[1].runtime_bindings[0].context_length, requested_context)
                 ) and self._speculative_matches(

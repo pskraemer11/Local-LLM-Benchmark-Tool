@@ -280,7 +280,7 @@ llmster = os.path.join(os.path.dirname(os.path.dirname(__file__)),
 | `tests/test_run_benchmarks.py`                                               | `SAFE_CONTEXT_FALLBACK` imported, 9 obsolete tests skipped                                                                               |
 | `tests/test_registry_tool.py`                                                | **NEW** – 35 tests                                                                                                                       |
 | `tests/test_assemble_blueprint.py`                                           | **NEW** – 43 tests                                                                                                                       |
-| `doc-git/Architecture-and-Flow.md`, `HowTo-Install-and-Configure-New-LLM.md` | Minor corrections (doc sync)                                                                                                             |
+| `docs/Architecture-and-Flow.md`, `HowTo-Install-and-Configure-New-LLM.md` | Minor corrections (doc sync)                                                                                                             |
 
 ---
 

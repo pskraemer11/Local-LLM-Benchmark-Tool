@@ -4,7 +4,7 @@ Registry and prompt-policy tool for local LLM benchmarks.
 
 This program prepares models for `run_benchmarks.py`. It discovers benchmarkable
 LM Studio models, uses the canonical identity `publisher/model@quant`, reads
-technical facts from GGUF files, maintains `doc-git\model_registry.yaml`, and
+technical facts from GGUF files, maintains `data\model_registry.yaml`, and
 checks prompt and runtime drift.
 
 1. RECOMMENDED WORKFLOW
@@ -42,9 +42,9 @@ compatibility spelling of `full`; both use the same workflow and options.
 
 2. SOURCE OF TRUTH AND WRITE BOUNDARIES
 
-  Registry policy       doc-git\model_registry.yaml
+  Registry policy       data\model_registry.yaml
   Technical limits      Main GGUF file and header
-  Prompt policy         doc-git\blueprint_definitions.yaml and templates
+  Prompt policy         docs\blueprint_definitions.yaml and templates
   LM Studio settings    Tested runtime evidence; import is opt-in
   llama.cpp preset      Generated runtime output; never the Registry source
 
@@ -107,7 +107,7 @@ if TYPE_CHECKING:
     from type_defs import RegistryEntry
 
 PROJECT_ROOT = _SRC_DIR.parent
-REGISTRY_PATH = PROJECT_ROOT / "doc-git" / "model_registry.yaml"
+REGISTRY_PATH = PROJECT_ROOT / "data" / "model_registry.yaml"
 CONFIG_ROOT = Path.home() / ".lmstudio" / ".internal" / "user-concrete-model-default-config"
 
 
@@ -165,6 +165,12 @@ from benchmark_config import (
     USE_UNIFIED_KV_CACHE_THRESHOLD_GB as _USE_UNIFIED_KV_CACHE_THRESHOLD_GB,  # noqa: F401 - re-export for tests
 )
 from inventory import IdentityLink, InventorySnapshot, RuntimeBinding
+from kv_cache_policy import (
+    KVCachePolicyError,
+    kv_cache_type,
+    normalize_kv_pair,
+    runtime_kv_pair,
+)
 from model_identity import (
     ArtifactIdentityEvidence,
     UniqueMatch,
@@ -250,6 +256,20 @@ def _normalize_sampling_schema(reg: dict[str, Any]) -> None:
 
 def save_registry(reg: dict[str, Any], path: Path | None = None) -> None:
     target = path or REGISTRY_PATH
+    # Validate every pair before mutating data or creating the output file.
+    cache_updates: list[tuple[dict[str, Any], str, str, tuple[str | None, str | None]]] = []
+    for entry in reg.values():
+        if not isinstance(entry, dict):
+            continue
+        cache_updates.append((entry, "k_cache", "v_cache", normalize_kv_pair(entry.get("k_cache"), entry.get("v_cache"))))
+        for provider in ("llama_cpp", "unsloth_server", "lmstudio", "lm_studio"):
+            explicit = entry.get(provider)
+            if isinstance(explicit, dict):
+                fields = ("k_cache", "v_cache") if provider in {"lmstudio", "lm_studio"} else ("cache_type_k", "cache_type_v")
+                cache_updates.append((explicit, *fields, normalize_kv_pair(*(explicit.get(field) for field in fields))))
+    for entry, k_field, v_field, pair in cache_updates:
+        if pair[0] is not None:
+            entry[k_field], entry[v_field] = pair
     _normalize_sampling_schema(reg)
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary_path: Path | None = None
@@ -963,6 +983,7 @@ def _build_runtime_binding(
         if isinstance(speculative, dict)
         else ()
     )
+    cache_pair = normalize_kv_pair(config.get("k_cache") if config else None, config.get("v_cache") if config else None)
     return RuntimeBinding(
         config_path=Path(config["json_path"]) if config and config.get("json_path") else None,
         config_scope=str(config.get("_registry_config_scope", "gguf")) if config else None,
@@ -971,8 +992,8 @@ def _build_runtime_binding(
         use_unified_kv=config.get("use_unified_kv") if config else None,
         num_parallel=_positive_int(config.get("num_parallel")) if config else None,
         offload=offload_value,
-        k_cache=str(config.get("k_cache")) if config and config.get("k_cache") else None,
-        v_cache=str(config.get("v_cache")) if config and config.get("v_cache") else None,
+        k_cache=cache_pair[0],
+        v_cache=cache_pair[1],
         num_experts=_positive_int(config.get("num_experts")) if config else None,
         speculative=speculative_items,
     )
@@ -1225,7 +1246,16 @@ def _format_blank_lines(path: Path) -> None:
 
 
 def cmd_fmt() -> None:
-    _format_blank_lines(REGISTRY_PATH)
+    # Reuse the atomic writer so formatting also enforces the KV pair contract.
+    if not REGISTRY_PATH.is_file():
+        raise FileNotFoundError(f"Registry not found: {REGISTRY_PATH}")
+    with REGISTRY_PATH.open(encoding="utf-8") as stream:
+        reg = y.load(stream)
+    if reg is None:
+        reg = {}
+    if not isinstance(reg, dict):
+        raise ValueError(f"Registry root must be a mapping: {REGISTRY_PATH}")
+    save_registry(reg)
     print(f"[OK] Blank lines formatted in {REGISTRY_PATH.name}")
 
 
@@ -1247,8 +1277,8 @@ def cmd_fill_ctx(default: int = 16384) -> None:
             continue
         size_bytes = entry.get("file_size_bytes")
         if size_bytes and size_bytes > 0:
-            kc = entry.get("k_cache", "q8_0")
-            vc = entry.get("v_cache", "iq4_nl")
+            kc = entry.get("k_cache")
+            vc = entry.get("v_cache")
             entry["context_length"] = _default_ctx_from_size(int(size_bytes), _NP_POLICY, kc, vc)
         else:
             entry["context_length"] = default
@@ -1270,8 +1300,8 @@ def cmd_fix_ctx() -> None:
             continue
         sb = entry.get("file_size_bytes")
         if sb and sb > 0:
-            kc = entry.get("k_cache", "q8_0")
-            vc = entry.get("v_cache", "iq4_nl")
+            kc = entry.get("k_cache")
+            vc = entry.get("v_cache")
             new_ctx = _default_ctx_from_size(int(sb), _NP_POLICY, kc, vc)
             if entry.get("context_length") in (None, 0):
                 entry["context_length"] = new_ctx
@@ -1502,9 +1532,14 @@ def build_llama_preset(
             continue
         try:
             runtime = runtime_registry.provider_runtime(key, "llama_cpp")
+        except KVCachePolicyError:
+            raise
         except ValueError as exc:
             skipped.append(f"{key} (invalid local bundle: {exc})")
             continue
+        runtime["cache_type_k"], runtime["cache_type_v"] = runtime_kv_pair(
+            runtime.get("cache_type_k"), runtime.get("cache_type_v")
+        )
         lines.extend((f"[{key}]", "# registry_tool:generated-section", f"model = {model_path}"))
         for source_key, preset_key in option_map:
             value = runtime.get(source_key)
@@ -1600,6 +1635,34 @@ def merge_llama_preset(existing: str, generated: str) -> str:
         if output and output[-1].strip():
             output.append("")
         output.extend(lines)
+    return normalize_llama_preset("\n".join(output).rstrip() + "\n")
+
+
+def normalize_llama_preset(content: str) -> str:
+    """Normalize every explicit KV pair, including retained global/manual blocks."""
+    preamble, blocks = _ini_blocks(content)
+    output: list[str] = []
+    for name, lines in [("preamble", preamble), *blocks]:
+        cache_lines: dict[str, list[tuple[int, re.Match[str]]]] = {"k": [], "v": []}
+        for index, line in enumerate(lines):
+            match = re.match(r"^(\s*cache-type-([kv])\s*[=:]\s*)([^#;]*)(.*)$", line, re.IGNORECASE)
+            if match:
+                cache_lines[match.group(2).lower()].append((index, match))
+        values: dict[str, str | None] = {}
+        for side, matches in cache_lines.items():
+            observed = [kv_cache_type(match.group(3)) for _index, match in matches]
+            if len(set(observed)) > 1:
+                raise KVCachePolicyError(f"Conflicting cache-type-{side} values in preset section {name}")
+            values[side] = observed[0] if observed else None
+        pair = normalize_kv_pair(values["k"], values["v"])
+        if pair[0] is not None:
+            for side, value in zip(("k", "v"), pair, strict=True):
+                for index, match in cache_lines[side]:
+                    suffix = match.group(4)
+                    lines[index] = f"{match.group(1)}{value}" + (f" {suffix}" if suffix else "")
+                if not cache_lines[side]:
+                    lines.append(f"cache-type-{side} = {value}")
+        output.extend(lines)
     return "\n".join(output).rstrip() + "\n"
 
 
@@ -1609,14 +1672,15 @@ def cmd_export_llama_preset(
 ) -> int:
     """Write the derived local llama.cpp preset and report skipped entries."""
     target = Path(output_path) if output_path else PROJECT_ROOT / "ergebnisse" / "llama-cpp-generated" / "preset.ini"
-    registry = load_registry()
-    content, skipped = build_llama_preset(registry)
-    generated_count = content.count("\n[")
     try:
+        registry = load_registry()
+        content, skipped = build_llama_preset(registry)
+        generated_count = content.count("\n[")
         if merge_existing and target.exists():
             content = merge_llama_preset(target.read_text(encoding="utf-8"), content)
+        content = normalize_llama_preset(content)
         _atomic_write_text(target, content)
-    except OSError as exc:
+    except (OSError, KVCachePolicyError) as exc:
         print(f"[ERROR] Could not write llama.cpp preset {target}: {exc}")
         return 1
     written = generated_count
@@ -2055,7 +2119,7 @@ def cmd_quarantine_missing(
     ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     quarantine_dir = CONFIG_ROOT / f"_quarantine_missing_{ts}"
     backup_path = (
-        PROJECT_ROOT / "doc-git" / "Review-Artifacts" / f"quarantine_registry_{ts}.yaml"
+        PROJECT_ROOT / "docs" / "Review-Artifacts" / f"quarantine_registry_{ts}.yaml"
     )
 
     quarantined: list[str] = []
@@ -2340,7 +2404,9 @@ def cmd_add(
             entry["architecture_family"] = base_architecture
         if size_bytes and size_bytes > 0:
             entry["file_size_bytes"] = int(size_bytes)
-            entry["context_length"] = _default_ctx_from_size(int(size_bytes), _NP_POLICY, entry["k_cache"], entry["v_cache"])
+            entry["context_length"] = _default_ctx_from_size(
+                int(size_bytes), _NP_POLICY, entry.get("k_cache"), entry.get("v_cache")
+            )
         else:
             entry["context_length"] = 16384
 
@@ -2522,9 +2588,8 @@ def cmd_suggest() -> dict[str, Any]:
             fs = entry.get("file_size_bytes", 0)
             nl = entry.get("n_layers")
             hd = entry.get("hidden_dim")
-            kc = entry.get("k_cache", "q8_0")
-            vc = entry.get("v_cache", "iq4_nl")
-            kv_bytes = _KV_BYTES.get(kc, 1.0) + _KV_BYTES.get(vc, 0.5)
+            kc, vc = normalize_kv_pair(entry.get("k_cache"), entry.get("v_cache"))
+            kv_bytes = _KV_BYTES.get(kc or "q8_0", 1.0) + _KV_BYTES.get(vc or "q8_0", 1.0)
             model_gb = fs / 1_000_000_000 if fs else 0
 
             kv_per_slot_gb = 0.0
@@ -2699,6 +2764,16 @@ def _build_config_sync_proposal(
         model_key = matching_keys[0]
         if is_blacklisted_model_name(model_key):
             continue
+        config = dict(config)
+        if any(field in {"k_cache", "v_cache"} for field, _source in fields_to_sync):
+            try:
+                config["k_cache"], config["v_cache"] = normalize_kv_pair(config.get("k_cache"), config.get("v_cache"))
+            except KVCachePolicyError as exc:
+                issues.append(SyncProposalItem(
+                    model_key, "KV-cache pair", None, (config.get("k_cache"), config.get("v_cache")),
+                    (source_path,), conflict=True, problem=str(exc),
+                ))
+                continue
         for field, config_field in fields_to_sync:
             value = config.get(config_field)
             if value is None:
@@ -3130,7 +3205,13 @@ _KV_BYTES: dict[str, float] = {
 }
 
 
-def _default_ctx_from_size(size_bytes: int, np: int = 1, k_cache: str = "q8_0", v_cache: str = "iq4_nl") -> int:
+def _default_ctx_from_size(
+    size_bytes: int,
+    np: int = 1,
+    k_cache: str | None = None,
+    v_cache: str | None = None,
+) -> int:
+    normalized_k, normalized_v = runtime_kv_pair(k_cache, v_cache)
     gb = size_bytes / 1_000_000_000
     for limit, ctx in _CTX_FROM_SIZE:
         if gb > limit:
@@ -3143,7 +3224,7 @@ def _default_ctx_from_size(size_bytes: int, np: int = 1, k_cache: str = "q8_0", 
         return base_ctx
 
     kv_ref = 1.5
-    kv_actual = _KV_BYTES.get(k_cache, 2.0) + _KV_BYTES.get(v_cache, 2.0)
+    kv_actual = _KV_BYTES.get(normalized_k or "q8_0", 1.0) + _KV_BYTES.get(normalized_v or "q8_0", 1.0)
     scale = (kv_ref / kv_actual) / np
     return max(16384, int(base_ctx * scale))
 
@@ -4018,7 +4099,7 @@ def cmd_fill_reasoning(
 
 # ── sync-templates command ─────────────────────────────────────────
 
-TEMPLATE_DIR = PROJECT_ROOT / "doc-git" / "Jinja-Chat-Templates"
+TEMPLATE_DIR = PROJECT_ROOT / "docs" / "Jinja-Chat-Templates"
 
 _BLUEPRINT_CACHE: dict[str, Any] | None = None
 
@@ -4029,7 +4110,7 @@ def _load_blueprints() -> dict[str, Any]:
     if _BLUEPRINT_CACHE is None:
         from ruamel.yaml import YAML
         y = YAML()
-        bp_path = PROJECT_ROOT / "doc-git" / "blueprint_definitions.yaml"
+        bp_path = PROJECT_ROOT / "docs" / "blueprint_definitions.yaml"
         with open(bp_path, encoding="utf-8") as f:
             data = y.load(f)
         _BLUEPRINT_CACHE = (data or {}).get("blueprints", {})
@@ -4251,14 +4332,14 @@ def _hub_model_yaml(entry: dict[str, Any], model_key: str) -> tuple[Path, dict[s
 
 
 def _write_repro_issues(reg: dict[str, RegistryEntry], errors: dict[str, list[str]], verbose: bool) -> None:
-    """Write doc-git/Review-Artifacts/repro_issues.md: validate errors + hub diffs.
+    """Write docs/Review-Artifacts/repro_issues.md: validate errors + hub diffs.
 
     Repro artifact for the review: every registry decision (context_length,
     max_context_length, arch, reasoning, capabilities) is checked against the
     LM Studio Hub model.yaml (metadataOverrides); deviations are documented as
     'REPRO-Check'. An existing file is overwritten.
     """
-    artifacts_dir = PROJECT_ROOT / "doc-git" / "Review-Artifacts"
+    artifacts_dir = PROJECT_ROOT / "docs" / "Review-Artifacts"
     artifacts_dir.mkdir(parents=True, exist_ok=True)
     out = artifacts_dir / "repro_issues.md"
 
@@ -4414,7 +4495,7 @@ def cmd_validate(
     """Validate model_registry.yaml consistency: templates, configs, overrides.
 
     verbose: zeigt alle Einzelprobleme (statt nur die ersten 10 je Kategorie).
-    repro:   schreibt zusätzlich doc-git/Review-Artifacts/repro_issues.md mit
+    repro:   schreibt zusätzlich docs/Review-Artifacts/repro_issues.md mit
              GGUF-Hub-Abweichungen (Registry vs. LM-Studio-Hub model.yaml).
     ci:      headless static checks only; skips LM-Studio configs and local GGUFs.
 

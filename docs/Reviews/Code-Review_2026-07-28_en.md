@@ -3,7 +3,7 @@
 > **Status:** Deep-Dive Code Analysis after Phase p8 (Rename-Cleanup, CI/CD, further Registry Cleanup)
 > **Methodology:** [ISO/IEC 9126](https://de.wikipedia.org/wiki/ISO/IEC_9126) — the 6 main characteristics: Functionality, Reliability, Usability, Efficiency, Maintainability, Portability.
 > **Scope:** 9 main scripts (7,925 LOC code-only) + 14 test files (3,948 LOC, 559 tests green) + YAML registry (124 entries). As of 28.07.2026.
-> **Previous Reviews:** `doc-git/Reviews/Code-Review_2026-07-27.md` (8.5/10), `doc-git/Reviews/Code-Review_2026-07-20.md` (7.75/10)
+> **Previous Reviews:** `docs/Reviews/Code-Review_2026-07-27.md` (8.5/10), `docs/Reviews/Code-Review_2026-07-20.md` (7.75/10)
 
 ---
 
@@ -160,7 +160,7 @@ Proxy for LM-Eval Native API endpoint:
 
 | Sub-characteristic | Rating | Finding                                                       |
 | ------------------ | -----: | ------------------------------------------------------------- |
-| Understandability  | 8/10   | Extensive `doc-git/` documentation (7+ Markdown files)        |
+| Understandability  | 8/10   | Extensive `docs/` documentation (7+ Markdown files)        |
 | Learnability       | 7/10   | Quick start in README, CLI table; no tutorial notebook        |
 | Operability        | 7/10   | Interactive + non-interactive mode; `--json` output           |
 | Attractiveness     | 6/10   | Terminal output ASCII-only, no colors/progress bars           |

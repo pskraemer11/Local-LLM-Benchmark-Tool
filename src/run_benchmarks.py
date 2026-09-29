@@ -535,7 +535,7 @@ def _load_registry_for_context() -> tuple[dict[str, dict[str, Any]], dict[str, s
 
     from model_identity import unique_normalized_index
 
-    rpath = Path(__file__).resolve().parent.parent / "doc-git" / "model_registry.yaml"
+    rpath = Path(__file__).resolve().parent.parent / "data" / "model_registry.yaml"
     if not rpath.exists():
         _REGISTRY_DATA = {}
         _REGISTRY_NORM = {}

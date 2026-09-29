@@ -182,7 +182,7 @@ py -3.12 .\src\registry_tool.py --help
 
 The registry tool operates on:
 
-- doc-git\model_registry.yaml
+- data\model_registry.yaml
 - local GGUF headers
 - the LM Studio model inventory
 - LM Studio config JSONs as read-only runtime evidence; the explicit
@@ -192,7 +192,7 @@ The registry tool operates on:
 - bounded web research for one-time sampling onboarding
 
 The authoritative source for each field and the permitted direction of data
-transfer are defined in the [field ownership and synchronization rules](<doc-git/Architecture, Flow & ChangeLog_en.md#213-field-authority-during-synchronization>). In particular, GGUF facts come from the main file on disk, LM Studio settings are evidence of tested runtime choices, and benchmark policy remains in the Registry. LM Studio's displayed model size can include support files such as `mmproj`; it is not the main GGUF file size.
+transfer are defined in the [field ownership and synchronization rules](<docs/Architecture, Flow & ChangeLog_en.md#213-field-authority-during-synchronization>). In particular, GGUF facts come from the main file on disk, LM Studio settings are evidence of tested runtime choices, and benchmark policy remains in the Registry. LM Studio's displayed model size can include support files such as `mmproj`; it is not the main GGUF file size.
 
 ### GGUF model root configuration
 
@@ -263,7 +263,7 @@ It is selected explicitly with `--models-preset` or
 `[*]` section and model sections. The global section supplies defaults shared
 by the model sections; a named section supplies model-specific server
 options. The preset is a derived runtime catalog, not a replacement for
-`doc-git\model_registry.yaml`.
+`data\model_registry.yaml`.
 
 For a normal standalone llama.cpp command, the effective order is:
 
@@ -371,7 +371,7 @@ Direct registry maintenance:
 - fills quantization, GGUF architecture, reasoning, and main-GGUF file size;
 - normalizes the registry file.
 
-It may write `doc-git\model_registry.yaml`. It does not write LM Studio
+It may write `data\model_registry.yaml`. It does not write LM Studio
 config JSONs or search the web unless `--refresh-sampling` is supplied.
 
 #### Import LM Studio runtime settings
@@ -609,16 +609,18 @@ runtime artifacts.
 
 | Data                   | Location                                                       | Role                                                 |
 | ---------------------- | -------------------------------------------------------------- | ---------------------------------------------------- |
-| Model registry         | doc-git\model_registry.yaml                                    | Benchmark policy and provider-neutral model metadata |
-| Blueprint definitions  | doc-git\blueprint_definitions.yaml                             | System-prompt assembly rules                         |
-| Jinja templates        | doc-git\Jinja-Chat-Templates\                                  | Explicit chat-template overrides                     |
+| Model registry         | data\model_registry.yaml                                    | Benchmark policy and provider-neutral model metadata |
+| Blueprint definitions  | docs\blueprint_definitions.yaml                             | System-prompt assembly rules                         |
+| Jinja templates        | docs\Jinja-Chat-Templates\                                  | Explicit chat-template overrides                     |
 | GGUF files             | `D:\LLM-Modelle\models` (legacy `~\.lmstudio\models` fallback) | Immutable model/header facts                         |
 | LM Studio config JSONs | LM Studio internal config directory                            | Backend-local runtime artifacts and drift evidence   |
 | Benchmark datasets     | simple_evals\, lm-eval, EvalPlus, tool-eval-bench              | Tasks and scenarios                                  |
 | Run specifications     | local run*.yaml files                                          | Reproducible run selections                          |
 | Results                | ergebnisse\                                                    | Per-task CSVs, summaries, logs, and reports          |
 
-`doc-git/model_registry.yaml` is a machine-local generated file and is always
+`data/model_registry.yaml` is the machine-local SSOT database for model identity,
+benchmark policy and runtime parameters. It is maintained by the Registry tool
+and explicit user decisions, and is always
 ignored by Git; it is not downloaded from the repository. On a fresh setup,
 run `py -3.12 .\src\registry_tool.py full` to create/populate it from the
 available GGUF inventory (and LM Studio inventory/configs when installed).
@@ -752,8 +754,9 @@ Benchmarks/
 │   ├── csv_writer.py            Uniform result output
 │   └── consolidate_results.py   Weighted summaries and comparisons
 ├── tests/                       Pytest suite
-├── doc-git/
-│   ├── model_registry.yaml      Registry source of truth
+├── data/
+│   └── model_registry.yaml      Runtime SSOT database (machine-local)
+├── docs/
 │   ├── blueprint_definitions.yaml
 │   ├── Jinja-Chat-Templates/
 │   └── Architecture, Flow & ChangeLog_en.md
@@ -785,10 +788,10 @@ manually afterwards.
 ## Further documentation
 
 - Review-Gate für Review, Commit und Push: REVIEW-GATE.md
-- Architecture, Flow & ChangeLog: doc-git\Architecture, Flow & ChangeLog_en.md
+- Architecture, Flow & ChangeLog: docs\Architecture, Flow & ChangeLog_en.md
 - How to install and configure a new LLM:
-  doc-git\HowTo-Install-and-Configure-New-LLM_en.md
-- LM Studio API references: doc-git\Developer-Docs\LM-Studio-API-References.md
+  docs\HowTo-Install-and-Configure-New-LLM_en.md
+- LM Studio API references: docs\Developer-Docs\LM-Studio-API-References.md
 - Registry sampling review workflow:
   .codex\skills\registry-sampling-review\SKILL.md
 - Project planning: PLANUNG.md

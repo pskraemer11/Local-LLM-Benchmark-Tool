@@ -19,7 +19,7 @@ Details und Grenzen stehen im `Registry-Update_Runtime-and-KV_2026-09-29.md`.
 
 ## Folgereview vom 29.09.2026: Plan und Abnahme
 
-Der Bericht `doc-git/Review-Artifacts/Code-Review_registry_Fixes_2026-09-29.md`
+Der Bericht `docs/Review-Artifacts/Code-Review_registry_Fixes_2026-09-29.md`
 führt den Fix-Bericht vom 28.09. mit dem aktuellen Datei-Inventar fort.
 
 - [x] Aktuelle LMS-/GGUF-Snapshots prüfen, Registry sichern und aktuelle Modelle synchronisieren.
@@ -36,7 +36,7 @@ Eine statisch gültige Registry ersetzt keine erfolgreiche lokale Backend-Abnahm
 
 ## Registry-Review vom 28.09.2026: Implementierungsstand
 
-Die Befunde R01–R12 aus `doc-git/Review-Artifacts/Code-Review_registry_2026-09-28.md`
+Die Befunde R01–R12 aus `docs/Review-Artifacts/Code-Review_registry_2026-09-28.md`
 werden durch gemeinsame Identitäts-, Runtime- und Companion-Grenzen geschlossen.
 Der ergänzende Fix-/Re-Review-Bericht dokumentiert Regressionen und das Vollgate;
 die frühere SampleSize-1-Abnahme ersetzt diese neuen Vertragsprüfungen nicht.
@@ -737,7 +737,7 @@ ausschließlich `C:\Program Files\llama.cpp\llama-server.exe`.
 | Modell-Datei | lokales GGUF unter dem gemeinsamen GGUF-Root | `llama-server.exe --model` erhält den konkreten lokalen Pfad |
 | Modellbeschaffung | explizit bereitgestellte lokale GGUF-Datei | Kein automatischer Hugging-Face-Download und kein impliziter GUI-Cache im Benchmarkpfad |
 | Architektur, Quant, native Grenzen | GGUF-Header und Dateiname | read-only technische Fakten für Registry und Resolver |
-| Benchmark-Policy | `doc-git/model_registry.yaml` | Runtimewerte, Sampling, Reasoning und Modellidentität |
+| Benchmark-Policy | `data/model_registry.yaml` | Runtimewerte, Sampling, Reasoning und Modellidentität |
 | Prompt-/Template-Policy | `blueprint_definitions.yaml` und Template-Dateien | providerneutrale Prompt- und Stop-Policy |
 | Parameterexperimente | LM-Studio-GUI und LM-Studio-Config-JSONs | Mess- und Tuning-Arbeitsplatz, nicht dauerhafte Runtime-Quelle |
 | Benchmark-Inferenz | direkter llama.cpp-Server | einziges produktives lokales Backend |
@@ -891,7 +891,7 @@ gezielt erneut validiert werden.
      lauf sind abgeschlossen.
    - [ ] Nach jedem llama.cpp-Update `--version`, `--help`, `llama-bench`,
      einen Modell-Smoke und die Registry-/Template-Tests wiederholen.
-   - [x] Die Zielarchitektur in `doc-git/Architecture, Flow & ChangeLog_en.md`
+   - [x] Die Zielarchitektur in `docs/Architecture, Flow & ChangeLog_en.md`
      und README um den direkten Provider und die beiden GGUF-Ablagen ergänzen.
 
 ##### Bewusste Nichtziele
@@ -928,7 +928,7 @@ gezielt erneut validiert werden.
 - [x] Einen sequenziellen LM-Studio/llama.cpp-Kompatibilitaetsvergleich mit
   identischem Modell, System-/Userprompt, Sampling, Seed, Kontext und Request
   ausfuehren. Der Qwen-Lauf ist in
-  `doc-git\\Developer-Docs\\Backend-Compatibility-and-SampleSize-1-Verification_2026-09-25.md`
+  `docs\\Developer-Docs\\Backend-Compatibility-and-SampleSize-1-Verification_2026-09-25.md`
   dokumentiert.
 - [x] GLM-4.7 unter LM Studio mit JSON-Schema-Structured-Output sowie im
   OpenAI-kompatiblen und nativen REST-Streamingpfad pruefen; der GLM-
@@ -1048,3 +1048,20 @@ Bei Backendänderungen folgt ein SampleSize-1-Smoke mit dem produktiven
 `llama-server.exe`; LM Studio wird nur für den separaten
 Kompatibilitätsvergleich gestartet. Der grössere direkte SampleSize-5-Lauf
 bleibt bis zur fachlichen Abnahme pausiert.
+
+## KV-Paarvertrag, Generierungsgrenzen und Pfadmigration (29.09.2026)
+
+- [x] Registry nach `data/model_registry.yaml` und bisherigen Dokumentationsbaum
+  nach `docs/` migrieren; vorhandenen `docs/keystone`-Inhalt erhalten.
+- [x] Verbraucher, Tests, Hooks, Tool-Konfiguration und Dokumentationsverweise
+  anpassen; Dateisicherung und inhaltsidentische Registry-Migration prüfen.
+- [x] Gemeinsamen KV-Paarresolver integrieren: Summe K+V bis 12 Bits ergibt
+  `q4_0/q4_0`, darüber `q8_0/q8_0`; Gleichstand wird abgerundet.
+- [x] JSON-/Registry-/Preset-/Provider-Grenzen prüfen und lokale abgeleitete
+  Dateien mit ausschließlich diesen Paaren aktualisieren.
+- [x] Lange Ausgabe-Wiederholungen während Streaming abbrechen und exakte
+  Reasoning-Usage gegen die gewählte Grenze prüfen, ohne automatischen Retry.
+- [x] Vollständige Testsuite und unabhängiger Nachreview für den aktuellen
+  Stand; Git-Hooks werden bei Commit und Push ausgeführt.
+
+GPU-, Lade- und Generierungsläufe bleiben gemäß Benutzerentscheidung ausgeschlossen.

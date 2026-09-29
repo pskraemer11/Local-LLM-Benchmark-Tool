@@ -46,7 +46,7 @@ ans.png
 opencode.json
 benchmark-dirs.txt
 *.sqlite
-doc-git/model_registry.yaml
+data/model_registry.yaml
 
 # OpenCode
 .opencode/
@@ -81,21 +81,22 @@ prompt_inventory.csv
 .pytest-temp-20260925/
 .pytest-temp-codex-provider-20260925-02/
 .pytest-tmp-current/
+.pytest-tmp-path-migration/
 .sidecar-test-escalated-20260925/
 .sidecar-test-tmp-20260925-b/
 
-# Review-Gate-Logs (Artefakte in doc-git/Review-Artifacts/ werden committet)
+# Review-Gate-Logs (Artefakte in docs/Review-Artifacts/ werden committet)
 pre_review_checks_*.log
 validate_errors.log
 
 # Lokale, regenerierbare Quarantaene-Backups der Registry
-doc-git/Review-Artifacts/quarantine_registry_*.yaml
+docs/Review-Artifacts/quarantine_registry_*.yaml
 
 # Lokale, regenerierbare Analyse- und Sicherheitsartefakte
 .compat-baseline-*/
 hardening/
 model-list.txt
-doc-git/*_llama-server_version+help.txt
+docs/*_llama-server_version+help.txt
 
 # Fremder, unversionierter Hilfscode im Arbeitsbaum
 /utils/

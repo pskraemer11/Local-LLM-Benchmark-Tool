@@ -302,11 +302,11 @@ The registry lookup (`reasoning: thinking`) is reflected in the JSON-Config's
 ## History
 
 ### 2026-08-13
-- **Registry `sampling:` field is the SSOT** (`doc-git/model_registry.yaml`, Variante A):
+- **Registry `sampling:` field is the SSOT** (`data/model_registry.yaml`, Variante A):
   17 models carry per-category `temperature`/`top_p`. `get_model_config()` reads the
   registry first, falls back to `MODEL_CATEGORY_SAMPLING`, then category/thinking
   defaults. New `_source` value `registry-sampling`. Plan + log:
-  `doc-git/Planung/registry_sampling.md` + `registry_sampling_log.md`.
+  `docs/Planung/registry_sampling.md` + `registry_sampling_log.md`.
 - **`MODEL_CATEGORY_SAMPLING` kept as fallback** (30 models without a `sampling:` block).
 
 ### 2026-08-05
