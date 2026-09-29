@@ -2172,3 +2172,30 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 ## Next Move
 1. CI-Isolation veröffentlichen und Linux-/Windows-CI für diesen konkreten
    Commit abwarten; Fremdänderungen im Arbeitsbaum weiter erhalten.
+
+=============== Compaction 29.09.2026 / 15:21 ================
+## Objective
+- Letzten Windows-CI-Unterschied schließen und den finalen Remote-Stand prüfen.
+
+## Important Details
+- `ad36df87` ist mit aktiven grünen Hooks veröffentlicht. Linux-CI und CodeQL
+  bestanden; Windows-Lint, statische Registry und mypy ebenfalls. Der Windows-
+  Testjob meldete ausschließlich die GGUF-Cache-Refresh-Fixture.
+- Gleich große unmittelbar aufeinanderfolgende Fixture-Writes können denselben
+  `mtime_ns` erhalten. Der Produktionscache verwendet `(path, size, mtime_ns)`.
+  Der Test muss eine Änderung dieses Schlüssels nachweislich auslösen; er setzt
+  nun einen um zwei Sekunden geänderten Zeitstempel und prüft die tatsächliche
+  Änderung vor der unveränderten Dense-/False-Assertion.
+- Keine Sleeps, Cache-Resets oder Produktionsänderungen. Das ist eine
+  deterministische Testeingabe; die reale Registry und GGUF-Dateien bleiben
+  unverändert. Details stehen im CHANGELOG-Eintrag zum Windows-Cache-Test.
+
+## Work State
+- Completed: 34 Header-/Runtime-Tests sowie unabhängiger Read-only-Nachreview
+  und Einzeltest bestanden. Eigene Änderungen sind nur Test und Nachweise.
+- Active: Testkorrektur mit Hooks veröffentlichen, abschließende Linux-/Windows-
+  CI und CodeQL für genau diesen Commit abgleichen und Ergebnisse berichten.
+- Open: die unveränderten zwei lokalen Companion-Blocker; keine GPU-Aufrufe.
+
+## Next Move
+1. Letzte CI-Korrektur committen/pushen und tatsächliche Run-Ergebnisse prüfen.

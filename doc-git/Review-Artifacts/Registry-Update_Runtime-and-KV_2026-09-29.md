@@ -159,3 +159,12 @@ anschließende Push wiederholt alle Hooks und wird auf GitHub erneut geprüft.
 Unabhängiger Nachreview `/root/aux_types`: PASS, keine neuen P1-/P2-Befunde;
 die 20 fokussierten Tests wurden sowohl im Arbeitsbaum als auch im Snapshot
 ohne private Registry unabhängig bestanden.
+
+Der folgende Linux-CI-Lauf und CodeQL für `ad36df87` bestanden. Der Windows-
+Testjob meldete ausschließlich die Cache-Refresh-Fixture: zwei sofortige
+gleich große GGUF-Schreibvorgänge können denselben Änderungszeitstempel liefern.
+Der Cache-Vertrag verwendet Pfad, Größe und `mtime_ns`. Die Fixture setzt und
+prüft nun explizit einen geänderten Zeitstempel und behält die ursprünglichen
+True-/False-Assertions bei. Kein Sleep, Cache-Reset oder Produktionswechsel.
+34 Header-/Runtime-Tests bestanden; unabhängiger Nachreview: PASS, Einzeltest
+ebenfalls bestanden. Abschließende Remote-Prüfung folgt für diesen Fix.

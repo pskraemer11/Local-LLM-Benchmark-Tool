@@ -1,6 +1,7 @@
 """Explicit user policy survives sync and reaches the derived provider files."""
 
 import json
+import os
 
 import pytest
 import yaml
@@ -163,5 +164,10 @@ def test_moe_detection_reads_header_without_weight_mapping_and_refreshes(tmp_pat
     main = tmp_path / "model-Q6_K.gguf"
     write_gguf(main, metadata={"qwen35.expert_count": 64})
     assert rt._gguf_has_experts(str(main)) is True
+    before = main.stat()
     write_gguf(main, metadata={"qwen35.expert_count": 0})
+    # Equal-size writes can share an mtime on Windows runners. Exercise the
+    # stat-keyed refresh contract explicitly, without sleeping or clearing it.
+    os.utime(main, ns=(before.st_atime_ns, before.st_mtime_ns + 2_000_000_000))
+    assert main.stat().st_mtime_ns != before.st_mtime_ns
     assert rt._gguf_has_experts(str(main)) is False

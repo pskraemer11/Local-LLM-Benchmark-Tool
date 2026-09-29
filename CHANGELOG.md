@@ -798,3 +798,8 @@ Die Hooks erzeugen CHANGELOG-Eintraege nicht automatisch; dieser Eintrag dokumen
 
 - **TEST:** Die sieben im ersten Linux-CI-Lauf gescheiterten Tests erhalten eigene Eingaben: Reasoning-Katalog, belegendes Gemma-Template, existierende temporäre Sync-Registry und versionierte Ownership-Fixture. Ursprüngliche Assertions und Produktionsregeln bleiben erhalten; die Tests werden nicht übersprungen.
 - **VERIFY:** 20 fokussierte Tests bestanden. Vollständiger Git-Quellcode-Snapshot ohne private Registry: 1497 bestanden, vier bestehende Skips. Lokale Registry bleibt unverändert. Siehe Runtime-/KV-Nachreview und Compaction 29.09.2026 / 15:10.
+
+## GGUF-Cache-Test auf Windows deterministisch (29.09.2026)
+
+- **TEST:** Cache-Refresh-Fixture setzt und prüft nach einem gleich großen Header-Neuschreiben einen geänderten `mtime_ns`. Die ursprüngliche MoE-/Dense-Assertion und der Produktionscache bleiben unverändert; keine Sleeps oder Cache-Resets.
+- **VERIFY:** 34 Header-/Runtime-Tests bestanden; unabhängiger Nachreview und einzelner Regressionstest bestanden. Hintergrund: ausschließlich dieser Test scheiterte im Windows-Run `36573641878`; Linux-CI und CodeQL für `ad36df87` waren grün. Siehe Compaction 29.09.2026 / 15:21.
