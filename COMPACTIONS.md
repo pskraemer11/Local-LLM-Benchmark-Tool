@@ -2098,3 +2098,44 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
    aufgabenspezifische Dateien committen/pushen.
 2. Tatsächliche GitHub-Actions für den neuen Commit prüfen und Status berichten.
 3. Offene lokale Modellverträge erst mit zusätzlicher konkreter Evidenz klären.
+
+=============== Compaction 29.09.2026 / 15:02 ================
+## Objective
+- Completed: autorisierten Implementierungscommit und Push mit aktiven Hooks
+  abschließen. Die konkreten Änderungen stehen im CHANGELOG-Eintrag
+  „Registry-Fixes mit Hooks nach GitHub veröffentlicht“.
+
+## Important Details
+- **Veröffentlichung:** `85741533f4a4ceaadcd5e4d3429c4dc0fa3c5e4b` enthält die
+  R01–R13-Fixes, Typecheck-Korrekturen und aktuellen Runtime-Verträge; 64
+  aufgabenspezifische Dateien. Push nach `origin/main` veröffentlichte auch
+  den bisher lokalen Vorläufer `5fe026bf`. Fremde Änderungen blieben außerhalb.
+- **Git-Anmeldung:** ein injizierter ungültiger Token blockierte zuerst die
+  Remote-Anmeldung. Für den Wiederholungsprozess wurden nur die injizierten
+  Variablen ausgeblendet und die vorhandene GitHub-CLI-Anmeldung verwendet.
+  Gespeicherte Credentials und TLS-Einstellungen wurden nicht geändert.
+- **Datenabschluss:** acht gelöschte Modelle reversibel archiviert, Registry
+  aktuell 61 Einträge. Zwei während des Abschlusses neu gespeicherte JSONs
+  exakt über IdentityLink gebunden, gesichert und assembliert; 54 aktuelle
+  Systemprompts verifiziert. Benutzer bestätigt 18 Experten für Qwen3-30B-A3B
+  und 32 für GPT-OSS. Zwei fehlende Harmony-Templates ergänzt; Preset mit 57
+  erzeugten Modellabschnitten und erhaltenen manuellen/globalen Einstellungen.
+- **Gates:** tatsächliche Pre-Commit-/Commit-Message-/Pre-Push-Hooks bestanden;
+  174 fokussierte beziehungsweise 1501 vollständige Tests, Ruff und sämtliche
+  Typechecks grün. 56 GGUF-Einträge ohne Drift. Es wurde kein Hook übersprungen.
+
+## Work State
+- Completed: Fix-Commit und tatsächlicher Remote-Push. Eigenes Code-/Test-/
+  Review-Scope ist committed; nur fremde Arbeitsbaumänderungen bleiben lokal.
+- Active: diesen Ereignischeckpoint committen und pushen, anschließend die
+  GitHub-Actions für den endgültigen Commit abgleichen.
+- Open: Bonsai/Qwen3.8-DSpark ohne konkrete Zielpaarung und Gemma-31B ohne
+  freigegebene Helper-Datei bleiben blockiert. Lokale Vollvalidierung: zwei
+  Blocker, 19 Hinweise (fünf Config-Lücken, vierzehn Kontextabweichungen).
+- Keine GPU-Tests, Modellladeaufrufe, Unloads oder Generierungen durchgeführt.
+
+## Next Move
+1. Dokumentationscheckpoint mit Projekt-Hooks veröffentlichen und endgültigen
+   Remote-Hash sowie GitHub-Actions für genau diesen Commit prüfen.
+2. Ergebnisse im Chat berichten; spätere lokale Helper-Freigaben benötigen
+   zusätzliche konkrete Evidenz und eine gesonderte Laufgenehmigung.

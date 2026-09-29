@@ -13,7 +13,7 @@ Status: 2026-09-29. Prioritaet: Registry-Verträge, reproduzierbare Backend-Abna
 - [x] Neue Codeverträge unabhängig nachprüfen: LMS-Load-Policy und typstrenge Aliaswerte korrigiert.
 - [x] Abschließendes vollständiges Review-Gate: 1.501 Tests, Ruff, Vollbaum-mypy und GGUF-Abgleich ohne Fehler; Pre-Commit mit 174 fokussierten Tests bestanden.
 - [ ] Neue Bonsai/Qwen3.8-DSpark-Paarung sowie Gemma-31B-Helper mit konkreter Ziel-/Dateievidenz freigeben; fehlende lokale Config-/Expert-Verträge getrennt klären.
-- [ ] Autorisierten Commit und Push nach abschließenden Hooks durchführen; GitHub-Actions für den tatsächlichen Commit prüfen.
+- [x] Autorisierten Implementierungscommit `85741533` nach abschließenden Hooks nach `origin/main` pushen; abschließender GitHub-Actions-Check folgt für den Dokumentationscheckpoint.
 
 Details und Grenzen stehen im `Registry-Update_Runtime-and-KV_2026-09-29.md`.
 
