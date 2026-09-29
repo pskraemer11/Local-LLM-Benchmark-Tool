@@ -334,16 +334,23 @@ class TestFamilies:
 
 class TestFieldOwnership:
     def test_every_field_has_rule(self) -> None:
-        # Alle Registry-Felder aus model_registry.yaml muessen eine Regel haben
-        import yaml
+        # Versioned field coverage always runs; include optional private fields
+        # locally without requiring the ignored Registry on CI.
+        from ruamel.yaml import YAML
 
-        reg = yaml.safe_load(
-            open(os.path.join(os.path.dirname(__file__), "..", "doc-git", "model_registry.yaml"), encoding="utf-8")
-        )
+        fixture = Path(__file__).parent / "fixtures" / "registry_ownership.yaml"
+        private_registry = Path(__file__).parent.parent / "doc-git" / "model_registry.yaml"
+        paths = [fixture]
+        if private_registry.is_file():
+            paths.append(private_registry)
         reg_fields = set()
-        for v in reg.values():
-            if isinstance(v, dict):
-                reg_fields.update(v.keys())
+        for path in paths:
+            with path.open(encoding="utf-8") as stream:
+                reg = YAML(typ="safe").load(stream)
+            assert reg, f"Empty ownership fixture: {path.name}"
+            for entry in reg.values():
+                if isinstance(entry, dict):
+                    reg_fields.update(entry.keys())
         missing = reg_fields - set(FIELD_OWNERSHIP)
         assert not missing, f"Felder ohne Ownership-Regel: {sorted(missing)}"
 

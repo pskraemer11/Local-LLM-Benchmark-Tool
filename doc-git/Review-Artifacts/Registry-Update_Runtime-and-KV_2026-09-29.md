@@ -139,3 +139,23 @@ Tests. Die zusätzliche unabhängige Abschlussprüfung der Ownership-Regeln und
 isolierten GPT-OSS-Fixtures bestand mit 178 Tests ohne neue P1-/P2-Befunde.
 Die statische Registry-Prüfung meldet null Blocker; die zwei oben genannten
 lokalen Companion-Blocker bleiben davon getrennt.
+
+## Remote-CI und private Registry
+
+Der erste Linux-CI-Lauf für Implementierungscommit `85741533` bestand Lint
+und Typecheck, meldete aber sieben Testfehler: vier Reasoning-Tests und ein
+Gemma-Template-Test lasen implizit die private Registry; der Ownership-Test
+öffnete sie zwingend; der Sync-Reihenfolgetest setzte ihre Existenz voraus.
+Die inzwischen ignorierte maschinenbezogene Registry ist auf GitHub abwesend.
+
+Diese Tests verwenden jetzt eigene Registry-/Template-Fixtures und prüfen
+weiterhin die echten Resolver und ursprünglichen Assertions. Eine versionierte
+Ownership-Fixture prüft alle aktuellen Top-Level-Felder; lokal werden vorhandene
+private Zusatzfelder weiterhin geprüft. Produktionsregeln und Testausschlüsse
+wurden nicht verändert. Die sieben betroffenen Tests wurden nicht übersprungen.
+20 fokussierte Tests bestanden. Ein separater Git-Quellcode-Snapshot ohne
+private Registry bestand mit 1497 Tests und vier bestehenden Skips. Der
+anschließende Push wiederholt alle Hooks und wird auf GitHub erneut geprüft.
+Unabhängiger Nachreview `/root/aux_types`: PASS, keine neuen P1-/P2-Befunde;
+die 20 fokussierten Tests wurden sowohl im Arbeitsbaum als auch im Snapshot
+ohne private Registry unabhängig bestanden.

@@ -329,7 +329,19 @@ class TestSupportsChatTemplateKwargs:
     def test_deepseek_r1_distill_qwen(self):
         assert _supports_chat_template_kwargs("lmstudio-community/deepseek-r1-distill-qwen-14b") is False
 
-    def test_gemma4(self):
+    def test_gemma4(self, tmp_path, monkeypatch):
+        # Gemma support must be proved by template content, not by its name.
+        key = "fixture/gemma-4-19b-a4b-it-reap-i1@q4_k_m"
+        (tmp_path / "gemma.jinja").write_text(
+            "{% if enable_thinking %}<|think|>{% endif %}", encoding="utf-8",
+        )
+        monkeypatch.setattr("benchmark_config._load_quant_registry", lambda: {
+            key: {"reasoning": "thinking"},
+        })
+        monkeypatch.setattr("benchmark_config._blueprint_features", lambda _key: {
+            "template": "gemma.jinja",
+        })
+        monkeypatch.setattr("benchmark_config._TEMPLATE_ROOT", tmp_path)
         assert _supports_chat_template_kwargs("gemma-4-19b-a4b-it-reap-i1@q4_k_m") is True
 
     def test_gemma4_12b(self):

@@ -1,0 +1,36 @@
+# Test-only field-ownership coverage; this is not a runnable model profile.
+fixture/owned-policy@q4_k_m:
+  publisher: fixture
+  arch: moe
+  architecture_family: qwen3moe
+  n_layers: 32
+  hidden_dim: 4096
+  file_size_bytes: 1024
+  max_context_length: 32768
+  context_length: 16384
+  max_experts: 128
+  experts: 18
+  reasoning: thinking
+  reasoning_format: auto
+  reasoning_budget: 512
+  reasoning_effort: low
+  capabilities: [text]
+  blueprint: fixture
+  blueprint_policy: registry
+  template: fixture.jinja
+  template_policy: explicit_file
+  custom_template: fixture
+  speculative_policy: disabled
+  truncation: full
+  quants: [Q4_K_M]
+  k_cache: q8_0
+  v_cache: q8_0
+  useUnifiedKvCache: true
+  offload: 1
+  hf_url: https://example.invalid/fixture/owned-policy
+  pub_url: https://example.invalid/fixture
+  sampling:
+    coding: {temperature: 0.2, top_p: 0.9}
+  local: {model_path: fixture.gguf}
+  llama_cpp: {}
+  notes: Synthetic field coverage without private files or runtime calls.

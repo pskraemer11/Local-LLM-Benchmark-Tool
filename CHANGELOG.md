@@ -793,3 +793,8 @@ Die Hooks erzeugen CHANGELOG-Eintraege nicht automatisch; dieser Eintrag dokumen
 - **GIT:** Implementierungscommit `85741533` (`fix: enforce registry identity and runtime contracts`) mit 64 aufgabenspezifischen Dateien nach `origin/main` gepusht; der zuvor lokale Commit `5fe026bf` wurde mit veröffentlicht. Fremde Arbeitsbaumänderungen bleiben erhalten.
 - **GATES:** Tatsächliche Pre-Commit-/Commit-Message-/Pre-Push-Hooks bestanden: 174 fokussierte und 1501 vollständige Tests, Ruff, Vollbaum-/fokussierter mypy, statische Registry und 56 GGUF-Einträge ohne Drift. Keine Hooks umgangen.
 - **CHECKPOINT:** Commit-/Push-Ereignis in [COMPACTIONS.md](COMPACTIONS.md), 29.09.2026 / 15:02, festgehalten. Lokale Registry, LM-Studio-Configs und Preset bleiben maschinenbezogen; zwei Companion-Blocker werden weiterhin gesperrt. GitHub-Actions werden anschließend für den endgültigen Commit geprüft.
+
+## Registry-Tests ohne private Dateien reproduzierbar (29.09.2026)
+
+- **TEST:** Die sieben im ersten Linux-CI-Lauf gescheiterten Tests erhalten eigene Eingaben: Reasoning-Katalog, belegendes Gemma-Template, existierende temporäre Sync-Registry und versionierte Ownership-Fixture. Ursprüngliche Assertions und Produktionsregeln bleiben erhalten; die Tests werden nicht übersprungen.
+- **VERIFY:** 20 fokussierte Tests bestanden. Vollständiger Git-Quellcode-Snapshot ohne private Registry: 1497 bestanden, vier bestehende Skips. Lokale Registry bleibt unverändert. Siehe Runtime-/KV-Nachreview und Compaction 29.09.2026 / 15:10.

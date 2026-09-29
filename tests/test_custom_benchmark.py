@@ -851,6 +851,15 @@ def test_custom_manifest_confirmation_requires_one_result_per_selected_task():
 
 
 class TestModelSupportsReasoning:
+    @pytest.fixture(autouse=True)
+    def _reasoning_registry(self, monkeypatch) -> None:
+        # Exercise the real resolver without relying on a private local catalog.
+        monkeypatch.setattr("model_registry.load_registry", lambda: {
+            "techhermit/gemma-4-26b-a4b-it-reap126@iq4_nl": {"reasoning": "thinking"},
+            "lmstudio-community/qwen2.5-coder-14b-instruct@q4_k_m": {"reasoning": "instruct"},
+            "unsloth/phi-4@q5_k_m": {"reasoning": "thinking"},
+        })
+
     def test_quantless_lms_key_resolves_reap_registry_entry(self):
         # REAP-Fall: LMS modelKey ohne Quant muss auf den vorhandenen
         # techhermit-Registryeintrag mit Quant-Suffix auflösen.

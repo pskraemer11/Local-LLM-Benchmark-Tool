@@ -2139,3 +2139,36 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
    Remote-Hash sowie GitHub-Actions für genau diesen Commit prüfen.
 2. Ergebnisse im Chat berichten; spätere lokale Helper-Freigaben benötigen
    zusätzliche konkrete Evidenz und eine gesonderte Laufgenehmigung.
+
+=============== Compaction 29.09.2026 / 15:10 ================
+## Objective
+- GitHub-CI nach dem erfolgreichen Hook-/Push-Nachweis ebenfalls abschließen;
+  der Remote-Lauf offenbart noch private Testdaten-Abhängigkeiten.
+
+## Important Details
+- **Ursache:** Linux-Run `36572041762` für `85741533` besteht Lint/Typecheck,
+  aber sieben Tests setzen die inzwischen ignorierte lokale Registry voraus.
+  CodeQL und Dependency Graph sind erfolgreich. Dokumentationscheckpoint
+  `7ce93b91` wurde ebenfalls mit grünen Hooks veröffentlicht.
+- **Korrektur:** ausschließlich Testeingaben ändern: vier Reasoning-Fälle
+  erhalten eine class-lokale Registry-Fixture; Gemma erhält belegendes Template;
+  Sync-Reihenfolge erhält eigene existierende Registry; Ownership verwendet
+  versionierte Feldabdeckung und prüft private Zusatzfelder weiterhin optional.
+  Echte Resolver und Assertions bleiben erhalten, keine Produktionsheuristik,
+  kein Ausschluss der fehlgeschlagenen Tests.
+- **Verifikation ohne Datenverlust:** Git-Archiv in einem ignorierten lokalen
+  Quellcode-Snapshot erstellt und nur fünf Fixture-/Testdateien aktualisiert.
+  Dort fehlt `doc-git/model_registry.yaml` vollständig. Die produktive Registry
+  wurde dafür weder gelöscht noch verschoben.
+
+## Work State
+- Completed: 20 fokussierte Tests; isolierte Vollsuite ohne private Registry
+  mit 1497 bestandenen Tests und vier bestehenden Skips. Konkrete Änderungen
+  stehen im CHANGELOG-Eintrag „Registry-Tests ohne private Dateien reproduzierbar“.
+- Active: unabhängiger Read-only-Nachreview, anschließend korrigierte Tests
+  mit aktiven Hooks committen und pushen, tatsächliche GitHub-Runs prüfen.
+- Open: unveränderte zwei lokale Companion-Blocker; keine GPU-/Load-Aufrufe.
+
+## Next Move
+1. CI-Isolation veröffentlichen und Linux-/Windows-CI für diesen konkreten
+   Commit abwarten; Fremdänderungen im Arbeitsbaum weiter erhalten.

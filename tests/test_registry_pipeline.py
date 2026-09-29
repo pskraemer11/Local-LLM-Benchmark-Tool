@@ -5,13 +5,20 @@ from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 import registry_tool as rt
 
 
-def test_cmd_sync_repairs_missing_quant_before_arch_sync() -> None:
+def test_cmd_sync_repairs_missing_quant_before_arch_sync(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     calls: list[str] = []
+    registry_path = tmp_path / "registry.yaml"
+    registry_path.write_text("{}\n", encoding="utf-8")
+    monkeypatch.setattr(rt, "REGISTRY_PATH", registry_path)
 
     def record(name: str) -> Callable[..., None]:
         def callback(*_args: object, **_kwargs: object) -> None:
