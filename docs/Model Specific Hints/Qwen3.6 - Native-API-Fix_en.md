@@ -38,7 +38,7 @@ For the non-thinking Native API path, the implementation must preserve:
 
 The current Registry/blueprint classification and the Native-API fixes therefore address different layers: the Registry chooses the model policy and blueprint, while `custom_benchmark.py` adapts the request to the selected LM Studio API route.
 
-Sources: [Qwen3.6 model card](https://huggingface.co/Qwen/Qwen3.6-27B), [Qwen3.6 README](https://huggingface.co/Qwen/Qwen3.6-27B/raw/main/README.md), and the project sources `data/model_registry.yaml`, `docs/blueprint_definitions.yaml`, `src/assemble_blueprint.py` and `src/custom_benchmark.py`.
+Sources: [Qwen3.6 model card](https://huggingface.co/Qwen/Qwen3.6-27B), [Qwen3.6 README](https://huggingface.co/Qwen/Qwen3.6-27B/raw/main/README.md), and the project sources `data/model_registry.yaml`, `data/blueprint_definitions.yaml`, `src/assemble_blueprint.py` and `src/custom_benchmark.py`.
 
 ## Problem
 Qwen3.6 27B and Qwen3.6 28B REAP performed worse in v13 than before.

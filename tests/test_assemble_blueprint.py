@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -22,8 +23,8 @@ from assemble_blueprint import (
     configs_for_registry_key,
     extract_params,
     find_config_for_registry_key,
-    find_registry_matches_for_config,
     find_registry_key_for_config,
+    find_registry_matches_for_config,
     format_capabilities,
     format_publishers,
     normalize_model_name,
@@ -39,6 +40,50 @@ def test_help_documents_commands_and_registry_pipeline_write_boundary() -> None:
     assert "assemble_blueprint.py preview" in help_text
     assert "pipeline full runs prompt assembly as a preview only" in help_text
     assert "assemble_blueprint.py assemble directly" in help_text
+
+
+def test_blueprint_section_tags_render_as_markdown_without_changing_native_tokens() -> None:
+    modules = {
+        "sample": {
+            "full": """<reasoning>Check assumptions.</reasoning>
+<coding><code_quality>Make focused changes.</code_quality>
+<file_system>Verify paths.</file_system><testing>Run focused tests.</testing>
+<troubleshooting>Isolate failures.</troubleshooting></coding>
+<safety>Protect user data.</safety><output>Use concise Markdown.</output>
+<capabilities>Text and code.</capabilities><|think|>"""
+        }
+    }
+
+    rendered = ab._render_system_prompt("Granite coding assistant", ["sample"], modules, "full")
+
+    for tag in (
+        "role", "reasoning", "coding", "code_quality", "file_system", "testing",
+        "troubleshooting", "safety", "output", "capabilities",
+    ):
+        assert f"<{tag}>" not in rendered
+        assert f"</{tag}>" not in rendered
+    assert "## Code Quality" in rendered
+    assert "## File System" in rendered
+    assert "## Testing" in rendered
+    assert "## Troubleshooting" in rendered
+    assert "<|think|>" in rendered
+
+
+def test_all_active_blueprints_render_without_xml_section_wrappers() -> None:
+    definitions = ab.load_blueprint_defs()
+    modules = definitions["modules"]
+    wrappers = re.compile(r"</?[A-Za-z_][A-Za-z0-9_-]*>")
+
+    for blueprint_name, blueprint in definitions["blueprints"].items():
+        if blueprint_name == "none":
+            continue
+        rendered = ab._render_system_prompt(
+            blueprint.get("role", ""),
+            blueprint.get("modules", []),
+            modules,
+            "full",
+        )
+        assert wrappers.search(rendered) is None, blueprint_name
 
 # ─────────────────────────────────────────────────────────────────────
 # normalize_model_name
@@ -944,6 +989,24 @@ class TestBlueprintFeatures:
         f = ab.blueprint_features("gemma_reasoning", "gemma4-26b-a4b")
         assert f["template"] == "google_gemma-4-26B-A4B-it_chat_template.jinja"
         assert f["reasoning_parsing"]["enabled"] is False
+
+    def test_gemma_31b_uses_the_shared_official_family_template(self):
+        for blueprint in ("gemma_assistant", "gemma_reasoning"):
+            features = ab.blueprint_features(blueprint, "mradermacher/gemma-4-31b-it")
+            assert features["template"] == "google_gemma-4-26B-A4B-it_chat_template.jinja"
+
+    def test_generated_blueprint_defaults_map_gemma_31b(self, tmp_path, monkeypatch):
+        blueprint_path = tmp_path / "blueprints.yaml"
+        monkeypatch.setattr(ab, "BLUEPRINT_PATH", blueprint_path)
+
+        ab.create_blueprint_definitions()
+
+        definitions = ab.YAML().load(blueprint_path.read_text(encoding="utf-8"))
+        for blueprint in ("gemma_assistant", "gemma_reasoning"):
+            assert (
+                definitions["blueprints"][blueprint]["template_map"]["31b"]
+                == "google_gemma-4-26B-A4B-it_chat_template.jinja"
+            )
 
     def test_generic_coding_blueprint_has_no_granite_template(self):
         assert ab.blueprint_features("coding_agent", "qwen3-coder-30b") == {}

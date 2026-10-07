@@ -36,7 +36,7 @@ LM Studio inventory ─────┐
                          ├─ registry_tool.py ──> model_registry.yaml
 GGUF headers/files ──────┘          │
                                     ├─> blueprint classification
-blueprint_definitions.yaml ─────────┘
+data/blueprint_definitions.yaml ────┘
                                     │
                                     └─> prompt preview and validation
 
@@ -51,18 +51,18 @@ model_registry.yaml + provider ──> run_benchmarks.py
 
 ### 2.1 Authoritative and derived data
 
-| Data                                  | Authority                                      | Used by                                   | Write policy                                      |
-| ------------------------------------- | ---------------------------------------------- | ----------------------------------------- | ------------------------------------------------- |
-| data/model_registry.yaml           | Benchmark policy and provider-neutral metadata | Registry tool, launcher, model resolution | Updated by registry maintenance                   |
-| GGUF header and filename              | Model architecture and native limits           | Registry tool, resolver                   | Read-only source                                  |
-| docs/blueprint_definitions.yaml    | Prompt blueprint definitions                   | Assembly and validation                   | Maintained as project policy                      |
-| docs/Jinja-Chat-Templates/         | Explicit template files                        | Prompt assembly                           | Maintained as project assets                      |
+| Data                                  | Authority                                      | Used by                                                                  | Write policy                                                                                                 |
+| ------------------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| data/model_registry.yaml              | Benchmark policy and provider-neutral metadata | Registry tool, launcher, model resolution                                | Updated by registry maintenance                                                                              |
+| GGUF header and filename              | Model architecture and native limits           | Registry tool, resolver                                                  | Read-only source                                                                                             |
+| data/blueprint_definitions.yaml       | Prompt blueprint definitions                   | Assembly and validation                                                  | Maintained as project policy                                                                                 |
+| docs/Jinja-Chat-Templates/            | Explicit template files                        | Prompt assembly                                                          | Maintained as project assets                                                                                 |
 | LM Studio config JSONs                | LM Studio runtime state                        | Drift checks, explicit Registry import, and IdentityLink prompt assembly | Read as evidence; `full` previews, `full --write-prompts` writes only uniquely joined prompt/template fields |
-| llama.cpp `config.ini`                | Hardware-wide llama.cpp defaults               | Direct CLI/server processes               | User/system runtime configuration                 |
-| llama.cpp `preset.ini`                | Derived model router catalog                   | Direct server provider                    | Generated from Registry; preserve custom sections |
-| simple_evals/                         | Local custom benchmark tasks                   | Custom pipeline                           | Benchmark input; do not rewrite during runs       |
-| EvalPlus/lm-eval/tool-eval-bench data | External benchmark tasks                       | Their respective pipelines                | Managed by the dependency/tool                    |
-| ergebnisse/                           | Run outputs                                    | Human review and consolidation            | Runtime output, normally ignored                  |
+| llama.cpp `config.ini`                | Hardware-wide llama.cpp defaults               | Direct CLI/server processes                                              | User/system runtime configuration                                                                            |
+| llama.cpp `preset.ini`                | Derived model router catalog                   | Direct server provider                                                   | Generated from Registry; preserve custom sections                                                            |
+| simple_evals/                         | Local custom benchmark tasks                   | Custom pipeline                                                          | Benchmark input; do not rewrite during runs                                                                  |
+| EvalPlus/lm-eval/tool-eval-bench data | External benchmark tasks                       | Their respective pipelines                                               | Managed by the dependency/tool                                                                               |
+| ergebnisse/                           | Run outputs                                    | Human review and consolidation                                           | Runtime output, normally ignored                                                                             |
 
 ### 2.1.1 GGUF model root resolution
 
@@ -189,19 +189,19 @@ The Registry is not a copy of every local file. It stores reviewed benchmark
 policy and the selected runtime values consumed by providers. Synchronization
 reads several sources, but each field has one defined authority:
 
-| Field or data                  | Authoritative source                           | Synchronization rule                                                                |
-| ------------------------------ | ---------------------------------------------- | ----------------------------------------------------------------------------------- |
-| Model identity and eligibility | Registry key plus exact local identity         | Match publisher/model/quant; report ambiguity instead of guessing.                  |
-| Main GGUF path and byte size   | Resolved main GGUF file on disk                | Use the main file stat; exclude `mmproj` and LMS aggregate size.                    |
-| Technical facts and limits     | GGUF header and filename                       | Read-only: architecture, quant, native context, `max_experts`.                      |
-| Tested runtime settings        | Active LMS config after a real test            | Propose context, offload, K/V cache, unified KV, experts; import explicitly.        |
-| MoE expert counts              | GGUF maximum plus tested LMS value             | Keep fixed `max_experts`; store selected runtime value as `experts`.                |
-| Sampling values                | Official model card or documentation           | Import sourced categories only; leave missing or conflicting values unresolved.     |
-| Benchmark and prompt policy    | Registry plus blueprint/template files         | Registry holds policy; blueprint and Jinja files hold prompt content.               |
-| LMS prompt fields              | Project blueprint and templates                | Fill only missing `promptTemplate`; never import GUI prompt text.                   |
-| Parallel benchmark slots       | Runner rule plus provider capability           | Use Sample Size rule and provider cap; ignore GUI parallel-session settings.        |
-| Effective server parallel/UKV | Final explicit llama.cpp CLI                   | Log `--parallel` and `--kv-unified`/`--no-kv-unified`; CLI owns the effective value. |
-| llama.cpp model sections       | Registry, resolved GGUF, and test evidence     | Export model sections; preserve user-owned `config.ini` and preset `[*]`.           |
+| Field or data                  | Authoritative source                       | Synchronization rule                                                                 |
+| ------------------------------ | ------------------------------------------ | ------------------------------------------------------------------------------------ |
+| Model identity and eligibility | Registry key plus exact local identity     | Match publisher/model/quant; report ambiguity instead of guessing.                   |
+| Main GGUF path and byte size   | Resolved main GGUF file on disk            | Use the main file stat; exclude `mmproj` and LMS aggregate size.                     |
+| Technical facts and limits     | GGUF header and filename                   | Read-only: architecture, quant, native context, `max_experts`.                       |
+| Tested runtime settings        | Active LMS config after a real test        | Propose context, offload, K/V cache, unified KV, experts; import explicitly.         |
+| MoE expert counts              | GGUF maximum plus tested LMS value         | Keep fixed `max_experts`; store selected runtime value as `experts`.                 |
+| Sampling values                | Official model card or documentation       | Import sourced categories only; leave missing or conflicting values unresolved.      |
+| Benchmark and prompt policy    | Registry plus blueprint/template files     | Registry holds policy; blueprint and Jinja files hold prompt content.                |
+| LMS prompt fields              | Project blueprint and templates            | Fill only missing `promptTemplate`; never import GUI prompt text.                    |
+| Parallel benchmark slots       | Runner rule plus provider capability       | Use Sample Size rule and provider cap; ignore GUI parallel-session settings.         |
+| Effective server parallel/UKV  | Final explicit llama.cpp CLI               | Log `--parallel` and `--kv-unified`/`--no-kv-unified`; CLI owns the effective value. |
+| llama.cpp model sections       | Registry, resolved GGUF, and test evidence | Export model sections; preserve user-owned `config.ini` and preset `[*]`.            |
 
 LM Studio settings are evidence of a user's tested choice, not the ongoing
 source for benchmark execution. After an explicit import, `model_registry.yaml`
@@ -262,14 +262,14 @@ For a local GGUF artifact, the evidence table retains only the additional data
 needed to prove and resolve that identity. The distinction between required
 identity data and transient join data is intentional:
 
-| Evidence | Required for a unique local identity? | Role and persistence |
-| -------- | ------------------------------------ | ------------------- |
-| Registry key: publisher + complete model name + quant | yes | Semantic identity and benchmark selection; persisted as the Registry key |
-| Absolute GGUF path | yes for local execution | Strong physical reference to the exact file passed to `llama-server.exe`; persisted in the machine-local `local.model_path` |
-| Full path components and GGUF filename | yes as physical evidence | Derive/check publisher, namespaced model name, variant markers, and filename quant; retained in the per-run evidence record, not copied into the semantic key |
-| GGUF header facts | yes for technical validation | Immutable architecture and limit evidence such as context and expert bounds; never replaced by an LMS display value |
-| LMS publisher/modelKey/selectedVariant | no for the final llama.cpp binding | Transient join and cross-check evidence only; do not persist as a second identity because LMS publisher metadata is not the physical file owner |
-| Unique LMS JSON config path | only when LMS runtime values are imported | Identifies the source of tested sampling, context, UKV, cache, offload, parallel-session, expert, and speculative settings; persisted as `local.config_path` only after a unique join |
+| Evidence                                              | Required for a unique local identity?     | Role and persistence                                                                                                                                                                  |
+| ----------------------------------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Registry key: publisher + complete model name + quant | yes                                       | Semantic identity and benchmark selection; persisted as the Registry key                                                                                                              |
+| Absolute GGUF path                                    | yes for local execution                   | Strong physical reference to the exact file passed to `llama-server.exe`; persisted in the machine-local `local.model_path`                                                           |
+| Full path components and GGUF filename                | yes as physical evidence                  | Derive/check publisher, namespaced model name, variant markers, and filename quant; retained in the per-run evidence record, not copied into the semantic key                         |
+| GGUF header facts                                     | yes for technical validation              | Immutable architecture and limit evidence such as context and expert bounds; never replaced by an LMS display value                                                                   |
+| LMS publisher/modelKey/selectedVariant                | no for the final llama.cpp binding        | Transient join and cross-check evidence only; do not persist as a second identity because LMS publisher metadata is not the physical file owner                                       |
+| Unique LMS JSON config path                           | only when LMS runtime values are imported | Identifies the source of tested sampling, context, UKV, cache, offload, parallel-session, expert, and speculative settings; persisted as `local.config_path` only after a unique join |
 
 LM Studio data is join evidence, not a second semantic identity. Its
 `publisher`, `modelKey`, `selectedVariant`, and logical path are used only to
@@ -408,14 +408,14 @@ current llama.cpp option labels only at the provider boundary.
 
 The synchronization report must preserve the reason for a rejected join:
 
-| Outcome | Meaning | Allowed action |
-| ------- | ------- | -------------- |
-| `not_found` | No physical GGUF or no matching config exists | Report; leave the local binding unchanged |
-| `ambiguous` | Several GGUFs/configs match the same request | Report all candidates; never select the first |
-| `identity_collision` | Publisherless or normalized identity maps to multiple Registry keys | Require publisher and quant evidence; do not import |
-| `stale_path` | Persisted or LMS concrete path no longer names the candidate | Fail resolution; do not fall back silently |
-| `config_reused` | One JSON config would be assigned to multiple identities | Keep it diagnostic-only until a unique ownership exists |
-| `companion_missing` | Speculative mode requires an explicit sidecar that cannot be uniquely resolved | Keep the main model usable, but omit broken speculative CLI arguments |
+| Outcome              | Meaning                                                                        | Allowed action                                                        |
+| -------------------- | ------------------------------------------------------------------------------ | --------------------------------------------------------------------- |
+| `not_found`          | No physical GGUF or no matching config exists                                  | Report; leave the local binding unchanged                             |
+| `ambiguous`          | Several GGUFs/configs match the same request                                   | Report all candidates; never select the first                         |
+| `identity_collision` | Publisherless or normalized identity maps to multiple Registry keys            | Require publisher and quant evidence; do not import                   |
+| `stale_path`         | Persisted or LMS concrete path no longer names the candidate                   | Fail resolution; do not fall back silently                            |
+| `config_reused`      | One JSON config would be assigned to multiple identities                       | Keep it diagnostic-only until a unique ownership exists               |
+| `companion_missing`  | Speculative mode requires an explicit sidecar that cannot be uniquely resolved | Keep the main model usable, but omit broken speculative CLI arguments |
 
 Only the unique path continues to runtime materialization. A warning may be
 non-blocking for a report-only command, but it must never become an implicit
@@ -459,14 +459,14 @@ identity/config join is unique.
 
 The UI choices map as follows:
 
-| LM Studio choice / artifact | Registry representation | llama.cpp launch data |
-| -------------------------- | ----------------------- | ---------------------- |
-| Off | no speculative profile or companion | no speculative options |
-| MTP integrated in the main GGUF | main `model_path`; `type: mtp`, `mode: integrated`; no companion | `--spec-type draft-mtp`; no `--spec-draft-model` |
-| MTP in a separate assistant GGUF | `companions.mtp`; `type: mtp`, `mode: separate`, `companion_role: mtp` | `--spec-type draft-mtp` and `--spec-draft-model <path>` |
+| LM Studio choice / artifact            | Registry representation                                                      | llama.cpp launch data                                      |
+| -------------------------------------- | ---------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| Off                                    | no speculative profile or companion                                          | no speculative options                                     |
+| MTP integrated in the main GGUF        | main `model_path`; `type: mtp`, `mode: integrated`; no companion             | `--spec-type draft-mtp`; no `--spec-draft-model`           |
+| MTP in a separate assistant GGUF       | `companions.mtp`; `type: mtp`, `mode: separate`, `companion_role: mtp`       | `--spec-type draft-mtp` and `--spec-draft-model <path>`    |
 | Drafter (ordinary small, runnable LLM) | `companions.draft`; `type: draft`, `method: simple`, `companion_role: draft` | `--spec-type draft-simple` and `--spec-draft-model <path>` |
-| DFlash / DFlash2 speculator | `companions.draft`; `type: draft`, `method: dflash`, `companion_role: draft` | `--spec-type draft-dflash` and `--spec-draft-model <path>` |
-| DSpark speculator | `companions.draft`; `type: draft`, `method: dspark`, `companion_role: draft` | `--spec-type draft-dspark` and `--spec-draft-model <path>` |
+| DFlash / DFlash2 speculator            | `companions.draft`; `type: draft`, `method: dflash`, `companion_role: draft` | `--spec-type draft-dflash` and `--spec-draft-model <path>` |
+| DSpark speculator                      | `companions.draft`; `type: draft`, `method: dspark`, `companion_role: draft` | `--spec-type draft-dspark` and `--spec-draft-model <path>` |
 
 `Drafter` is not synonymous with DFlash or MTP: it is the generic draft-model
 algorithm and its ordinary LLM remains independently runnable/eligible when
@@ -775,17 +775,17 @@ py -3.12 src\registry_tool.py sync --import-lms-settings
 The pipeline modes are the preferred user interface, but lower-level
 commands remain useful for focused repairs:
 
-| Command                 | Purpose                                                                                  | Writes config JSONs? |
-| ----------------------- | ---------------------------------------------------------------------------------------- | -------------------- |
-| compare                 | Report Registry/LMS/config differences                                                   | No                   |
-| validate --ci           | Headless consistency validation                                                          | No                   |
-| fill-quant              | Fill missing quantization from GGUF names                                                | No                   |
-| fill-arch               | Read architecture values from GGUF headers                                               | No                   |
-| fill-reasoning          | Detect reasoning from GGUF templates                                                     | No                   |
+| Command                 | Purpose                                                                                                                                      | Writes config JSONs? |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- |
+| compare                 | Report Registry/LMS/config differences                                                                                                       | No                   |
+| validate --ci           | Headless consistency validation                                                                                                              | No                   |
+| fill-quant              | Fill missing quantization from GGUF names                                                                                                    | No                   |
+| fill-arch               | Read architecture values from GGUF headers                                                                                                   | No                   |
+| fill-reasoning          | Detect reasoning from GGUF templates                                                                                                         | No                   |
 | sync-from-configs       | Report drift; --write-context imports only context; --write-experts imports tested MoE runtime experts; --write imports all supported fields | No by default        |
-| sync-templates          | Copy missing prompt templates into configs; also run by pipeline full                   | Yes                  |
-| sync-template-from-gguf | Explicitly copy an embedded GGUF template into one config                                | Yes                  |
-| patch-reasoning-effort  | Explicit GLM runtime-config patch                                                        | Yes                  |
+| sync-templates          | Copy missing prompt templates into configs; also run by pipeline full                                                                        | Yes                  |
+| sync-template-from-gguf | Explicitly copy an embedded GGUF template into one config                                                                                    | Yes                  |
+| patch-reasoning-effort  | Explicit GLM runtime-config patch                                                                                                            | Yes                  |
 
 The explicit write commands are intentionally separate from normal sync and
 full validation.
@@ -836,13 +836,24 @@ benchmark is intentionally not used.
 
 ## 5. Prompt and blueprint architecture
 
-blueprint_definitions.yaml is the source of truth for system-prompt
+`data/blueprint_definitions.yaml` is the source of truth for system-prompt
 construction. It contains:
 
 - blueprint descriptions and roles;
 - reusable prompt modules;
 - model-family template mappings;
 - reasoning parsing and stop-string policy.
+
+The assembler renders project-defined section wrappers such as `<role>`,
+`<safety>`, `<coding>`, and `<output>` as Markdown headings for every active
+blueprint. These shared modules are used by Granite, generic instruct/coding,
+reasoning, GLM, Gemma, GPT-OSS, and other families. This conservative default
+follows local LM Studio observations of premature end-of-turn behavior with
+tagged system prompts; it does not assert that those architectures cannot
+process XML in general. Model-native control tokens and chat-template markup
+remain intact. Granite-specific XML tool-call formatting is also distinct from
+these project-authored section wrappers (see the
+[IBM Granite prompt-engineering guide](https://www.ibm.com/granite/docs/use-cases/prompt-engineering)).
 
 assemble_blueprint.py performs three logically separate operations:
 
@@ -1049,9 +1060,9 @@ Benchmarks/
 │   └── consolidate_results.py
 ├── tests/
 ├── data/
-│   └── model_registry.yaml
+│   ├── model_registry.yaml
+│   └── blueprint_definitions.yaml
 ├── docs/
-│   ├── blueprint_definitions.yaml
 │   ├── Jinja-Chat-Templates/
 │   └── Architecture, Flow & ChangeLog_en.md
 ├── simple_evals/

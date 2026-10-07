@@ -79,7 +79,7 @@ template requirements, not by every GGUF architecture-family spelling.
 
 Validation on 2026-09-20 found no missing Registry blueprint, no missing
 template file and no invalid blueprint definition. Therefore
-`docs/blueprint_definitions.yaml` does not require a new architecture-class
+`data/blueprint_definitions.yaml` does not require a new architecture-class
 entry for the current sampling research. It should only change when a family
 introduces a distinct prompt template, stop protocol, reasoning parser or
 category-specific thinking control.

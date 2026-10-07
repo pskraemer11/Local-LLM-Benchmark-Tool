@@ -610,7 +610,7 @@ runtime artifacts.
 | Data                   | Location                                                       | Role                                                 |
 | ---------------------- | -------------------------------------------------------------- | ---------------------------------------------------- |
 | Model registry         | data\model_registry.yaml                                    | Benchmark policy and provider-neutral model metadata |
-| Blueprint definitions  | docs\blueprint_definitions.yaml                             | System-prompt assembly rules                         |
+| Blueprint definitions  | data\blueprint_definitions.yaml                             | System-prompt assembly rules                         |
 | Jinja templates        | docs\Jinja-Chat-Templates\                                  | Explicit chat-template overrides                     |
 | GGUF files             | `D:\LLM-Modelle\models` (legacy `~\.lmstudio\models` fallback) | Immutable model/header facts                         |
 | LM Studio config JSONs | LM Studio internal config directory                            | Backend-local runtime artifacts and drift evidence   |
@@ -755,9 +755,9 @@ Benchmarks/
 │   └── consolidate_results.py   Weighted summaries and comparisons
 ├── tests/                       Pytest suite
 ├── data/
-│   └── model_registry.yaml      Runtime SSOT database (machine-local)
+│   ├── model_registry.yaml
+│   └── blueprint_definitions.yaml
 ├── docs/
-│   ├── blueprint_definitions.yaml
 │   ├── Jinja-Chat-Templates/
 │   └── Architecture, Flow & ChangeLog_en.md
 ├── simple_evals/                Local JSONL benchmark data

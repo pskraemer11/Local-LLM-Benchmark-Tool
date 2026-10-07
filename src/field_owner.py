@@ -126,6 +126,10 @@ FIELD_OWNERSHIP: dict[str, FieldRule] = {
     "k_cache": FieldRule("registry", "registry", False),
     "v_cache": FieldRule("registry", "registry", False),
     "quants": FieldRule("registry", "registry", False),
+    "quantization_status": FieldRule(
+        "registry", "registry", False,
+        description="Layer-wise mixed quantization; @? is valid only with status mix",
+    ),
     "hf_url": FieldRule("registry", "registry", False),
     "pub_url": FieldRule("registry", "registry", False),
     "notes": FieldRule("registry", "registry", False),

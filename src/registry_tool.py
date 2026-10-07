@@ -44,7 +44,7 @@ compatibility spelling of `full`; both use the same workflow and options.
 
   Registry policy       data\model_registry.yaml
   Technical limits      Main GGUF file and header
-  Prompt policy         docs\blueprint_definitions.yaml and templates
+  Prompt policy         data\blueprint_definitions.yaml and templates
   LM Studio settings    Tested runtime evidence; import is opt-in
   llama.cpp preset      Generated runtime output; never the Registry source
 
@@ -133,6 +133,7 @@ y.indent(mapping=2, sequence=4, offset=2)
 # ── assemble_blueprint helpers ─────────────────────────────────────
 from artifact_bundle import validate_companion_binding, validate_config_gguf_pair
 from assemble_blueprint import (
+    BLUEPRINT_PATH,
     _registry_quant,
     assemble_prompts,
     blueprint_features,
@@ -843,6 +844,8 @@ def _registry_local_config_matches(
         except OSError:
             return True, model_path, ()
         registry_quant = _registry_quant(registry_key)
+        _, _, raw_registry_quant = decompose_model_identity(registry_key)
+        declared_mixed_quant = raw_registry_quant == "?" and entry.get("quantization_status") == "mix"
         from gguf_evidence import resolve_artifact_quant
         from local_model_resolver import LocalModelResolver
 
@@ -850,7 +853,13 @@ def _registry_local_config_matches(
         resolver.model_roots = _gguf_roots()
         physical_reference = resolver._model_base_id(model_path)
         artifact_quant = resolve_artifact_quant(model_path, publisher=decompose_model_identity(physical_reference)[0])
-        if not registry_quant or not artifact_quant:
+        mixed_quant = declared_mixed_quant and not artifact_quant
+        if mixed_quant:
+            registry_quant = raw_registry_quant
+        if not registry_quant or (not artifact_quant and not mixed_quant):
+            return True, model_path, ()
+        identity_quant = artifact_quant or ("?" if mixed_quant else "")
+        if not identity_quant:
             return True, model_path, ()
         pair_errors = validate_config_gguf_pair(
             model_path,
@@ -878,15 +887,25 @@ def _registry_local_config_matches(
                 from local_model_resolver import LocalModelResolver
 
                 reference = f"{config_publisher}/{config.get('dir_name') or ''}"
-                if LocalModelResolver._match_registry(reference, artifact_quant, {registry_key: entry}) != registry_key:
+                if LocalModelResolver._match_registry(reference, identity_quant, {registry_key: entry}) != registry_key:
                     continue
             config_quant = config.get("quant") or extract_quant_from_text(
                 f"{config.get('dir_name', '')} {config.get('file_name', '')}"
             )
             config_quant = str(config_quant) if config_quant else None
-            if registry_quant and artifact_quant and normalize_quant(registry_quant) != normalize_quant(artifact_quant):
+            if mixed_quant and config_quant:
                 continue
-            if registry_quant and config_quant and normalize_quant(registry_quant) != normalize_quant(config_quant):
+            if (
+                registry_quant != "?"
+                and artifact_quant
+                and normalize_quant(registry_quant) != normalize_quant(artifact_quant)
+            ):
+                continue
+            if (
+                registry_quant != "?"
+                and config_quant
+                and normalize_quant(registry_quant) != normalize_quant(config_quant)
+            ):
                 continue
             if artifact_quant and config_quant and normalize_quant(artifact_quant) != normalize_quant(config_quant):
                 continue
@@ -4110,8 +4129,7 @@ def _load_blueprints() -> dict[str, Any]:
     if _BLUEPRINT_CACHE is None:
         from ruamel.yaml import YAML
         y = YAML()
-        bp_path = PROJECT_ROOT / "docs" / "blueprint_definitions.yaml"
-        with open(bp_path, encoding="utf-8") as f:
+        with open(BLUEPRINT_PATH, encoding="utf-8") as f:
             data = y.load(f)
         _BLUEPRINT_CACHE = (data or {}).get("blueprints", {})
     return _BLUEPRINT_CACHE
@@ -4134,8 +4152,10 @@ def cmd_sync_templates(
     configs: list[dict[str, Any]] | None = None,
     installed_models: list[dict[str, Any]] | None = None,
     identity_links: dict[str, IdentityLink] | None = None,
+    model_keys: set[str] | None = None,
+    dry_run: bool = False,
 ) -> None:
-    """Write promptTemplate from blueprint-defined templates into configs missing it.
+    """Write blueprint templates only into configs missing promptTemplate.
 
     Blueprint-driven (SSOT): jedes Registry-Entry, dessen Blueprint eine
     ``template``/``template_map``-Definition besitzt, wird gegen seine Config
@@ -4143,9 +4163,16 @@ def cmd_sync_templates(
     der Inhalt der .jinja-Datei geschrieben. Behebt die validate-Kategorie
     ``template_missing_config``. Das Registry-``template:``-Feld gilt als
     veraltet (Fallback). ``pipeline full`` ruft diesen idempotenten Schritt
-    ebenfalls auf; befuellte Templates werden nicht ueberschrieben.
+    ebenfalls auf; befuellte Templates werden nicht ueberschrieben. ``model_keys``
+    begrenzt den Vorgang auf explizit ausgewaehlte Registry-Identitaeten; ``dry_run``
+    zeigt geplante Ergaenzungen ohne Config-Dateien zu schreiben.
     """
     reg = load_registry()
+    if model_keys is not None:
+        unknown_keys = model_keys.difference(reg)
+        if unknown_keys:
+            print("[ERROR] sync-templates: unbekannte Registry-Identitaet im Filter")
+            raise SystemExit(2)
     cfgs = configs if configs is not None else read_lms_configs(CONFIG_ROOT)
     if installed_models is not None:
         linked_config_paths = {
@@ -4165,6 +4192,8 @@ def cmd_sync_templates(
     )
     added = skipped = errors = 0
     for model_key, entry in reg.items():
+        if model_keys is not None and model_key not in model_keys:
+            continue
         if not isinstance(entry, dict):
             continue
         tpl_name = _registry_template_name(model_key)
@@ -4204,27 +4233,34 @@ def cmd_sync_templates(
                 if field.get("key") == "llm.prediction.promptTemplate":
                     found = True
                     if not field.get("value"):
-                        field["value"] = template_content
-                        _atomic_write_text(
-                            json_path, json.dumps(data, indent=2, ensure_ascii=False) + "\n"
-                        )
-                        print(f"  [FIX] {model_key}: promptTemplate ergänzt")
+                        if dry_run:
+                            print(f"  [WOULD FIX] {model_key}: promptTemplate ergänzt")
+                        else:
+                            field["value"] = template_content
+                            _atomic_write_text(
+                                json_path, json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+                            )
+                            print(f"  [FIX] {model_key}: promptTemplate ergänzt")
                         added += 1
                     else:
                         skipped += 1
                     break
             if not found:
-                fields.append({"key": "llm.prediction.promptTemplate", "value": template_content})
-                _atomic_write_text(
-                    json_path, json.dumps(data, indent=2, ensure_ascii=False) + "\n"
-                )
-                print(f"  [FIX] {model_key}: promptTemplate ergänzt")
+                if dry_run:
+                    print(f"  [WOULD FIX] {model_key}: promptTemplate ergänzt")
+                else:
+                    fields.append({"key": "llm.prediction.promptTemplate", "value": template_content})
+                    _atomic_write_text(
+                        json_path, json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+                    )
+                    print(f"  [FIX] {model_key}: promptTemplate ergänzt")
                 added += 1
         except Exception as e:
             print(f"  [ERROR] {model_key}: {e}")
             errors += 1
     clear_lms_config_cache(CONFIG_ROOT)
-    print(f"\n[OK] sync-templates: {added} Configs aktualisiert, {skipped} übersprungen, {errors} Fehler")
+    status = "DRY-RUN" if dry_run else "OK"
+    print(f"\n[{status}] sync-templates: {added} Configs ergänzt, {skipped} übersprungen, {errors} Fehler")
 
 
 def _find_lms_gguf_for_registry_key(model_key: str) -> Path | None:
@@ -4523,6 +4559,7 @@ def cmd_validate(
         "missing_blueprint": [],
         "sampling_invalid": [],
         "sampling_research_status_invalid": [],
+        "quantization_status_invalid": [],
         "identity_collision": [],
         "publisherless_identity_ambiguity": [],
         "registry_no_config": [],
@@ -4640,7 +4677,7 @@ def cmd_validate(
     # Jeder Registry-Key MUSS die Form publisher/modelname@quant haben.
     # Base-Entries ohne @quant sind nicht eindeutig und gehören entfernt.
     from model_identity import decompose_model_identity
-    for model_key in reg:
+    for model_key, entry in reg.items():
         pub, _model, quant = decompose_model_identity(model_key)
         if not pub:
             errors.setdefault("missing_publisher", []).append(
@@ -4649,6 +4686,13 @@ def cmd_validate(
         if not quant:
             errors.setdefault("missing_quant", []).append(
                 f"{model_key}: keine @quant (MUSS publisher/model@quant sein)"
+            )
+        quantization_status = entry.get("quantization_status") if isinstance(entry, dict) else None
+        if (quant == "?" and quantization_status != "mix") or (
+            quant != "?" and quantization_status is not None
+        ):
+            errors["quantization_status_invalid"].append(
+                f"{model_key}: quantization_status muss nur bei @? den Wert 'mix' haben"
             )
 
     # ── Check 5: installed LMS model has one concrete config binding ──
@@ -5520,7 +5564,7 @@ _ADVANCED_COMMAND_HELP = r"""Specialist registry_tool.py commands (compatibility
 
   compare, add, suggest, fill-ctx, fix-ctx, fix-np, fill-size, fill-quant,
   fill-arch, sync-from-gguf, fill-reasoning, fmt, migrate-keys, rm,
-  sync-from-configs, sync-templates, sync-template-from-gguf,
+  sync-from-configs, sync-templates [--model KEY ...] [--dry-run], sync-template-from-gguf,
   export-llama-preset, export-llama-args, patch-reasoning-effort,
   patch-glm-configs, pipeline
 
@@ -5881,7 +5925,29 @@ def main() -> None:
         dry_run = "--apply" not in sys.argv[2:]
         sys.exit(cmd_quarantine_missing(dry_run=dry_run))
     elif cmd == "sync-templates":
-        cmd_sync_templates()
+        model_keys: set[str] = set()
+        dry_run = False
+        template_args = sys.argv[2:]
+        index = 0
+        while index < len(template_args):
+            argument = template_args[index]
+            if argument == "--dry-run":
+                dry_run = True
+                index += 1
+            elif argument == "--model" and index + 1 < len(template_args):
+                model_keys.add(template_args[index + 1])
+                index += 2
+            else:
+                print("[ERROR] Nutzung: registry_tool.py sync-templates [--model <Registry-Key> ...] [--dry-run]")
+                sys.exit(2)
+        inventory = _collect_registry_inventory()
+        cmd_sync_templates(
+            configs=inventory.configs,
+            installed_models=inventory.lms_models,
+            identity_links=inventory.identity_links,
+            model_keys=model_keys or None,
+            dry_run=dry_run,
+        )
     elif cmd == "sync-template-from-gguf":
         if len(sys.argv) < 3:
             print("[ERROR] Nutzung: python registry_tool.py sync-template-from-gguf <model-key>")

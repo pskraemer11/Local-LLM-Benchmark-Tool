@@ -13,6 +13,9 @@ ergebnisse/
 logs/
 runs/
 data/
+!data/
+data/*
+!data/blueprint_definitions.yaml
 !tests/data/
 human_eval_plus/
 

@@ -113,6 +113,7 @@ blueprints:
       12b: google_gemma-4-12B-it-qat-q4_0-chat_template.jinja
       19b: google_gemma-4-26B-A4B-it_chat_template.jinja
       26b: google_gemma-4-26B-A4B-it_chat_template.jinja
+      31b: google_gemma-4-26B-A4B-it_chat_template.jinja
     reasoning_parsing:
       enabled: false
       startString: " thinking"
@@ -132,6 +133,7 @@ blueprints:
       12b: google_gemma-4-12B-it-qat-q4_0-chat_template.jinja
       19b: google_gemma-4-26B-A4B-it_chat_template.jinja
       26b: google_gemma-4-26B-A4B-it_chat_template.jinja
+      31b: google_gemma-4-26B-A4B-it_chat_template.jinja
     enable_thinking_by_category:
       coding: false
       agentic: false

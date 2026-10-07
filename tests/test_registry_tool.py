@@ -418,6 +418,70 @@ def test_local_bundle_validation_reports_companion_mismatch_and_accepts_fix(tmp_
     assert rt._registry_local_bundle_errors(registry) == {"config": [], "companion": []}
 
 
+def test_mixed_quant_identity_binds_exact_local_gguf_and_config(tmp_path, monkeypatch):
+    models_root = tmp_path / "models"
+    model_path = (
+        models_root
+        / "zerodigest"
+        / "Qwen3.8-27B-YMQ-MTP-GGUF"
+        / "Qwen3.8-27B-YMQ-M-TI.gguf"
+    )
+    config_path = model_path.with_suffix(".gguf.json")
+    model_path.parent.mkdir(parents=True)
+    config_path.write_text("{}", encoding="utf-8")
+    write_gguf(model_path)
+    monkeypatch.setattr(rt, "_gguf_roots", lambda: [models_root])
+    key = "zerodigest/qwen3.8-27b-ymq-mtp@?"
+    entry = {
+        "quantization_status": "mix",
+        "local": {
+            "model_path": str(model_path),
+            "config_path": str(config_path),
+            "config_scope": "gguf",
+        },
+    }
+    configs = [
+        {
+            "publisher": "zerodigest",
+            "dir_name": "Qwen3.8-27B-YMQ-MTP-GGUF",
+            "file_name": config_path.name,
+            "json_path": config_path,
+        }
+    ]
+
+    declared, matched_path, matched_configs = rt._registry_local_config_matches(key, entry, configs)
+
+    assert declared is True
+    assert matched_path == model_path
+    assert len(matched_configs) == 1
+    assert matched_configs[0]["json_path"] == config_path
+
+    registry = {key: entry}
+    inventory = rt.RegistryInventory(registry, [], [], configs, [], True)
+    rt._refresh_identity_links(inventory)
+
+    assert inventory.identity_links[key].config_paths == (config_path,)
+
+
+@pytest.mark.parametrize(
+    ("registry_key", "status", "invalid"),
+    [
+        ("publisher/mixed-model@?", None, True),
+        ("publisher/mixed-model@?", "mix", False),
+        ("publisher/quantized-model@q4_k_m", "mix", True),
+    ],
+)
+def test_validate_requires_mix_status_only_for_question_quant(
+    monkeypatch, registry_key, status, invalid
+):
+    entry = {"quantization_status": status} if status is not None else {}
+    monkeypatch.setattr(rt, "load_registry", lambda: {registry_key: entry})
+
+    errors = rt.cmd_validate(ci=True)
+
+    assert bool(errors.get("quantization_status_invalid")) is invalid
+
+
 def test_build_llama_preset_resolves_lm_studio_hub_repository_alias(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -3226,6 +3290,83 @@ def test_lm_studio_local_findings_are_advisory_for_backend_validation() -> None:
         "runtime_experts_missing": ["model: runtime experts missing"],
         "missing_quant": ["model: quant identity missing"],
     }
+
+
+def test_sync_templates_can_be_scoped_to_selected_registry_keys(monkeypatch) -> None:
+    target_key = "publisher/target-model@q4_k_m"
+    registry = {
+        target_key: {"blueprint": "target"},
+        "publisher/unrelated-model@q4_k_m": {"blueprint": "unrelated"},
+    }
+    resolved: list[str] = []
+    monkeypatch.setattr(rt, "load_registry", lambda: registry)
+    monkeypatch.setattr(rt, "read_lms_configs", lambda _root: [])
+    monkeypatch.setattr(rt, "clear_lms_config_cache", lambda _root: None)
+    monkeypatch.setattr(rt, "_registry_template_name", lambda key: resolved.append(key) or None)
+
+    rt.cmd_sync_templates(model_keys={target_key})
+
+    assert resolved == [target_key]
+
+
+def test_sync_templates_rejects_unknown_registry_keys(monkeypatch) -> None:
+    monkeypatch.setattr(rt, "load_registry", lambda: {"publisher/known-model@q4_k_m": {}})
+
+    with pytest.raises(SystemExit) as error:
+        rt.cmd_sync_templates(model_keys={"publisher/unknown-model@q4_k_m"})
+
+    assert error.value.code == 2
+
+
+def test_sync_templates_can_dry_run_and_write_only_selected_registry_keys(tmp_path, monkeypatch, capsys):
+    target_key = "publisher/gemma-4-31b@q4_k_m"
+    other_key = "publisher/other-model@q4_k_m"
+    registry = {target_key: {}, other_key: {}}
+    configs_dir = tmp_path / "configs"
+    configs_dir.mkdir()
+    template_dir = tmp_path / "templates"
+    template_dir.mkdir()
+    template_path = template_dir / "gemma.jinja"
+    template_content = "{{ bos_token }}{% for message in messages %}{{ message.content }}{% endfor %}"
+    template_path.write_text(template_content, encoding="utf-8")
+    target_config = configs_dir / "gemma.json"
+    other_config = configs_dir / "other.json"
+    target_original = {"operation": {"fields": []}}
+    other_original = {"operation": {"fields": []}}
+    target_config.write_text(json.dumps(target_original), encoding="utf-8")
+    other_config.write_text(json.dumps(other_original), encoding="utf-8")
+    configs = [
+        {"dir_name": "gemma-4-31b", "json_path": str(target_config), "publisher": "publisher"},
+        {"dir_name": "other-model", "json_path": str(other_config), "publisher": "publisher"},
+    ]
+
+    monkeypatch.setattr(rt, "load_registry", lambda: registry)
+    monkeypatch.setattr(rt, "TEMPLATE_DIR", template_dir)
+    monkeypatch.setattr(rt, "clear_lms_config_cache", lambda _root: None)
+    monkeypatch.setattr(
+        rt,
+        "_registry_template_name",
+        lambda key: "gemma.jinja" if key == target_key else "other.jinja",
+    )
+    monkeypatch.setattr(
+        rt,
+        "find_registry_matches_for_config",
+        lambda _name, _keys, config=None: [
+            target_key if config is not None and config["dir_name"] == "gemma-4-31b" else other_key
+        ],
+    )
+
+    rt.cmd_sync_templates(configs=configs, model_keys={target_key}, dry_run=True)
+
+    assert json.loads(target_config.read_text(encoding="utf-8")) == target_original
+    assert json.loads(other_config.read_text(encoding="utf-8")) == other_original
+    assert "[WOULD FIX]" in capsys.readouterr().out
+
+    rt.cmd_sync_templates(configs=configs, model_keys={target_key})
+
+    target_fields = json.loads(target_config.read_text(encoding="utf-8"))["operation"]["fields"]
+    assert target_fields == [{"key": "llm.prediction.promptTemplate", "value": template_content}]
+    assert json.loads(other_config.read_text(encoding="utf-8")) == other_original
 
 
 def test_assemble_adds_system_prompt_and_normalizes_default_kv_pair(tmp_path, monkeypatch):

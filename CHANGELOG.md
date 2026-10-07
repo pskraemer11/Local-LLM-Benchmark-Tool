@@ -2,6 +2,12 @@
 
 Zentrales Änderungslog für das Local-LLM-Benchmark-Tool. Neueste Einträge zuerst.
 
+## Gemma-4-Templates und gemischte Quantisierung (07.10.2026)
+
+- **TEMPLATE:** Offizielle Gemma-4-Templates für 12B, 26B A4B und 31B abgeglichen; 31B nutzt die gemeinsame kanonische 26B-A4B-Vorlage. `sync-templates` kann auf Registry-Keys begrenzt und per `--dry-run` geprüft werden; unbekannte Keys enden mit Fehlercode 2. Vier fehlende Config-Templates wurden ergänzt, vorhandene Werte blieben unverändert.
+- **IDENTITÄT:** `@?` bleibt für das YMQ-M-TI-Modell erhalten und wird nur mit `quantization_status: mix` als gültige gemischte Layer-Quantisierung akzeptiert. NVFP4/MXFP4 werden aus Dateinamen erkannt. Mellum2 MXFP4 erhält den vom Nutzer bestätigten getesteten Wert `experts: 18`.
+- **PRÜFUNG:** Pre-Review-Gate bestanden: `validate --ci` ohne Blocker, Ruff 0, mypy 0, 1.649 Tests bestanden, GGUF-Abgleich 52 Einträge ohne Abweichung. Die vollständige lokale Validierung hat weiterhin vier Blocker aus fehlenden/unbewiesenen GGUF-/Companion-Bindungen. Die drei Spekulationsprofile bleiben auf Nutzerwunsch aktiv; keine Sidecars wurden heruntergeladen und keine Inferenz ausgeführt.
+
 ## Registry-Folgereview, R13 und Typechecks korrigiert (29.09.2026)
 
 - **FIX/TEST:** R13 im Namespace-Fallback behoben: korrekter Sandbox-Aufruf, Setup-Zustand aus demselben Worker und vollständiger typisierter Zustandsvergleich. Lange Arrays, DataFrames und verschachtelte Werte werden vollständig verglichen; nicht belegbar vergleichbare Werte scheitern geschlossen.

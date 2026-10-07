@@ -60,7 +60,7 @@ PROJECT_ROOT = _SRC_DIR.parent
 sys.path.insert(0, str(_SRC_DIR))
 
 REGISTRY_PATH = PROJECT_ROOT / "data" / "model_registry.yaml"
-BLUEPRINT_PATH = PROJECT_ROOT / "docs" / "blueprint_definitions.yaml"
+BLUEPRINT_PATH = PROJECT_ROOT / "data" / "blueprint_definitions.yaml"
 CONFIG_ROOT = Path.home() / ".lmstudio" / ".internal" / "user-concrete-model-default-config"
 TEMPLATE_DIR = PROJECT_ROOT / "docs" / "Jinja-Chat-Templates"
 INVENTORY_PATH = PROJECT_ROOT / "prompt_inventory.csv"
@@ -755,11 +755,15 @@ def render_role(entry: dict[str, Any], model_name: str, role_template: str | Non
 
 
 def _harmonify_prompt(prompt: str) -> str:
-    """Convert blueprint XML section wrappers to Harmony-friendly Markdown."""
+    """Render project section wrappers as Markdown, preserving native tokens."""
     headings = {
         "role": "Role",
         "reasoning": "Reasoning",
         "coding": "Coding",
+        "code_quality": "Code Quality",
+        "file_system": "File System",
+        "testing": "Testing",
+        "troubleshooting": "Troubleshooting",
         "safety": "Safety",
         "output": "Output",
         "capabilities": "Capabilities",
@@ -769,6 +773,24 @@ def _harmonify_prompt(prompt: str) -> str:
         result = result.replace(f"<{tag}>", f"\n## {heading}\n")
         result = result.replace(f"</{tag}>", "\n")
     return result.strip()
+
+
+def _render_system_prompt(
+    role: str,
+    module_names: list[str],
+    modules: Mapping[str, Any],
+    truncation: str,
+) -> str:
+    """Assemble one blueprint prompt and render its sections in Markdown."""
+    prompt_parts = [f"<role>\n{role}\n</role>"] if role else []
+    for module_name in module_names:
+        module = modules.get(module_name)
+        if not module:
+            continue
+        content = module.get(truncation, module.get("full", ""))
+        if content:
+            prompt_parts.append(content)
+    return _harmonify_prompt("\n\n".join(prompt_parts))
 
 
 def truncation_from_context(ctx_len: int | None) -> str:
@@ -1182,6 +1204,12 @@ def create_blueprint_definitions() -> None:
                 "output_style_default",
             ],
             "custom_template": True,
+            "template_map": {
+                "12b": "google_gemma-4-12B-it-qat-q4_0-chat_template.jinja",
+                "19b": "google_gemma-4-26B-A4B-it_chat_template.jinja",
+                "26b": "google_gemma-4-26B-A4B-it_chat_template.jinja",
+                "31b": "google_gemma-4-26B-A4B-it_chat_template.jinja",
+            },
         },
         "gemma_reasoning": {
             "description": "Gemma-4 spezifisch (Thinking via <|think|>)",
@@ -1193,6 +1221,7 @@ def create_blueprint_definitions() -> None:
                 "12b": "google_gemma-4-12B-it-qat-q4_0-chat_template.jinja",
                 "19b": "google_gemma-4-26B-A4B-it_chat_template.jinja",
                 "26b": "google_gemma-4-26B-A4B-it_chat_template.jinja",
+                "31b": "google_gemma-4-26B-A4B-it_chat_template.jinja",
             },
             "enable_thinking_by_category": {
                 "coding": False,
@@ -1370,19 +1399,7 @@ def assemble_prompts(
         role_template = bp.get("role_template", None)
         role = render_role(entry, model_name, role_template, static_role)
         module_list = bp.get("modules", [])
-        prompt_parts = []
-        if role:
-            prompt_parts.append(f"<role>\n{role}\n</role>")
-        for mod_name in module_list:
-            mod = modules.get(mod_name)
-            if not mod:
-                continue
-            content = mod.get(truncation, mod.get("full", ""))
-            if content:
-                prompt_parts.append(content)
-        assembled_prompt = "\n\n".join(prompt_parts)
-        if bp_name == "gptoss_reasoning":
-            assembled_prompt = _harmonify_prompt(assembled_prompt)
+        assembled_prompt = _render_system_prompt(role, module_list, modules, truncation)
 
         # Use the shared identity-aware matcher so publisher and quantization
         # rules stay identical to registry/config synchronization and validation.

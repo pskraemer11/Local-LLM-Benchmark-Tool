@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any, NotRequired, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 
 
 class ModelConfig(TypedDict):
@@ -142,6 +142,8 @@ class RegistryEntry(TypedDict):
     benchmark_context_limit: NotRequired[int]
     useUnifiedKvCache: NotRequired[bool]
     quants: NotRequired[list[str]]
+    # ``@?`` is valid only when layer-wise mixed quantization is declared.
+    quantization_status: NotRequired[Literal["mix"]]
     display_name: NotRequired[str]
     blueprint: NotRequired[str]
     sampling: NotRequired[SamplingBlock]

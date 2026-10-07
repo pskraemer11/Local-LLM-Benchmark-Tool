@@ -56,6 +56,7 @@ def test_quantization_vocabulary_covers_new_markers() -> None:
     assert extract_quant_from_text("model-Q6_K_L.gguf") == "q6_k_l"
     assert extract_quant_from_text("gemma-4-12b-QAT-NVFP4-GGUF") == "nvfp4"
     assert extract_quant_from_text("gemma-4-26b-it-mini.gguf") == "mini"
+    assert extract_quant_from_text("model-MXFP4_MOE.gguf") == "mxfp4"
 
 
 def test_parameter_bindings_are_the_sync_and_llama_contract() -> None:

@@ -49,8 +49,10 @@ You are gpt-oss-20b, a GPT-OSS MoE model with 20B parameters...
 ...
 ```
 
-The fix was implemented in `assemble_blueprint.py`: new function `_harmonify_prompt()` converts 
-XML-tag prompts to Harmony Markdown. **Only for the `gptoss_reasoning` blueprint.
+The fix was implemented in `assemble_blueprint.py`: `_harmonify_prompt()` converts
+project-defined XML section wrappers to Markdown headings for every active
+blueprint, preserving model-native control tokens. The conversion was first
+introduced to keep the `gptoss_reasoning` prompt Harmony-friendly.
 
 ### Bug 3: `chat_template_kwargs` was mistakenly sent to gpt-oss
 `run_benchmarks.py:_get_evaluation_parameters()` sent `chat_template_kwargs`

@@ -769,7 +769,7 @@ USE_UNIFIED_KV_CACHE_THRESHOLD_GB = 12.0  # When model_size_gb >= this, UKV=True
 # Kimi Linear: vertragen keine KV-Quant
 # Gpt-Oss: vertragen keine KV-Quant (nur fp16 KV-Cache)
 UKV_FORCE_TRUE_MODELS = {
-    "gemma-4",      # Gemma-4 Familie (26B, 19B, 12B)
+    "gemma-4",      # Gemma-4 Familie (31B, 26B A4B, 19B REAP, 12B, E4B, E2B)
     "kimi-linear",  # Kimi Linear REAP
     "gpt-oss",      # GPT-OSS-20B
 }

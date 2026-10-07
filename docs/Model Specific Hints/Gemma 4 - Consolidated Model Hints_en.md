@@ -127,15 +127,31 @@ They **must not** be built into the Jinja chat template – the template exclusi
 
 Compare "Technical Report Gemma-4" pdf by Google DeepMind, Appendix, page 17.
 
-### 4.3 Template Divergence (CRITICAL – as of 07/13)
+### 4.3 Current template source check (2026-10-07)
 
-Three generations exist in parallel:
+The current official Google model repositories for Gemma-4 12B, 26B A4B, and
+31B expose the same full `chat_template.jinja` structure: conditional thinking,
+complete function schemas, multimodal content handling, tool-response pairing,
+and balanced turn endings. The versioned `google_gemma-4-12B-it-qat-q4_0-`
+and `google_gemma-4-26B-A4B-it_` template copies were compared with those
+official files and are current. The 31B blueprint uses the same canonical
+26B-A4B template because the official 31B template body is the same.
 
-1. **GGUF-embedded** (Original in `tokenizer_config.json`) – 270-line macro version
-2. **Hub Jinja override** (`~/.lmstudio/hub/models/google/*.jinja`) – **authoritative source**
-3. **docs copies** – partially outdated (contain unconditional `<|think|>`, `<|channel>thought`)
+The local LM Studio Hub files named `gemma4-*-template_minijinja.jinja` are
+shorter compatibility variants, not the canonical upstream templates. They
+omit parts of the full tool-schema and content handling. Registry-managed
+Gemma configs should therefore receive an explicit `llm.prediction.promptTemplate`
+from the Blueprint rather than relying on those local Hub fallbacks. The sync
+only fills missing/empty config fields; it preserves populated user values.
+On 2026-10-07, the targeted sync added the canonical template to four
+uniquely matched active Gemma configs. The existing 31B template was already
+populated and preserved; the uninstalled Google QAT Registry entry had no unique
+config and was left unchanged.
 
-**Recommended action:** Regularly synchronize docs copies with hub overrides.
+The LM Studio log records a stale-template compatibility warning for Gemma-4
+and tokenizer/EOG metadata warnings. Those are separate signals: the explicit
+Blueprint template addresses the request-format source, while the warning alone
+does not prove why a particular response ended.
 
 ### 4.4 `enable_thinking` Control in the Template
 
