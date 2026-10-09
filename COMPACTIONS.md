@@ -2269,3 +2269,62 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
   Tokenbudget-Endbedingungen.
 - `docs/Review-Artifacts/Registry-Update_Runtime-and-KV_2026-09-29.md`:
   Review-Evidenz und lokale Grenzen.
+
+=============== Compaction 08.10.2026 / 20:59 ================
+## Objective
+- **Current:** To-dos 5–6 der Registry-Folgearbeiten abschließen: sichere Duplikaterkennung/-bereinigung sowie Regressionstests und Full-Sync-Dokumentation.
+- **Completed:** Dedupe-Befehl umgesetzt, freigegebene Duplikate bereinigt, Regressionen und Dokumentation ergänzt; vollständige Testsuite verifiziert.
+
+## Important Details
+- **Decision:** Nur gleiche, lesbare GGUF-Pfade plus belegte physische Publisher/Modell/Quant-Identität begründen Aliasgruppen. Verschiedene GGUF-Dateien bleiben verschieden. Feldkonflikte brauchen explizites `--keep`; unbewiesene Gruppen verhindern die gesamte Änderung. Vor Apply entsteht ein Registry-Backup.
+- **Data:** Codestral- und Qwen3-14B-Aliase auf Freigabe entfernt; die physischen `lmstudio-community`-Einträge und ihre bisherigen Policy-Werte erhalten. Die Qwen3.8-IQ3_S-Dateien von `unsloth` und `byteshape` bleiben getrennt.
+- **Full-sync boundary:** `full` synchronisiert Templates nicht und schreibt im Standardlauf keine LM-Studio-JSON-Felder. `--write-prompts` ändert ausschließlich `llm.prediction.systemPrompt`.
+- **Live finding:** Die finale Live-Validierung meldet inzwischen 1 Blocker: Config `numExperts=16` gegenüber dem getesteten Registry-Wert `experts=24`; `contextLength=131072` gegenüber `18432` ist ein Hinweis. Es wurde nichts in Configs importiert/geschrieben. Den bestätigten Registry-Wert 24 nicht ohne Nutzerentscheidung ändern.
+- **Review:** Codeänderungen sind uncommittet und warten auf unabhängige Review. Es gibt bereits zahlreiche weitere Änderungen im Working Tree; diese wurden unangetastet gelassen.
+
+## Work State
+### Completed
+- To-dos 5–6 erledigt; dedizierte Dedupe-Suite 5/5 und vollständige Suite 1.662/1.662 bestanden.
+- `ruff check` für `src/registry_tool.py` und `tests/test_registry_dedupe.py`, fokussiertes mypy sowie Markdown-Tabellenprüfung bestanden.
+- Nach Dedupe: 0 geteilte GGUF-Duplikatgruppen; eine publisherlose Qwen3.8-Mehrdeutigkeit bleibt korrekt erhalten.
+### Active / Blocked
+- Live-Config drift: `config_experts_drift` blockiert die aktuelle lokale Validierung; Entscheidung/Anpassung an LM Studio ausstehend.
+- Unabhängige Code-Review ausstehend; kein Commit/Push erfolgt.
+
+## Next Move
+1. Unabhängige Review der Registry-Dedupe- und Full-Sync-Änderungen durchführen.
+2. Mit dem Nutzer klären, ob die LM-Studio-Config auf den bestätigten Expertenwert 24 zurückgestellt werden soll; Registry-Policy nicht eigenmächtig abändern.
+
+## Relevant Files
+- `src/registry_tool.py`: `dedupe`, lokale Bindungsvalidierung und Full-Sync-Grenze.
+- `tests/test_registry_dedupe.py`, `tests/test_registry_tool.py`, `tests/test_registry_pipeline_blockers.py`: Sicherheits- und Regressionsabdeckung.
+- `docs/Architecture, Flow & ChangeLog_en.md`, `CHANGELOG.md`: Dedupe-/Full-Sync-Vertrag und Änderungshistorie.
+- `data/model_registry.yaml`: lokale Registry; Backup `data/model_registry.yaml.bak-dedupe-20261008_162203_745365`.
+
+=============== Compaction 09.10.2026 / 01:02 ================
+## Objective
+- **Current:** Fuzzy GGUF-Auflösung für llama.cpp-Preset/Argument-Export ergänzen, aber nur mit physischer Identität und unabhängigen Größenbelegen.
+- **Completed:** Bucoid- und Jrell-Namensvarianten werden im Live-Preset aufgelöst; der frühere Skip-Warnhinweis verschwindet.
+
+## Important Details
+- **Resolver contract:** exakte Bindungen bleiben vorrangig. Fuzzy-Fallback verlangt LMS-Zeile mit gleichem Publisher, konkreten GGUF-Pfad, ähnlich genug normalisierte Registry-/LMS-/Paketnamen, genaue Quantisierung aus Dateiname gegen Registry-Key und exakte Gleichheit der Registry-/LMS-Größen mit `stat().st_size`. Bei fehlenden/abweichenden Größen oder mehreren physischen Kandidaten wird weiter fail-closed übersprungen. LMS-Quant-Label ist nicht maßgeblich, wenn es weniger spezifisch als der GGUF-Dateiname ist.
+- **Registry decisions:** Bucoid-Quant auf Nutzerbestätigung `iq4_xs` korrigiert. Speculative Policy für Bucoid und Jrell deaktiviert. Nutzer wählte den Jrell-Key mit Kontext 49.152; der alte 16.384-Alias wurde entfernt. Das frühere Jrell-Integrated-MTP-Profil ist entfernt.
+- **Alias history:** Vor der Entfernung zeigen Registry-Einträge beide denselben GGUF-Pfad, aber unterschiedliche Kontextwerte; Backup vor Cleanup: `data/model_registry.yaml.bak-before-jrell-alias-cleanup-20261009`. Weitere Sicherungen: `data/model_registry.yaml.bak-before-fuzzy-identity-20261008`, `data/model_registry.yaml.bak-before-disable-qwen-mtp-20261009`.
+
+## Work State
+### Completed
+- Live-Preset erzeugt 58 lokale Modelle ohne übersprungene Registry-Einträge; Bucoid und kanonischer Jrell-Key sind enthalten. Argument-Manifest bestätigt dieselben zwei Keys ohne Skip.
+- Vollsuite: 1.667 Tests bestanden; Ruff für `src/registry_tool.py`, fokussiertes mypy und Markdown-Tabellenprüfung bestanden.
+- Lokale Validierung danach: 1 unabhängiger Blocker `local_binding_missing` für Qwythos, 11 Hinweise; keine Jrell-Config-Warnung mehr.
+### Active / Blocked
+- Unabhängige Code-Review steht aus; Änderungen sind uncommittet. Es bestehen weitere, nicht zugehörige Änderungen im Arbeitsbaum.
+
+## Next Move
+1. Unabhängige Review der fuzzy Resolver-Grenze, Sizeschutzes und lokalen Registry-Anpassungen durchführen.
+
+## Relevant Files
+- `src/registry_tool.py`: begrenzter Fallback für Preset-/Argument-Export.
+- `tests/test_registry_tool.py`: positiver Fall, Größen-/Quantabweichung, Mehrdeutigkeit und CLI-Weitergabe.
+- `data/model_registry.yaml`: bestätigte Quant-/Speculative-Policy und Jrell-Keyentscheidung.
+- `docs/Architecture, Flow & ChangeLog_en.md`, `docs/Model Specific Hints/Qwen3.8 - How to Run Locally.md`: Resolververtrag und kanonischer Jrell-Key.
+- `CHANGELOG.md`: Fuzzy-GGUF-Auflösung, Datenentscheidung und Live-Verifikation.

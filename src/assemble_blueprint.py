@@ -1351,8 +1351,9 @@ def create_blueprint_definitions() -> None:
 def assemble_prompts(
     preview_only: bool = False,
     identity_links: Mapping[str, Any] | None = None,
+    system_prompt_only: bool = False,
 ) -> None:
-    """Phase 3: Generate system prompts from blueprints and write to JSON configs."""
+    """Generate blueprint prompts; optionally limit JSON writes to systemPrompt."""
     # Read registry
     yaml_ruamel = YAML()
     yaml_ruamel.preserve_quotes = True
@@ -1440,6 +1441,27 @@ def assemble_prompts(
                 try:
                     with open(json_path, encoding="utf-8-sig") as f:
                         data = json.load(f)
+
+                    if system_prompt_only:
+                        operation = data.setdefault("operation", {})
+                        if not isinstance(operation, dict):
+                            raise ValueError("Invalid LM Studio operation object")
+                        fields = operation.setdefault("fields", [])
+                        if not isinstance(fields, list) or not all(isinstance(field, dict) for field in fields):
+                            raise ValueError("Invalid LM Studio operation fields")
+                        system_fields = [
+                            field for field in fields if field.get("key") == "llm.prediction.systemPrompt"
+                        ]
+                        if system_fields:
+                            for field in system_fields:
+                                field["value"] = assembled_prompt
+                        else:
+                            fields.append({"key": "llm.prediction.systemPrompt", "value": assembled_prompt})
+                        from registry_tool import _atomic_write_text
+
+                        _atomic_write_text(Path(json_path), json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+                        written += 1
+                        continue
 
                     tpl_name = resolve_template(entry, bp, model_name)
                     tpl_content = None

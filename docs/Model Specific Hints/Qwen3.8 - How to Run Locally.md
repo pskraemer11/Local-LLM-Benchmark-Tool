@@ -13,7 +13,7 @@ This document contains the upstream local-run guide below. The following project
 | Qwen3.8 dense 27B variants | `qwen35`            | `thinking` | `reasoning_coding` | 262144          |
 | Qwen3.8 distilled 9B       | `qwen35`            | `thinking` | `reasoning_coding` | 262144          |
 
-The current Registry entries cover `byteshape/qwen3.8-27b@iq4_xs`, `jrell/qwen3.8-27b-i1-smaller@iq4_xs` and `empero-ai/qwen3.8-9b-distill@q8_0`. Quantization, distillation and imatrix/I1 packaging affect resource use and quality, but do not create a new architecture family or blueprint. The model-specific setup is therefore shared through `architecture_family: qwen35` and `blueprint: reasoning_coding`.
+The current Registry entries cover `byteshape/qwen3.8-27b@iq4_xs`, `jrell/qwen3.8-27b-i1-iq4_xs-gguf-smaller@iq4_xs` and `empero-ai/qwen3.8-9b-distill@q8_0`. Quantization, distillation and imatrix/I1 packaging affect resource use and quality, but do not create a new architecture family or blueprint. The model-specific setup is therefore shared through `architecture_family: qwen35` and `blueprint: reasoning_coding`.
 
 ### Differentiated benchmark sampling
 

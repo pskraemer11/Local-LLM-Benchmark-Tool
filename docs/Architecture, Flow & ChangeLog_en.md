@@ -51,18 +51,18 @@ model_registry.yaml + provider ──> run_benchmarks.py
 
 ### 2.1 Authoritative and derived data
 
-| Data                                  | Authority                                      | Used by                                                                  | Write policy                                                                                                 |
-| ------------------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
-| data/model_registry.yaml              | Benchmark policy and provider-neutral metadata | Registry tool, launcher, model resolution                                | Updated by registry maintenance                                                                              |
-| GGUF header and filename              | Model architecture and native limits           | Registry tool, resolver                                                  | Read-only source                                                                                             |
-| data/blueprint_definitions.yaml       | Prompt blueprint definitions                   | Assembly and validation                                                  | Maintained as project policy                                                                                 |
-| docs/Jinja-Chat-Templates/            | Explicit template files                        | Prompt assembly                                                          | Maintained as project assets                                                                                 |
-| LM Studio config JSONs                | LM Studio runtime state                        | Drift checks, explicit Registry import, and IdentityLink prompt assembly | Read as evidence; `full` previews, `full --write-prompts` writes only uniquely joined prompt/template fields |
-| llama.cpp `config.ini`                | Hardware-wide llama.cpp defaults               | Direct CLI/server processes                                              | User/system runtime configuration                                                                            |
-| llama.cpp `preset.ini`                | Derived model router catalog                   | Direct server provider                                                   | Generated from Registry; preserve custom sections                                                            |
-| simple_evals/                         | Local custom benchmark tasks                   | Custom pipeline                                                          | Benchmark input; do not rewrite during runs                                                                  |
-| EvalPlus/lm-eval/tool-eval-bench data | External benchmark tasks                       | Their respective pipelines                                               | Managed by the dependency/tool                                                                               |
-| ergebnisse/                           | Run outputs                                    | Human review and consolidation                                           | Runtime output, normally ignored                                                                             |
+| Data                                  | Authority                                      | Used by                                                                  | Write policy                                                                                           |
+| ------------------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| data/model_registry.yaml              | Benchmark policy and provider-neutral metadata | Registry tool, launcher, model resolution                                | Updated by registry maintenance                                                                        |
+| GGUF header and filename              | Model architecture and native limits           | Registry tool, resolver                                                  | Read-only source                                                                                       |
+| data/blueprint_definitions.yaml       | Prompt blueprint definitions                   | Assembly and validation                                                  | Maintained as project policy                                                                           |
+| docs/Jinja-Chat-Templates/            | Explicit template files                        | Prompt assembly                                                          | Maintained as project assets                                                                           |
+| LM Studio config JSONs                | LM Studio runtime state                        | Drift checks, explicit Registry import, and IdentityLink prompt assembly | Read as evidence; `full` writes no JSON by default; `full --write-prompts` changes only `systemPrompt` |
+| llama.cpp `config.ini`                | Hardware-wide llama.cpp defaults               | Direct CLI/server processes                                              | User/system runtime configuration                                                                      |
+| llama.cpp `preset.ini`                | Derived model router catalog                   | Direct server provider                                                   | Generated from Registry; preserve custom sections                                                      |
+| simple_evals/                         | Local custom benchmark tasks                   | Custom pipeline                                                          | Benchmark input; do not rewrite during runs                                                            |
+| EvalPlus/lm-eval/tool-eval-bench data | External benchmark tasks                       | Their respective pipelines                                               | Managed by the dependency/tool                                                                         |
+| ergebnisse/                           | Run outputs                                    | Human review and consolidation                                           | Runtime output, normally ignored                                                                       |
 
 ### 2.1.1 GGUF model root resolution
 
@@ -429,6 +429,17 @@ is the highest-priority shared GGUF root and therefore participates in the
 same resolver used for discovery, config joins, companion resolution, and
 llama.cpp execution; it is not a second path-resolution implementation.
 
+Preset and direct-argument exports have a narrowly scoped fallback for a
+Registry model name that differs from the installed package/file spelling.
+It is considered only after exact resolution fails and requires an LMS row
+with the same publisher, a concrete GGUF path that identifies one local
+file, a high normalized model-name similarity, and exact agreement between the
+GGUF filename quantization and Registry quantization. The filesystem size must
+match every available independent size value (`file_size_bytes` and LMS
+`sizeBytes`). LMS's display quantization cannot override the physical GGUF
+filename. Multiple matches, missing size evidence, or any mismatch remain
+unresolved; a stale persisted `local.model_path` still fails closed.
+
 ### 2.2.1.4 Pair and bundle enforcement
 
 `artifact_bundle.py` is the shared fail-closed boundary for local config and
@@ -605,6 +616,7 @@ py -3.12 src\registry_tool.py full --write-prompts
 py -3.12 src\registry_tool.py validate
 py -3.12 src\registry_tool.py preset "C:\Users\<user>\.config\llama.cpp\preset.ini" --merge-existing
 py -3.12 src\registry_tool.py quarantine-missing
+py -3.12 src\registry_tool.py dedupe
 py -3.12 src\registry_tool.py preset
 ~~~
 
@@ -612,16 +624,30 @@ py -3.12 src\registry_tool.py preset
 field-level LM Studio proposals while updating deterministic Registry-owned
 facts. `--import-lms-settings` is an explicit write opt-in for valid,
 unambiguous local values; conflicting Configs and values exceeding GGUF-owned
-context/expert limits are never applied. `full` adds missing prompt-template
-maintenance, prompt preview, and validation. It does not write assembled
-system prompts by default. After review, `full --write-prompts` writes them
-atomically, but only for configs selected by the shared physical-GGUF/JSON
-`IdentityLink` table; an empty or ambiguous link fails closed instead of
-selecting a first fuzzy match. `preset` derives local model sections from the Registry while
-preserving the target INI's global and manually maintained sections.
+context/expert limits are never applied. `full` adds final local-binding
+reconciliation, prompt preview, and validation. It does not write LM Studio
+config JSONs by default. After review, `full --write-prompts` atomically changes
+only `llm.prediction.systemPrompt`, and only in configs selected by the shared
+physical-GGUF/JSON `IdentityLink` table; an empty or ambiguous link fails closed
+instead of selecting a first fuzzy match. `preset` derives local model sections
+from the Registry while preserving the target INI's global and manually
+maintained sections.
 `quarantine-missing` is preview-only unless `--apply` is supplied. Specialist
 maintenance commands remain available through `registry_tool.py advanced
 <command>`; old command names continue to work as compatibility aliases.
+
+`dedupe` is a read-only preview by default. It identifies aliases only when
+they point to the same readable local GGUF and that file's physical identity
+selects one canonical Registry key. Same-name/quant entries backed by distinct
+GGUF files are retained and reported as distinct. Conflicting policy fields
+block `--apply` until the physical-owner key is explicitly selected with
+`--keep`; a Registry backup is created before any aliases are merged or
+removed. Apply only after reviewing the preview, and repeat `--keep` for each
+conflicting group that you authorize:
+
+~~~text
+py -3.12 src\registry_tool.py dedupe --apply --keep <physical-registry-key>
+~~~
 
 ### 3.3 The three pipeline modes (compatibility aliases)
 
@@ -724,15 +750,16 @@ py -3.12 src\registry_tool.py full
 the same flags. The full workflow performs synchronization and then:
 
 1. reports non-installed Registry models in quarantine dry-run mode;
-2. classifies Registry entries and fills missing LM Studio `promptTemplate` fields;
+2. classifies Registry entries and reconciles unique local GGUF/config bindings;
 3. runs a read-only system-prompt assembly preview;
 4. validates prompt and template completeness;
 5. validates Registry drift and field ownership.
 
-System-prompt assembly is explicitly preview-only. The GLM config patch is
-skipped. Open blocking Registry/runtime issues cause exit code 1 unless
---ignore-drift is passed. The flag changes the exit behavior only; it is not
-an automatic repair.
+System-prompt assembly is preview-only by default; `--write-prompts` explicitly
+writes only the assembled system prompt to uniquely bound configs. The GLM
+config patch is skipped. Open blocking Registry/runtime issues cause exit code 1
+unless `--ignore-drift` is passed. The flag changes the exit behavior only; it
+is not an automatic repair.
 
 Validation treats LM Studio context values as local runtime observations.
 Registry `context_length` is the benchmark source of truth, so a different
@@ -741,10 +768,12 @@ or the direct llama.cpp path. Missing LM Studio config files and missing
 `promptTemplate` values are reported the same way. A missing or invalid
 Registry-owned runtime value, such as MoE `experts`, remains blocking.
 
-`pipeline full` runs `sync-templates` before prompt preview. It fills only
-missing or empty `promptTemplate` fields in matching LM Studio config JSONs
-and preserves populated values. System-prompt assembly remains preview-only;
-the separate GLM config patch is not run.
+`pipeline full` does not run `sync-templates` and does not write any LM Studio
+JSON field during its default preview. The separate `sync-templates` command
+fills only missing or empty `promptTemplate` fields. With `full --write-prompts`,
+only `llm.prediction.systemPrompt` is written; `load` fields, templates,
+reasoning settings, budgets, and other JSON values are preserved. The separate
+GLM config patch is not run.
 
 These steps are intentionally previews or report-only unless explicitly
 applied. To move the proposed stale configs and Registry entries into

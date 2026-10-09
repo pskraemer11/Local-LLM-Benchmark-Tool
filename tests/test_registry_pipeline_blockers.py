@@ -3,11 +3,11 @@ from contextlib import ExitStack
 from unittest.mock import patch
 
 import pytest
+
 import registry_tool as rt
 
-
 BLOCKERS = (
-    "local_companion_invalid", "local_config_pair_invalid", "template_missing_file",
+    "local_companion_invalid", "local_config_pair_invalid", "local_binding_missing", "template_missing_file",
     "identity_collision", "runtime_experts_missing", "runtime_experts_exceed_max",
     "config_experts_drift", "gguf_header_drift", "unknown_future_blocker",
 )

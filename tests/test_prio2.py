@@ -345,7 +345,7 @@ class TestSupportsChatTemplateKwargs:
         assert _supports_chat_template_kwargs("gemma-4-19b-a4b-it-reap-i1@q4_k_m") is True
 
     def test_gemma4_12b(self):
-        assert _supports_chat_template_kwargs("gemma-4-12b-it-qat@q4_k_xl") is False
+        assert _supports_chat_template_kwargs("gemma-4-12b-it-qat@q4_k_xl") is True
 
     def test_non_qwen_model(self):
         assert _supports_chat_template_kwargs("lmstudio-community/ministral-8b-instruct-2410") is False

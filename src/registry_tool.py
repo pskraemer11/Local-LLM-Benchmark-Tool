@@ -21,10 +21,10 @@ checks prompt and runtime drift.
       API expert counts into the Registry. Values beyond GGUF limits are rejected.
 
   py -3.12 .\src\registry_tool.py full
-      Run synchronization, prompt-template maintenance, preview, and checks.
+      Run synchronization, local-binding reconciliation, preview, and checks.
 
   py -3.12 .\src\registry_tool.py full --write-prompts
-      Additionally write assembled system prompts to uniquely joined configs.
+      Write only llm.prediction.systemPrompt to uniquely joined configs.
 
   py -3.12 .\src\registry_tool.py preset <path> --merge-existing
       Export Registry runtime values into a llama.cpp preset, preserving
@@ -34,11 +34,15 @@ checks prompt and runtime drift.
       Preview stale entries. Moving configs and removing Registry entries
       requires the explicit --apply option.
 
-`full` writes only missing LM Studio `promptTemplate` fields and runs prompt
-assembly as a preview. It does not write assembled system prompts by default.
-After reviewing the preview, `full --write-prompts` writes them atomically and
-only through the shared per-run IdentityLink table. `pipeline full` remains a
-compatibility spelling of `full`; both use the same workflow and options.
+  py -3.12 .\src\registry_tool.py dedupe
+      Preview Registry keys that share the same physical GGUF. Conflicting
+      policy values require an explicit --keep decision before --apply.
+
+`full` does not write LM Studio config JSON fields by default. After reviewing
+the preview, `full --write-prompts` writes only `llm.prediction.systemPrompt`
+atomically through the shared per-run IdentityLink table. Template maintenance
+is a separate `sync-templates` command. `pipeline full` remains a compatibility
+spelling of `full`; both use the same workflow and options.
 
 2. SOURCE OF TRUTH AND WRITE BOUNDARIES
 
@@ -73,6 +77,7 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import copy
 import hashlib
 import json
 import os
@@ -85,6 +90,7 @@ import tempfile
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import urlsplit
@@ -1078,6 +1084,14 @@ def _materialize_local_bindings(inventory: RegistryInventory) -> int:
             continue
         speculative = dict(binding.speculative)
         normalized = normalize_speculative_profile(speculative)
+        if not normalized:
+            # Integrated MTP is a main-GGUF capability, not a companion
+            # selection. LM Studio may keep the GUI flag off even though the
+            # standalone GGUF contains runnable NextN layers, so derive the
+            # llama.cpp profile only after full header/tensor validation.
+            integrated_mtp = {"type": "mtp", "mode": "integrated"}
+            if not validate_companion_binding(main_path, None, integrated_mtp):
+                normalized = integrated_mtp
         local_llama = local.get("llama_cpp")
         if normalized:
             if not isinstance(local_llama, dict):
@@ -1461,14 +1475,19 @@ def _resolve_hub_source_gguf(key: str, entry: dict[str, Any]) -> Path | None:
     return resolved.path if resolved.is_unique else None
 
 
-def _resolve_model_path_multi(key: str, entry: dict[str, Any] | None = None) -> str:
-    """Resolve a GGUF path through the shared fail-closed artifact resolver.
+def _resolve_model_path_multi(
+    key: str,
+    entry: dict[str, Any] | None = None,
+    *,
+    lms_models: list[dict[str, Any]] | None = None,
+) -> str:
+    """Resolve a GGUF through exact bindings first, then verified LMS evidence.
 
-    1. Exact ``GGUF root / key`` — library-level path from LM Studio.
-    2. Explicit Hub source mapping, when available.
-    3. Unique normalized filename match.
-    Ambiguous and fuzzy matches return ``""`` instead of selecting a first
-    path; diagnostics can inspect ``ArtifactResolution.candidates``.
+    Persisted bindings remain authoritative; a stale explicit path fails
+    closed. Otherwise the normal exact/Hub/normalized resolver runs first.
+    The optional fuzzy fallback requires a concrete LMS GGUF path, matching
+    publisher and quant, similar model labels, and exact byte-size agreement.
+    Ambiguous candidates return ``""`` instead of selecting the first path.
     """
     if entry is not None:
         local = entry.get("local")
@@ -1492,7 +1511,11 @@ def _resolve_model_path_multi(key: str, entry: dict[str, Any] | None = None) -> 
     resolver = ArtifactResolver()
     resolver.model_roots = _gguf_roots()
     resolved = resolver.resolve(key)
-    return str(resolved.path) if resolved.is_unique else ""
+    if resolved.is_unique:
+        return str(resolved.path)
+    if entry is not None and lms_models:
+        return _resolve_fuzzy_gguf_from_lms(key, entry, lms_models)
+    return ""
 
 
 def _preset_value(value: Any) -> str:
@@ -1502,14 +1525,125 @@ def _preset_value(value: Any) -> str:
     return str(value).strip()
 
 
+_FUZZY_ARTIFACT_NAME_THRESHOLD = 0.88
+
+
+def _artifact_name_similarity(left: str, right: str, quant: str) -> float:
+    """Compare model labels after removing only known quant/packaging markers."""
+    from model_identity import normalize_artifact_model_name
+
+    def normalize(value: str) -> str:
+        name = normalize_artifact_model_name(value, quant)
+        name = re.sub(r"(?:^|-)[0-9]+(?:-[0-9]+)?bpw(?=-|$)", "-", name)
+        return re.sub(r"-+", "-", name).strip("-")
+
+    normalized_left = normalize(left)
+    normalized_right = normalize(right)
+    if not normalized_left or not normalized_right:
+        return 0.0
+    return SequenceMatcher(None, normalized_left, normalized_right, autojunk=False).ratio()
+
+
+def _positive_file_size(value: Any) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
+
+
+def _resolve_fuzzy_gguf_from_lms(
+    key: str,
+    entry: dict[str, Any],
+    lms_models: list[dict[str, Any]],
+) -> str:
+    """Resolve a differently named GGUF only with publisher, path, quant and size proof.
+
+    This fallback is deliberately stricter than a filename guess: an LMS row
+    must identify a concrete GGUF path, its publisher and model label must
+    resemble the Registry identity, the physical publisher/quant must agree,
+    and every available Registry/LMS byte-size value must equal the file size.
+    Ambiguous matches fail closed. LMS's display quant is not authoritative
+    when it is less specific than the quant marker in the concrete GGUF name.
+    """
+    from artifact_resolver import ArtifactResolver
+    from local_model_resolver import LocalModelResolver
+
+    registry_publisher, registry_model, registry_quant = decompose_model_identity(key)
+    normalized_quant = normalize_quant(registry_quant)
+    if not registry_publisher or not is_known_quant(normalized_quant):
+        return ""
+
+    registry_size = _positive_file_size(entry.get("file_size_bytes"))
+    roots = _gguf_roots()
+    artifacts = ArtifactResolver()
+    artifacts.model_roots = roots
+    artifact_files = artifacts.files()
+    identity_resolver = LocalModelResolver()
+    identity_resolver.model_roots = roots
+    matches: dict[str, tuple[Path, str]] = {}
+
+    for model in lms_models:
+        if not is_registry_candidate(model):
+            continue
+        lms_publisher = str(model.get("publisher") or "").strip().casefold()
+        if lms_publisher != registry_publisher:
+            continue
+        raw_model_key = str(model.get("modelKey") or "").strip()
+        lms_model = raw_model_key.rsplit("@", 1)[0].rsplit("/", 1)[-1]
+        if _artifact_name_similarity(registry_model, lms_model, normalized_quant) < _FUZZY_ARTIFACT_NAME_THRESHOLD:
+            continue
+        if not _lms_has_concrete_artifact_path(model):
+            continue
+
+        lms_size = _positive_file_size(model.get("sizeBytes"))
+        expected_sizes = {size for size in (registry_size, lms_size) if size is not None}
+        if not expected_sizes or len(expected_sizes) > 1:
+            continue
+
+        for _root_index, candidate in artifact_files:
+            if not _lms_path_matches_candidate(model, candidate):
+                continue
+            try:
+                actual_size = candidate.stat().st_size
+            except OSError:
+                continue
+            if actual_size not in expected_sizes:
+                continue
+
+            physical_reference = identity_resolver._model_base_id(candidate)
+            physical_publisher, physical_model, _physical_quant = decompose_model_identity(physical_reference)
+            if physical_publisher != registry_publisher:
+                continue
+            physical_quant = extract_quant_from_text(candidate.name)
+            # LMS can report the coarser "IQ4" label for a concrete IQ4_XS
+            # artifact. Trust the filename plus Registry quant after the exact
+            # LMS path and byte-size checks, not that display label.
+            if not physical_quant or normalize_quant(physical_quant) != normalized_quant:
+                continue
+            if max(
+                _artifact_name_similarity(registry_model, physical_model, normalized_quant),
+                _artifact_name_similarity(registry_model, candidate.parent.name, normalized_quant),
+                _artifact_name_similarity(registry_model, candidate.stem, normalized_quant),
+            ) < _FUZZY_ARTIFACT_NAME_THRESHOLD:
+                continue
+
+            identity = _path_identity(candidate)
+            matches[identity] = (candidate, raw_model_key)
+
+    if len(matches) != 1:
+        return ""
+    return str(next(iter(matches.values()))[0])
+
+
 def build_llama_preset(
     registry: dict[str, Any],
+    *,
+    lms_models: list[dict[str, Any]] | None = None,
 ) -> tuple[str, list[str]]:
     """Build a llama.cpp preset from locally resolvable Registry entries.
 
     The generated file is a derived launch artifact.  Registry policy remains
     authoritative; entries without a local GGUF are reported and omitted
-    instead of causing a remote download or an invented model path.
+    instead of causing a remote download or an invented model path. When
+    ``lms_models`` is available, its concrete path and byte size permit a
+    guarded fuzzy-name fallback after the strict path resolver fails.
     """
     runtime_registry = ModelRegistry(registry_loader=lambda: registry)
     lines = [
@@ -1545,7 +1679,11 @@ def build_llama_preset(
         entry = registry.get(key)
         if not isinstance(entry, dict):
             continue
-        model_path = _resolve_model_path_multi(key, entry)
+        model_path = (
+            _resolve_model_path_multi(key, entry, lms_models=lms_models)
+            if lms_models is not None
+            else _resolve_model_path_multi(key, entry)
+        )
         if not model_path:
             skipped.append(key)
             continue
@@ -1693,7 +1831,7 @@ def cmd_export_llama_preset(
     target = Path(output_path) if output_path else PROJECT_ROOT / "ergebnisse" / "llama-cpp-generated" / "preset.ini"
     try:
         registry = load_registry()
-        content, skipped = build_llama_preset(registry)
+        content, skipped = build_llama_preset(registry, lms_models=_run_lms_ls())
         generated_count = content.count("\n[")
         if merge_existing and target.exists():
             content = merge_llama_preset(target.read_text(encoding="utf-8"), content)
@@ -1739,6 +1877,8 @@ def build_llama_argument_manifest(
     registry: dict[str, Any],
     executable: str | Path | None = None,
     api_base: str | None = None,
+    *,
+    lms_models: list[dict[str, Any]] | None = None,
 ) -> tuple[dict[str, Any], list[str]]:
     """Build a reproducible direct llama.cpp argument manifest."""
     runtime_registry = ModelRegistry(registry_loader=lambda: registry)
@@ -1758,7 +1898,11 @@ def build_llama_argument_manifest(
         entry = registry.get(key)
         if not isinstance(entry, dict):
             continue
-        model_path = _resolve_model_path_multi(key, entry)
+        model_path = (
+            _resolve_model_path_multi(key, entry, lms_models=lms_models)
+            if lms_models is not None
+            else _resolve_model_path_multi(key, entry)
+        )
         if not model_path:
             skipped.append(key)
             continue
@@ -1808,7 +1952,7 @@ def cmd_export_llama_args(output_path: str | Path | None = None) -> int:
     """Write a JSON manifest with direct llama.cpp start/request arguments."""
     target = Path(output_path) if output_path else PROJECT_ROOT / "ergebnisse" / "llama-cpp-generated" / "args-manifest.json"
     registry = load_registry()
-    manifest, skipped = build_llama_argument_manifest(registry)
+    manifest, skipped = build_llama_argument_manifest(registry, lms_models=_run_lms_ls())
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
@@ -2232,6 +2376,255 @@ def cmd_quarantine_missing(
         f"{len(reported)} nur gemeldet (GGUF vorhanden)."
     )
     return 0 if not reported else 2
+
+
+# ── registry dedupe command ─────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class _RegistryDuplicatePlan:
+    """One exact shared-GGUF alias group and its physical canonical key."""
+
+    keys: tuple[str, ...]
+    physical_key: str | None
+    conflicts: tuple[str, ...] = ()
+    reason: str | None = None
+
+
+def _dedupe_empty_value(value: Any) -> bool:
+    return value is None or value == "" or value == [] or value == {}
+
+
+def _dedupe_conflict_fields(
+    keeper: dict[str, Any],
+    duplicate: dict[str, Any],
+    *,
+    prefix: str = "",
+) -> set[str]:
+    conflicts: set[str] = set()
+    for field, duplicate_value in duplicate.items():
+        if not prefix and field in {"publisher", "hf_url", "pub_url"}:
+            continue
+        field_path = f"{prefix}.{field}" if prefix else field
+        keeper_value = keeper.get(field)
+        if field_path == "local.model_path":
+            if keeper_value and _path_identity(keeper_value) != _path_identity(duplicate_value or ""):
+                conflicts.add(field_path)
+            continue
+        if _dedupe_empty_value(keeper_value) or _dedupe_empty_value(duplicate_value):
+            continue
+        if isinstance(keeper_value, dict) and isinstance(duplicate_value, dict):
+            conflicts.update(
+                _dedupe_conflict_fields(keeper_value, duplicate_value, prefix=field_path)
+            )
+        elif keeper_value != duplicate_value:
+            conflicts.add(field_path)
+    return conflicts
+
+
+def _merge_dedupe_missing_fields(
+    keeper: dict[str, Any],
+    duplicate: dict[str, Any],
+    *,
+    prefix: str = "",
+) -> None:
+    """Copy non-conflicting missing data while retaining keeper-owned values."""
+    for field, duplicate_value in duplicate.items():
+        if not prefix and field in {"publisher", "hf_url", "pub_url"}:
+            continue
+        if prefix == "local" and field == "model_path":
+            continue
+        keeper_value = keeper.get(field)
+        if _dedupe_empty_value(keeper_value):
+            keeper[field] = copy.deepcopy(duplicate_value)
+        elif isinstance(keeper_value, dict) and isinstance(duplicate_value, dict):
+            _merge_dedupe_missing_fields(keeper_value, duplicate_value, prefix=f"{prefix}.{field}".strip("."))
+
+
+def _registry_duplicate_plans(registry: dict[str, Any]) -> list[_RegistryDuplicatePlan]:
+    """Find Registry keys that point to the same readable local GGUF file."""
+    from gguf_evidence import read_gguf_evidence, resolve_artifact_quant
+    from local_model_resolver import LocalModelResolver
+    from model_identity import normalize_artifact_model_name
+
+    path_owners: dict[str, list[str]] = {}
+    for model_key, entry in registry.items():
+        local = entry.get("local") if isinstance(entry, dict) else None
+        model_path = local.get("model_path") if isinstance(local, dict) else None
+        if isinstance(model_path, (str, os.PathLike)) and str(model_path).strip():
+            path_owners.setdefault(_path_identity(str(model_path)), []).append(model_key)
+
+    resolver = LocalModelResolver()
+    resolver.model_roots = _gguf_roots()
+    plans: list[_RegistryDuplicatePlan] = []
+    for _path_key, owners in sorted(path_owners.items()):
+        keys = tuple(sorted(set(owners)))
+        if len(keys) < 2:
+            continue
+        first_local = registry[keys[0]].get("local", {})
+        model_path_value = first_local.get("model_path") if isinstance(first_local, dict) else None
+        path = Path(str(model_path_value)) if model_path_value else Path()
+        try:
+            read_gguf_evidence(path)
+        except (OSError, ValueError, struct.error):
+            plans.append(_RegistryDuplicatePlan(keys, None, reason="shared local path is not a readable GGUF"))
+            continue
+
+        physical_reference = resolver._model_base_id(path)
+        publisher, _, _embedded_quant = decompose_model_identity(physical_reference)
+        quant = extract_quant_from_text(path.name) or resolve_artifact_quant(path, publisher=publisher)
+        if not quant:
+            plans.append(_RegistryDuplicatePlan(keys, None, reason="shared GGUF has no complete quant evidence"))
+            continue
+        physical_key = LocalModelResolver._match_registry(
+            physical_reference,
+            quant,
+            {key: registry[key] for key in keys},
+        )
+        if physical_key not in keys:
+            plans.append(
+                _RegistryDuplicatePlan(
+                    keys,
+                    None,
+                    reason="no unique Registry key matches the GGUF publisher/model/quant identity",
+                )
+            )
+            continue
+
+        canonical_model = decompose_model_identity(physical_key)[1]
+        mismatched = [
+            key
+            for key in keys
+            if normalize_quant(decompose_model_identity(key)[2]) != normalize_quant(quant)
+            or normalize_artifact_model_name(decompose_model_identity(key)[1], quant)
+            != normalize_artifact_model_name(canonical_model, quant)
+        ]
+        if mismatched:
+            plans.append(
+                _RegistryDuplicatePlan(
+                    keys,
+                    physical_key,
+                    reason="shared file is assigned to different model or quant identities: "
+                    + ", ".join(mismatched),
+                )
+            )
+            continue
+
+        merged = copy.deepcopy(registry[physical_key])
+        conflicts: set[str] = set()
+        for alias_key in keys:
+            if alias_key == physical_key:
+                continue
+            alias_entry = registry[alias_key]
+            if not isinstance(alias_entry, dict):
+                conflicts.add(alias_key)
+                continue
+            conflicts.update(_dedupe_conflict_fields(merged, alias_entry))
+            _merge_dedupe_missing_fields(merged, alias_entry)
+        plans.append(_RegistryDuplicatePlan(keys, physical_key, tuple(sorted(conflicts))))
+    return plans
+
+
+def cmd_dedupe_registry(
+    *,
+    apply: bool = False,
+    keep_keys: list[str] | None = None,
+    registry_path: Path | None = None,
+) -> int:
+    """Preview or safely merge duplicate Registry entries sharing one GGUF.
+
+    Publisherless name/quant collisions on different files are reported as
+    distinct artifacts, never collapsed. Conflicting policy values require an
+    explicit ``--keep <physical-owner-key>`` together with ``--apply``.
+    """
+    path = registry_path or REGISTRY_PATH
+    registry = load_registry(path)
+    if not registry:
+        print("[ERROR] Leere Registry")
+        return 1
+
+    plans = _registry_duplicate_plans(registry)
+    plan_by_key = {
+        plan.physical_key: plan
+        for plan in plans
+        if plan.physical_key is not None
+    }
+    requested_keep = set(keep_keys or ())
+    unknown_keep = requested_keep.difference(plan_by_key)
+    if unknown_keep:
+        print("[ERROR] --keep muss den physischen kanonischen Registry-Key einer Duplikatgruppe nennen")
+        return 2
+
+    physical_duplicate_members = {key for plan in plans for key in plan.keys}
+    for plan in plans:
+        aliases = [key for key in plan.keys if key != plan.physical_key]
+        if plan.reason:
+            print(f"[UNPROVEN] {', '.join(plan.keys)}: {plan.reason}")
+        elif plan.conflicts and plan.physical_key not in requested_keep:
+            print(
+                f"[CONFLICT] keep={plan.physical_key}; aliases={', '.join(aliases)}; "
+                f"Felder={', '.join(plan.conflicts)}. Aufräumen erfordert explizites --keep."
+            )
+        else:
+            action = "wird behalten" if apply else "würde behalten"
+            print(
+                f"[DUPLICATE] {plan.physical_key} {action}; "
+                f"Alias-Keys: {', '.join(aliases)}"
+            )
+
+    for normalized, candidates in sorted(find_match_collisions(list(registry)).items()):
+        if set(candidates).issubset(physical_duplicate_members):
+            continue
+        path_ids = {
+            _path_identity((registry.get(key, {}).get("local") or {}).get("model_path") or "")
+            for key in candidates
+        }
+        path_ids.discard("")
+        disposition = "DISTINCT" if len(path_ids) > 1 else "UNPROVEN"
+        print(
+            f"[{disposition}] {normalized}: publisherless model/quant collision retained; "
+            f"keys={', '.join(candidates)}"
+        )
+
+    if not apply:
+        print(f"[DRY-RUN] {len(plans)} gemeinsame GGUF-Duplikatgruppe(n); Registry unverändert.")
+        return 0
+
+    unresolved = [
+        plan
+        for plan in plans
+        if plan.reason or (plan.conflicts and plan.physical_key not in requested_keep)
+    ]
+    if unresolved:
+        print("[BLOCKED] Mindestens eine Gruppe ist unbewiesen oder hat ungelöste Feldkonflikte; nichts geschrieben.")
+        return 1
+
+    if not plans:
+        print("[OK] Keine doppelten lokalen GGUF-Bindungen gefunden.")
+        return 0
+
+    updated = copy.deepcopy(registry)
+    removed = 0
+    for plan in plans:
+        assert plan.physical_key is not None
+        keeper = updated[plan.physical_key]
+        for alias_key in plan.keys:
+            if alias_key == plan.physical_key:
+                continue
+            _merge_dedupe_missing_fields(keeper, updated[alias_key])
+            del updated[alias_key]
+            removed += 1
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    backup_path = path.with_name(f"{path.name}.bak-dedupe-{timestamp}")
+    try:
+        shutil.copy2(path, backup_path)
+        save_registry(updated, path)
+    except OSError as exc:
+        print(f"[ERROR] Dedupe abgebrochen; Registry nicht vollständig geschrieben: {exc}")
+        return 1
+    print(f"[OK] {removed} Alias-Eintrag/-Einträge entfernt; Registry-Backup: {backup_path.name}")
+    return 0
 
 
 # ── np inference helper ────────────────────────────────────────────
@@ -4564,6 +4957,7 @@ def cmd_validate(
         "publisherless_identity_ambiguity": [],
         "registry_no_config": [],
         "local_config_pair_invalid": [],
+        "local_binding_missing": [],
         "local_companion_invalid": [],
         "reasoning_arch_mismatch": [],
         "config_context_drift": [],
@@ -4579,6 +4973,34 @@ def cmd_validate(
         bundle_errors = _registry_local_bundle_errors(reg)
         errors["local_config_pair_invalid"].extend(bundle_errors["config"])
         errors["local_companion_invalid"].extend(bundle_errors["companion"])
+        if identity_links is not None:
+            for model_key, link in identity_links.items():
+                if len(link.artifact_evidence) != 1:
+                    continue
+                config_bindings = [binding for binding in link.runtime_bindings if binding.config_path is not None]
+                if len(config_bindings) != 1:
+                    continue
+                if any(
+                    message.startswith(f"{model_key}:")
+                    for message in errors["local_config_pair_invalid"]
+                ):
+                    continue
+                local = reg.get(model_key, {}).get("local")
+                local = local if isinstance(local, dict) else {}
+                binding = config_bindings[0]
+                expected_config_path = binding.config_path
+                if expected_config_path is None:
+                    continue
+                expected_model_path = link.artifact_evidence[0].path
+                expected_scope = binding.config_scope or "gguf"
+                if (
+                    _path_identity(local.get("model_path") or "") != _path_identity(expected_model_path)
+                    or _path_identity(local.get("config_path") or "") != _path_identity(expected_config_path)
+                    or local.get("config_scope") != expected_scope
+                ):
+                    errors["local_binding_missing"].append(
+                        f"{model_key}: unique local GGUF/Config binding is not materialized in the Registry"
+                    )
 
     # Canonical publisher/model/quant identities must be unique.  The
     # publisher-stripped namespace is retained only as a diagnostic because
@@ -5218,12 +5640,16 @@ def cmd_pipeline(
     classify_registry()
 
     if mode == "full":
-        print("[4a] Fehlende LM-Studio-Prompt-Templates ergänzen ...")
-        cmd_sync_templates(
-            configs=inventory.configs,
-            installed_models=inventory.lms_models,
-            identity_links=inventory.identity_links,
-        )
+        print("[4a] Lokale GGUF-/Config-Bindungen nach Klassifikation abgleichen ...")
+        # `cmd_sync` has already reloaded its persisted Registry into this
+        # shared inventory. Classification only changes policy fields, so
+        # keep this in-memory state instead of re-reading the global path
+        # (which also makes isolated pipeline inventories self-contained).
+        _ensure_gguf_inventory(inventory)
+        materialized = _materialize_local_bindings(inventory)
+        print(f"[local-bindings] {materialized} lokale Bundle-/llama.cpp-Felder aktualisiert")
+
+        print("[4b] Prompt-Template-JSON-Sync ausgelassen (separater Befehl: sync-templates) ...")
         if write_prompts:
             print("[5] Prompt-Assembly (WRITE; eindeutige IdentityLinks) ...")
         else:
@@ -5231,6 +5657,7 @@ def cmd_pipeline(
         assemble_prompts(
             preview_only=not write_prompts,
             identity_links=inventory.identity_links,
+            system_prompt_only=write_prompts,
         )
         if not write_prompts:
             print("[HINWEIS] System-Prompts nach Prüfung schreiben mit:")
@@ -5587,7 +6014,7 @@ def _run_public_cli(arguments: list[str]) -> bool:
         sys.argv = [sys.argv[0], *arguments[1:]]
         return False
 
-    public_commands = {"status", "sync", "full", "validate", "preset", "quarantine-missing"}
+    public_commands = {"status", "sync", "full", "validate", "preset", "quarantine-missing", "dedupe"}
     if arguments and arguments[0] not in public_commands and arguments[0] not in {"-h", "--help"}:
         return False
 
@@ -5660,6 +6087,18 @@ def _run_public_cli(arguments: list[str]) -> bool:
     )
     quarantine_parser.add_argument("--apply", action="store_true", help="move configs and remove stale entries")
 
+    dedupe_parser = subparsers.add_parser(
+        "dedupe", help="Preview duplicate Registry keys bound to the same physical GGUF"
+    )
+    dedupe_parser.add_argument("--apply", action="store_true", help="remove verified duplicate aliases")
+    dedupe_parser.add_argument(
+        "--keep",
+        action="append",
+        default=[],
+        metavar="REGISTRY_KEY",
+        help="confirm the physical canonical key for a conflicting duplicate group (repeatable)",
+    )
+
     if not arguments or arguments[0] in {"-h", "--help"}:
         parser.print_help()
         print("\nRecommended sequence: status -> sync -> full")
@@ -5708,6 +6147,8 @@ def _run_public_cli(arguments: list[str]) -> bool:
         sys.exit(cmd_export_llama_preset(args.path, merge_existing=args.merge_existing))
     elif args.command == "quarantine-missing":
         sys.exit(cmd_quarantine_missing(dry_run=not args.apply))
+    elif args.command == "dedupe":
+        sys.exit(cmd_dedupe_registry(apply=args.apply, keep_keys=args.keep))
     return True
 
 

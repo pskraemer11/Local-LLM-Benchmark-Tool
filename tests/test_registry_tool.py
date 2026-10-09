@@ -16,6 +16,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -53,7 +54,7 @@ def test_help_describes_registry_tool_surface() -> None:
     help_text = rt.__doc__ or ""
     assert "model_registry.yaml" in help_text
     assert "Tested runtime evidence; import is opt-in" in help_text
-    assert "only missing" in help_text
+    assert "is a separate `sync-templates` command" in help_text
     assert "full --write-prompts" in help_text
     assert "sync --refresh-sampling" in help_text
     assert "may take several minutes" in help_text
@@ -273,6 +274,139 @@ def test_build_llama_preset_uses_local_gguf_and_provider_runtime(tmp_path: Path,
     assert skipped == ["publisher/missing@q4_k_m"]
 
 
+def _fuzzy_preset_fixture(
+    tmp_path: Path,
+) -> tuple[Path, dict[str, dict[str, Any]], list[dict[str, Any]], dict[str, Path]]:
+    models_root = tmp_path / "models"
+    specs = (
+        (
+            "bucoid/qwen3.8-27b-xs-mtp-16gb-vram@iq4_xs",
+            "Bucoid",
+            "Qwen3.8-27B-IQ4-XS-MTP-16GB-VRAM-GGUF",
+            "Qwen3.8-27B-IQ4_XS_4BPW.gguf",
+            "qwen3.8-27b-xs-mtp-16gb-vram",
+            "IQ4",
+        ),
+        (
+            "jrell/qwen3.8-27b-i1-smaller@iq4_xs",
+            "jrell",
+            "Qwen3.8-27B-i1-IQ4_XS-GGUF-Smaller",
+            "Qwen3.8-27B-i1-IQ4_XS-GGUF-Smaller.gguf",
+            "qwen3.8-27b-i1-smaller",
+            "IQ4_XS",
+        ),
+    )
+    registry = {}
+    lms_models = []
+    paths = {}
+    for key, publisher, package, filename, model_key, lms_quant in specs:
+        path = models_root / publisher / package / filename
+        write_gguf(path)
+        file_size = path.stat().st_size
+        paths[key] = path
+        registry[key] = {
+            "publisher": publisher,
+            "arch": "mtp" if publisher == "Bucoid" else "dense",
+            "file_size_bytes": file_size,
+            "context_length": 16384,
+        }
+        lms_models.append(
+            {
+                "type": "llm",
+                "publisher": publisher,
+                "modelKey": model_key,
+                "path": path.relative_to(models_root).as_posix(),
+                "sizeBytes": file_size,
+                "quantization": {"name": lms_quant},
+            }
+        )
+    return models_root, registry, lms_models, paths
+
+
+def test_build_llama_preset_resolves_fuzzy_names_with_identity_and_size_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    models_root, registry, lms_models, paths = _fuzzy_preset_fixture(tmp_path)
+    monkeypatch.setattr(rt, "MODELS_CACHE", models_root)
+
+    content, skipped = rt.build_llama_preset(registry, lms_models=lms_models)
+
+    assert skipped == []
+    for key, path in paths.items():
+        assert f"[{key}]" in content
+        assert f"model = {path}" in content
+
+
+def test_export_llama_preset_passes_live_lms_inventory_to_fuzzy_resolver(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    models_root, registry, lms_models, _paths = _fuzzy_preset_fixture(tmp_path)
+    target = tmp_path / "preset.ini"
+    monkeypatch.setattr(rt, "MODELS_CACHE", models_root)
+    monkeypatch.setattr(rt, "load_registry", lambda: registry)
+    monkeypatch.setattr(rt, "_run_lms_ls", lambda: lms_models)
+
+    result = rt.cmd_export_llama_preset(target)
+
+    output = capsys.readouterr().out
+    written = target.read_text(encoding="utf-8")
+    assert result == 0
+    assert "(2 local models)" in output
+    assert "[WARN] Skipped" not in output
+    assert "[bucoid/qwen3.8-27b-xs-mtp-16gb-vram@iq4_xs]" in written
+    assert "[jrell/qwen3.8-27b-i1-smaller@iq4_xs]" in written
+
+
+def test_fuzzy_preset_resolution_rejects_size_mismatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    models_root, registry, lms_models, _paths = _fuzzy_preset_fixture(tmp_path)
+    monkeypatch.setattr(rt, "MODELS_CACHE", models_root)
+    lms_models[0]["sizeBytes"] += 1
+
+    content, skipped = rt.build_llama_preset(registry, lms_models=lms_models)
+
+    assert "[bucoid/qwen3.8-27b-xs-mtp-16gb-vram@iq4_xs]" not in content
+    assert skipped == ["bucoid/qwen3.8-27b-xs-mtp-16gb-vram@iq4_xs"]
+
+
+def test_fuzzy_preset_resolution_rejects_registry_quant_mismatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    models_root, registry, lms_models, _paths = _fuzzy_preset_fixture(tmp_path)
+    monkeypatch.setattr(rt, "MODELS_CACHE", models_root)
+    corrected_key = "bucoid/qwen3.8-27b-xs-mtp-16gb-vram@iq4_xs"
+    registry["bucoid/qwen3.8-27b-xs-mtp-16gb-vram@iq4"] = registry.pop(corrected_key)
+
+    content, skipped = rt.build_llama_preset(registry, lms_models=lms_models)
+
+    wrong_key = "bucoid/qwen3.8-27b-xs-mtp-16gb-vram@iq4"
+    assert f"[{wrong_key}]" not in content
+    assert wrong_key in skipped
+
+
+def test_fuzzy_preset_resolution_refuses_ambiguous_live_rows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    models_root, registry, lms_models, paths = _fuzzy_preset_fixture(tmp_path)
+    monkeypatch.setattr(rt, "MODELS_CACHE", models_root)
+    source_key = "jrell/qwen3.8-27b-i1-smaller@iq4_xs"
+    duplicate_path = paths[source_key].with_name("Qwen3.8-27B-i1-IQ4_XS-GGUF-Smaller-copy.gguf")
+    write_gguf(duplicate_path)
+    lms_models.append(
+        {
+            **lms_models[1],
+            "path": duplicate_path.relative_to(models_root).as_posix(),
+            "sizeBytes": duplicate_path.stat().st_size,
+        }
+    )
+
+    content, skipped = rt.build_llama_preset(registry, lms_models=lms_models)
+
+    assert f"[{source_key}]" not in content
+    assert source_key in skipped
+
+
 def test_build_llama_preset_exports_speculative_profiles_and_companions(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -461,6 +595,51 @@ def test_mixed_quant_identity_binds_exact_local_gguf_and_config(tmp_path, monkey
     rt._refresh_identity_links(inventory)
 
     assert inventory.identity_links[key].config_paths == (config_path,)
+
+
+def test_validate_blocks_unique_local_binding_not_materialized(tmp_path, monkeypatch):
+    from inventory import IdentityLink, RuntimeBinding
+    from model_identity import ArtifactIdentityEvidence
+
+    key = "publisher/model@q4_k_m"
+    main_path = tmp_path / "models" / "publisher" / "model-GGUF" / "model-Q4_K_M.gguf"
+    config_path = tmp_path / "configs" / "publisher" / "model-GGUF" / "model-Q4_K_M.gguf.json"
+    write_gguf(main_path)
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text("{}", encoding="utf-8")
+    registry = {
+        key: {
+            "reasoning": "instruct",
+            "capabilities": ["text"],
+            "blueprint": "coding_agent",
+        }
+    }
+    config = {
+        "publisher": "publisher",
+        "dir_name": "model-GGUF",
+        "file_name": config_path.name,
+        "json_path": config_path,
+    }
+    inventory = rt.RegistryInventory(registry, [], [], [config], [], True)
+    inventory.with_identity_link(
+        IdentityLink(
+            registry_key=key,
+            runtime_bindings=(RuntimeBinding(config_path=config_path, config_scope="gguf"),),
+            artifact_evidence=(ArtifactIdentityEvidence.from_reference(main_path, "publisher/model", "q4_k_m"),),
+        )
+    )
+    monkeypatch.setattr(rt, "load_registry", lambda: registry)
+
+    missing = rt.cmd_validate(inventory=inventory)
+    assert len(missing["local_binding_missing"]) == 1
+
+    registry[key]["local"] = {
+        "model_path": str(main_path),
+        "config_path": str(config_path),
+        "config_scope": "gguf",
+    }
+    materialized = rt.cmd_validate(inventory=inventory)
+    assert materialized["local_binding_missing"] == []
 
 
 @pytest.mark.parametrize(
@@ -2865,6 +3044,74 @@ def test_materialize_local_binding_persists_main_config_and_mtp_companion(tmp_pa
     assert saved == [registry]
 
 
+def test_materialize_local_binding_infers_integrated_mtp_from_main_gguf(tmp_path, monkeypatch):
+    from local_model_resolver import LocalModelResolver
+
+    models_root = tmp_path / "models"
+    main_path = models_root / "bucoid" / "qwen3.8-27b-GGUF" / "qwen3.8-27b-Q4_K_M.gguf"
+    config_path = (
+        tmp_path
+        / "configs"
+        / "bucoid"
+        / "qwen3.8-27b-GGUF"
+        / "qwen3.8-27b-Q4_K_M.gguf.json"
+    )
+    write_gguf(
+        main_path,
+        block_count=4,
+        metadata={"qwen35.nextn_predict_layers": 1},
+        tensors={
+            "token_embd.weight": (5120, 4),
+            "blk.0.attn_q.weight": (5120, 5120),
+            "blk.3.nextn.eh_proj.weight": (10240, 5120),
+            "blk.3.nextn.enorm.weight": (5120,),
+            "blk.3.nextn.hnorm.weight": (5120,),
+        },
+    )
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text("{}", encoding="utf-8")
+    registry_key = "bucoid/qwen3.8-27b@q4_k_m"
+    registry = {registry_key: {}}
+    model = {
+        "type": "llm",
+        "modelKey": "qwen3.8-27b",
+        "publisher": "bucoid",
+        "quantization": {"name": "Q4_K_M"},
+        "path": str(main_path),
+    }
+    config = {
+        "publisher": "bucoid",
+        "dir_name": "qwen3.8-27b-GGUF",
+        "file_name": config_path.name,
+        "json_path": config_path,
+        "speculative": {
+            "draft_n_max": 4,
+            "draft_n_min": 0,
+            "draft_p_min": 0.0,
+        },
+    }
+    monkeypatch.setattr(rt, "MODELS_CACHE", models_root)
+    candidates = LocalModelResolver(models_root, registry_loader=lambda: registry).candidates()
+    inventory = rt.RegistryInventory(registry, [model], [model], [config], candidates, True)
+    monkeypatch.setattr(rt, "save_registry", lambda _registry: None)
+
+    rt._refresh_identity_links(inventory)
+    rt._materialize_local_bindings(inventory)
+
+    local = registry[registry_key]["local"]
+    assert local["model_path"] == str(main_path)
+    assert local["config_path"] == str(config_path)
+    assert local["config_scope"] == "gguf"
+    assert local["llama_cpp"]["speculative"] == {
+        "type": "mtp",
+        "mode": "integrated",
+        "draft_n_max": 4,
+        "draft_n_min": 0,
+        "draft_p_min": 0.0,
+    }
+    assert rt._materialize_local_bindings(inventory) == 0
+
+
 def test_materialize_local_binding_persists_dflash_companion_role(tmp_path, monkeypatch):
     from local_model_resolver import LocalModelResolver
 
@@ -3230,18 +3477,18 @@ class TestPipelineDriftExitCode:
         assert error.value.code == 1
 
     @pytest.mark.parametrize("import_lms_settings", [False, True])
-    def test_full_prints_explicit_write_paths_after_previews(self, import_lms_settings, capsys):
+    @pytest.mark.parametrize("write_prompts", [False, True])
+    def test_full_only_assembles_system_prompts_and_never_syncs_templates(
+        self, import_lms_settings, write_prompts, capsys
+    ):
         calls = []
 
         def record_quarantine(*, dry_run=False, inventory=None):
             calls.append(("quarantine", dry_run))
             return 0
 
-        def record_assemble(*, preview_only=False, identity_links=None):
-            calls.append(("assemble", preview_only))
-
-        def record_templates(*_args, **_kwargs):
-            calls.append(("templates",))
+        def record_assemble(*, preview_only=False, identity_links=None, system_prompt_only=False):
+            calls.append(("assemble", preview_only, system_prompt_only))
 
         with (
             patch.object(
@@ -3253,24 +3500,100 @@ class TestPipelineDriftExitCode:
             patch.object(rt, "cmd_quarantine_missing", side_effect=record_quarantine),
             patch.object(rt, "cmd_sync"),
             patch.object(rt, "classify_registry"),
-            patch.object(rt, "cmd_sync_templates", side_effect=record_templates),
+            patch.object(
+                rt,
+                "cmd_sync_templates",
+                side_effect=AssertionError("full must not write promptTemplate"),
+            ),
             patch.object(rt, "assemble_prompts", side_effect=record_assemble),
             patch.object(rt, "cmd_patch_glm_configs", side_effect=AssertionError("config patch must not run")),
             patch.object(rt, "validate_prompts"),
             patch.object(rt, "cmd_validate", return_value={"gguf_header_drift": []}),
         ):
-            assert rt.cmd_pipeline("full", import_lms_settings=import_lms_settings) is None
+            assert rt.cmd_pipeline(
+                "full", import_lms_settings=import_lms_settings, write_prompts=write_prompts
+            ) is None
 
-        assert calls == [("quarantine", True), ("templates",), ("assemble", True)]
+        assert calls == [("quarantine", True), ("assemble", not write_prompts, write_prompts)]
         output = capsys.readouterr().out
+        assert "sync-templates" in output
         assert "py -3.12 .\\src\\registry_tool.py quarantine-missing --apply" in output
-        assert "py -3.12 .\\src\\registry_tool.py full --write-prompts" in output
         assert output.index("quarantine-missing --apply") < output.index("Prompt-Assembly")
-        assert output.index("Prompt-Assembly") < output.index("registry_tool.py full --write-prompts")
+        if write_prompts:
+            assert "Prompt-Assembly (WRITE;" in output
+        else:
+            assert "py -3.12 .\\src\\registry_tool.py full --write-prompts" in output
         if import_lms_settings:
             assert "LM-Studio-Werte wurden nur berichtet" not in output
         else:
             assert "py -3.12 .\\src\\registry_tool.py sync --import-lms-settings" in output
+
+
+def test_system_prompt_only_assembly_preserves_every_other_config_field(tmp_path, monkeypatch):
+    config_path = tmp_path / "configs" / "publisher" / "model-GGUF" / "model-Q4_K_M.gguf.json"
+    config_path.parent.mkdir(parents=True)
+    original = {
+        "operation": {
+            "fields": [
+                {"key": "llm.prediction.systemPrompt", "value": "old prompt"},
+                {"key": "llm.prediction.promptTemplate", "value": "user template"},
+                {"key": "llm.prediction.reasoning.parsing", "value": {"enabled": False}},
+                {"key": "llm.prediction.reasoning.budgetTokens", "value": {"checked": True, "value": 99}},
+                {"key": "custom.operation", "value": {"keep": [1, 2, 3]}},
+            ]
+        },
+        "load": {
+            "fields": [
+                {"key": "llm.load.numExperts", "value": 24},
+                {
+                    "key": "llm.load.llama.kCacheQuantizationType",
+                    "value": {"checked": True, "value": "q4_0"},
+                },
+                {"key": "llm.load.llama.speculativeDecoding.draftMtpSidecar", "value": True},
+            ]
+        },
+        "custom": {"retain": True},
+    }
+    config_path.write_text(json.dumps(original), encoding="utf-8")
+    registry_path = tmp_path / "model_registry.yaml"
+    registry_path.write_text(
+        "publisher/model@q4_k_m:\n  publisher: publisher\n  blueprint: default_chat\n  reasoning: instruct\n"
+        "  k_cache: q8_0\n  v_cache: q8_0\n  speculative_policy: disabled\n",
+        encoding="utf-8",
+    )
+    blueprint_path = tmp_path / "blueprints.yaml"
+    blueprint_path.write_text(
+        "blueprints:\n  default_chat:\n    role: A helpful assistant.\n    modules: []\nmodules: {}\n",
+        encoding="utf-8",
+    )
+    config = {
+        "publisher": "publisher",
+        "dir_name": "model-GGUF",
+        "file_name": config_path.name,
+        "json_path": config_path,
+    }
+    monkeypatch.setattr(ab, "REGISTRY_PATH", registry_path)
+    monkeypatch.setattr(ab, "BLUEPRINT_PATH", blueprint_path)
+    monkeypatch.setattr(ab, "TEMPLATE_DIR", tmp_path / "templates")
+    monkeypatch.setattr(ab, "read_lms_configs", lambda _root: [config])
+    monkeypatch.setattr(ab, "configs_for_registry_key", lambda _key, _configs, _links: [config])
+
+    ab.assemble_prompts(preview_only=False, system_prompt_only=True)
+
+    written = json.loads(config_path.read_text(encoding="utf-8"))
+    expected = json.loads(json.dumps(original))
+    system_prompt = next(
+        field["value"]
+        for field in written["operation"]["fields"]
+        if field["key"] == "llm.prediction.systemPrompt"
+    )
+    next(
+        field
+        for field in expected["operation"]["fields"]
+        if field["key"] == "llm.prediction.systemPrompt"
+    )["value"] = system_prompt
+
+    assert written == expected
 
 
 def test_lm_studio_local_findings_are_advisory_for_backend_validation() -> None:
@@ -3289,6 +3612,98 @@ def test_lm_studio_local_findings_are_advisory_for_backend_validation() -> None:
     assert blockers == {
         "runtime_experts_missing": ["model: runtime experts missing"],
         "missing_quant": ["model: quant identity missing"],
+    }
+
+
+def test_full_reconciles_local_binding_and_integrated_mtp_after_classification(tmp_path, monkeypatch):
+    from local_model_resolver import LocalModelResolver
+
+    models_root = tmp_path / "models"
+    main_path = models_root / "bucoid" / "qwen3.8-27b-GGUF" / "qwen3.8-27b-Q4_K_M.gguf"
+    config_path = (
+        tmp_path
+        / "configs"
+        / "bucoid"
+        / "qwen3.8-27b-GGUF"
+        / "qwen3.8-27b-Q4_K_M.gguf.json"
+    )
+    write_gguf(
+        main_path,
+        block_count=4,
+        metadata={"qwen35.nextn_predict_layers": 1},
+        tensors={
+            "token_embd.weight": (5120, 4),
+            "blk.0.attn_q.weight": (5120, 5120),
+            "blk.3.nextn.eh_proj.weight": (10240, 5120),
+            "blk.3.nextn.enorm.weight": (5120,),
+            "blk.3.nextn.hnorm.weight": (5120,),
+        },
+    )
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text("{}", encoding="utf-8")
+    registry_key = "bucoid/qwen3.8-27b@q4_k_m"
+    registry_path = tmp_path / "model_registry.yaml"
+    rt.save_registry(
+        {registry_key: {"arch": "dense", "blueprint": "coding_agent", "reasoning": "thinking"}},
+        registry_path,
+    )
+    monkeypatch.setattr(rt, "REGISTRY_PATH", registry_path)
+    monkeypatch.setattr(rt, "MODELS_CACHE", models_root)
+    registry = rt.load_registry()
+    model = {
+        "type": "llm",
+        "modelKey": "qwen3.8-27b",
+        "publisher": "bucoid",
+        "quantization": {"name": "Q4_K_M"},
+        "path": str(main_path),
+    }
+    config = {
+        "publisher": "bucoid",
+        "dir_name": "qwen3.8-27b-GGUF",
+        "file_name": config_path.name,
+        "json_path": config_path,
+        "speculative": {
+            "draft_n_max": 4,
+            "draft_n_min": 0,
+            "draft_p_min": 0.0,
+        },
+    }
+    candidates = LocalModelResolver(models_root, registry_loader=lambda: registry).candidates()
+    inventory = rt.RegistryInventory(registry, [model], [model], [config], candidates, True)
+    rt._refresh_identity_links(inventory)
+    monkeypatch.setattr(rt, "_collect_registry_inventory", lambda *_args, **_kwargs: inventory)
+    monkeypatch.setattr(rt, "_ensure_gguf_inventory", lambda _inventory: _inventory.gguf_candidates)
+    monkeypatch.setattr(rt, "cmd_compare", lambda **_kwargs: None)
+    monkeypatch.setattr(rt, "cmd_quarantine_missing", lambda **_kwargs: 0)
+    monkeypatch.setattr(rt, "cmd_sync", lambda **_kwargs: None)
+    stages = []
+    monkeypatch.setattr(rt, "classify_registry", lambda: stages.append("classify"))
+    materialize = rt._materialize_local_bindings
+
+    def record_materialization(current_inventory: rt.RegistryInventory) -> int:
+        stages.append("materialize")
+        return materialize(current_inventory)
+
+    monkeypatch.setattr(rt, "_materialize_local_bindings", record_materialization)
+    monkeypatch.setattr(rt, "cmd_sync_templates", lambda **_kwargs: None)
+    monkeypatch.setattr(rt, "assemble_prompts", lambda **_kwargs: None)
+    monkeypatch.setattr(rt, "cmd_patch_glm_configs", lambda **_kwargs: None)
+    monkeypatch.setattr(rt, "validate_prompts", lambda: None)
+    monkeypatch.setattr(rt, "cmd_validate", lambda **_kwargs: {"gguf_header_drift": []})
+
+    rt.cmd_pipeline("full")
+
+    saved_local = rt.load_registry(registry_path)[registry_key]["local"]
+    assert stages.index("classify") < stages.index("materialize")
+    assert saved_local["model_path"] == str(main_path)
+    assert saved_local["config_path"] == str(config_path)
+    assert saved_local["config_scope"] == "gguf"
+    assert saved_local["llama_cpp"]["speculative"] == {
+        "type": "mtp",
+        "mode": "integrated",
+        "draft_n_max": 4,
+        "draft_n_min": 0,
+        "draft_p_min": 0.0,
     }
 
 

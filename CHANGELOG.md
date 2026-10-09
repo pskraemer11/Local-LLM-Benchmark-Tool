@@ -2,11 +2,35 @@
 
 Zentrales Änderungslog für das Local-LLM-Benchmark-Tool. Neueste Einträge zuerst.
 
+## Fuzzy-GGUF-Auflösung mit unabhängiger Größenprüfung (09.10.2026)
+
+- **RESOLVER:** llama.cpp-Preset und Argument-Manifest versuchen nach exakter Pfad-/Identitätsauflösung einen eng begrenzten Namensfallback: gleicher Publisher, konkreter GGUF-Pfad aus `lms ls --json`, hohe normalisierte Namensähnlichkeit, passende physische/Registry-Quantisierung und exakte Dateigröße gegen alle verfügbaren LMS-/Registry-Größen. Fehlende Evidenz und Mehrdeutigkeit bleiben ungelöst.
+- **IDENTITÄT:** Bucoid-Registry-Key auf die vom Nutzer bestätigte Quantisierung `iq4_xs` korrigiert. Speculative-Policy für Bucoid und den kanonischen Jrell-Key deaktiviert; das alte Jrell-MTP-Profil entfernt. Vor den lokalen Registry-Änderungen wurden Backups angelegt.
+- **ALIAS:** Zwei Jrell-Registry-Keys verwiesen auf dasselbe lokale GGUF, mit `context_length` 16.384 bzw. 49.152. Auf Nutzerentscheidung blieb der 49.152-Key kanonisch; der 16.384-Alias wurde entfernt. Die Qwen3.8-Hints-Doku folgt dem kanonischen Key.
+- **LIVE-VERIFY:** Preset-Export mit aktuellem `lms ls --json`: 58 Modelle erzeugt, keine übersprungenen Registry-Einträge; Bucoid und kanonischer Jrell-Key erscheinen. Lokale Validierung: 1 unabhängiger `local_binding_missing`-Blocker bei Qwythos und 11 Hinweise; keine Jrell-Config-Warnung mehr. Die fuzzy Zuordnung bleibt auf Preset-/Argument-Exporte begrenzt.
+- **TESTS:** Positiver Export der Bucoid-/Jrell-Namensvarianten sowie Größen-/Quant-Abweichungen und mehrdeutige LMS-Zeilen regressionsgetestet. Vollsuite: 1.667 Tests bestanden; Ruff für `src/registry_tool.py` und fokussiertes mypy bestanden.
+- **COMPACTION:** Entscheidungs- und Folgekontext append-only in [COMPACTIONS.md](COMPACTIONS.md), Block 09.10.2026 / 01:02.
+
+## Registry-Folgearbeiten: Prompt-Schreibgrenze und Duplikatvorschau (08.10.2026)
+
+- **WRITE-BOUNDARY:** `full` synchronisiert keine Prompt-Templates und schreibt standardmäßig keine LM-Studio-Config-JSONs. `full --write-prompts` ist auf `llm.prediction.systemPrompt` beschränkt; ein fokussierter Regressionstest bestätigt, dass alle anderen Config-Felder erhalten bleiben.
+- **DEDUPE:** Neues `registry_tool.py dedupe` mit schreibgeschützter Vorschau und explizitem `--apply`; derselbe lesbare physische GGUF-Pfad und dessen Publisher-/Modell-/Quant-Identität bestimmen Aliasgruppen. Konflikte erfordern `--keep`; gleiche publisherlose Namen auf unterschiedlichen GGUF-Dateien bleiben getrennt.
+- **LIVE-VERIFY:** `full` mit dem aktuellen Live-Inventar (53 benchmarkbare Modelle, 114 Configs, 56 GGUFs) abgeschlossen; `sync-from-configs` meldete sieben Vorschläge und schrieb null Config-Werte. Die Full-Validierung meldete 0 Blocker und 12 Hinweise, `local_binding_missing: 0`; die Validierung unmittelbar nach Dedupe 0 Blocker und 10 Hinweise. Bei der späteren Abschlussprüfung meldete die inzwischen geänderte LM-Studio-Config `numExperts=16` statt des getesteten Registry-Werts 24 (1 Blocker `config_experts_drift`) sowie als Hinweis `contextLength=131072` statt 18432. Es wurde nichts importiert oder in die Config geschrieben.
+- **DEDUPE:** Codestral mit `context_length`-Konflikt und Qwen3-14B mit `context_length`, `k_cache` und `v_cache`-Konflikten bereinigt. Auf Nutzerfreigabe blieben die physischen `lmstudio-community`-Keys mit ihren bisherigen Policy-Werten erhalten; zwei Alias-Keys wurden entfernt und ein Registry-Backup angelegt. `unsloth` und `byteshape` Qwen3.8 IQ3_S bleiben wegen unterschiedlicher GGUF-Dateien getrennt; publisherlose Mehrdeutigkeiten sanken von 3 auf 1.
+- **TESTS:** Die Erwartung für Gemma-4 12B wurde an das aktuelle Template angepasst, das `enable_thinking` unterstützt. Dedizierte Dedupe-Regressionen decken Vorschau, Konfliktfreigabe, Merge, unterschiedliche Dateien und atomaren Abbruch bei unbewiesener Evidenz ab. Die vollständige Suite mit 1.662 Tests, Ruff für Registry-CLI und Dedupe-Tests sowie der fokussierte mypy-Scope bestanden.
+- **COMPACTION:** Sitzungsentscheidungen, Verifikationsstand und nächste Schritte stehen append-only in [COMPACTIONS.md](COMPACTIONS.md), Block 08.10.2026 / 20:59.
+
 ## Gemma-4-Templates und gemischte Quantisierung (07.10.2026)
 
 - **TEMPLATE:** Offizielle Gemma-4-Templates für 12B, 26B A4B und 31B abgeglichen; 31B nutzt die gemeinsame kanonische 26B-A4B-Vorlage. `sync-templates` kann auf Registry-Keys begrenzt und per `--dry-run` geprüft werden; unbekannte Keys enden mit Fehlercode 2. Vier fehlende Config-Templates wurden ergänzt, vorhandene Werte blieben unverändert.
 - **IDENTITÄT:** `@?` bleibt für das YMQ-M-TI-Modell erhalten und wird nur mit `quantization_status: mix` als gültige gemischte Layer-Quantisierung akzeptiert. NVFP4/MXFP4 werden aus Dateinamen erkannt. Mellum2 MXFP4 erhält den vom Nutzer bestätigten getesteten Wert `experts: 18`.
 - **PRÜFUNG:** Pre-Review-Gate bestanden: `validate --ci` ohne Blocker, Ruff 0, mypy 0, 1.649 Tests bestanden, GGUF-Abgleich 52 Einträge ohne Abweichung. Die vollständige lokale Validierung hat weiterhin vier Blocker aus fehlenden/unbewiesenen GGUF-/Companion-Bindungen. Die drei Spekulationsprofile bleiben auf Nutzerwunsch aktiv; keine Sidecars wurden heruntergeladen und keine Inferenz ausgeführt.
+
+## Full-Sync lokale GGUF/Config-Bindungen (08.10.2026)
+
+- **SYNC:** Der `full`-Ablauf materialisiert eindeutige lokale GGUF-/JSON-Paare nach Klassifikation und Config-Sync erneut; `local_binding_missing` blockiert Validierung, wenn ein eindeutiger Pair-Link noch nicht in der Registry steht.
+- **MTP:** `llama_cpp.speculative` erhält `type: mtp`, `mode: integrated` automatisch aus validiertem NextN-Haupt-GGUF, wenn keine explizite MTP-/Draft-Auswahl vorliegt.
+- **LIVE-SYNC:** Der bestätigte `full`-Lauf materialisierte sieben eindeutige Config-Bindungen, ergänzte sechs integrierte MTP-Profile und füllte zwei fehlende Prompt-Templates. `local_binding_missing` sank auf 0; der Lauf endete dennoch mit Exit 1 wegen 12 übriger lokaler Datei-/Companion-/Experten-Verträge. Drei installierte Modelle wurden von der bestehenden Auto-Add-Stufe ergänzt; LM-Studio-Expertenwerte blieben im Melde-Modus unverändert.
 
 ## Registry-Folgereview, R13 und Typechecks korrigiert (29.09.2026)
 
