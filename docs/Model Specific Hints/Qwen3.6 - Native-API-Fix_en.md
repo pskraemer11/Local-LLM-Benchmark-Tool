@@ -1,5 +1,9 @@
 # Qwen3.6 / REAP: Native-API-Fix (Stop-Tokens + Reasoning)
 
+Anmerkung aus: https://github.com/ruwwww/ninfer-5060ti
+"The Qwen3.6 rows used temperature 0.6 and presence penalty 1.0; the Qwen3.8 rows used temperature 1.0 and presence penalty 0.0."
+
+
 ## Current Registry and Blueprint Review (2026-09-20)
 
 The earlier API-fix description remains relevant, but it is no longer the complete Qwen3.6 model-family documentation. Qwen3.6 models are classified in the Registry as the `qwen35` or `qwen35moe` architecture families, depending on whether the downloaded variant is dense/MTP or MoE/REAP. They use the `reasoning_coding` blueprint and are treated as dual-mode reasoning models rather than as permanently non-thinking instruct models.

@@ -17,6 +17,14 @@ function Stop-Hook([string]$Message) {
     exit 1
 }
 
+# Git supplies ref updates on stdin. Preserve them for the history-aware check.
+$pushInput = [Console]::In.ReadToEnd()
+$pushInputBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($pushInput))
+& python (Join-Path $repoRoot "src\privacy_gate.py") "pre-push" "--input-base64" $pushInputBase64
+if ($LASTEXITCODE -ne 0) {
+    Stop-Hook "Privacy-Pruefung fuer ausgehende Commits ist fehlgeschlagen."
+}
+
 $gate = Join-Path $repoRoot "pre_review_checks.ps1"
 if (-not (Test-Path -LiteralPath $gate)) {
     Stop-Hook "pre_review_checks.ps1 fehlt."

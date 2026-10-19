@@ -29,6 +29,9 @@ function Invoke-Checked([string]$FilePath, [string[]]$Arguments) {
     }
 }
 
+# Check identities and staged content before any commit gate can pass.
+Invoke-Checked "python" @((Join-Path $repoRoot "src\privacy_gate.py"), "pre-commit")
+
 $staged = @(git diff --cached --name-only --diff-filter=ACMR)
 if ($LASTEXITCODE -ne 0) {
     Stop-Hook "Staged-Dateien konnten nicht ermittelt werden."

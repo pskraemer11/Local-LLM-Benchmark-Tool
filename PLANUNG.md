@@ -628,7 +628,7 @@ Version: 0.4.1-dev, build 11081, commit 161755f29
 ```
 
 Der Pfad muss über `LLAMA_CPP_SERVER_EXE` überschreibbar sein. Der Standard-
-API-Port des direkten Providers ist `http://127.0.0.1:8080/v1`; auch dieser
+API-Port des direkten Providers ist `http://localhost:8080/v1`; auch dieser
 Wert muss konfigurierbar bleiben.
 
 ##### Verifikationsergebnisse 22.09.2026
@@ -1065,3 +1065,289 @@ bleibt bis zur fachlichen Abnahme pausiert.
   Stand; Git-Hooks werden bei Commit und Push ausgeführt.
 
 GPU-, Lade- und Generierungsläufe bleiben gemäß Benutzerentscheidung ausgeschlossen.
+
+## Prompt-, Modell- und Sampling-Empfehlungen (Review 19.10.2026)
+
+Status: Empfehlungen aus einer statischen Sichtung von Runner, Task-YAMLs und
+Blueprints. Dieser Abschnitt ändert noch keine Laufzeitkonfiguration und enthält
+keine gemessenen Qualitäts-, Kosten- oder Latenzergebnisse. Zahlen zu
+Geschwindigkeit und Modellwahl sind Hypothesen für den unten beschriebenen
+Vergleich. Die historische DS1000/Qwen-Beobachtung bleibt ein technischer
+Einzelfall und keine Qualitätsbaseline.
+
+### 1. Task-YAML-Sampling bei LM-Eval erhalten
+
+`lm_eval_tasks/minerva_math500/minerva_math500.yaml` und
+`lm_eval_tasks/hellaswag_gen.yaml` setzen `do_sample: false` und
+`temperature: 0.0`. Der Runner baut aber aus `evaluation_parameters` ein
+`--gen_kwargs`; überlappende Werte wie `temperature` überschreiben damit die
+Task-`generation_kwargs`. `do_sample` wird in der aktuellen Liste der
+übernommenen Requestparameter nicht geführt. Die effektive Kombination aus
+Task-YAML, Kategorieprofil und Backend muss deshalb im Requestmanifest
+ausgewiesen werden; aus der statischen Überschreibung der Temperatur allein
+folgt noch kein gemessener Zufallslauf.
+
+Belegstellen: `src/benchmark_config.py:126-161`,
+`src/run_benchmarks.py:1572-1589`,
+`lm_eval_tasks/minerva_math500/minerva_math500.yaml:10-14` und
+`lm_eval_tasks/hellaswag_gen.yaml:18-23`.
+
+Empfehlung:
+
+1. Die effektiven Parameter in einem Laufmanifest ausweisen und nicht nur die
+   Werte aus Registry, Kategorie oder YAML dokumentieren.
+2. Eine klare Priorität festlegen: explizite, benchmarkrelevante
+   Taskvorgaben (zum Beispiel deterministische Multiple-Choice-Aufgaben)
+   bleiben maßgeblich; Modell- und Kategorieprofile ergänzen nur nicht
+   festgelegte Parameter.
+3. Falls ein konkretes Reasoning-Modell eine abweichende Samplingregel
+   benötigt, diese als ausdrücklich benannte Kompatibilitätsvariante führen
+   und nicht stillschweigend mit dem deterministischen Tasklauf vermischen.
+4. Die gespeicherte Ergebniszeile muss das tatsächlich gesendete
+   `temperature`, `top_p`, `do_sample`, Tokenlimit und Thinking-Profil
+   enthalten.
+
+Bei der vorangegangenen statischen Sichtung der lokalen Registry waren von
+67 Einträgen 57 Samplingprofile ungeklärt und bei 10 Einträgen kein
+Samplingstatus angegeben. Diese Momentaufnahme ist vor einer Evaluation gegen
+die dann aktive `data/model_registry.yaml` zu erneuern. Unbelegte Samplingwerte
+sollen offen bleiben, statt durch scheinbar präzise Zahlen ersetzt zu werden.
+
+### 2. Reasoning und Ausgabelimits nach Aufgabe und Modell wählen
+
+Die Kategorie-Defaults in `src/benchmark_config.py` setzen derzeit Coding auf
+`temperature=0.2`, `top_p=1.0`, `max_tokens=4096`, Math auf `0.7/0.95`,
+Knowledge auf `0.6/1.0` und Agentic auf `0.6/0.95`. Im globalen
+`--thinking`-Lauf greift stattdessen ein pauschales Thinking-Profil mit
+`temperature=0.6`, `top_p=0.95` und `max_tokens=8192`. Ein einziger Schalter
+und ein gemeinsames Profil können einfache Auswahlaufgaben unnötig verlangsamen
+und zugleich anspruchsvollen Aufgaben ein ungeeignetes Ausgabe- oder
+Reasoningbudget geben.
+
+Belegstellen: `src/benchmark_config.py:126-161` und die Zusammenstellung der
+effektiven Kategorie-/Thinkingparameter in `src/benchmark_config.py:500-530`.
+
+Empfehlung:
+
+- Thinking für konkrete Modell-/Aufgabenprofile aktivieren, nicht allein
+  anhand eines globalen Laufschalters. Die Profile müssen die nachweislich
+  unterstützten Parameter des jeweiligen Modells und Providers nennen.
+- `max_tokens` als Grenze der erzeugten Ausgabe passend zur erwarteten Antwort
+  wählen. Ein separates `max_thinking_tokens`- oder
+  `reasoning_effort`-Feld nur verwenden, wenn der betreffende Backendpfad es
+  unterstützt und im effektiven Request bestätigt.
+- Für einfache Klassifikation und kurze, automatisch ausgewertete Antworten
+  zuerst ein kleines Instruct-Profil mit kurzem Ausgabeformat prüfen.
+  Zusätzliches Reasoning ist erst gerechtfertigt, wenn der gepaarte Test einen
+  Qualitätsgewinn zeigt, der die längere Laufzeit und Tokenzahl trägt.
+- Bei mehrstufiger Mathematik, schwierigem Code und Tool-Planung ein stärkeres
+  Reasoningprofil als Challenger aufnehmen. Das sichtbare Ausgabeformat soll
+  dabei weiterhin knapp und maschinenlesbar bleiben; keine Aufgabe soll
+  sichtbare Gedankengänge anfordern.
+- Bei OpenAI-API-Vergleichen `reasoning.effort` und `text.verbosity` getrennt
+  behandeln. Diese API-Felder sind nicht automatisch auf llama.cpp- oder
+  LM-Studio-Requests übertragbar. Auch bei OpenAI muss das konkrete Modell die
+  gewählte Einstellung unterstützen.
+
+Die alte DS1000/Qwen-Notiz in diesem Dokument berichtet, dass ein Lauf das
+Ausgabelimit mit Reasoning-Ausgabe erreichen konnte, ohne brauchbaren finalen
+Code zu liefern. Das belegt ein Budget-/Harness-Risiko für diesen Lauf, aber
+weder einen allgemeinen Qwen-Fehler noch einen Qualitätsvergleich.
+
+### 3. Ausgabeformat und Aufgabenvertrag in Prompts eindeutig machen
+
+In `src/custom_benchmark.py` verlangt der CoderEval-Grundprompt Code ohne
+Zusatztext. Der Thinking-Zusatz fordert dagegen einen Python-Codeblock. Der
+Parser kann gefenceten Code extrahieren; es ist daher eine unnötige
+Ausgabeform-Mehrdeutigkeit, aber kein belegter Scorefehler. Beim DS1000-Prompt
+wird außerdem ein Funktionsname angefügt, sobald `entry_point` gesetzt ist.
+Die Instruktion sollte dem tatsächlichen Einfügepunkt und der erwarteten
+Aufgabenform folgen.
+
+Belegstellen: `src/custom_benchmark.py:1186-1206` für die Codeextraktion und
+`src/custom_benchmark.py:1974-2002` für den Thinking-Zusatz sowie die beiden
+Promptbuilder.
+
+#### Konkrete Rewrite-Beispiele
+
+**CoderEval – bisherige zusammengesetzte Anweisung:**
+
+````text
+Complete the following Python function. Output only the function code, no additional text.
+...
+IMPORTANT: You may reason during your thinking phase, but your FINAL answer must contain ONLY the complete Python code inside a single ```python code block. No explanations, no prose, no commentary.
+````
+
+**Vorschlag:**
+
+````text
+Complete the Python function below.
+Return exactly one Python code block containing the complete function, including its required signature. Put no explanation or other text outside the block. Preserve the task's required interface and use the provided context and tests as constraints.
+
+Required function name: {entry_point}
+
+Task:
+{prompt}
+````
+
+`Required function name` nur ausgeben, wenn der Task einen `entry_point`
+mitliefert. Die einzelne klare Formatregel ersetzt die bisherige Kombination
+aus „nur Code“ und einer später ergänzten Fence-Regel.
+
+**DS1000 – bisherige Anweisung:**
+
+````text
+Complete the following Python code. Only output the code, no additional text.
+Return the missing solution, do not repeat the provided imports or input setup, and define the output variable(s) requested by the task.
+...
+Create the function `{entry_point}`.
+````
+
+**Vorschlag:**
+
+````text
+Solve the task using the supplied code context.
+Return exactly one Python code block containing only the missing solution code. Put no explanation outside the block. Reuse the provided imports, setup, and variables; do not repeat them. Produce the outputs and interface requested by the task. Define `{entry_point}` only when the task's expected interface requires that function; otherwise return the statements or variables the task requests.
+
+Task:
+{prompt}
+````
+
+Der Harness bleibt maßgeblich für die konkrete Schnittstelle: der Rewrite
+verlangt nicht pauschal eine neue Funktion, wenn der Task stattdessen eine
+Einfügelösung oder bestimmte Ergebnisvariable erwartet.
+
+Für Multiple-Choice-Aufgaben wie HellaSwag kann der bereits klare
+Antwortvertrag noch als strikte Parse-Regel formuliert werden:
+
+````text
+Choose the best ending. Return exactly one uppercase letter: A, B, C, or D.
+Do not include an explanation, punctuation, or any other text.
+````
+
+Taskdaten und Auswahloptionen bleiben unverändert; die Formulierung macht nur
+die maschinell erwartete Ausgabe unmissverständlich.
+
+### 4. Blueprint-Wirkung und plattformspezifische Hinweise trennen
+
+Die versionierten Prompts in `data/blueprint_definitions.yaml` werden in
+LM-Studio-Artefakte assembliert. Die Benchmarkrequests verwenden überwiegend
+die aufgabenspezifischen Prompts und Einstellungen direkt. Eine Änderung des
+Blueprints ist deshalb nicht automatisch eine Änderung der Benchmarkprompts
+oder ein Grund, eine Scoreänderung zu erwarten. Interaktive Blueprint- und
+Benchmarkpfade müssen getrennt beurteilt werden.
+
+Belegstellen: `src/assemble_blueprint.py:1-12` beschreibt die Erzeugung von
+LM-Studio-Systemprompts und Templates; die auffälligen Vorgaben stehen in
+`data/blueprint_definitions.yaml:247` und `data/blueprint_definitions.yaml:288-290`.
+
+- Bei `gptoss_reasoning_level` liefern `full`, `medium` und `minimal` derzeit
+  alle `Reasoning: medium`. Die Auswahlstufe reduziert das Reasoning also
+  nicht. Die Stufen erst nach einer modellgerechten Definition unterschiedlicher
+  Werte als Kosten-/Latenzregler behandeln.
+- Die Coding-Hinweise nennen unter Windows `sed` für globale Ersetzungen.
+  Durch PowerShell- oder Python-Beispiele ersetzen oder als shellabhängige
+  Alternative kennzeichnen.
+- Blueprint-Rewrites nicht in Taskprompts kopieren, wenn damit persistente
+  LM-Studio-Prompts und Benchmarkrequests unabsichtlich gekoppelt würden.
+  Beide Ausgabewege mit ihrem jeweils effektiven Prompt protokollieren.
+
+### 5. Modellwahl nach Aufgabenwert und gemessenem Aufwand abstufen
+
+Die folgenden Modell-IDs sind Kandidaten für den lokalen Vergleich, keine
+verifizierten Empfehlungen und keine gemessenen Gewinner. Verfügbarkeit,
+vollständige Quantisierungsidentität, Modellunterstützung und Toolfähigkeit
+müssen vor einem Lauf anhand der aktiven Registry und Backendmetadaten
+bestätigt werden.
+
+Die Benchmarkpolicy liegt in der lokalen `data/model_registry.yaml`; die
+vorgeschlagenen Kandidaten sind vor einem Lauf dort auf vollständige
+Identität und Profilstatus zu prüfen. Die aktuellen Registryzeilen sind
+maschinenlokal und damit keine versionierte Quellreferenz.
+
+- `ibm-granite/granite-4.0-h-tiny@q8_0`: kleines Instruct-Kontrollmodell für
+  kurze Coding- und Wissensaufgaben.
+- `unsloth/phi-4@q5_k_m`: Reasoning-Challenger für Mathematik und Aufgaben,
+  bei denen mehrere Denkschritte die Erfolgsrate beeinflussen können.
+- `unsloth/glm-4.7-flash@q3_k_s`: Agentic-Challenger erst nach bestätigter
+  Tool-Call-Kompatibilität des konkreten GGUF-/Serverpfads.
+
+Eine kleinere oder schnellere Variante dürfte bei einfachen
+Multiple-Choice-Aufgaben ausreichend sein; das ist eine zu messende
+Erwartung. Ein größeres Reasoningprofil lohnt sich bei Mathematik, komplexem
+Code oder Toolplanung nur dann, wenn es auf denselben Aufgaben die
+Harness-/Taskqualität ausreichend verbessert. Laufzeit, Input-/Outputtokens,
+Tokenrate und GPU-Speicherbedarf nebeneinander messen; keine Kosten- oder
+Latenzvorteile allein aus Modellnamen oder Quantisierung ableiten.
+
+OpenAI-Referenzen gelten nur für einen separaten OpenAI-API-Pfad und nicht als
+Beleg für lokale llama.cpp-Parameter:
+[Reasoning best practices](https://developers.openai.com/api/docs/guides/reasoning-best-practices),
+[model selection](https://developers.openai.com/api/docs/guides/model-selection),
+[model optimization](https://developers.openai.com/api/docs/guides/model-optimization).
+
+#### Task-by-task guidance (Empfehlungen je Aufgabe)
+
+| Aufgabe   | Prompt und effektive Einstellungen                                                                                         | Modellkandidat                              | Abwägung                                                                                               |
+| --------- | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Coding    | Signatur und fehlende Lösung benennen; `0.2/1.0`, bis `4096` Tokens als Ausgangsprofil; Thinking nur gezielt.              | Granite Tiny als Instruct-Kontrolle.        | Kleines Instruct-Modell als Kontrollpunkt; Latenz- und Tokenvorteil erst messen.                       |
+| Math      | MATH-500 verlangt `do_sample=false`, `temperature=0.0`; Taskvorgabe vor Kategorie-Override schützen.                       | Phi-4 als gesonderter Reasoning-Challenger. | Gleiche Samplingbedingungen für Scorevergleich; ein notwendiger Modellsonderfall separat kennzeichnen. |
+| Knowledge | Bei Multiple Choice genau `A`–`D`; HellaSwag-YAMLs deterministische Werte erhalten.                                        | Granite Tiny als Instruct-Kontrolle.        | Kurzes Format kann Tokens sparen; Mehrverbrauch durch Reasoning nur mit Qualitätsgewinn.               |
+| Agentic   | Toolschema, erlaubte Aktionen und finales Antwortformat präzisieren; Reasoning und Tokenbudget nur bei Support aktivieren. | GLM-4.7-Flash nach Tool-Call-Prüfung.       | Stärkeres Modell kann Planung verbessern; Qualitäts- und Laufzeitwirkung muss der Lauf zeigen.         |
+
+Die Temperatur-/Tokenprofile in dieser Tabelle sind Ausgangspunkte, keine
+unveränderlichen Modellvorgaben. Registrywerte, explizite Taskverträge und
+Backendunterstützung müssen gemeinsam in den effektiven Parametern sichtbar
+sein. Für ein Thinking-Modell keine Samplingregel aus einer anderen
+Modellfamilie übernehmen, ohne dessen dokumentierte Anforderungen zu prüfen.
+
+#### Vorschlag für die kleine Evaluation
+
+Vor einem größeren Referenzlauf eine gepaarte, lokale Screeningevaluation mit
+festen Aufgaben durchführen. Sie schätzt Qualitäts- und Laufzeitunterschiede;
+bei nur fünf Aufgaben pro Dataset ist sie keine belastbare allgemeine
+Qualitätsbaseline.
+
+Die vorhandenen Vergleichsmanifeste zeigen die Mechanik für stabile,
+gehashte Taskauswahl (`src/comparison_manifest.py:122-159` und
+`src/prepare_comparison_manifest.py:13-22`). Für den hier vorgeschlagenen
+Mix aus Coding, Math, Knowledge und Agentic ist ein eigenes, eingefrorenes
+Manifest nötig; die vorhandene Vier-Pipeline-Auswahl deckt MATH-500 und
+HellaSwag nicht ab. Die bisherigen technischen und historischen
+Scoreeinschränkungen sind in `PLANUNG.md:914-979` dokumentiert.
+
+1. Je fünf feste Aufgaben aus DS1000, CoderEval, MATH-500, HellaSwag und dem
+   Agentic-Dataset wählen (insgesamt 25 Taskinstanzen). IDs und Quelldateien
+   hashen und als separates Manifest einfrieren. Für die Agentic-Aufgaben
+   sicherstellen, dass Prompt, verfügbare Tools und Harness unverändert sind.
+2. Vier gepaarte Varianten mit identischen Inputs ausführen:
+   - **A – Baseline:** aktueller Modell-/Promptstand und die tatsächlich
+     effektiven Requestparameter.
+   - **B – Prompt:** Rewrite aus Abschnitt 3; Modell und effektive Parameter
+     ansonsten wie A.
+   - **C – Profile:** aktueller Prompt; Task-Sampling, Thinking- und
+     Ausgabelimit nach der Tabelle, mit aktuellem Modell.
+   - **D – Kandidat:** Rewrite und passendes Taskprofil zusammen mit dem
+     oben benannten Kandidatenmodell, soweit dessen Unterstützung bestätigt ist.
+3. Gleiche Aufgaben-IDs, Backendversion, Kontext, Seed und Harness verwenden.
+   Läufe auf der einzelnen lokalen GPU nacheinander statt gleichzeitig
+   ausführen. Effektive Parameter, vollständige Modell-ID samt Quantisierung,
+   Prompt-Hash, Paket-/Backendversion und Fehl-/Abbruchstatus je Anfrage
+   festhalten.
+4. Qualität je Dataset mit dem vorhandenen Harness messen (Passrate,
+   Exact-Match oder Tool-/Task-Erfolg); zusätzlich Input-/Outputtokens,
+   End-to-End-Latenz, Generierungstoken pro Sekunde und verfügbaren
+   GPU-Speicherverbrauch erfassen. Promptkosten lokal anhand der Tokenzahlen
+   vergleichen; daraus keine Geldkosten ableiten.
+5. Pro Aufgaben-ID A gegen B, C und D vergleichen. Fehler stichprobenartig
+   nach Promptverständnis, falschem Ausgabeformat, Reasoning ohne finale
+   Antwort, Harnessproblem und Modellfehler einordnen. Bei knappen oder
+   widersprüchlichen Ergebnissen das Sample vor einer Richtungsentscheidung
+   erweitern.
+
+**Erwarteter Umfang (Schätzung, nicht gemessen):** 25 Taskinstanzen × vier
+Varianten ergeben bis zu 100 Generierungen, falls alle Varianten und Modelle
+für jeden Task unterstützt werden. Nicht unterstützte Kombinationen werden
+als übersprungen dokumentiert. Die Evaluation verwendet lokale Inferenz; es
+werden keine bezahlten API-Aufrufe vorausgesetzt. Erst nach Freigabe der
+Evaluation und Bestätigung der aktiven Modelleinstellungen einen Lauf starten.

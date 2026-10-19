@@ -62,9 +62,9 @@ param (
 
 $ErrorActionPreference = "Stop"
 
-$projectPath = "C:\Users\pskra\Python-Projekte\Benchmarks"
-if (-not (Test-Path -LiteralPath $projectPath)) {
-    Write-Error "Projektverzeichnis nicht gefunden: $projectPath"
+$projectPath = (git -C $PSScriptRoot rev-parse --show-toplevel).Trim()
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $projectPath)) {
+    Write-Error "Projektverzeichnis konnte aus dem Git-Checkout nicht ermittelt werden."
     exit 1
 }
 Set-Location -LiteralPath $projectPath

@@ -2,17 +2,16 @@
 
 ## Project integration review (2026-09-21)
 
-`assemble_blueprint.py` selects the dedicated `gemma_assistant` or
-`gemma_reasoning` blueprint and resolves the size-specific Jinja template
-through `template_map`. The reasoning blueprint keeps thinking category-aware:
-coding and agentic runs disable thinking, while knowledge and math runs enable
-it. `benchmark_config.py` carries that policy into the API request through
-`chat_template_kwargs`; it does not blindly inherit a GUI budget for every
-benchmark category.
+`assemble_blueprint.py` selects the dedicated `gemma_assistant` or `gemma_reasoning` blueprint and resolves the 
+size-specific Jinja template through `template_map`. 
 
-The f16 K/V-cache requirement remains a registry/load-policy concern and is
-not replaced by prompt assembly. No GLM-4.7 streaming or structured-output
-exception is applied to Gemma-4.
+The reasoning blueprint keeps thinking category-aware: coding and agentic runs disable thinking, while knowledge and math runs enable it. 
+
+`benchmark_config.py` carries that policy into the API request through `chat_template_kwargs`; 
+it does not blindly inherit a GUI budget for every benchmark category.
+
+The 2-fold Q4_0, Q8_0 or F16 K/V-cache requirement remains a registry/load-policy concern and is not replaced by prompt assembly. 
+No GLM-4.7 streaming or structured-output exception is applied to Gemma-4.
 
 > Status: 2026-07-29
 > Sources: 8 documents from `docs/Model Specific Hints/`,
@@ -22,12 +21,12 @@ exception is applied to Gemma-4.
 ## Capabilities
 
 - **Reasoning:** All models in the family are designed as highly capable reasoners, with configurable
-                [thinking modes](https://ai.google.dev/gemma/docs/capabilities/thinking).
+        [thinking modes](https://ai.google.dev/gemma/docs/capabilities/thinking).
 - **Extended Multimodalities:** Processes Text, [Image](https://ai.google.dev/gemma/docs/capabilities/vision/image) with variable aspect ratio and resolution support (all models),
-                [Video](https://ai.google.dev/gemma/docs/capabilities/vision/video), and [Audio](https://ai.google.dev/gemma/docs/capabilities/audio) (featured natively on the E2B, E4B and 12B models).
+        [Video](https://ai.google.dev/gemma/docs/capabilities/vision/video), and [Audio](https://ai.google.dev/gemma/docs/capabilities/audio) (featured natively on the E2B, E4B and 12B models).
 - **Increased Context Window:** Small models feature a 128K context window, while the medium models support 256K.
 - **Enhanced Coding \& Agentic Capabilities:** Achieves notable improvements in coding benchmarks alongside built-in
-                [function-calling support](https://ai.google.dev/gemma/docs/capabilities/text/function-calling-gemma4), powering highly capable autonomous agents.
+        [function-calling support](https://ai.google.dev/gemma/docs/capabilities/text/function-calling-gemma4), powering highly capable autonomous agents.
 - **Native System Prompt Support:** Gemma 4 introduces built-in support for the system role, enabling more structured and controllable conversations.
 - **[Multi-Token Prediction] (https://ai.google.dev/gemma/docs/mtp/overview)**
 
@@ -50,19 +49,20 @@ All Gemma-4 IT models have `reasoning: thinking` and use `blueprint: gemma_reaso
 
 ---
 
-## 2. KV-Cache: NO Quantization (f16 mandatory)
+## 2. KV-Cache: NO or equal Quantization 
 
-**Rule:** For all Gemma-4 models, the KV-Cache MUST be set to `f16` – both K and V.
+**Rule:** For all Gemma-4 models, the KV-Cache MUST be set to 2-fold `Q4_0`, `Q8_0` or `F16` – both K and V mus be equal.
+            Mixed Quantisation will fail, and will fall back to 2-fold F16.
 
 - `k_cache: f16` (default would be `q8_0`)
 - `v_cache: f16` (default would be `iq4_nl`)
 
 **Reason:** Gemma-4 uses a special KV-Cache structure / attention mechanism that does not support quantized KV-Cache representation.
-                If the KV-Cache is quantized (e.g., `q8_0`), the model **will not load** or will produce incorrect results.
+            If the KV-Cache is quantized (e.g., `q8_0`), the model **will not load** or will produce incorrect results.
 
-**VRAM impact:** `f16` = 2 bytes/element (vs. `q8_0` = 1.0, `q4_0` = 0.5). The KV-Cache therefore theoretically uses two to four times as much VRAM as with quantized models.
-                The MoE architecture mitigates this somewhat. The "unified KV-Cache" setting in LMS (llama.cpp) can also help counteract this.
-                This is already taken into account in the rough calculation of `context_length` and `useUnifiedKvCache`.
+**VRAM impact:** `F16` = 2 bytes/element (vs. `q8_0` = 1.0, `q4_0` = 0.5). The KV-Cache therefore theoretically uses two to four times as much VRAM as with quantized models.
+            The MoE architecture mitigates this somewhat. The "unified KV-Cache" setting in LMS (llama.cpp) can also help counteract this.
+            This is already taken into account in the rough calculation of `context_length` and `useUnifiedKvCache`.
 
 All 9 Gemma-4 entries in `model_registry.yaml` correctly have `k_cache: f16` and `v_cache: f16` set.
 
@@ -87,6 +87,7 @@ The file `Gemma-4 - System Prompt Example (ungeprüft).txt` contains custom XML 
 ```
 
 **Assessment:** These tags are **not** part of the official Gemma-4 tokenizer vocabulary.
+
 They are registered neither as `sot_token`, `eot_token` nor as any other control tokens.
 The tags belong in the **Blueprint system** (`gemma_assistant`/`gemma_reasoning`) and are stored as **plain text in the LM Studio System Prompt Field**.
 
@@ -129,28 +130,21 @@ Compare "Technical Report Gemma-4" pdf by Google DeepMind, Appendix, page 17.
 
 ### 4.3 Current template source check (2026-10-07)
 
-The current official Google model repositories for Gemma-4 12B, 26B A4B, and
-31B expose the same full `chat_template.jinja` structure: conditional thinking,
-complete function schemas, multimodal content handling, tool-response pairing,
-and balanced turn endings. The versioned `google_gemma-4-12B-it-qat-q4_0-`
-and `google_gemma-4-26B-A4B-it_` template copies were compared with those
-official files and are current. The 31B blueprint uses the same canonical
-26B-A4B template because the official 31B template body is the same.
+The current official Google model repositories for Gemma-4 12B, 26B A4B, and 31B expose the same full `chat_template.jinja` structure: 
+conditional thinking, complete function schemas, multimodal content handling, tool-response pairing, and balanced turn endings. 
+The versioned `google_gemma-4-12B-it-qat-q4_0-` and `google_gemma-4-26B-A4B-it_` template copies were compared with those official files and are current. 
 
-The local LM Studio Hub files named `gemma4-*-template_minijinja.jinja` are
-shorter compatibility variants, not the canonical upstream templates. They
-omit parts of the full tool-schema and content handling. Registry-managed
-Gemma configs should therefore receive an explicit `llm.prediction.promptTemplate`
-from the Blueprint rather than relying on those local Hub fallbacks. The sync
-only fills missing/empty config fields; it preserves populated user values.
-On 2026-10-07, the targeted sync added the canonical template to four
-uniquely matched active Gemma configs. The existing 31B template was already
-populated and preserved; the uninstalled Google QAT Registry entry had no unique
-config and was left unchanged.
+The 31B blueprint uses the same canonical 26B-A4B template because the official 31B template body is the same.
 
-The LM Studio log records a stale-template compatibility warning for Gemma-4
-and tokenizer/EOG metadata warnings. Those are separate signals: the explicit
-Blueprint template addresses the request-format source, while the warning alone
+The local LM Studio Hub files named `gemma4-*-template_minijinja.jinja` are shorter compatibility variants, not the canonical upstream templates. 
+**They omit parts of the full tool-schema and content handling. 
+Registry-managed Gemma configs should therefore receive an explicit `llm.prediction.promptTemplate` from the Blueprint rather than relying on those local Hub fallbacks. 
+The sync only fills missing/empty config fields; it preserves populated user values.
+On 2026-10-07, the targeted sync added the canonical template to four uniquely matched active Gemma configs. 
+The existing 31B template was already populated and preserved; the uninstalled Google QAT Registry entry had no unique config and was left unchanged.
+
+The LM Studio log records a stale-template compatibility warning for Gemma-4 and tokenizer/EOG metadata warnings. 
+Those are separate signals: the explicit Blueprint template addresses the request-format source, while the warning alone
 does not prove why a particular response ended.
 
 ### 4.4 `enable_thinking` Control in the Template
@@ -165,6 +159,7 @@ The template controls thinking via:
 
 - If `enable_thinking` is set to `false`, **no** `<|think|>` token appears in the prompt.
 - When `enable_thinking=True`, `<|think|>` is inserted into the system turn.
+
 - **Known issue (07/11):** Some Gemma Config instances ignore `enable_thinking=False` – Workaround: System prompt override "Do NOT use thinking or reasoning. Answer directly without `<|channel>thought` tags."
 
 ---

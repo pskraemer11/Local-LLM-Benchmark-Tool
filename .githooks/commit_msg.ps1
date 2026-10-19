@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Validates commit message shape and prevents credentials in messages.
+    Validates commit message shape and prevents credentials or prohibited email domains.
 #>
 
 param (
@@ -9,6 +9,8 @@ param (
 )
 
 $ErrorActionPreference = "Stop"
+$repoRoot = (git rev-parse --show-toplevel).Trim()
+Set-Location -LiteralPath $repoRoot
 
 function Stop-Hook([string]$Message) {
     Write-Host "[COMMIT-MSG BLOCKED] $Message" -ForegroundColor Red
@@ -17,6 +19,11 @@ function Stop-Hook([string]$Message) {
 
 if (-not (Test-Path -LiteralPath $MessageFile)) {
     Stop-Hook "Commit-Message-Datei nicht gefunden."
+}
+
+& python (Join-Path $repoRoot "src\privacy_gate.py") "check-message" $MessageFile
+if ($LASTEXITCODE -ne 0) {
+    Stop-Hook "Commit-Message enthaelt eine verbotene E-Mail-Domain oder konnte nicht geprueft werden."
 }
 
 $lines = @(Get-Content -LiteralPath $MessageFile -Encoding utf8)

@@ -1,4 +1,6 @@
 # AGENTS.md - Kontext für Agenten – Benchmarks-Projekt
+Actual year: 2026
+Last change: 29th Sept 2026
 
 **Cover what matters**
  - Project overview
@@ -40,7 +42,8 @@
 - `src/` – Hauptcode (`run_benchmarks.py`, `custom_benchmark.py`, `registry_tool.py`, `assemble_blueprint.py`, `model_registry.py`, `local_model_resolver.py`, `src/providers/`, `evalplus_subset_eval.py`, …)
 - `tests/` – Pytest-Suite
 - `data/model_registry.yaml` – SSOT-Datenbank für Modellidentität, Benchmark-Policy und Runtime-Parameter (maschinenbezogen, gitignored)
-- `docs/` – Architektur-Doku, blueprint_definitions.yaml, Jinja-Chat-Templates/, Model Specific Hints/, Developer-Docs/
+- `data/blueprint_definitions.yaml` – versionierte Prompt-Blueprint-Policy; `data/model_registry.yaml` bleibt maschinenlokal
+- `docs/` – Architektur-Doku, Jinja-Chat-Templates/, Model Specific Hints/, Developer-Docs/
 - `PLANUNG.md` – zentrale Workflow- und Architekturplanung im Projektroot
 - lokale `run.*.yaml`-Run-Specs – Benchmark-Läufe außerhalb des versionierten Quellcodes
 - `ergebnisse/`, `Doku-intern/` – gitignored (Lauf-Ergebnisse, Terminal-Logs, Chatverlauf-Compactions)
@@ -60,7 +63,11 @@
 
 ## Git-Hooks und Sicherheitsgate
 - Der versionierte Hook-Pfad ist `.githooks/`; im lokalen Clone muss `git config core.hooksPath .githooks` gesetzt sein.
-- `pre-commit` prüft staged Dateien: Diff-Whitespace, sensible Dateitypen, hochwahrscheinliche Secret-Muster,
+- `pre-commit` prüft vor jedem Commit die konfigurierte Autor-/Committer-Identität sowie hinzugefügte staged Textzeilen auf konkrete Windows-Profilpfade (`C:\Users\<Profil>`) und E-Mail-Adressen mit den Domains `online.de`, `e-mail.de` oder `posteo.de`; Treffer dürfen keine Pfad-, E-Mail- oder Identitätswerte ausgeben.
+- `commit-msg` prüft Commit-Nachrichten zusätzlich auf dieselben verbotenen E-Mail-Domains.
+- `pre-push` prüft ausgehende Commit-Autor-/Committer-Metadaten und Nachrichten auf verbotene E-Mail-Domains sowie hinzugefügte Textzeilen auf Domains und konkrete Windows-Profilpfade; historische Commits werden nicht umgeschrieben.
+- GitHub Actions prüfen denselben Privacy-Vertrag für den jeweiligen Push- bzw. Pull-Request-Commitbereich.
+- `pre-commit` prüft staged Dateien außerdem auf Diff-Whitespace, sensible Dateitypen, hochwahrscheinliche Secret-Muster,
     Ruff, Python-Syntax, YAML/JSON und bei Registry-Änderungen `registry_tool.py validate --ci` sowie fokussierte Tests.
 - `commit-msg` verlangt eine nichtleere Conventional-Commit-Subject-Zeile (maximal 72 Zeichen);
     Merge-/Revert-Nachrichten bleiben erlaubt.

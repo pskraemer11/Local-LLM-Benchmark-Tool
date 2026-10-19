@@ -698,7 +698,7 @@ Common local API variables:
 
 ~~~powershell
 $env:LLM_PROVIDER = "lmstudio"
-$env:LMSTUDIO_API_BASE = "http://127.0.0.1:1234/v1"
+$env:LMSTUDIO_API_BASE = "http://localhost:1234/v1"
 ~~~
 
 For direct llama.cpp execution:
@@ -706,7 +706,7 @@ For direct llama.cpp execution:
 ~~~powershell
 $env:LLM_PROVIDER = "llama_cpp"
 $env:LLAMA_CPP_SERVER_EXE = "C:\Program Files\llama.cpp\llama-server.exe"
-$env:LLAMA_CPP_API_BASE = "http://127.0.0.1:8080/v1"
+$env:LLAMA_CPP_API_BASE = "http://localhost:8080/v1"
 ~~~
 
 The provider layer keeps model selection, load/unload, readiness checks, and

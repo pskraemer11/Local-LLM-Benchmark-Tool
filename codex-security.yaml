@@ -1,0 +1,28 @@
+# This file is trusted like CLI options. Keep it outside untrusted inputs.
+$schema: ./node_modules/@openai/codex-security/schemas/project-config.schema.json
+
+# Uncomment the settings you want to override. Defaults remain unpinned.
+# auth: auto
+# scan:
+#   mode: standard
+#   scope:
+#     paths: [src] # Relative to each selected repository.
+#   knowledge_base: [] # Paths relative to this file.
+#   instructions_file: instructions.md
+#   validation_file: validation.md # Standard mode only.
+#   deep: # Used when mode is deep.
+#     workers: 4
+#     subagents_per_worker: 3
+#     stop_after_no_new: 4
+#     stop_after_consecutive_errors: 3
+#     max_discovery_runs: 40
+#     max_time_hours: 96
+# codex:
+#   model: gpt-5.6-sol
+#   model_reasoning_effort: xhigh
+# limits:
+#   max_cost_usd_per_scan: 10 # Optional limit per scan attempt.
+# policy:
+#   fail_on_severity: high # Omitted by default (report only).
+# output:
+#   directory: ../scan-results # Outside the selected repositories.
