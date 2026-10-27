@@ -57,13 +57,15 @@ def test_neutral_registry_thinking_uses_profile_and_template_in_both_requests(mo
         "coding": {"temperature": 0.12, "top_p": 0.99},
         "thinking": {"temperature": 0.93, "top_p": 0.81},
     }}
+    # The Registry `sampling` block is research history; the runtime uses the
+    # fixed class policy (docs/Benchmark-Sampling-Policy_en.md).
     (tmp_path / "native.jinja").write_text(template, encoding="utf-8")
     monkeypatch.setattr(bc, "_load_quant_registry", lambda: {key: entry})
     monkeypatch.setattr(bc, "_lms_generation_config", lambda _key: {})
     monkeypatch.setattr(bc, "_blueprint_features", lambda _key: {"template": "native.jinja"})
     monkeypatch.setattr(bc, "_TEMPLATE_ROOT", tmp_path)
     config = bc.get_model_config(key, is_thinking_enabled=True)
-    assert (config["temperature"], config["top_p"], config["enable_thinking"]) == (0.93, 0.81, True)
+    assert (config["temperature"], config["top_p"], config["enable_thinking"]) == (0.6, 0.95, True)
     monkeypatch.setattr(rb, "IS_THINKING_ENABLED", True)
     lmeval = rb._get_evaluation_parameters(key, "coding")
     captured = {}

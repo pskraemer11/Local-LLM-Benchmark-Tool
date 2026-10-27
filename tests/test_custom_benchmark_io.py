@@ -244,36 +244,59 @@ class TestExecSandboxed:
         assert first_arg[1:4] == ["-I", "-B", "-X"]
 
 
-class TestThinkingCodeOnlyPrompts:
-    """Prompt-Härtung für Thinking-Modelle (Fix 2026-07-31)."""
+class TestCodeOutputContractPrompts:
+    """One clear output rule replaces the competing 'nur Code' plus fence rule.
 
-    def test_datascience_default_no_suffix(self):
+    Rewrite from the review of 19.10.2026: a single format rule, the real
+    insertion point of the task, and the expected task form. The former
+    thinking suffix produced a second, contradicting output contract.
+    """
+
+    def test_datascience_names_the_output_rule(self):
         p = cb._make_datascience_prompt("task", "entry")
-        assert "```python" not in p
-        assert p.startswith("Complete the following Python code.")
-        assert "do not repeat the provided imports or input setup" in p
-        assert "define the output variable(s) requested" in p
+        assert p.startswith("Solve the task using the supplied code context.")
+        assert "exactly one Python code block" in p
+        assert "do not repeat them" in p
+        assert p.rstrip().endswith("task")
 
-    def test_datascience_code_only_adds_suffix(self):
-        p = cb._make_datascience_prompt("task", "", code_only=True)
-        assert "```python" in p
-        assert "FINAL answer" in p
-        assert p.endswith("commentary.")
+    def test_datascience_does_not_demand_a_function_unconditionally(self):
+        p = cb._make_datascience_prompt("task", "entry")
+        assert "only when the task's expected interface requires" in p
+        assert "otherwise return the statements or variables" in p
 
-    def test_codereval_default_no_suffix(self):
+    def test_datascience_without_entry_point_omits_the_function_clause(self):
+        p = cb._make_datascience_prompt("task", "")
+        assert "only when the task's expected interface requires" not in p
+        assert "Define `" not in p
+
+    def test_datascience_code_only_does_not_add_a_second_rule(self):
+        with_rule = cb._make_datascience_prompt("task", "", code_only=True)
+        without_rule = cb._make_datascience_prompt("task", "", code_only=False)
+        assert with_rule == without_rule
+        assert "FINAL answer" not in with_rule
+        assert with_rule.count("exactly one Python code block") == 1
+
+    def test_codereval_names_the_required_function(self):
         p = cb._make_codereval_prompt("task", "fn")
-        assert "```python" not in p
-        assert "fn" in p
+        assert p.startswith("Complete the Python function below.")
+        assert "Required function name: fn" in p
+        assert "exactly one Python code block" in p
+        assert "including its required signature" in p
 
-    def test_codereval_code_only_adds_suffix(self):
-        p = cb._make_codereval_prompt("task", "fn", code_only=True)
-        assert "```python" in p
-        assert "FINAL answer" in p
+    def test_codereval_without_entry_point_omits_the_name_clause(self):
+        p = cb._make_codereval_prompt("task", "")
+        assert "Required function name" not in p
 
-    def test_entry_point_preserved_with_code_only(self):
+    def test_codereval_code_only_does_not_add_a_second_rule(self):
+        with_rule = cb._make_codereval_prompt("task", "fn", code_only=True)
+        without_rule = cb._make_codereval_prompt("task", "fn", code_only=False)
+        assert with_rule == without_rule
+        assert "FINAL answer" not in with_rule
+        assert with_rule.count("exactly one Python code block") == 1
+
+    def test_entry_point_precedes_the_task(self):
         p = cb._make_codereval_prompt("task", "my_fn", code_only=True)
-        assert "my_fn" in p
-        assert p.index("my_fn") < p.index("```python")
+        assert p.index("Required function name: my_fn") < p.index("Task:")
 
 
 class TestDS1000OutputDiagnostics:

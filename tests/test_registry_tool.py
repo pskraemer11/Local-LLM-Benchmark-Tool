@@ -810,7 +810,14 @@ def test_build_llama_argument_manifest_contains_runtime_and_provenance(
     assert model["model_path"] == str(gguf)
     assert "--model" in model["start_args"]
     assert "--ctx-size" in model["start_args"]
-    assert model["request_defaults"]["sampling"]["temperature"] == 0.7
+    # The request defaults carry the benchmark sampling policy; the Registry
+    # research block is history and does not drive the runtime.
+    assert model["request_defaults"]["sampling"] == {
+        "temperature": 0.6,
+        "top_p": 0.95,
+        "top_k": 20,
+        "min_p": 0.0,
+    }
     assert model["request_defaults"]["reasoning_format"] == "deepseek"
 
 

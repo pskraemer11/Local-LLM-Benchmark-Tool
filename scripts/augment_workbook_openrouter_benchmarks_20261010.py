@@ -4,12 +4,11 @@ import copy
 import json
 import os
 import urllib.request
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import openpyxl
 from openpyxl.styles import Alignment, Font, PatternFill
-
 
 WORKBOOK = Path.home() / "Documents" / "Computer+Handy" / "AI-Grundsatz_u_Prompting" / "Preise (Online)" / "Preisvergleich OpenCode Go+Zen, Marktplätze_Arbeitskopie_20261010.xlsx"
 
@@ -99,7 +98,7 @@ def main() -> None:
         for col in range(1, ws.max_column + 1):
             ws.cell(row, col).value = None
     notes = [
-        f"OpenRouter benchmark transport retrieved: {datetime.now(timezone.utc).isoformat()} UTC.",
+        f"OpenRouter benchmark transport retrieved: {datetime.now(UTC).isoformat()} UTC.",
         "Queries: /api/v1/benchmarks?source=artificial-analysis&task_type=intelligence|coding|agentic.",
         "The OR AA columns are transported Artificial Analysis evidence, not OpenRouter-native benchmarks; direct AA columns remain primary.",
         "Counts: " + ", ".join(f"{task}={meta['model_count']}" for task, (_, meta) in tasks.items()) + f"; exact display-name matches in this table={matched}.",

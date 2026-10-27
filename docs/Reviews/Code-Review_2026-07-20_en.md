@@ -240,7 +240,7 @@ Suitability for transfer to other environments.
 
 | Sub-characteristic | Rating | Finding                                                                             |
 | ------------------ | :----: | ----------------------------------------------------------------------------------- |
-| Adaptability       | 6/10   | Hardcoded `127.0.0.1:1234` and `C:\Users\pskra\.lmstudio` paths in hidden locations |
+| Adaptability       | 6/10   | Hardcoded `127.0.0.1:1234` and `$HOME\.lmstudio` paths in hidden locations |
 | Installability     | 9/10   | `pyproject.toml` + `requirements-dev.txt`, LM Studio installation guide             |
 | Conformance        | 7/10   | Python ≥3.11 enforced; OpenAI-compatible + LM Studio-specific                       |
 | Replaceability     | 7/10   | LM Studio only; no alternative runtime (vLLM, Ollama, TGI); but clear adapter layer |

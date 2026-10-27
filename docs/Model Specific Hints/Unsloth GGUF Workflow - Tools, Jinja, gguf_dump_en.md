@@ -8,18 +8,18 @@
 
 ## 1. gguf_dump.py — Stand
 
-**Verfügbar:** im venv `C:\Users\pskra\Python-Projekte\.venv` (Paket `gguf` **0.19.0**).
-Scripts-Ordner: `C:\Users\pskra\Python-Projekte\.venv\Lib\site-packages\gguf\scripts\`:
+**Verfügbar:** im venv `$HOME\Python-Projekte\.venv` (Paket `gguf` **0.19.0**).
+Scripts-Ordner: `$HOME\Python-Projekte\.venv\Lib\site-packages\gguf\scripts\`:
 `gguf_dump.py`, `gguf_convert_endian.py`, `gguf_editor_gui.py`, `gguf_hash.py`,
 `gguf_new_metadata.py`, `gguf_set_metadata.py`.
 
-**Hinweis:** Die System-Python (`C:\Users\pskra\AppData\Local\Programs\Python\Python312`)
+**Hinweis:** Die System-Python (`$HOME\AppData\Local\Programs\Python\Python312`)
 hat `gguf` **nicht** installiert — nur das venv des übergeordneten Projekts. `registry_tool.py`
 nutzt `from gguf import GGUFReader` (im venv-Pfad) für `_read_gguf_arch`.
 
 **Aufruf (Metadaten):**
 ```powershell
-& "C:\Users\pskra\Python-Projekte\.venv\Scripts\python.exe" `
+& "$HOME\Python-Projekte\.venv\Scripts\python.exe" `
   -m gguf.scripts.gguf_dump --no-tensors "<pfad>\modell.gguf"
 ```
 

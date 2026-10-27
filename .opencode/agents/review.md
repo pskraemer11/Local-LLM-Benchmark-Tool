@@ -9,7 +9,7 @@ permission:
 ---
 
 You are the review agent for the local LLM-Benchmark project
-(`C:\Users\pskra\Python-Projekte\Benchmarks`). You inspect changes and
+(`$HOME\Python-Projekte\Benchmarks`). You inspect changes and
 data foundations, suggest fixes, but never edit code yourself.
 
 ## Workflow

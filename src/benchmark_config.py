@@ -34,6 +34,12 @@ from runtime_policy import (
     resolve_reasoning,
     resolve_template,
 )
+from sampling_policy import (
+    BENCHMARK_REASONING_LEVEL,
+    BENCHMARK_REASONING_MAX_TOKENS,
+    BENCHMARK_REASONING_THINKING_TOKENS,
+    sampling_for_class,
+)
 from utils.terminal import warn
 
 _TEMPLATE_ROOT = Path(__file__).resolve().parents[1] / "docs" / "Jinja-Chat-Templates"
@@ -120,34 +126,20 @@ def is_registry_candidate(model: dict[str, Any]) -> bool:
 # GUI-only und werden fuer Benchmarks ignoriert. MODEL_TEMP_OVERRIDES und der Knowledge-Floor wurden entfernt
 # (Punkte 3+4, Transparenz-Refactor 05.08.2026).
 # Temperaturen: Recherche 06.08.2026 (docs/Temperature Recommondations_en.md).
-# Instruct-Modelle nutzen Kategorie-Defaults (coding 0.2, knowledge 0.6,
-# agentic 0.6, math 0.7); Reasoning/Thinking-Modelle (im --thinking-Lauf)
-# nutzen BENCHMARK_THINKING_DEFAULTS (pauschal 0.6/0.95).
+#
+# Die Werte sind seit 19.10.2026 durch die feste Klassen-Policy ersetzt
+# (docs/Benchmark-Sampling-Policy_en.md). Greedy Decoding (t=0) ist auf der
+# lokalen Hardware mit stark quantisierten Modellen ungeeignet: Qwen3 warnt
+# explizit vor "endless repetitions", DeepSeek-R1 empfiehlt 0.5-0.7. Die
+# per Modell recherchierte Registry-Policy bleibt als Recherche-Historie im
+# `sampling`-Block erhalten, steuert aber nicht mehr die Laufzeit.
 BENCHMARK_CATEGORY_DEFAULTS = {
-    "coding": {
-        "temperature": 0.2,
-        "top_p": 1.0,
+    category: {
+        **sampling_for_class(category),
         "max_tokens": 4096,
         "enable_thinking": False,
-    },
-    "math": {
-        "temperature": 0.7,
-        "top_p": 0.95,
-        "max_tokens": 4096,
-        "enable_thinking": False,
-    },
-    "knowledge": {
-        "temperature": 0.6,
-        "top_p": 1.0,
-        "max_tokens": 4096,
-        "enable_thinking": False,
-    },
-    "agentic": {
-        "temperature": 0.6,
-        "top_p": 0.95,
-        "max_tokens": 4096,
-        "enable_thinking": False,
-    },
+    }
+    for category in ("coding", "math", "knowledge", "agentic")
 }
 
 # ── Thinking-Defaults (Fallback im --thinking-Lauf) ──
@@ -155,10 +147,12 @@ BENCHMARK_CATEGORY_DEFAULTS = {
 # Kategorien (offizielle Thinking-Werte: DeepSeek-R1, Qwen3, Qwen3.6,
 # Nemotron-Cascade, Kimi-K2; "DO NOT use greedy"). top_p 1.0-Feld:
 # flat top_p 0.95 wie in der Recherche vorgeschlagen.
+# Das Antwort-Budget betraegt 4096 statt 8192 Token: Reasoning auf `medium`
+# begrenzt die Laufzeit, und ein niedrigeres Budget beendet beobachtete
+# Wiederholungsschleifen unter 4 Bit und bei REAP-Varianten frueher.
 BENCHMARK_THINKING_DEFAULTS = {
-    "temperature": 0.6,
-    "top_p": 0.95,
-    "max_tokens": 8192,
+    **sampling_for_class("coding", thinking=True),
+    "max_tokens": BENCHMARK_REASONING_MAX_TOKENS,
     "enable_thinking": True,
 }
 
@@ -172,8 +166,10 @@ BENCHMARK_THINKING_DEFAULTS = {
 #   1. LM-Studio-Engine-Config (registry_tool.py patch-reasoning-effort schreibt reasoningEffort/budgetTokens)
 #   2. System-Prompt des gptoss_reasoning-Blueprints (assemble_blueprint.py)
 # OpenAI: "The reasoning level can be set in the system prompts, e.g. 'Reasoning: high'."
-GPTOSS_REASONING_EFFORT = "medium"
-GPTOSS_REASONING_BUDGET = 4096
+# Der Wert kommt aus der Benchmark-Policy, damit Benchmarklauf und
+# LM-Studio-Config dieselbe Reasoning-Stufe verwenden.
+GPTOSS_REASONING_EFFORT = BENCHMARK_REASONING_LEVEL
+GPTOSS_REASONING_BUDGET = 2048
 
 # ── Quantization extraction from model key (canonical identity) ──
 # The quant is ALWAYS part of the key: publisher/model@quant.
@@ -493,6 +489,28 @@ def should_use_unified_kv_cache(model_name: str, model_size_gb: float) -> bool:
     return model_size_gb >= USE_UNIFIED_KV_CACHE_THRESHOLD_GB
 
 
+def _gguf_template_text(model_identifier: str, registry_entry: Any) -> str:
+    """Return the chat template of the local GGUF for one model.
+
+    The GGUF is the authoritative source. The versioned template copy under
+    ``docs/Jinja-Chat-Templates`` is a second, manually maintained
+    representation that drifts silently whenever the upstream model revision
+    changes its template.
+    """
+    local = registry_entry.get("local") if isinstance(registry_entry, dict) else None
+    model_path = local.get("model_path") if isinstance(local, dict) else None
+    if not model_path:
+        return ""
+    from local_model_resolver import LocalModelResolver, ModelResolutionError
+    from registry_tool import _read_gguf_chat_template
+
+    try:
+        candidate = LocalModelResolver(registry_loader=_load_quant_registry).resolve(model_identifier)
+        return _read_gguf_chat_template(candidate.path) or ""
+    except (ModelResolutionError, OSError, ValueError):
+        return ""
+
+
 def get_model_config(model_identifier: str, category: str = "coding", is_thinking_enabled: bool = False) -> ModelConfig:
     """Generations-Parameter fuer Benchmarks (Sampling-Design 2026-08-06).
 
@@ -519,20 +537,19 @@ def get_model_config(model_identifier: str, category: str = "coding", is_thinkin
     # statt der Kategorie-Defaults (Research 06.08.2026). Der Registry-Block
     # schlaegt auch hier (dokumentierte Ausnahmen: GPT-OSS 1.0/1.0,
     # Gemma-4 1.0/0.95, Nemotron-3-Reasoning 1.0/1.0, ...).
+    # The Registry `sampling` block keeps the per-model research history
+    # (values, provenance, sources) and stays visible, but it no longer
+    # decides the runtime parameters. The fixed class policy does
+    # (docs/Benchmark-Sampling-Policy_en.md): the per-model research only
+    # covered about 30 percent of the models with usable values, and greedy
+    # decoding is unsuitable for the local low-bit quantization.
     is_thinking_model = is_thinking_enabled and resolve_reasoning(registry_entry, model_identifier) == "thinking"
     if is_thinking_model:
         config: dict[str, Any] = dict(BENCHMARK_THINKING_DEFAULTS)
         source = "thinking-default"
-        cell = _sampling_cell(model_identifier, cat, prefer_thinking=True)
-        if cell:
-            config["temperature"], config["top_p"], source = cell
     else:
         config = dict(BENCHMARK_CATEGORY_DEFAULTS[cat])
-        cell = _sampling_cell(model_identifier, cat, prefer_thinking=False)
-        if cell:
-            config["temperature"], config["top_p"], source = cell
-        else:
-            source = "category-default"
+        source = "category-default"
     lms = _lms_generation_config(model_identifier)
     if lms:
         # Nur Nicht-Temperatur-Felder uebernehmen (Sampling-Design 2026-08-06).
@@ -540,21 +557,27 @@ def get_model_config(model_identifier: str, category: str = "coding", is_thinkin
         # Steuerung via Blueprint-Feld schlaegt die JSON-Config (Fix 15.08. -
         # Gemma-Configs mit budgetTokens=2048 haetten sonst Thinking in allen
         # Kategorien erzwungen, auch Coding).
-        for k in ("top_k", "min_p", "presence_penalty", "repetition_penalty", "enable_thinking", "reasoning_effort"):
+        # top_k/min_p belong to the sampling policy as well and are therefore
+        # not taken from the GUI artifact.
+        for k in ("presence_penalty", "repetition_penalty", "enable_thinking", "reasoning_effort"):
             if k in lms:
                 config[k] = lms[k]
-    # A web-researched Registry cell is more authoritative than one GUI
-    # profile.  This applies only to optional non-temperature fields; the
-    # Registry cell already owns temperature/top_p above.
-    for key, value in _registry_sampling_params(model_identifier, cat, prefer_thinking=is_thinking_model).items():
-        config[key] = value
     # A model classified as a Thinking model needs enough total completion
     # budget for reasoning plus its final answer, even when a benchmark
     # category intentionally disables the template's thinking switch. A
     # model-specific benchmark_runtime policy below remains the explicit
     # override.
     if registry_declares_thinking or is_thinking_model:
-        config["max_tokens"] = 8192
+        config["max_tokens"] = BENCHMARK_REASONING_MAX_TOKENS
+        # The reasoning level is a project-wide benchmark decision. A
+        # blueprint may not lower it, because the higher levels multiply the
+        # run time without improving the model comparison.
+        config["reasoning_strength"] = BENCHMARK_REASONING_LEVEL
+        # Templates that speak "reasoning_effort" instead of
+        # "reasoning_strength" need the same level under their own name. A
+        # proven model-specific value from the Registry or the GUI wins.
+        if config.get("reasoning_effort") is None:
+            config["reasoning_effort"] = BENCHMARK_REASONING_LEVEL
     # Blueprint-SSOT: stop_strings + reasoning_parsing aus blueprint_definitions.yaml
     # (Refactor 14.08. - Registry-`template:`-Feld ist veraltet).
     bp_features = _blueprint_features(model_identifier)
@@ -568,12 +591,19 @@ def get_model_config(model_identifier: str, category: str = "coding", is_thinkin
         # of LM Studio GUI fields. Keep it namespaced so callers choose the
         # relevant behavior explicitly.
         config["_benchmark_runtime"] = dict(runtime)
-        if runtime.get("reasoning_strength") in {"low", "medium", "high"}:
-            config["reasoning_strength"] = runtime["reasoning_strength"]
-        if isinstance(runtime.get("max_tokens"), int) and runtime["max_tokens"] > 0:
-            config["max_tokens"] = runtime["max_tokens"]
-        if isinstance(runtime.get("max_thinking_tokens"), int) and runtime["max_thinking_tokens"] > 0:
-            config["max_thinking_tokens"] = runtime["max_thinking_tokens"]
+        # The reasoning level and the response budget belong to the benchmark
+        # policy, not to the blueprint. A blueprint may still contribute a
+        # separate thinking budget for backends that split reasoning and
+        # answer into two channels.
+        if (
+            isinstance(runtime.get("max_thinking_tokens"), int)
+            and runtime["max_thinking_tokens"] > 0
+            and "max_thinking_tokens" not in config
+        ):
+            config["max_thinking_tokens"] = min(
+                runtime["max_thinking_tokens"],
+                BENCHMARK_REASONING_THINKING_TOKENS,
+            )
     # Kategorie-basierte Thinking-Steuerung aus dem Blueprint (SSOT, 15.08.):
     # ueberschreibt den LMS-Config-Wert (budgetTokens). Reihenfolge: zuerst die
     # Kategorie-Steuerung anwenden, damit das --thinking-Flag danach als Force
@@ -584,29 +614,25 @@ def get_model_config(model_identifier: str, category: str = "coding", is_thinkin
     # Thinking-Flag: force enable_thinking=True fuer Reasoning-Modelle (gewinnt)
     if is_thinking_model:
         config["enable_thinking"] = True
-    template_text = None
-    template_name = bp_features.get("template")
-    if template_name:
-        template_path = _TEMPLATE_ROOT / template_name
-        try:
-            template_text = template_path.read_text(encoding="utf-8")
-        except OSError:
-            # A missing selected template cannot prove a capability.
-            template_text = ""
-    else:
-        local = registry_entry.get("local") if isinstance(registry_entry, dict) else None
-        model_path = local.get("model_path") if isinstance(local, dict) else None
-        if model_path:
-            from local_model_resolver import LocalModelResolver, ModelResolutionError
-            from registry_tool import _read_gguf_chat_template
-
+    # The GGUF chat template is the authoritative source for the capabilities
+    # a model supports. The versioned copy under docs/Jinja-Chat-Templates is
+    # only a fallback for models without a local GGUF, because a stale copy
+    # would report capabilities the current upstream template no longer has.
+    template_text = _gguf_template_text(model_identifier, registry_entry)
+    if not template_text:
+        template_name = bp_features.get("template")
+        if template_name:
+            template_path = _TEMPLATE_ROOT / template_name
             try:
-                candidate = LocalModelResolver(registry_loader=_load_quant_registry).resolve(model_identifier)
-                template_text = _read_gguf_chat_template(candidate.path) or ""
-            except (ModelResolutionError, OSError, ValueError):
+                template_text = template_path.read_text(encoding="utf-8")
+            except OSError:
+                # A missing selected template cannot prove a capability.
                 template_text = ""
+    # An empty/missing template proves no capability by itself; keep the
+    # documented architecture fallback for that case. A non-empty template
+    # remains authoritative and may narrow the supported controls.
     config["_reasoning_template_controls"] = reasoning_template_controls(
-        registry_entry, model_identifier, template_text=template_text
+        registry_entry, model_identifier, template_text=template_text or None
     )
     config["_source"] = source
     return config

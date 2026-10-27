@@ -20,10 +20,12 @@ from typing import Any, cast
 from ruamel.yaml import YAML
 
 from artifact_bundle import validate_companion_binding
+from chat_template_cache import template_from_registry_entry
 from kv_cache_policy import normalize_kv_pair
 from model_identity import UniqueMatch, resolve_registry_match
 from providers.llama_cpp_args import normalize_cache_type
 from runtime_policy import resolve_context_length, resolve_template
+from sampling_policy import sampling_for_class
 from speculative import companion_role, llama_cpp_spec_type, normalize_speculative_profile, registry_speculative_policy
 
 RegistryLoader = Callable[[], dict[str, Any]]
@@ -120,9 +122,13 @@ class ResolvedRegistryEntry:
         reasoning = self.entry.get("reasoning")
         if isinstance(reasoning, str) and reasoning.strip():
             runtime["reasoning"] = reasoning.strip()
+        # The Registry `sampling` block is research history: values,
+        # provenance and sources. It stays visible under its own key but is
+        # not the runtime request default. The benchmark sampling policy
+        # (src/sampling_policy.py) provides the effective values.
         sampling = self.entry.get("sampling")
         if isinstance(sampling, dict) and sampling:
-            runtime["sampling"] = copy.deepcopy(sampling)
+            runtime["sampling_research"] = copy.deepcopy(sampling)
         quant = self.quant
         if quant:
             runtime["quant"] = quant
@@ -140,8 +146,19 @@ class ResolvedRegistryEntry:
             runtime["technical_boundary_issues"] = issues
         return runtime
 
-    def provider_runtime(self, provider_name: str, template_root: Path | None = None) -> dict[str, Any]:
-        """Return provider-specific runtime overrides derived from the registry."""
+    def provider_runtime(
+        self,
+        provider_name: str,
+        template_root: Path | None = None,
+        category: str | None = None,
+    ) -> dict[str, Any]:
+        """Return provider-specific runtime overrides derived from the registry.
+
+        ``category`` selects the benchmark class whose sampling values apply.
+        Without it the coding class is used, because the native llama.cpp
+        server is started once per model and its sampling defaults are a
+        server-level setting rather than a per-request one.
+        """
         provider = provider_name.strip().casefold().replace("-", "_")
         runtime = self.benchmark_runtime()
         explicit = self.entry.get(provider)
@@ -212,15 +229,45 @@ class ResolvedRegistryEntry:
             unified_kv = runtime.get("useUnifiedKvCache")
             if isinstance(unified_kv, bool):
                 overrides["kv_unified"] = unified_kv
+            # The GGUF chat template is the authoritative source. It is
+            # extracted into the machine-local cache and passed to the
+            # server, so a model revision cannot be shadowed by a stale
+            # versioned copy. An explicit file policy stays authoritative
+            # for models that deliberately use a patched template.
             if self.entry.get("template_policy") == "explicit_file":
                 template_name = resolve_template(self.entry, None)
                 if isinstance(template_name, str) and template_name.strip():
                     root = template_root or _DEFAULT_TEMPLATE_ROOT
                     overrides["chat_template_file"] = str(root / template_name.strip())
+            else:
+                from registry_tool import _read_gguf_chat_template
+
+                cached = template_from_registry_entry(
+                    self.entry,
+                    self.registry_key,
+                    read_gguf_template=_read_gguf_chat_template,
+                )
+                if cached is not None:
+                    overrides["chat_template_file"] = str(cached)
             # llama-server exposes these controls directly.  Keep them
             # provider-specific: they are not part of the LM Studio JSON
             # contract and must never be inferred from a GUI artifact.
             if provider == "llama_cpp":
+                # The native server applies its own sampling defaults
+                # (temp 0.80, top-k 40, top-p 0.95, min-p 0.05) unless the
+                # start command overrides them.  The benchmark policy has to
+                # reach the server explicitly, otherwise the class values
+                # never take effect on the direct llama.cpp path.
+                # The category may arrive through the explicit argument or
+                # through the runtime mapping itself, because the server is
+                # started before the benchmark loop knows the class.
+                runtime_category = category
+                if runtime_category is None:
+                    candidate = runtime.get("benchmark_category")
+                    if isinstance(candidate, str) and candidate.strip():
+                        runtime_category = candidate.strip()
+                overrides.update(sampling_for_class(runtime_category or "coding"))
+                overrides.pop("benchmark_category", None)
                 # An instruct model must not inherit llama.cpp's automatic
                 # reasoning-preservation parser.  Auto mode is appropriate
                 # for explicit thinking profiles, but Muse-/chat-template
@@ -390,10 +437,21 @@ class ModelRegistry:
         resolved = self.resolve(model_key)
         return resolved.benchmark_runtime() if resolved else {}
 
-    def provider_runtime(self, model_key: str, provider_name: str) -> dict[str, Any]:
+    def provider_runtime(
+        self,
+        model_key: str,
+        provider_name: str,
+        category: str | None = None,
+    ) -> dict[str, Any]:
         """Return provider-specific runtime overrides for one model key."""
         resolved = self.resolve(model_key)
-        return resolved.provider_runtime(provider_name, template_root=self._template_root) if resolved else {}
+        if not resolved:
+            return {}
+        return resolved.provider_runtime(
+            provider_name,
+            template_root=self._template_root,
+            category=category,
+        )
 
 
 def _main() -> None:

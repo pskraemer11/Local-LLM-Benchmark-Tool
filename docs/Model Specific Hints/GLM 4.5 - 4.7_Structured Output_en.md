@@ -472,11 +472,11 @@ print(f"Emotions: {result['emotions']}")
 
   # Extract contact information
   contact_text = """
-  Zhang San, mobile: 13800138000, email: zhangsan@example.com,
+  Example Person, mobile: [PHONE], email: [EMAIL],
   works as Technical Director at Beijing Technology Co., Ltd.
   Company address: No. 123, Technology Park, Chaoyang District, Beijing.
 
-  Li Si, phone: 010-12345678, work email: lisi@company.com,
+  Another Example Person, phone: [PHONE], work email: [EMAIL],
   is a Product Manager at Shanghai Innovation Company.
   """
 
@@ -1205,7 +1205,7 @@ All three requests returned HTTP 200:
 
 The corresponding request/response artifacts are in the ignored directory
 `ergebnisse/smoke-20260922`. The server evidence is in
-`C:\Users\pskra\.lmstudio\server-logs\2026-09\2026-09-22.1.log`. Older
+`$HOME\.lmstudio\server-logs\2026-09\2026-09-22.1.log`. Older
 entries in that rotated log contain failures for the unsupported
 `response_format: {"type":"json_object"}` shape. The new smoke requests did
 not reproduce those errors. Therefore the LM Studio benchmark path must keep

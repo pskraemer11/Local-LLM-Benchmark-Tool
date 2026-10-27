@@ -9,6 +9,7 @@ import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
+from urllib import request as urllib_request
 
 from benchmark_config import (
     guess_quant_from_filename,
@@ -781,9 +782,45 @@ class LMStudioProvider(HttpProvider):
         warn("Model readiness timeout")
         return False
 
+    def _server_state(self, timeout: int = 3) -> str:
+        """Classify why the LM Studio endpoint does not answer.
+
+        Returns ``"ready"``, ``"auth"`` when the endpoint demands a token,
+        or ``"unreachable"``. The distinction matters: an unauthorized
+        endpoint is a running server, while an unreachable one still needs
+        a start.
+        """
+        try:
+            request = urllib_request.Request(
+                f"{self.base_url.rstrip('/')}/models",
+                headers={**self.headers, "Accept": "application/json"},
+                method="GET",
+            )
+            with urllib_request.urlopen(request, timeout=timeout) as response:
+                status = getattr(response, "status", 200)
+                if 200 <= status < 300:
+                    return "ready"
+                return "unreachable"
+        except urllib_request.HTTPError as error:
+            if error.code in (401, 403):
+                return "auth"
+            return "unreachable"
+        except (urllib_request.URLError, OSError, TimeoutError):
+            return "unreachable"
+
     def ensure_server(self) -> bool:
-        if self.is_available(timeout=3):
+        state = self._server_state()
+        if state == "ready":
             return True
+        if state == "auth":
+            # The server runs but requires the LM Studio API token. Starting
+            # it again would not help; the caller has to provide the token.
+            warn(
+                "LM Studio-Server antwortet, verlangt aber Authentifizierung. "
+                "LMS_OpenAI_AUTH_TOKEN setzen oder die API-Authentifizierung "
+                "in LM Studio deaktivieren."
+            )
+            return False
         print("  [INFO] LM Studio-Server nicht erreichbar - versuche 'lms server start'...")
         try:
             result = self._subprocess_run(
@@ -795,9 +832,16 @@ class LMStudioProvider(HttpProvider):
                 errors="replace",
             )
             self._sleep(5)
-            if self.is_available(timeout=3):
+            state = self._server_state()
+            if state == "ready":
                 ok("LM Studio-Server gestartet via 'lms server start'")
                 return True
+            if state == "auth":
+                warn(
+                    "LM Studio-Server laeuft nach 'lms server start', verlangt aber "
+                    "Authentifizierung. LMS_OpenAI_AUTH_TOKEN setzen."
+                )
+                return False
             warn(f"'lms server start' brachte Server nicht hoch: {result.stderr.strip()[:120]}")
         except FileNotFoundError:
             warn("lms.exe nicht im PATH - versuche llmster.exe direkt")

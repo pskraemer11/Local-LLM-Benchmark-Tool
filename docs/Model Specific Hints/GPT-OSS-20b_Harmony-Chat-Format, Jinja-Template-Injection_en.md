@@ -84,7 +84,7 @@ is now only set for non-gpt-oss models.
 ## Verification
 ```bash
 # Check config JSON for template and prompt
-python -c "import json; d=json.load(open(r'C:\Users\pskra\.lmstudio\.internal\user-concrete-model-default-config\openai\gpt-oss-20b.json')); fields={f['key']: f['value'] for f in d['operation']['fields']}; print('Has template:', 'promptTemplate' in str(list(fields.keys()))); print('Prompt starts:', repr(fields['llm.prediction.systemPrompt'][:80]))"
+python -c "import json; d=json.load(open(r'$HOME\.lmstudio\.internal\user-concrete-model-default-config\openai\gpt-oss-20b.json')); fields={f['key']: f['value'] for f in d['operation']['fields']}; print('Has template:', 'promptTemplate' in str(list(fields.keys()))); print('Prompt starts:', repr(fields['llm.prediction.systemPrompt'][:80]))"
 
 # Template-Validierung (registry_tool.py)
 echo "14" | python registry_tool.py | grep template

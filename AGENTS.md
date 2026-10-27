@@ -40,7 +40,9 @@ Last change: 29th Sept 2026
 
 ## Repo-Struktur (Auszug)
 - `src/` – Hauptcode (`run_benchmarks.py`, `custom_benchmark.py`, `registry_tool.py`, `assemble_blueprint.py`, `model_registry.py`, `local_model_resolver.py`, `src/providers/`, `evalplus_subset_eval.py`, …)
-- `tests/` – Pytest-Suite
+- `tests/` – bestehende Pytest-Suite
+- `pytest/` – neue Pytest-Testquellen; `pytest/artifacts/` nur Laufartefakte
+- `pytest/artifacts/` – ignorierte, lokale Pytest-Temporär- und Laufdaten; keine Testquellen
 - `data/model_registry.yaml` – SSOT-Datenbank für Modellidentität, Benchmark-Policy und Runtime-Parameter (maschinenbezogen, gitignored)
 - `data/blueprint_definitions.yaml` – versionierte Prompt-Blueprint-Policy; `data/model_registry.yaml` bleibt maschinenlokal
 - `docs/` – Architektur-Doku, Jinja-Chat-Templates/, Model Specific Hints/, Developer-Docs/
@@ -55,6 +57,7 @@ Last change: 29th Sept 2026
   CHANGELOG = „was", Compaction = „warum/next". Nur per Write/Edit-Tool schreiben.
 
 - Lint/Typecheck: `ruff check` (config: `pyproject.toml`; ANN-Regeln aktiv).
+- Pytest-Artefakte gehören unter `pytest/artifacts/`; keine neuen `.pytest-*`-Ordner im Projektstamm anlegen.
 - Vor Commit: Ruff-Cleanliness für geänderte `src/`-Dateien sicherstellen.
 - `utils/` ist fremder Code und bleibt untracked.
 - Review: verwende `engineering:code-review` und das zentrale Review-Gate
@@ -71,7 +74,9 @@ Last change: 29th Sept 2026
     Ruff, Python-Syntax, YAML/JSON und bei Registry-Änderungen `registry_tool.py validate --ci` sowie fokussierte Tests.
 - `commit-msg` verlangt eine nichtleere Conventional-Commit-Subject-Zeile (maximal 72 Zeichen);
     Merge-/Revert-Nachrichten bleiben erlaubt.
-- `pre-push` führt `pre_review_checks.ps1` ohne Skip-Schalter und anschließend den fokussierten blockierenden mypy-Scope aus;
+- `pre-push` führt zuerst die vollständige pytest-Suite aus, danach `pre_review_checks.ps1`
+    mit `-SkipPytest` (keine doppelte Ausführung), `-NoArtifacts` und `-NoTranscript`
+    sowie anschließend den fokussierten blockierenden mypy-Scope;
     die dabei erzeugten Artefakte bleiben temporär, weil der Commit beim Pre-Push bereits erstellt ist.
 - `--no-verify` ist nur für dokumentierte Notfälle zulässig; die übersprungenen Prüfungen müssen vor dem Push manuell nachgeholt werden.
 - Die vollständige lokale Suite und GitHub Actions bleiben unabhängige zweite und dritte Schutzebenen;
@@ -85,3 +90,17 @@ Last change: 29th Sept 2026
 
 - Für technische Benchmarkdaten `data-analytics:validate-data`, `data-analytics:analyze-data-quality`, `data-analytics:visualize-data`, `data-analytics:jupyter-notebooks`, `data-analytics:metric-diagnostics` und `mcp__stats_compass` verwenden.
 - Für Reviews und Änderungen `engineering:code-review`, `engineering:debug`, `engineering:testing-strategy`, `codex-engineering-guardrails:code-verification` und `codex-security:security-diff-scan` berücksichtigen.
+
+## Tests
+
+Neue Tests liegen in Unterordnern unter `pytest/` und werden bei mehreren Bereichen nach Domäne gegliedert, zum Beispiel `pytest/unit/` oder `pytest/integration/`.
+Laufartefakte gehören ausschließlich nach `pytest/artifacts/`; dieser Pfad ist ignoriert.
+Kein `pytest/__init__.py` anlegen, damit das installierte Pytest-Paket nicht verdeckt wird.
+Verhaltensänderungen erhalten einen fokussierten Test oder einen deterministischen Smoke-Test mit Exitcode und beobachtbarem Ergebnis.
+Windows-Pfade, Prozessaufrufe und MCP-Protokolle werden gegen die reale Zielumgebung geprüft.
+
+## Sicherheit
+
+Keine API-Schlüssel, Tokens, Passwörter, personenbezogenen Daten oder konkreten Umgebungswerte in Dateien, Logs oder Tool-Ausgaben übernehmen.
+Geheimnisse ausschließlich aus Umgebungsvariablen lesen und maskieren.
+Vor Änderungen den Diff prüfen, fremde lokale Änderungen erhalten und wichtige Konfigurationen oder Dokumente vorher sichern.

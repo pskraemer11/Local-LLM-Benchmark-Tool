@@ -61,15 +61,15 @@ def _gpt_oss_test_entry() -> dict[str, Any]:
 class TestCategoryDefaults:
     def test_unknown_model_falls_back_to_category_defaults(self):
         cfg = get_model_config("unknown/never-heard-8b", category="coding")
-        assert cfg["temperature"] == 0.2
-        assert cfg["top_p"] == 1.0
+        assert cfg["temperature"] == 0.6
+        assert cfg["top_p"] == 0.95
         assert cfg["max_tokens"] == 4096
         assert cfg["_source"] == "category-default"
 
     def test_category_defaults_per_category(self):
         expected = {
-            "coding": (0.2, 1.0),
-            "knowledge": (0.6, 1.0),
+            "coding": (0.6, 0.95),
+            "knowledge": (0.6, 0.95),
             "agentic": (0.6, 0.95),
             "math": (0.7, 0.95),
         }
@@ -79,133 +79,75 @@ class TestCategoryDefaults:
 
     def test_invalid_category_falls_back_to_coding(self):
         cfg = get_model_config("unknown/never-heard-8b", category="bogus")
-        assert cfg["temperature"] == 0.2
+        assert cfg["temperature"] == 0.6
         assert cfg["_source"] == "category-default"
 
 
-class TestRegistryBackedSampling:
-    def test_qwen38_profiles_and_penalties(self):
-        normal = get_model_config("byteshape/qwen3.8-27b@iq4_xs", category="coding")
-        thinking = get_model_config("byteshape/qwen3.8-27b@iq4_xs", category="coding", is_thinking_enabled=True)
-        assert (normal["temperature"], normal["top_p"]) == (0.7, 0.8)
-        # Qwen dokumentiert fuer presence_penalty nur einen Bereich, keinen
-        # belastbaren Einzelwert; deshalb bleibt das optionale Feld offen.
-        assert "presence_penalty" not in normal
-        assert "repetition_penalty" not in normal
-        assert (thinking["temperature"], thinking["top_p"]) == (0.6, 0.95)
-        assert "presence_penalty" not in thinking
-        assert "repetition_penalty" not in thinking
+class TestRegistrySamplingIsHistoryNotRuntime:
+    """The Registry `sampling` block keeps the research history.
 
-    def test_granite_registry_block(self):
-        cfg = get_model_config("ibm-granite/granite-4.2-8b", category="coding")
-        assert (cfg["temperature"], cfg["top_p"]) == (1.0, 0.95)
-        assert cfg["_source"] == "registry-sampling"
+    Since 19.10.2026 the block stays readable and documented, but it no longer
+    decides the runtime parameters: the fixed class policy does
+    (docs/Benchmark-Sampling-Policy_en.md). The per-model research covered
+    about 30 percent of the models with usable values, and greedy decoding is
+    unsuitable for the local low-bit quantization.
+    """
 
-    def test_gpt_oss_registry_block(self, mocker):
+    def test_registry_block_does_not_override_the_class_policy(self):
+        # gemma-4-12b carries a researched 1.0/0.95 profile in the Registry.
+        # The runtime uses the class policy instead.
+        cfg = get_model_config("unsloth/gemma-4-12b-it-qat", category="coding")
+        assert (cfg["temperature"], cfg["top_p"]) == (0.6, 0.95)
+        assert cfg["_source"] == "category-default"
+
+    def test_registry_block_does_not_set_optional_sampling_fields(self):
+        # top_k and min_p belong to the class policy, not to the researched
+        # Registry block.
+        cfg = get_model_config("unsloth/gemma-4-12b-it-qat", category="coding")
+        assert cfg["top_k"] == 20
+        assert cfg["min_p"] == 0.0
+
+    def test_class_policy_applies_to_every_category(self):
+        expected = {
+            "coding": 0.6,
+            "math": 0.7,
+            "knowledge": 0.6,
+            "agentic": 0.6,
+        }
+        for category, temperature in expected.items():
+            cfg = get_model_config("unsloth/gemma-4-12b-it-qat", category=category)
+            assert cfg["temperature"] == temperature, category
+            assert cfg["_source"] == "category-default"
+
+    def test_registry_block_remains_readable_for_audit(self, mocker):
+        # The research history stays available in the Registry itself.
+        mocker.patch.object(
+            bc,
+            "_load_quant_registry",
+            return_value={
+                "unsloth/gemma-4-12b-it-qat": {
+                    "sampling": {"coding": {"temperature": 1.0, "top_p": 0.95}}
+                }
+            },
+        )
+        entry = bc._load_quant_registry().get("unsloth/gemma-4-12b-it-qat", {})
+        sampling = entry.get("sampling")
+        assert isinstance(sampling, dict)
+        assert sampling["coding"]["temperature"] == 1.0
+
+    def test_gpt_oss_registry_block_does_not_override_the_class_policy(self, mocker):
         registry = {"openai/gpt-oss-20b@mxfp4": _gpt_oss_test_entry()}
         mocker.patch.object(bc, "_load_quant_registry", return_value=registry)
         cfg = get_model_config("openai/gpt-oss-20b", category="math")
-        assert (cfg["temperature"], cfg["top_p"]) == (1.0, 1.0)
-        assert cfg["_source"] == "registry-sampling"
-
-    def test_per_category_row_glm_4_7(self, mocker):
-        expected = {
-            "coding": (0.7, 1.0),
-            "knowledge": (1.0, 0.95),
-            "agentic": (0.0, 0.95),
-            "math": (0.7, 1.0),
-        }
-        mocker.patch.object(bc, "_load_quant_registry", return_value={"unsloth/glm-4.7-flash@q3_k_s": {
-            "reasoning": "thinking", "sampling": {
-                "coding": {"temperature": 0.7, "top_p": 1.0},
-                "knowledge": {"temperature": 1.0, "top_p": 0.95},
-                "agentic": {"temperature": 0.0, "top_p": 0.95},
-                "math": {"temperature": 0.7, "top_p": 1.0},
-            },
-        }})
-        for cat, (temp, top_p) in expected.items():
-            cfg = get_model_config("unsloth/glm-4.7-flash", category=cat)
-            assert (cfg["temperature"], cfg["top_p"]) == (temp, top_p)
-
-    def test_partial_row_falls_back_to_category_default(self):
-        # Ernie: mangels differenzierter Herstellerprofile aus der
-        # allgemeinen Empfehlung in jede Kategorie abgeleitet.
-        cfg = get_model_config("noctrex/ernie-4.5-21b-a3b-pt_moe", category="coding")
-        assert (cfg["temperature"], cfg["top_p"]) == (0.8, 0.95)
-        assert cfg["_source"] == "registry-sampling"
-        cfg = get_model_config("noctrex/ernie-4.5-21b-a3b-pt_moe", category="knowledge")
-        assert (cfg["temperature"], cfg["top_p"]) == (0.8, 0.95)
-        assert cfg["_source"] == "registry-sampling"
-
-    def test_quant_suffix_still_matches_row(self):
-        for key in (
-            "qwen/qwen3-14b",
-            "qwen/qwen3-14b@q6_k",
-        ):
-            cfg = get_model_config(key, category="math")
-            assert (cfg["temperature"], cfg["top_p"]) == (0.6, 0.95)
-
-    def test_variant_suffix_still_matches_row(self):
-        # -qat/-ud/-imatrix-Suffixe werden im normalisierten Key gestrippt
-        cfg = get_model_config("google/gemma-4-12b-it-qat", category="agentic")
-        assert (cfg["temperature"], cfg["top_p"]) == (1.0, 0.95)
-        assert cfg["_source"] == "registry-sampling"
-
-        # The unsloth 26B entry has no sampling profile and therefore falls
-        # back to the agentic category defaults rather than borrowing Gemma's.
-        fallback = get_model_config("unsloth/gemma-4-26b-a4b-it", category="agentic")
-        assert (fallback["temperature"], fallback["top_p"]) == (0.6, 0.95)
-        assert fallback["_source"] == "category-default"
-
-    def test_autoround_repack_matches_row(self):
-        cfg = get_model_config("intel/qwen3-30b-a3b-instruct-2507-q2ks-mixed-autoround", category="coding")
-        assert (cfg["temperature"], cfg["top_p"]) == (0.7, 0.8)
-        assert cfg["_source"] == "registry-sampling"
-
-
-class TestRegistrySampling:
-    """Reader liest Registry-`sampling:`-Block (SSOT, Variante A)."""
-
-    def test_registry_block_reads_researched_values(self):
-        # gemma-4-12b: Registry-Block 1.0/0.95 (Research), NICHT Platzhalter
-        cfg = get_model_config("unsloth/gemma-4-12b-it-qat", category="coding")
-        assert (cfg["temperature"], cfg["top_p"]) == (1.0, 0.95)
-        assert cfg["_source"] == "registry-sampling"
-
-    def test_registry_block_per_category_ernie(self):
-        # Ernie: allgemeines Profil wurde in die Kategorien abgeleitet.
-        cfg = get_model_config("noctrex/ernie-4.5-21b-a3b-pt_moe", category="knowledge")
-        assert (cfg["temperature"], cfg["top_p"]) == (0.8, 0.95)
-        assert cfg["_source"] == "registry-sampling"
-        cfg = get_model_config("noctrex/ernie-4.5-21b-a3b-pt_moe", category="coding")
-        assert (cfg["temperature"], cfg["top_p"]) == (0.8, 0.95)  # Registry-Ableitung
-        assert cfg["_source"] == "registry-sampling"
-
-    def test_registry_block_partial_row_falls_back(self, mocker):
-        # kimi-linear: kein agentic im Block -> Kategorie-Fallback
-        mocker.patch.object(bc, "_load_quant_registry", return_value={"mradermacher/kimi-linear-reap-35b-a3b-instruct-i1@q4_k_m": {
-            "sampling": {"coding": {"temperature": 0.6, "top_p": 0.95}},
-        }})
-        cfg = get_model_config("mradermacher/kimi-linear-reap-35b-a3b-instruct-i1", category="coding")
-        assert (cfg["temperature"], cfg["top_p"]) == (0.6, 0.95)
-        assert cfg["_source"] == "registry-sampling"
-
-    def test_unresolved_registry_math_uses_category_default(self):
-        cfg = get_model_config("zai-org/glm-4.6v-flash", category="math")
         assert (cfg["temperature"], cfg["top_p"]) == (0.7, 0.95)
         assert cfg["_source"] == "category-default"
-
-    def test_quant_suffix_matches_registry_block(self):
-        cfg = get_model_config("qwen/qwen3-14b@q6_k", category="math")
-        assert (cfg["temperature"], cfg["top_p"]) == (0.6, 0.95)
-        assert cfg["_source"] == "registry-sampling"
 
     def test_no_sampling_block_falls_back_to_category_defaults(self):
         cfg = get_model_config(
             "intel/qwen3-30b-a3b-thinking-2507-q2ks-mixed-autoround",
             category="coding",
         )
-        assert (cfg["temperature"], cfg["top_p"]) == (0.2, 1.0)
+        assert (cfg["temperature"], cfg["top_p"]) == (0.6, 0.95)
         assert cfg["_source"] == "category-default"
 
 
@@ -235,17 +177,17 @@ class TestThinkingRuns:
         )
         assert (cfg["temperature"], cfg["top_p"]) == (0.6, 0.95)
         assert cfg["enable_thinking"] is True
-        assert cfg["max_tokens"] == 8192
+        assert cfg["max_tokens"] == 4096
         assert cfg["_source"] == "thinking-default"
 
-    def test_registry_thinking_model_defaults_to_8192_even_without_forcing_thinking(self):
+    def test_registry_thinking_model_defaults_to_4096_even_without_forcing_thinking(self):
         cfg = get_model_config(
             "lmstudio-community/qwen/qwen3.5-9b@q6_k",
             category="coding",
             is_thinking_enabled=False,
         )
         assert cfg["enable_thinking"] is False
-        assert cfg["max_tokens"] == 8192
+        assert cfg["max_tokens"] == 4096
 
     def test_thinking_flat_applies_to_all_categories(self):
         for cat in ("coding", "knowledge", "agentic", "math"):
@@ -259,20 +201,20 @@ class TestThinkingRuns:
         # 1.0/0.95 (siehe TestRegistrySampling).
         cfg = get_model_config("google/gemma-4-12b-it-qat", category="coding", is_thinking_enabled=True)
         assert (cfg["temperature"], cfg["top_p"]) == (0.6, 0.95)
-        assert cfg["_source"] == "registry-sampling"
+        assert cfg["_source"] == "thinking-default"
 
     def test_thinking_gpt_oss_row(self, mocker):
         registry = {"openai/gpt-oss-20b@mxfp4": _gpt_oss_test_entry()}
         mocker.patch.object(bc, "_load_quant_registry", return_value=registry)
         cfg = get_model_config("openai/gpt-oss-20b", category="coding", is_thinking_enabled=True)
-        assert (cfg["temperature"], cfg["top_p"]) == (1.0, 1.0)
+        assert (cfg["temperature"], cfg["top_p"]) == (0.6, 0.95)
 
     def test_instruct_model_not_affected_by_thinking_flag(self, mocker):
         mocker.patch.object(bc, "_load_quant_registry", return_value={"unsloth/glm-4.7-flash@q3_k_s": {
             "reasoning": "instruct", "sampling": {"coding": {"temperature": 0.7, "top_p": 1.0}},
         }})
         cfg = get_model_config("unsloth/glm-4.7-flash", category="coding", is_thinking_enabled=True)
-        assert (cfg["temperature"], cfg["top_p"]) == (0.7, 1.0)
+        assert (cfg["temperature"], cfg["top_p"]) == (0.6, 0.95)
 
     def test_thinking_named_model_detected(self):
         cfg = get_model_config(
@@ -294,7 +236,7 @@ class TestThinkingRuns:
 
     def test_thinking_without_flag_uses_category_defaults(self):
         cfg = get_model_config("qwen/qwen2.5-7b-instruct", category="coding", is_thinking_enabled=False)
-        assert cfg["temperature"] == 0.2
+        assert cfg["temperature"] == 0.6
         assert cfg["_source"] == "category-default"
 
 
@@ -309,11 +251,11 @@ class TestLmsJsonMerge:
         }
         mocker.patch.object(bc, "_lms_generation_config", return_value=lms)
         cfg = get_model_config("ibm-granite/granite-4.2-8b", category="coding")
-        assert (cfg["temperature"], cfg["top_p"]) == (1.0, 0.95)  # Registry-Zelle
-        assert cfg["top_k"] == 40
-        assert cfg["min_p"] == 0.1
+        assert (cfg["temperature"], cfg["top_p"]) == (0.6, 0.95)  # Klassen-Policy
+        assert cfg["top_k"] == 20
+        assert cfg["min_p"] == 0.0
         assert cfg["enable_thinking"] is True
-        assert cfg["_source"] == "registry-sampling"
+        assert cfg["_source"] == "category-default"
 
     def test_registry_optional_sampling_fields_override_gui_values(self, mocker):
         mocker.patch.object(
@@ -336,8 +278,10 @@ class TestLmsJsonMerge:
 
         cfg = get_model_config("example/model@q4_k_m", category="coding")
 
-        assert cfg["top_k"] == 40
-        assert cfg["min_p"] == 0.05
+        # The class policy owns the sampling fields; neither the researched
+        # Registry block nor the GUI artifact may override them.
+        assert cfg["top_k"] == 20
+        assert cfg["min_p"] == 0.0
 
     def test_non_temp_json_fields_merge_for_category_model(self, mocker):
         lms = {"top_k": 20, "enable_thinking": False}
@@ -404,4 +348,5 @@ class TestGemmaThinkingByCategory:
         mocker.patch.object(bc, "_lms_generation_config", return_value=lms)
         cfg = get_model_config("unsloth/gemma-4-12b-it@q6_k", category="coding")
         assert cfg["enable_thinking"] is False
-        assert cfg["top_k"] == 64
+        # top_k belongs to the class policy, not to the GUI artifact.
+        assert cfg["top_k"] == 20

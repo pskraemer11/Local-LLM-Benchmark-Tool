@@ -213,7 +213,7 @@ class TestGetModelConfigLmsSource:
     def test_no_config_falls_back_to_category_default(self, tmp_path):
         with patch("benchmark_config.LMS_CONFIG_ROOT", tmp_path / "empty"):
             cfg = get_model_config("plain-7b-model", category="coding")
-        assert cfg["temperature"] == 0.2
+        assert cfg["temperature"] == 0.6
         assert cfg["_source"] == "category-default"
 
     def test_lms_temp_ignored_category_default_used(self, tmp_path):
@@ -225,8 +225,8 @@ class TestGetModelConfigLmsSource:
                                 "llm.prediction.topPSampling": 0.9})
         with patch("benchmark_config.LMS_CONFIG_ROOT", tmp_path):
             cfg = get_model_config("pub1/fake-model-7b", category="coding")
-        assert cfg["temperature"] == 0.2
-        assert cfg["top_p"] == 1.0
+        assert cfg["temperature"] == 0.6
+        assert cfg["top_p"] == 0.95
         assert cfg["_source"] == "category-default"
 
     def test_lms_config_matches_dir_with_gguf_suffix(self, tmp_path):
@@ -234,7 +234,7 @@ class TestGetModelConfigLmsSource:
                                {"llm.prediction.temperature": 0.5})
         with patch("benchmark_config.LMS_CONFIG_ROOT", tmp_path):
             cfg = get_model_config("pub1/fake-model-7b", category="coding")
-        assert cfg["temperature"] == 0.2
+        assert cfg["temperature"] == 0.6
 
     def test_enable_thinking_from_config(self, tmp_path, monkeypatch):
         self._write_lms_config(tmp_path, "pub1", "fake-model-7b",
@@ -280,7 +280,7 @@ class TestGetModelConfigLmsSource:
                                {"llm.prediction.topPSampling": {"checked": True, "value": 1}})
         with patch("benchmark_config.LMS_CONFIG_ROOT", tmp_path):
             cfg = get_model_config("pub1/fake-model-7b")
-        assert cfg["top_p"] == 1
+        assert cfg["top_p"] == 0.95
 
     def test_knowledge_temperature_floor_removed(self, tmp_path):
         # Frueher hob der Knowledge-Floor temp < 0.7 auf 0.7 an. Seit dem

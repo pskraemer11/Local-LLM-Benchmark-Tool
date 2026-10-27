@@ -44,8 +44,9 @@ def test_model_registry_resolves_registry_aliases_and_neutral_runtime(tmp_path: 
     assert runtime["useUnifiedKvCache"] is True
     assert runtime["reasoning"] == "thinking"
     assert runtime["quant"] == "iq3_s"
-    assert runtime["sampling"]["coding"]["temperature"] == 0.6
-    runtime["sampling"]["coding"]["temperature"] = 0.1
+    # The researched block stays visible as history, not as runtime value.
+    assert runtime["sampling_research"]["coding"]["temperature"] == 0.6
+    runtime["sampling_research"]["coding"]["temperature"] = 0.1
     assert registry["unsloth/gemma-4-26b-a4b-it@iq3_s"]["sampling"]["coding"]["temperature"] == 0.6
     assert resolved.technical_boundary_issues() == []
 

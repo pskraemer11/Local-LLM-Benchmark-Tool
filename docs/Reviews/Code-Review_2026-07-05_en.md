@@ -20,7 +20,7 @@ Notable observations:
 
 ### 2. HTTP-500 Crash: Cause & Fix
 
-**Cause:** `C:\Users\pskra\.lmstudio\hub\models\google\gemma-4-26b-a4b-it\model.yaml` created a virtual model `google/gemma-4-26b-a4b-it` that collided with the physical instance `gemma-4-26b-a4b-it` (unsloth IQ3_S) – both referenced the same GGUF file. llama.cpp crashed on inference attempt (HTTP 500 without "Running chat completion" in server log).
+**Cause:** `$HOME\.lmstudio\hub\models\google\gemma-4-26b-a4b-it\model.yaml` created a virtual model `google/gemma-4-26b-a4b-it` that collided with the physical instance `gemma-4-26b-a4b-it` (unsloth IQ3_S) – both referenced the same GGUF file. llama.cpp crashed on inference attempt (HTTP 500 without "Running chat completion" in server log).
 
 **Fix:** Deleted the entire directory `hub/models/google/gemma-4-26b-a4b-it/`. The mradermacher model.yaml remains, since there is no conflict (virtual `mradermacher/qwen3-coder-reap-25b-a3b-i1` does not collide with any physical instance).
 

@@ -43,7 +43,7 @@ from typing import Any, cast
 
 from ruamel.yaml import YAML
 
-from benchmark_config import GPTOSS_REASONING_EFFORT, is_blacklisted_model_name, is_support_file
+from benchmark_config import is_blacklisted_model_name, is_support_file
 from kv_cache_policy import KVCachePolicyError, normalize_kv_pair, runtime_kv_pair
 from model_identity import (
     _arch_reasoning_map,
@@ -52,6 +52,7 @@ from model_identity import (
 )
 from quantization import extract_quant_from_text, normalize_quant
 from runtime_policy import resolve_template
+from sampling_policy import GPTOSS_REASONING_LEVELS
 from speculative import classify_lms_speculative_values, companion_role, lms_speculative_values
 
 # === Pfade ===
@@ -610,6 +611,33 @@ def select_blueprint(reasoning: str, capabilities: str, arch: str = "", model_na
 def has_custom_template(entry: dict[str, Any]) -> bool:
     """Check if model has a custom jinja template (legacy registry-field path)."""
     return "template" in entry and entry["template"]
+
+
+def _gguf_template_content(entry: dict[str, Any] | None) -> str | None:
+    """Return the chat template of the model's local GGUF.
+
+    The GGUF file is the authoritative source of a model's chat template. The
+    versioned copy under ``docs/Jinja-Chat-Templates`` is a second,
+    manually maintained representation that drifts silently when the upstream
+    model revision changes its template.
+    """
+    if not isinstance(entry, dict):
+        return None
+    local = entry.get("local")
+    if not isinstance(local, dict):
+        return None
+    model_path = local.get("model_path")
+    if not isinstance(model_path, str) or not model_path.strip():
+        return None
+    if not Path(model_path).is_file():
+        return None
+    from registry_tool import _read_gguf_chat_template
+
+    try:
+        template = _read_gguf_chat_template(model_path)
+    except (OSError, ValueError):
+        return None
+    return template or None
 
 
 def resolve_template_name(bp_def: dict[str, Any] | None, model_name: str = "") -> str | None:
@@ -1314,9 +1342,11 @@ def create_blueprint_definitions() -> None:
         },
         "gptoss_reasoning_level": {
             "description": "GPT-OSS Reasoning-Level (OpenAI: 'The reasoning level can be set in the system prompts, e.g. Reasoning: high')",
-            "full": f"Reasoning: {GPTOSS_REASONING_EFFORT}",
-            "medium": f"Reasoning: {GPTOSS_REASONING_EFFORT}",
-            "minimal": f"Reasoning: {GPTOSS_REASONING_EFFORT}",
+            # The three levels used to render the same text, so the selection
+            # had no effect. They now differ and act as a cost/latency lever.
+            "full": f"Reasoning: {GPTOSS_REASONING_LEVELS['full']}",
+            "medium": f"Reasoning: {GPTOSS_REASONING_LEVELS['medium']}",
+            "minimal": f"Reasoning: {GPTOSS_REASONING_LEVELS['minimal']}",
         },
         "instruct_scaffolding": {
             "description": "Structured problem-solving guidance for instruct models",
@@ -1463,12 +1493,18 @@ def assemble_prompts(
                         written += 1
                         continue
 
-                    tpl_name = resolve_template(entry, bp, model_name)
-                    tpl_content = None
-                    if tpl_name:
-                        tpl_path = TEMPLATE_DIR / tpl_name
-                        if tpl_path.exists():
-                            tpl_content = tpl_path.read_text(encoding="utf-8")
+                    # The GGUF chat template is authoritative. The versioned
+                    # copy under docs/Jinja-Chat-Templates is only a fallback
+                    # for models without a local GGUF, because a stale copy
+                    # would install an outdated template into the LM Studio
+                    # config.
+                    tpl_content = _gguf_template_content(entry)
+                    if tpl_content is None:
+                        tpl_name = resolve_template(entry, bp, model_name)
+                        if tpl_name:
+                            tpl_path = TEMPLATE_DIR / tpl_name
+                            if tpl_path.exists():
+                                tpl_content = tpl_path.read_text(encoding="utf-8")
 
                     fields = data.setdefault("operation", {}).setdefault("fields", [])
                     apply_kv_cache_fields(data, entry.get("k_cache"), entry.get("v_cache"))

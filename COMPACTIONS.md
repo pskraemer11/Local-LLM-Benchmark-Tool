@@ -1,4 +1,4 @@
-### COMPACTIONS.md für Projekt "C:\Users\pskra\Python-Projekte\Benchmarks" ###
+### COMPACTIONS.md für Projekt "$HOME\Python-Projekte\Benchmarks" ###
 
 Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen oder per Kommando). CHANGELOG = was, Compaction = warum/was nächste.
 
@@ -16,7 +16,7 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 - Geplante Dateien laut Konzept/Todo: `CHANGELOG.md` (Root), `docs/Review-Prozess.md`, `docs/Reviews/_templates/{Phase1-Prompt.md, Phase2-Prompt.md, Review-Report-Template.md}` (konsolidiert aus `Doku-intern/Review-Checkliste (Single-Entwickler).md` + `Doku-intern/Review Prompt für Benchmarktest.md` + Heise-Prinzipien), `docs/Review-Artifacts/` (repro_issues.md + lint_issues.md als Snapshot je Review), `scripts/pre-push.ps1` + Installer (via `core.hooksPath`), `.gitignore`-Ergänzung, `.github/workflows/review.yml`-Fix.
 - Umsetzungsreihenfolge: validate-Erweiterung (──repro/--verbose) → Skript v2 → Hook → CI-Fix → CHANGELOG (§20-Umzug) → Templates → Prozess-Doku/Artefakte/gitignore → End-to-End-Test (Gate-Lauf, Hook-Test, CI-YAML-Syntax).
 - Für `--repro`: Nutzung von `src/tools/gguf_full_metadata_reader.py` (nutzt `from gguf import GGUFReader`); Vergleichsquellen: `~/.lmstudio/hub/models/{publisher}/{model}/model.yaml`, JSON-Configs, `model_registry.yaml`, GGUF-Header.
-- Offene Kleinigkeit aus Konzept: `gguf`-Paket verfügbar? → **geklärt: installiert** (`C:\Users\pskra\AppData\Local\Programs\Python\Python314\Lib\site-packages\gguf\__init__.py`); ebenso ruamel.yaml + psutil OK.
+- Offene Kleinigkeit aus Konzept: `gguf`-Paket verfügbar? → **geklärt: installiert** (`$HOME\AppData\Local\Programs\Python\Python314\Lib\site-packages\gguf\__init__.py`); ebenso ruamel.yaml + psutil OK.
 - Verbleibende Altlasten: 5 untracked `pre_review_checks_20260806_*.log` bleiben uncommittet; DeepSeek-Registry-Einträge bleiben (6 „missing"); Registry = 64 Keys; validate = 0 Probleme (Stand vor dieser Sitzung).
 
 ## Work State
@@ -52,7 +52,7 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 - `docs/Architecture, Flow & ChangeLog_en.md` — §20 „Version Changelog" (Z. ~1312) wandert in CHANGELOG.md; Verweis statt §20
 - `src/tools/gguf_full_metadata_reader.py` — GGUF-Metadaten-Extraktion für `--repro`
 - `docs/Reviews/` (10 Berichte) + `Doku-intern/Review-Checkliste (Single-Entwickler).md`, `Doku-intern/Review Prompt für Benchmarktest.md` — Quelle für `_templates/`-Konsolidierung
-- `C:\Users\pskra\.lmstudio\hub\models\{publisher}\{model}\model.yaml` — Vergleichsquelle für `--repro`
+- `$HOME\.lmstudio\hub\models\{publisher}\{model}\model.yaml` — Vergleichsquelle für `--repro`
 - `.gitignore` — Ergänzen: `validate_errors.log`, `pre_review_checks_*.log`; `docs/Review-Artifacts/` wird committet
 
 ================= Compaction 06.08.2026 / 20:42 ===========
@@ -123,7 +123,7 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 - **HowTo-Review-Gate_de.md** in `Doku-intern/` geschrieben (deutsch): 3 Säulen, 5 Check-Checks-Tabelle, Phase-2-Stichproben, ausführliche Prompt-Vorlage, Phasen/Regeln.
 - **Parallel-Agenten (3 große Übersetzungen)**: `Temperature Recommondations.md` (244 Zeilen, vollständig englisch, verifiziert per Regex) ✓; `Planung.md` (53 Zeilen, englisch, Checkbox-Status erhalten, Dateiname bleibt) ✓; `Architecture, Flow & ChangeLog_en.md` — Agent lieferte 2× leeres Ergebnis, Datei NIE angefasst (git status unverändert) → **mache ich selbst, aktuell in Arbeit**.
 - Front-Tabelle abgeschlossen: 105 Zeilen mit deutschen Treffern identifiziert via `lang_lines.py`; bisher übersetzt: Z.1, 77, Flow-Diagramm, §2.1a (Pre-Run-Checks komplett), §2.7-Sectionen (Reasoning-Quellen/Used-by, Qwen3-Familie, Registry-getriebenes enable_thinking, §2.11 YAML-Run-Spec komplett, §2.12 Seed-Durchgängigkeit, tool-eval-bench-CLI inkl. AGENTIC_SAFETY-Abschnitt, §3-Sektionen Struktur-Gate + main()/consolidate_results + _write_tbl, F5-Structured-Output-exclusions), Interne-Namen/Index-Tabelle `blueprint`/`truncation`/`custom_template`.
-- `lang_scan.py` + `lang_lines.py` in `C:\Users\pskra\AppData\Local\Temp\opencode\` (UTF-8-Wrapper gegen Kodierungsprobleme; Mischtabelle der 124 Muttersprachen; Zeilen-Trefferliste als `%TEMP%\opencode\arch_lines.txt`).
+- `lang_scan.py` + `lang_lines.py` in `$HOME\AppData\Local\Temp\opencode\` (UTF-8-Wrapper gegen Kodierungsprobleme; Mischtabelle der 124 Muttersprachen; Zeilen-Trefferliste als `%TEMP%\opencode\arch_lines.txt`).
 
 ### Active
 - **Architecture-Datei in Arbeit (selbst, batch-edit)**: bisher ~24 Edit-Blöcke x4 Sprachen fertig; **offen der Rest aus `arch_lines.txt`**; aktueller Read-Punkt Z. 790–1033 (nach Edit 4); Z. 795, 799, 800–801, 820–850 (Struktur-Gate + consolidate_results + _write_tbl) fertig — **Rest der Treffer-Liste (Z. > 860, Details in `arch_lines.txt`) noch nicht übersetzt**.
@@ -254,7 +254,7 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 - **Granite-8b hat kein Template** (Datei existiert nicht; BP-Map nur granite-4.0 + granite-4.1-30b). google/gemma-4-12b-q4_0-Config hat leeres promptTemplate (vorbestehendes Publisher-Zuordnungsproblem, kein Registry-Key unter `google/`).
 - **Stop-Strings nur für modellspezifische Blueprints** (gptoss/magistral/ministral/nemotron/apriel/phi4) — default_chat/coding_agent/reasoning_* bewusst ohne, sonst würde lm-eval `until` für alle Modelle setzen.
 - **Lauf-Keys:** Registry-Key ≠ Lauf-Key; Keys kommen aus `lms ls --json` Feld `modelKey` (z.B. `gemma-4-26b-a4b-it-qat-nvfp4`, `unsloth/gpt-oss-20b`). Früheres Blocking-Problem: Registry-Key `unsloth/gemma-4-26b-a4b-it@iq3_s` wurde von `run_benchmarks` nicht aufgelöst.
-- **Compaction-Anweisung (User):** Compactions regelmäßig/Anlass-bezogen in `C:\Users\pskra\Python-Projekte\Benchmarks\Doku-intern\compaction\compactions.md` schreiben, **hinten anhängen** — Datei angelegt (2 Blöcke: 14.08. 11:30 + 14:30). PowerShell-Here-Strings mit Backticks/`<|…|>` problematisch → Write/Edit-Tool nutzen.
+- **Compaction-Anweisung (User):** Compactions regelmäßig/Anlass-bezogen in `$HOME\Python-Projekte\Benchmarks\Doku-intern\compaction\compactions.md` schreiben, **hinten anhängen** — Datei angelegt (2 Blöcke: 14.08. 11:30 + 14:30). PowerShell-Here-Strings mit Backticks/`<|…|>` problematisch → Write/Edit-Tool nutzen.
 - **Commit-Politik:** Fremde Diffs (`docs\Developer-Docs\LM-Studio-API-References.md`, `Zusammenfassung_Benchmarks_kombiniert.ods`) nicht committen. Gemma-4-Registry + AGENTS.md + Blueprint-Refactor + Tests noch nicht committet.
 - **Vorbestehend:** 3 `test_model_manager.py`-Fehler (HTTP/Umgebung, Baseline-stash-verifiziert, nicht vom Refactor verursacht). Tests gesamt: 817 passed.
 - Verifikationslauf 4 war erfolgreich (Commits `8ed30dfb`, `6253a014`, `38cc0e0`); AGENTS.md enthält neue Abschnitte „Wichtige Pfade" + „LM Studio Doku / Links".
@@ -349,7 +349,7 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 - `tests\test_registry_tool.py` (`TestGlmPatchConfig`), `tests\test_run_benchmarks.py` (`TestCheckRegistryForModel`)
 - `logs\probelauf-familien-14.08.log` (+`.err`, `.pid`): abgebrochener Lauf
 - `Doku-intern\compaction\compactions.md`: Ziel-Datei (jetzt korrekt befüllt)
-- `C:\Users\pskra\.agents\skills\compaction\SKILL.md`: Zielpfad-Fix
+- `$HOME\.agents\skills\compaction\SKILL.md`: Zielpfad-Fix
 - GLM-Configs (`user-concrete-model-default-config\`): `enabled:true` gepatcht (+ `.bak-parsing`)
 
 
@@ -372,7 +372,7 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 - **GLM-skills Lokalisierung geprueft:** `glmv-caption.py` nutzt bereits OpenAI-kompatibles `/chat/completions` + base64 `image_url` -> direkt adaptierbar.
     `glm_ocr_cli.py` nutzt proprietären `…/v4/layout_parsing`-Endpoint (hartkodiert, explizit kein Custom-URL-Support) -> NICHT lokalisierbar.
 
-- **glmv-caption-local erstellt** unter `C:\Users\pskra\.agents\skills\glmv-caption-local\` (SKILL.md + `scripts\glmv_caption.py` + requirements.txt):
+- **glmv-caption-local erstellt** unter `$HOME\.agents\skills\glmv-caption-local\` (SKILL.md + `scripts\glmv_caption.py` + requirements.txt):
     Base-URL via `GLM_LOCAL_API_BASE` (Default `http://127.0.0.1:1234/v1`), kein API-Key noetig, Default-Modell `zai-org/glm-4.6v-flash`,
     nur Bilder (kein video/file_url, kein thinking-Payload), deutscher Default-Prompt.
 
@@ -398,10 +398,10 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 3. Skills (glmv-caption-local, gemma-dev-Version) nach OpenCode-Neustart nutzbar; ggf. CHANGELOG-Eintrag.
 
 ## Relevant Files
-- `C:\Users\pskra\.agents\skills\glmv-caption-local\` (NEU): SKILL.md, scripts\glmv_caption.py, scripts\requirements.txt
-- `C:\Users\pskra\.agents\skills\nemotron-customize\` (NEU, installiert)
-- `C:\Users\pskra\.agents\skills\gemma-dev\SKILL.md`: wiederhergestelltes Original (9.142 B)
-- `C:\Users\pskra\.agents\.skill-lock.json`: Provenienz (google-gemma/gemma-skills, vercel-labs/skills)
+- `$HOME\.agents\skills\glmv-caption-local\` (NEU): SKILL.md, scripts\glmv_caption.py, scripts\requirements.txt
+- `$HOME\.agents\skills\nemotron-customize\` (NEU, installiert)
+- `$HOME\.agents\skills\gemma-dev\SKILL.md`: wiederhergestelltes Original (9.142 B)
+- `$HOME\.agents\.skill-lock.json`: Provenienz (google-gemma/gemma-skills, vercel-labs/skills)
 - Referenz: `zai-org/GLM-skills` (glmv-caption = adaptierbar, glmocr = nicht)
 
 
@@ -432,8 +432,8 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 
 ## Relevant Files
 - `src/custom_benchmark.py`: aktueller Modell-zu-Code- und Sandbox-Ausführungspfad.
-- `C:\Users\pskra\Python-Projekte\Inspect-Evals\inspect_process_sandbox.py`: Referenz für den bestehenden Windows-Prozessrahmen.
-- `C:\Users\pskra\Python-Projekte\Inspect-Evals\README_inspect_evals.md`: dokumentierte Grenzen des `process`-Backends.
+- `$HOME\Python-Projekte\Inspect-Evals\inspect_process_sandbox.py`: Referenz für den bestehenden Windows-Prozessrahmen.
+- `$HOME\Python-Projekte\Inspect-Evals\README_inspect_evals.md`: dokumentierte Grenzen des `process`-Backends.
 - `security-report-de.md`: deutsche Scanfassung.
 - `security-report-en.md`: englischer Originalreport.
 
@@ -566,7 +566,7 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 - TabbyAPI als produktionsfaehigen Lifecycle-Provider gegen die lokal installierte ExLlamaV3-Umgebung verifizieren und die technische Modell-ID von der kanonischen Registry-Identitaet trennen.
 
 ## Important Details
-- Lokale Laufzeit: `C:\Users\pskra\Python-Projekte\exllamav3\exllamav3_env`, Python 3.12, Torch `2.10.0+cu128`, ExLlamaV3 `1.4.1`, TabbyAPI-Commit `3d2848d0`.
+- Lokale Laufzeit: `$HOME\Python-Projekte\exllamav3\exllamav3_env`, Python 3.12, Torch `2.10.0+cu128`, ExLlamaV3 `1.4.1`, TabbyAPI-Commit `3d2848d0`.
 - TabbyAPI-Contract live bestaetigt: `/v1/models` liefert die Modellordner; `/v1/model` liefert `503` ohne Modell und danach verschachtelte `parameters`; `/v1/model/load` antwortet als SSE-/Detached-Task; `/v1/model/unload` antwortet mit HTTP 200 und JSON `null`.
 - Providerfix: Load und Unload lesen den Response-Body nicht mehr aus, wenn nur der HTTP-Erfolg relevant ist. API-Key und Admin-Key bleiben getrennte Header-/Umgebungsvariablen.
 - Registry-Identitaet: Der technische Tabby-Name `google_gemma-4-26b-a4b-it`, API-ID und Pfad werden in `AvailableModelInfo` getrennt vom kanonischen Key `unsloth/gemma-4-26b-a4b-it@iq3_s` gefuehrt. Registry-only-Filterung erfolgt zentral in `model_manager.py`.
@@ -709,7 +709,7 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 
 ## Important Details
 - **User intent:** TabbyAPI und exllamav3 sollen dieselbe virtuelle Umgebung verwenden; keine zweite Installation von Torch/Transformers/PyTorch.
-- **Context:** Das Testmodell liegt unter `C:\Users\pskra\LLM-Modelle\Llama-3.2-1B-Instruct-exl3-4.0bpw`; `tabbyAPI\models` verweist per Junction auf diesen Modellordner.
+- **Context:** Das Testmodell liegt unter `$HOME\LLM-Modelle\Llama-3.2-1B-Instruct-exl3-4.0bpw`; `tabbyAPI\models` verweist per Junction auf diesen Modellordner.
 - **Root cause:** Das alte `run-tabbyapi.ps1` startete keinen Server. `tabbyAPI\start.bat` verwendet außerdem standardmäßig `tabbyAPI\venv`, was die vereinheitlichte Umgebung verfehlt. Die bestehende TabbyAPI-Konfiguration enthielt zudem einen nicht vorhandenen Gemma-Modellnamen.
 - **Decision:** Das neue Skript startet `tabbyAPI\start.py` direkt mit `exllamav3\exllamav3_env\Scripts\python.exe`, erzeugt eine temporäre Konfiguration ohne vorab geladenes Modell, wartet auf `127.0.0.1:5000` und lädt das Benchmarkmodell anschließend über die API.
 - **Provider separation:** `LMSTUDIO_API_BASE`, `UNSLOTH_API_BASE`, `UNSLOTH_LOCAL_API_BASE` und `TABBYAPI_API_BASE` sind provider-spezifisch; `LLM_API_BASE` bleibt nur als Kompatibilitäts-Fallback. `LLM_PROVIDER` bleibt ein Prozess-Selector.
@@ -854,7 +854,7 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 - (Completed) Isolierte pytest-Tempverzeichnisse in Hooks, Review-Gate und CI umgesetzt, geprüft, committed und nach `origin/main` gepusht. Siehe CHANGELOG-Eintrag `Pytest-Temp-Isolation für Hooks und CI`.
 
 ## Important Details
-- **Root cause:** Das gemeinsam verwendete `.pytest-temp\\pytest-of-pskra` konnte unter Windows zwischen Läufen gesperrt oder unzugänglich werden; globale Temp-/Cache-Umleitungen verstärkten die Kollision.
+- **Root cause:** Das gemeinsam verwendete `.pytest-temp\\pytest-of-SyntheticUser` konnte unter Windows zwischen Läufen gesperrt oder unzugänglich werden; globale Temp-/Cache-Umleitungen verstärkten die Kollision.
 - **Decision:** Jeder pytest-Lauf verwendet ein frisches OS-Tempverzeichnis; der pytest-Cacheprovider ist im Gate deaktiviert. `pre-push` führt die Suite isoliert vor dem übrigen Review-Gate aus; Registry- und LM-Studio-Config-Artefakte bleiben unangetastet.
 - **Validation:** Commit-Hook und echter, nicht sandboxed ausgeführter Pre-Push liefen erfolgreich: 934 Tests, Registry 0 blockierende Probleme, Ruff/GGUF/fokussiertes Mypy erfolgreich. Der verbleibende Legacy-Mypy-Hinweis und zwei LM-Studio-`numParallelSessions`-Warnungen sind nicht blockierend.
 
@@ -1113,7 +1113,7 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 - **Architecture decision:** `model_registry.yaml` bleibt die fachliche Quelle für Modellidentität, GGUF-/Architekturmetadaten, Blacklists, Blueprints, Sampling je Benchmarkkategorie, Provenienz und Validierungsstatus. llama.cpp-Argumente sowie optionale `preset.ini`-Dateien werden daraus generiert und nicht parallel manuell gepflegt.
 - **Preset boundary:** Die aktuelle llama.cpp-Dokumentation beschreibt `preset.ini` als Runtime-/Routerkonfiguration. Für den geplanten Einzelprozess pro Modell sind explizite Startargumente beziehungsweise ein generiertes Argumentmanifest zunächst deterministischer; `--models-preset` wird separat als Routeroption geprüft.
 - **Installation cleanup:** Das WinGet-Paket `ggml.llamacpp` wurde als `llama-b11046-bin-win-vulkan-x64.zip` identifiziert und mit `winget uninstall --id ggml.llamacpp --exact --silent` entfernt. Der Pfad unter `C:\Program Files\llama.cpp` mit `ggml-cuda.dll`, Build 10964, bleibt Produktionspfad.
-- **Remaining llama.exe:** `C:\Users\pskra\AppData\Local\Microsoft\WindowsApps\llama.exe` bleibt vorerst unfreigegeben, weil es eine separate GUI/CLI-Bündelung Build 11046 ist und Backend/Lifecycle noch nicht unabhängig belegt sind. Der Provider soll nie von PATH-Reihenfolge abhängen.
+- **Remaining llama.exe:** `$HOME\AppData\Local\Microsoft\WindowsApps\llama.exe` bleibt vorerst unfreigegeben, weil es eine separate GUI/CLI-Bündelung Build 11046 ist und Backend/Lifecycle noch nicht unabhängig belegt sind. Der Provider soll nie von PATH-Reihenfolge abhängen.
 - **Technical nuance:** Vulkan kann grundsätzlich NVIDIA-Hardware über den Vulkan-Treiber nutzen, ist aber nicht der für dieses Projekt gewünschte CUDA-Backendpfad. Deshalb wurde die Vulkan-Distribution entfernt, ohne die WindowsApps-Installation ungeprüft zu löschen.
 
 ## Work State
@@ -1275,9 +1275,9 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
   gleichnamigen Werten; Sampling und Request-Parameter bleiben pro Benchmark-
   Request steuerbar.
 - **Pfadentscheidung:** Auf diesem System ist `%APPDATA%` gleich
-  `C:\Users\pskra\AppData\Roaming`; die automatische globale Datei wäre
+  `$HOME\AppData\Roaming`; die automatische globale Datei wäre
   `AppData\Roaming\llama.cpp\config.ini`. Das portable
-  `C:\Users\pskra\.config\llama.cpp\preset.ini` bleibt ein explizit über
+  `$HOME\.config\llama.cpp\preset.ini` bleibt ein explizit über
   `LLAMA_ARG_MODELS_PRESET` ausgewähltes Router-Preset. Die GUI-Logs unter
   `AppData\Local\Llama\logs` sind davon unabhängig.
 - **Sampling:** `Terminal Bench`/`SWE-bench Verified` werden als Coding,
@@ -1428,7 +1428,7 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 - `py -3.12 -m ruff check` für alle geänderten Produktionsdateien: sauber.
 - `py -3.12 src/registry_tool.py validate --ci`: 0 blockierende Probleme, 0 Hinweise.
 - `llama-server.exe --version`: Build 11081, Commit `161755f29`; die Binary
-  meldet `C:\Users\pskra\AppData\Roaming\llama.cpp\config.ini`.
+  meldet `$HOME\AppData\Roaming\llama.cpp\config.ini`.
 - `llama-server.exe --help`: alle vom Argumentvertrag verwendeten Optionen
   wurden in der produktiven Binary gefunden.
 
@@ -2328,3 +2328,148 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 - `data/model_registry.yaml`: bestätigte Quant-/Speculative-Policy und Jrell-Keyentscheidung.
 - `docs/Architecture, Flow & ChangeLog_en.md`, `docs/Model Specific Hints/Qwen3.8 - How to Run Locally.md`: Resolververtrag und kanonischer Jrell-Key.
 - `CHANGELOG.md`: Fuzzy-GGUF-Auflösung, Datenentscheidung und Live-Verifikation.
+
+
+=============== Compaction 19.10.2026 / 15:40 ================
+## Objective
+- **Current:** Sampling-Policy fuer Benchmarks vereinfachen: starre Laufzeitparameter je Benchmark-Klasse statt per Modell recherchierter, differenzierter Profile.
+- **Completed:** Literaturrecherche zu Harness-Defaults und Vendor-Empfehlungen; Entscheidung dokumentiert in `docs/Benchmark-Sampling-Policy_en.md`. Umsetzung im Code noch offen.
+
+## Important Details
+- **Decision:** Die per Modell recherchierte Sampling-Policy wird nicht weiter verfolgt (nur ~30 % belastbare Werte laut Nutzererfahrung). Neue Policy: feste Werte je Klasse - coding `0.6`, math `0.7`, knowledge `0.6`, agentic `0.6`, schmale instruct `0.5`; jeweils `top_p=0.95`, `top_k=20`, `min_p=0.0`. Band 0.5-0.7, kein pauschaler Wert.
+- **Rationale:** Greedy (`t=0`) ist auf der Zielhardware ungeeignet. Quantisierung ist die Hauptursache (Modelle >22-24B Parameter muessen auf 16 GB VRAM auf ~3 Bit oder weniger quantisiert werden; von ~80 getesteten Open-Weight-Modellen zeigt die Mehrzahl unter 3 Bit entweder Wiederholungsschleifen ODER starke Qualitaetseinbusse - beides ist fuer den Benchmark unbrauchbar; Ternary Bonsai ist die einzige getestete Ausnahme ohne Schleifen und ohne vergleichbar gravierenden Qualitaetsverlust). Temperatur ist Mitverursacher. Bestaetigt durch Herstellerdokumentation: Qwen3 warnt explizit vor Greedy ("performance degradation and endless repetitions"), DeepSeek-R1 empfiehlt 0.5-0.7 "to prevent endless repetitions or incoherent outputs".
+- **Harness-Befund:** Es gibt keinen kanonischen Wert. lm-eval/OpenAI Evals/LightEval/SWE-bench lokal/BigCodeBench defaulten auf 0.0, SWE-bench API auf 0.2, HELM auf 1.0. Vendor-Angaben: Qwen3 0.6 (Thinking) / 0.7 (Instruct), DeepSeek-R1 0.6, Llama 3 0.6, Gemma 4 1.0, GLM-4.7 0.7 (Coding/Math) bzw. 1.0 (Knowledge) bzw. 0 (Agentic), IBM Granite 1.0. Kein Beleg fuer systematische Ranking-Umkehr durch Temperatur; Min-P-Studie (arXiv 2407.01082) zeigt Seed-Rauschen von ~3.7 Punkten auf AlpacaEval und aufgabenabhaengige Vorteile, keinen universellen Default.
+- **Reasoning:** Generell `medium`, Antwort-Budget 4096 statt 8192 Token (Laufzeit- und Kostenentscheidung, nicht Qualitaetsaussage). Motivation: beobachtete Wiederholungsschleifen unter 4 Bit und bei REAP-Varianten im LM-Studio. Abgrenzung: Agentic-Pfad wird nicht unter 4096 gesenkt (GLM-4.7-Doku warnt vor pauschaler 1024er-Senkung).
+- **Registry-Migration (Entscheidung des Nutzers):** Die per Modell recherchierten `sampling`-Bloecke in `data/model_registry.yaml` werden NICHT geloescht, sondern als eigene Felder erhalten. Die Laufzeit zieht die Kategorie-Werte kuenftig aus einer getrennten Runtime-Policy. Begruendung: `data/model_registry.yaml` ist nach der Konvertierung auch die Quelle fuer die llama.cpp-`preset.ini` und das Argument-Manifest, also fuer die spaetere, nicht nur benchmarkbezogene Nutzung.
+- **Artefakt-Trennung verifiziert:** `preset.ini` liest ausschliesslich Start-Parameter (ctx-size, cache-type-k/v, kv-unified, batch-size, ubatch-size, gpu-layers, flash-attn, jinja, chat-template-file, reasoning-format/effort/budget, spec-*). Sampling wird bewusst NICHT geschrieben ("Sampling defaults stay request-level and are intentionally omitted" im Generatorkopf). Betroffen ist nur das Argument-Manifest: `export-llama-args` schreibt `request_defaults` aus `benchmark_runtime()["sampling"]` - das ist Request-Policy und muss nach der Migration aus der neuen Runtime-Policy kommen.
+- **Schema-Vorbehalt:** Ein neues Top-Level-Feld fuer die Runtime-Policy braucht zwingend eine Regel in `src/field_owner.py` (`FIELD_OWNERSHIP`); `sampling` ist dort bereits als Registry-Feld eingetragen. Feldname noch offen.
+- **Task-YAML:** `do_sample: false` / `temperature: 0.0` in `minerva_math500.yaml` und `hellaswag_gen.yaml` sind Benchmark-Autoren-Erwartung, keine Projekt-Policy, und werden nicht durchgesetzt.
+- **LM-Eval-Nebenbefunde (lokal verifiziert, lm-eval 0.4.13.dev0):** (1) `do_sample` wird beim Payload-Bau entfernt und nie gesendet - nur `temperature` steuert die Stichprobe. (2) `--gen_kwargs` merged keyweise (`set_config(update=True)` -> `current_value.update(value)`), es ersetzt nicht. Eine fruehere Aussage in dieser Sitzung, es ersetze das YAML, war falsch und wurde nach Quellpruefung korrigiert. (3) Der Pfad sendet heute `max_tokens` und `max_gen_toks` gleichzeitig; der Server wertet `max_tokens` aus, das zweite Feld bleibt als widerspruechliches Extra-Feld im Request.
+
+## Work State
+### Completed
+- Projektueberblick, Hooks, CI, Docs und alle fuenf Pipeline-Pfade exploriert; Plan erstellt.
+- Sicherungs-Commit `bac6834` (33 Dateien) haelt den Arbeitsbaum vor der Aenderung fest. Zwei Korrekturen noetig: drei harte Profilpfade in `scripts/*.py` auf `Path.home()` anonymisiert, zwei ungenutzte Locals entfernt (beides fuer den Privacy-/Ruff-Gate).
+- Recherche: `openrouter:websearch` plus Firecrawl-Agent (Thorough) und Direktabruf der Primaerquellen (Qwen3, Gemma 4, DeepSeek-R1, Llama 3); zusaetzlich lokale Quellen aus `docs/Model Specific Hints` ausgewertet.
+- `docs/Benchmark-Sampling-Policy_en.md` geschrieben und per `format_md_tables.py --check` verifiziert.
+- Sampling-Policy implementiert: neue Quelle `src/sampling_policy.py`, Klassen-Defaults in `benchmark_config.py`, Sampling-Bindings und Server-Startparameter in `parameter_bindings.py`/`llama_cpp_args.py`, Kategorie-Uebergabe in `llama_cpp_provider.py`/`model_manager.py`/`run_benchmarks.py`, Manifest-`request_defaults` in `registry_tool.py`.
+- Verifikation: 1.679 Tests bestanden, `ruff check src/` und fokussierter mypy-Scope sauber, `registry_tool.py validate --ci` 0 Blocker, `assemble_blueprint.py validate` 125/125. Echter `llama-server`-Start mit Gemma-4-12B Q4_K_XL zeigt in `/props` die wirksamen Werte `temperature 0.7`, `top_p 0.95`, `top_k 20`, `min_p 0.0` statt der Server-Defaults (0.80/40/0.95/0.05) und statt `config.ini` (`temp 1.0`).
+- LM-Eval-Request bereinigt: echter lm-eval-Lauf gegen den echten Server erzeugt den Body `{"model","max_tokens","temperature","stop","seed","top_p","top_k","min_p"}` - ohne `do_sample` und ohne `max_gen_toks`. Die Task-YAMLs behalten `max_gen_toks` fuer lm-evals interne Kontextberechnung.
+- Punkte 2-5 umgesetzt: Reasoning generell `medium` (Antwort-Budget 4096, Thinking-Budget 2048), Blueprint-Stufen jetzt verschieden, `sed`-Hinweis ersetzt, Prompt-Rewrites fuer CoderEval und DS1000, Kandidatenliste dokumentiert.
+- **Ursache des fehlenden model_path gefunden:** Die Benutzer-Umgebungsvariable `LLAMA_ARG_MODELS_DIR` zeigte auf `D:\LLM-Modelle\models`, ein Verzeichnis, das nicht existiert; die Dateien liegen unter `D:\LLM-Modelle\Llama-GGUF`. Der Root wurde korrigiert (User-Ebene) und der Code gehaertet: ein nicht erreichbarer Override wird gemeldet und ignoriert, statt die lokale Sammlung zu verdecken. Der GGUF-Scan laeuft damit unabhaengig von LM Studio.
+- **LM-Studio-Diagnose verbessert:** Die Bereitschaftspruefung lief gegen den Port des aktiven Inference-Providers (8080 = llama.cpp) statt gegen den LM-Studio-Port (1234) und meldete "Server nicht hochgekommen". Sie prueft jetzt `LMSTUDIO_API_BASE`. Zusaetzlich unterscheidet `ensure_server()` den Zustand "unreachable" von "laeuft, verlangt aber Authentifizierung" (401) und nennt die passende Loesung (`LMS_OpenAI_AUTH_TOKEN`).
+- **GGUF-Template hat Vorrang:** `src/chat_template_cache.py` extrahiert das Chat-Template aus der GGUF-Metadaten in einen maschinenlokalen Cache (`data/chat_templates/`, Dateiname mit Inhalts-Hash). `provider_runtime()` setzt `chat_template_file` daraus; die versionierte Kopie unter `docs/Jinja-Chat-Templates/` wird nur noch bei `template_policy: explicit_file` verwendet. Verifiziert: echter Serverstart mit Gemma-4-12B, 74 Prompt-Tokens, korrekte OpenAI-`tool_calls`.
+- **Verwaiste MTP-Profile entfernt:** Drei Gemma-4-12B-Eintraege hatten ein MTP-Profil ohne existierende Companion-Datei und blockierten jeden Runtime-Aufruf. Der Sync entfernt unauflösbare Separate-Companion-Profile jetzt mit klarer Meldung; eine existierende, aber inkompatible Datei bleibt ein blockierender Befund.
+- **Gemessener Tool-Call-Befund:** Der `tool_eval_bench`-Adapter liest ausschliesslich das OpenAI-Feld `tool_calls`. Der native llama.cpp-Server injiziert das Tool-Schema nur mit `--chat-template-file` und der aus dem GGUF extrahierten Jinja-Datei: ohne sie 21 Prompt-Tokens und das Modell meldet "I don't have a get_weather tool available", mit ihr 74-282 Prompt-Tokens und korrekte `tool_calls`. Alle drei Kandidaten erzeugen korrekte OpenAI-`tool_calls`. Das GGUF direkt als Template-Datei zu uebergeben erzeugt Binarmuell. Offene Umsetzungsluecke: der Projektcode setzt `--chat-template-file` nur bei `template_policy: explicit_file`, und die drei Kandidaten haben das nicht.
+### Active / Blocked
+- Code-Umsetzung der Punkte 1-5 aus PLANUNG.md steht aus; Reihenfolge 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7.
+- Registry-Migration der bestehenden `sampling`-Bloecke ist offen: loeschen, ueberschreiben oder als historischer Audit-Nachweis behalten?
+- Kein Benchmark-Lauf gestartet. GPU-Laeufe bleiben bis ausdruecklicher Freigabe gesperrt.
+
+## Next Move
+1. Punkt 6: Screening-Manifest (25 Taskinstanzen, Varianten A-D) bauen. Erklaerung: Ein Manifest friert die Aufgaben-IDs samt Quellhash ein, damit die Varianten A-D exakt dieselben Aufgaben bearbeiten. Das bestehende Vergleichsmanifest fixiert nur EIN Benchmark je Pipeline (DS1000, HumanEval+, ARC-Challenge, Agentic) und waehlt LM-Eval-Aufgaben positional (`doc:0..N`); fuer MATH-500 und HellaSwag braucht es eine stratified Auswahl und eigene Manifest-Felder.
+2. Der GPU-Lauf bleibt bis ausdruecklicher Freigabe gesperrt.
+3. Der verbleibende Registry-Blocker `runtime_experts_missing` fuer `google/gemma-4-26b-a4b-it-qat@q4_0` braucht den LM-Studio-Expertenwert (36) und ist nur bei geladenem Modell importierbar; er ist unabhaengig von den Aenderungen dieser Sitzung.
+4. Offen: die versionierten Templates unter `docs/Jinja-Chat-Templates/` koennten entfernt werden, da das GGUF jetzt Vorrang hat. Vor einer Loeschung muessen die Blueprint-`template_map`-Eintraege und der `explicit_file`-Eintrag (`gguf-org/muse-glimmer-30b@nvfp4`) auf das GGUF umgestellt oder bewusst behalten werden.
+
+## Relevant Files
+- `docs/Benchmark-Sampling-Policy_en.md`: Sampling-Entscheidung, Herstellerbelege, Registry-Migrationsregel, Preset-/Manifest-Trennung, LM-Eval-Nebenbefunde und Umsetzungsstand.
+- `src/sampling_policy.py`: zentrale Policy-Quelle (Klassenwerte, Thinking-, Instruct-Profil, Reasoning-Stufe und -Budgets, GPT-OSS-Stufen).
+- `src/lmeval_backend.py`, `src/lmeval_runner.py`: eigenes lm-eval-Backend, das `do_sample` und `max_gen_toks` aus dem Request entfernt; der Runner registriert es, bevor lm-eval startet.
+- `src/custom_benchmark.py`: Prompt-Rewrites - eine klare Formatregel statt konkurrierender Code-/Fence-Regeln; DS1000 verlangt die Funktion nur noch bedingt.
+- `data/blueprint_definitions.yaml`: `gptoss_reasoning_level` liefert jetzt drei verschiedene Stufen (high/medium/low); der POSIX-`sed`-Hinweis durch eine Windows-taugliche Formulierung ersetzt.
+- `docs/Model-Kandidaten-Benchmark_en.md`: Kandidatenliste mit Pruefkriterien und lokalem Verfuegbarkeitsstand. Nach den handmaennlichen LM-Studio-Tests ueberarbeitet: `granite-4.0-h-tiny` und `glm-4.7-flash` sind **verworfen**. Der Nutzer waehlt drei Kandidaten, die fuer alle vier Pipelines passen: `unsloth/gemma-4-12b-it@q5_k_xl`, `prism-ml/ternary-bonsai-27b@q2_g64`, `byteshape/qwen3.8-27b@iq3_s`.
+- `PLANUNG.md`: Punkt 5 (Kandidaten), Task-by-task guidance, Status-Header und die Klarstellung zu Punkt 6 aktualisiert.
+- `docs/Architecture, Flow & ChangeLog_en.md`: Abschnitt 4.1 Sampling-Policy und die Blueprint-Trennung ergaenzt.
+- `docs/thinking-config_en.md`: Prioritaetskette und Reasoning-Stufe/Budgets auf den Stand vom 19.10.2026 gebracht.
+- `src/benchmark_config.py`: Kategorie-Defaults aus der Policy; Registry-Sampling und GUI-Werte ueberschreiben die Laufzeit nicht mehr.
+- `src/parameter_bindings.py`, `src/providers/llama_cpp_args.py`: Sampling-Bindings und Startparameter `--temp`, `--top-p`, `--top-k`, `--min-p`.
+- `src/providers/llama_cpp_provider.py`, `src/model_manager.py`: Kategorie-Uebergabe vor dem Server-Start.
+- `src/model_registry.py`: `sampling` bleibt als `sampling_research` lesbar, steuert aber nicht mehr die Laufzeit.
+- `src/registry_tool.py`: `request_defaults` im Argument-Manifest kommen aus der Policy.
+- `src/run_benchmarks.py`: `_load_model` setzt die Kategorie des ersten Benchmarks.
+- `tests/test_sampling_policy.py`: neue Regressionstests fuer Policy, Server-Flags und Bindings.
+- `~/.agents/skills/markdown-table-formatting/SKILL.md`: Description und neuer Abschnitt "Scope of change" - nur eigene/neue Tabellen ausrichten, bestehende nur auf ausdruecklichen Auftrag.
+- `PLANUNG.md`: Abschnitt "Prompt-, Modell- und Sampling-Empfehlungen (Review 19.10.2026)" - Punkte 1-5, Task-by-task guidance, Rewrites, Evaluation.
+- `src/benchmark_config.py`: `BENCHMARK_CATEGORY_DEFAULTS`, `BENCHMARK_THINKING_DEFAULTS`, `get_model_config()` - Ort der Klassenwerte.
+- `src/run_benchmarks.py`: `_get_evaluation_parameters()`, `generation_parameters_keys` - Ort der Request-Parameter und des `do_sample`-Problems.
+- `src/custom_benchmark.py`: `_make_codereval_prompt()`, `_make_datascience_prompt()` - Ort der Prompt-Rewrites.
+- `data/blueprint_definitions.yaml`: `gptoss_reasoning_level` (alle Stufen `medium`) und `sed`-Hinweis - Blueprint-Trennung.
+- `docs/Temperature Recommondations_en.md`: historischer Forschungsstand, unveraendert.
+
+=============== Compaction 20.10.2026 / 00:40 ================
+## Objective
+- **Current:** Verweis-Eintrag: Der Chatverlauf "HF LLM-Modelle suchen: Coding & MATH Benchmarks"
+  wurde aus dem Projekt Downloads nach `~/Python-Projekte/AI+IDE-Hints` verschoben. Dieser Block
+  haelt die Benchmarks-relevanten Ergebnisse dieses Verlaufs auffindbar.
+
+## Important Details
+- **Decision:** Ein Split des Verlaufs ist nicht moeglich; die ganze Session wandert nach
+  `AI+IDE-Hints`. Der fachliche Bezug zu diesem Projekt bleibt ueber die Ergebnisdateien bestehen.
+- **Finding:** OpenCode V2 kennt kein Projekt-Umhaengen per Copy. `POST /api/session/{id}/move`
+  haengt Projekt und Location in place um (Body nur `directory`, Antwort 204). Die Session-ID
+  bleibt unveraendert; der Wechsel wird als `Session.Message.LocationSwitched` (mit `previous`)
+  in der Historie und als `Session.Inbox.Move` protokolliert. `session export` + `import` waere
+  der falsche Weg, weil dabei eine neue Session-ID entsteht.
+- **Verweise:** Session `ses_0619d9308ffe1Pgoynwxvt0ZN3`; vorher Projekt `global` mit Location
+  `~/Downloads`, jetzt Projekt AI+IDE-Hints (`3d7bfa6d58a596d3e8c23dc5fec6873e250aad79`).
+
+## Work State
+### Completed
+- 22 OpenWeight-LLM-Kandidaten (12-35B) aus HF-Base-Pages mit GGUF unter 13,5 GB, Coding- und
+  Math-Scores sowie AA-Indizes als Markdown plus CSV erstellt; alle GGUF-Groessen gegen die
+  HF-Tree-API geprueft, alle URLs erreichbar.
+### Active / Blocked
+- nichts offen.
+
+## Next Move
+1. Bei Bedarf die Ergebnisdateien gegen neue AA-Indizes und neue GGUF-Quantisierungen auffrischen.
+
+## Relevant Files
+- `~/Doku-intern/Auswertungen, Berechnungen/LLM_Coding_Math_Base_Models_12B_35B_AA.md` (Report)
+- `~/Doku-intern/Auswertungen, Berechnungen/LLM_Coding_Math_Base_Models_12B_35B_AA.csv` (Datensatz)
+- `~/Downloads/LLM_Coding_Math_Base_Models_12B_35B_AA.md` und `.csv` (Original-Ablage)
+
+=============== Compaction 20.10.2026 / 16:31 ================
+## Objective
+- **Current:** Prompt-, Sampling- und Modellwahl-Empfehlungen aus `PLANUNG.md` (Punkte 1-5) umsetzen und die Voraussetzungen fuer den Agentic-Pfad schliessen. Punkt 6 (kleine Evaluation) bleibt offen.
+- **Completed:** Sicherungs-Commit `bac6834`; Sampling-Policy, Prompt-Rewrites, Blueprint-Trennung und Kandidatenliste umgesetzt; LM-Eval-Request bereinigt; GGUF-Scan vom LM-Studio-Framework entkoppelt; Tool-Call-Pfad verifiziert.
+
+## Important Details
+- **Decision (Sampling):** Die per Modell recherchierte Registry-Policy wird **nicht** weiter verfolgt (nur ~30 % belastbare Werte). Stattdessen gelten starre Klassenwerte in `src/sampling_policy.py`: coding 0.6, math 0.7, knowledge 0.6, agentic 0.6, schmale instruct 0.5; jeweils `top_p=0.95`, `top_k=20`, `min_p=0.0`. Das Registry-`sampling`-Block bleibt als Recherche-Historie lesbar (`sampling_research`), steuert aber nicht mehr die Laufzeit.
+- **Decision (Greedy):** `temperature=0` ist auf der Zielhardware ungeeignet. Quantisierung ist die Hauptursache fuer Wiederholungsschleifen (Modelle >22-24B Parameter muessen auf 16 GB VRAM auf ~3 Bit oder weniger quantisiert werden; von ~80 lokal getesteten Modellen zeigt die Mehrzahl unter 3 Bit **entweder** Schleifen **oder** starke Qualitaetseinbusse; Ternary-Bonsai ist die einzige getestete Ausnahme ohne Schleifen). Temperatur ist Mitverursacher: Qwen3 warnt explizit vor Greedy ("performance degradation and endless repetitions"), DeepSeek-R1 empfiehlt 0.5-0.7 "to prevent endless repetitions or incoherent outputs". Belege in `docs/Benchmark-Sampling-Policy_en.md`.
+- **Decision (Reasoning):** Generell `medium`, Antwort-Budget 4096 statt 8192 Token, Thinking-Budget 2048. Blueprint-Werte duerfen die Stufe nicht absenken. Das Budget senkt Laufzeit und beendet beobachtete Wiederholungsschleifen frueher; der Agentic-Pfad bleibt bei 4096 (GLM-4.7-Doku warnt vor pauschaler 1024er-Senkung).
+- **Bug / Finding (Root):** Die Benutzer-Umgebungsvariable `LLAMA_ARG_MODELS_DIR` zeigte auf `D:\LLM-Modelle\models`, ein **nicht existierendes** Verzeichnis; die Dateien liegen unter `D:\LLM-Modelle\Llama-GGUF`. Der GGUF-Scan fand deshalb 0 Dateien und **kein** der 71 Registry-Eintraege bekam einen `local.model_path` - kein Gemma-spezifisches, sondern ein generelles Problem. Korrigiert auf drei Ebenen: User-Umgebung gesetzt, Root-Reihenfolge in `src/model_paths.py` umgestellt, und der Code gehaertet: ein Umgebungs-Override auf ein fehlendes Verzeichnis wird gemeldet und ignoriert, statt die lokale Sammlung zu verdecken. Nach dem Sync: 62 von 72 Eintraegen mit Pfad (vorher 54).
+- **Bug / Finding (LM Studio):** Die Bereitschaftspruefung lief gegen den Port des aktiven Inference-Providers (8080 = llama.cpp) statt gegen den LM-Studio-Port (1234) und meldete daher "Server nicht hochgekommen". Sie prueft jetzt `LMSTUDIO_API_BASE`. Zusaetzlich unterscheidet `ensure_server()` den Zustand "unreachable" von "laeuft, verlangt aber Authentifizierung" (401) und nennt die Loesung (`LMS_OpenAI_AUTH_TOKEN` setzen). Der Token ist in dieser Umgebung nicht gesetzt - das ist eine Umgebungs-, keine Codeeinstellung.
+- **Finding (Agentic-Pfad):** `tool_eval_bench` liest ausschliesslich das OpenAI-Feld `tool_calls`; ein Text-Parser fuer XML-artige Tool-Formate fehlt. Gemessen: ohne `--chat-template-file` injiziert llama.cpp das Tool-Schema nicht (21 statt 282 Prompt-Tokens) und das Modell meldet sinngemaess "I don't have a get_weather tool available"; das GGUF direkt als Template-Datei zu uebergeben erzeugt Binaermuell. Mit der **extrahierten** Jinja-Datei erzeugen alle drei Kandidaten korrekte OpenAI-`tool_calls`. Vision ist fuer die vier Pipelines irrelevant (kein Bildpfad in `custom_benchmark.py`, `run_benchmarks.py`, `evalplus_subset_eval.py`).
+- **Architecture:** `src/chat_template_cache.py` extrahiert das GGUF-Chat-Template in einen maschinenlokalen Cache (`data/chat_templates/`, gitignored, Dateiname mit Inhalts-Hash). `provider_runtime()` setzt `chat_template_file` daraus - das GGUF hat Vorrang, die versionierte Kopie unter `docs/Jinja-Chat-Templates/` wird nur bei `template_policy: explicit_file` verwendet. `src/lmeval_backend.py` + `src/lmeval_runner.py` entfernen `do_sample` und `max_gen_toks` aus dem LM-Eval-Request (beide wirkungslos bzw. widerspruechlich; `max_gen_toks` bleibt in der Task-YAML, weil lm-eval es intern fuer die Kontextberechnung nutzt).
+- **Finding (Datenfehler):** Drei Gemma-4-12B-Eintraege hatten ein MTP-Speculative-Profil ohne existierende Companion-Datei und blockierten jeden Runtime-Aufruf. Der Sync entfernt unauflösbare Separate-Companion-Profile jetzt mit klarer Meldung; eine existierende, aber inkompatible Datei bleibt ein blockierender Befund fuer die menschliche Entscheidung.
+- **Kandidaten:** Drei Modelle decken alle vier Pipelines ab: `unsloth/gemma-4-12b-it@q5_k_xl`, `prism-ml/ternary-bonsai-27b@q2_g64`, `byteshape/qwen3.8-27b@iq3_s`. `granite-4.0-h-tiny` und `glm-4.7-flash` sind nach handmaennlichen LM-Studio-Tests **verworfen**. `granite-4.2-8b` und `glm-4.6v` haben ein abweichendes Profil und ersetzen keinen Klassen-Kandidaten.
+
+## Work State
+### Completed
+- Sampling-Policy, Reasoning-Stufe/Budgets, Prompt-Rewrites (CoderEval, DS1000, HellaSwag), Blueprint-Trennung (drei unterscheidliche GPT-OSS-Stufen, `sed`-Hinweis ersetzt) und Kandidatenliste umgesetzt.
+- LM-Eval-Request bereinigt und mit einem echten lm-eval-Lauf gegen den echten Server verifiziert: Request ohne `do_sample` und ohne `max_gen_toks`, mit `temperature/top_p/top_k/min_p/max_tokens`.
+- Server-Startparameter verifiziert: `/props` zeigt `temperature 0.7`, `top_p 0.95`, `top_k 20`, `min_p 0.0` statt der Server-Defaults (0.80/40/0.95/0.05) und statt `config.ini` (`temp 1.0`).
+- End-to-End ueber den Projekt-Code: Serverstart mit Gemma-4-12B, `--chat-template-file` aus dem GGUF, 74 Prompt-Tokens, korrekte `tool_calls` (`get_weather` mit `{"city":"Berlin"}`).
+- 1.680 Tests bestanden; `ruff check src/` und fokussierter mypy-Scope sauber; `git diff --check` sauber. Registry-Blocker von 44 auf 1 reduziert.
+- `PLANUNG.md`, `docs/Architecture, Flow & ChangeLog_en.md`, `docs/thinking-config_en.md` nachgezogen.
+
+### Active / Blocked
+- Der verbleibende Blocker `runtime_experts_missing` fuer `google/gemma-4-26b-a4b-it-qat@q4_0` (Expertenwert 36) ist nur bei geladenem Modell importierbar und unabhaengig von den Aenderungen dieser Sitzung.
+- `LMS_OpenAI_AUTH_TOKEN` ist nicht gesetzt; ohne Token antwortet der laufende LM-Studio-Server mit 401.
+- Kein Commit seit `bac6834`. Alle Aenderungen liegen uncommitted im Arbeitsbaum.
+
+## Next Move
+1. Punkt 6 umsetzen: Screening-Manifest (25 Taskinstanzen, Varianten A-D) bauen; dafuer ist ein eigener Manifest-Builder noetig, weil die Vier-Pipeline-Auswahl MATH-500 und HellaSwag nicht abdeckt und positional (`doc:0..N`) auswaehlt.
+2. Optional: `docs/Jinja-Chat-Templates/` entfernen, nachdem die Blueprint-`template_map`-Eintraege (Granite, Gemma, Phi-4, GPT-OSS) und `gguf-org/muse-glimmer-30b@nvfp4` auf das GGUF umgestellt oder bewusst behalten wurden.
+3. GPU-Lauf bleibt bis ausdruecklicher Freigabe gesperrt.
+
+## Relevant Files
+- `src/sampling_policy.py`: zentrale Sampling-, Reasoning- und Stufen-Policy.
+- `src/chat_template_cache.py`: GGUF-Template-Extraktion in den maschinenlokalen Cache.
+- `src/lmeval_backend.py`, `src/lmeval_runner.py`: LM-Eval-Backend ohne wirkungslose Request-Felder.
+- `src/model_paths.py`, `src/model_manager.py`, `src/providers/lmstudio_provider.py`, `src/registry_tool.py`: Root-Haertung, LM-Studio-Port und Profilbereinigung.
+- `docs/Benchmark-Sampling-Policy_en.md`, `docs/Model-Kandidaten-Benchmark_en.md`: Entscheidung, Belege und Kandidaten.
+- `CHANGELOG.md`: Dateiweise Aenderungen; siehe Abschnitt "Benchmark-Sampling-Policy" vom 19.10.2026.
+- `data/model_registry.yaml.bak-before-pathfix-20261020_141712`: Registry-Backup vor dem Root-Fix.

@@ -19,10 +19,21 @@ SUPPORTED_CACHE_TYPES = frozenset(
 CACHE_TYPE_ALIASES = {"fp16": "f16", "float16": "f16", "q4_nl": "iq4_nl"}
 REASONING_FORMATS = frozenset({"auto", "none", "deepseek", "deepseek-legacy"})
 
+#: Runtime fields that carry the benchmark sampling policy to the native
+#: server. These are passed as start parameters so that llama-server does not
+#: fall back to its own defaults.
+SAMPLING_RUNTIME_FIELDS = frozenset({"temperature", "top_p", "top_k", "min_p"})
+
 
 def normalize_cache_type(value: Any) -> str | None:
     """Normalize and validate a llama.cpp KV-cache type."""
     return cast("str | None", kv_cache_type(value))
+
+
+def _format_ratio(value: float) -> str:
+    """Format a sampling ratio without trailing zero noise."""
+    text = f"{value:.6f}".rstrip("0").rstrip(".")
+    return text or "0"
 
 
 def _as_bool(value: Any, default: bool = True) -> bool:
@@ -123,6 +134,29 @@ def build_runtime_args(
         value = runtime.get(key)
         if isinstance(value, (int, str)) and str(value).strip():
             args.extend([option, str(value).strip()])
+
+    # Sampling defaults reach the native server as start parameters. Without
+    # them llama-server falls back to its own defaults (temp 0.80, top-k 40,
+    # top-p 0.95, min-p 0.05), which are not the benchmark policy. CLI
+    # parameters take precedence over the server's global config.ini.
+    for binding in llama_cpp_value_bindings():
+        key = binding.registry_field
+        option = binding.llama_cpp_flag
+        if option is None or key not in SAMPLING_RUNTIME_FIELDS:
+            continue
+        value = runtime.get(key)
+        if value is None or isinstance(value, bool):
+            continue
+        if key in {"temperature", "top_p", "min_p"}:
+            if isinstance(value, (int, float)) and 0.0 <= float(value) <= 1.0:
+                args.extend([option, _format_ratio(float(value))])
+            else:
+                notify(f"Invalid {key} value {value!r} for llama-server; ignoring it.")
+        elif key == "top_k":
+            if isinstance(value, int) and value >= 0:
+                args.extend([option, str(value)])
+            else:
+                notify(f"Invalid {key} value {value!r} for llama-server; ignoring it.")
 
     # llama.cpp does not expose a dedicated --num-experts option. Its
     # supported metadata override changes the active expert count used by the

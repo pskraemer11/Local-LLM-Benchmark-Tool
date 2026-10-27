@@ -244,7 +244,9 @@ modules:
       </code_quality>\n\n<file_system>\n\
       - Verify file paths; do not assume relative to cwd\n\
       - Edit files in place; never create renamed copies\n\
-      - Use sed for global search/replace\n</file_system>\n\n<testing>\n\
+      - Prefer a targeted, tool-based edit over shell-wide search/replace\n\
+      - On Windows use PowerShell (Get-Content, Select-String, Set-Content) or a\n\
+      - short Python script instead of POSIX-only tools like sed\n</file_system>\n\n<testing>\n\
       - For bug fixes: write a test that reproduces the issue first\n\
       - For new features: test-driven development where appropriate\n\
       - Consult user if testing infra is missing or costly to set up\n\
@@ -285,9 +287,9 @@ modules:
   gptoss_reasoning_level:
     description: "GPT-OSS Reasoning-Level (OpenAI: 'The reasoning level can be set\
       \ in the system prompts, e.g. Reasoning: high')"
-    full: 'Reasoning: medium'
+    full: 'Reasoning: high'
     medium: 'Reasoning: medium'
-    minimal: 'Reasoning: medium'
+    minimal: 'Reasoning: low'
   instruct_scaffolding:
     description: Bedingtes Problemlösungs-Scaffolding für Instruct-Modelle
     full: "<reasoning>\n- Analyze the problem step by step before answering.\n- Consider\

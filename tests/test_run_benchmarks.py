@@ -477,10 +477,12 @@ class TestLmevalParams:
         assert "extra_body" not in params
 
     # Region: Category-Defaults (Fallback ohne JSON-Config) ----------------
-    def test_coding_default_is_deterministic(self):
+    def test_coding_default_uses_the_class_policy(self):
         params = _get_evaluation_parameters("plain-7b-model", "coding")
-        assert params["temperature"] == 0.2  # coding (Research 06.08.)
-        assert params["top_p"] == 1.0
+        # Greedy decoding is not a valid default on the local low-bit
+        # quantization; the class policy is 0.6/0.95.
+        assert params["temperature"] == 0.6
+        assert params["top_p"] == 0.95
         assert params["max_tokens"] == 4096
 
     def test_math_default_has_higher_max_tokens(self):
@@ -497,9 +499,9 @@ class TestLmevalParams:
         assert params["temperature"] == 0.6  # leicht stochastisch fuer tool-use
         assert params["max_tokens"] == 4096
 
-    def test_registry_sampling_replaces_model_overrides(self, mocker):
-        # MODEL_TEMP_OVERRIDES sind entfernt; stattdessen entscheidet
-        # Registry-Sampling (Modell x Kategorie) ueber die Defaults.
+    def test_registry_sampling_is_history_and_not_runtime(self, mocker):
+        # The Registry `sampling` block keeps the research history but no
+        # longer decides the runtime parameters. The class policy does.
         import benchmark_config as bc
         mocker.patch.object(bc, "_load_quant_registry", return_value={
             "unsloth/phi-4@q5_k_m": {"sampling": {"coding": {"temperature": 1.0, "top_p": 1.0}}},
@@ -508,28 +510,18 @@ class TestLmevalParams:
                 "temperature": 0.7, "top_p": 0.8, "top_k": 20, "repetition_penalty": 1.05,
             }}},
         })
-        expected = {
-            "unsloth/phi-4": 1.0,  # Registry-Sampling, coding
-            "unsloth/gpt-oss-20b": 1.0,  # Zeile gpt-oss
-            "vinpix/bonsai-8b-llama.cpp": 0.2,  # Bonsai 06.08. entfernt -> Kategorie-Default
-            "unsloth/qwen3-coder-30b-a3b-instruct": 0.7,  # Registry-Sampling
-            "qwen3.5-72b-instruct": 0.2,  # keine Zeile -> Kategorie-Default
-            "gemma-3-12b": 0.2,  # keine Zeile -> Kategorie-Default
-        }
-        for model, temp in expected.items():
+        for model in (
+            "unsloth/phi-4",
+            "unsloth/gpt-oss-20b",
+            "unsloth/qwen3-coder-30b-a3b-instruct",
+            "qwen3.5-72b-instruct",
+            "gemma-3-12b",
+        ):
             params = _get_evaluation_parameters(model, "coding")
-            assert params["temperature"] == temp, model
-            optional = {
-                "unsloth/qwen3-coder-30b-a3b-instruct": {
-                    "top_k": 20,
-                    "repetition_penalty": 1.05,
-                },
-            }.get(model, {})
-            for key, value in optional.items():
-                assert params.get(key) == value, (model, key, params)
-            for key in ("top_k", "min_p", "repetition_penalty"):
-                if key not in optional:
-                    assert key not in params
+            assert params["temperature"] == 0.6, model
+            assert params["top_p"] == 0.95, model
+            assert params["top_k"] == 20, model
+            assert params["min_p"] == 0.0, model
             if "gpt-oss" not in model:
                 # gpt-oss liefert until aus der Blueprint-Definition (eigener Test).
                 assert "until" not in params
@@ -547,7 +539,9 @@ class TestLmevalParams:
         """The Harmony reasoning cap must reach lm-eval as a gen kwarg."""
         _patch_gpt_oss_registry(mocker)
         params = _get_evaluation_parameters("unsloth/gpt-oss-20b", "coding")
-        assert params["max_thinking_tokens"] == 4096
+        # The benchmark policy caps the reasoning budget below the blueprint
+        # value, so the reasoning trace cannot consume the whole answer.
+        assert params["max_thinking_tokens"] == 2048
         assert "reasoning_effort" not in params
 
     def test_gptoss_thinking_budget_is_in_lmeval_command(self, mocker, tmp_path):
@@ -562,7 +556,7 @@ class TestLmevalParams:
             bench_name="gsm8k",
         )
         kwargs = json.loads(cmd[cmd.index("--gen_kwargs") + 1])
-        assert kwargs["max_thinking_tokens"] == 4096
+        assert kwargs["max_thinking_tokens"] == 2048
         assert "reasoning_effort" not in kwargs
 
     def test_enable_thinking_false_emits_chat_template_kwargs(self):
@@ -592,8 +586,10 @@ class TestLmevalParams:
         mocker.patch.object(bc, "_load_quant_registry", return_value=registry)
         with patch.object(bc, "LMS_CONFIG_ROOT", tmp_path):
             params = _get_evaluation_parameters("pub1/fake-model-7b@q6_k", "coding")
-        assert params["temperature"] == 0.2
-        assert params["min_p"] == 0.02
+        # Neither the GUI temperature nor the GUI min_p reaches the request:
+        # the class policy owns the sampling values.
+        assert params["temperature"] == 0.6
+        assert params["min_p"] == 0.0
 
     def test_lms_temp_ignored_category_variation_applies(self, tmp_path):
         # Gleiche Config -> Kategorie-Differenzierung greift (2026-08-06):
@@ -602,7 +598,7 @@ class TestLmevalParams:
         self._write_lms_config(tmp_path, "pub1", "fake-model-7b", {"llm.prediction.temperature": 0.6})
         import benchmark_config as bc
 
-        expected = {"arc": 0.6, "ifeval": 0.6, "ds1000": 0.2, "math-500": 0.7}
+        expected = {"arc": 0.6, "ifeval": 0.6, "ds1000": 0.6, "math-500": 0.7}
         with patch.object(bc, "LMS_CONFIG_ROOT", tmp_path):
             for bench, temp in expected.items():
                 params = _get_evaluation_parameters("pub1/fake-model-7b", bench)
@@ -658,7 +654,9 @@ class TestBuildLmevalCmd:
         out_path = str(tmp_path / "out")
         cmd = _build_lmeval_cmd("plain-model", "api/my-model", "task1", 10, out_path)
         assert "--model" in cmd
-        assert cmd[cmd.index("--model") + 1] == "local-chat-completions"
+        # The project runner registers its own backend so that the request
+        # stays free of the ineffective task fields.
+        assert cmd[cmd.index("--model") + 1] == "benchmarks-chat-completions"
         assert "--tasks" in cmd
         assert cmd[cmd.index("--tasks") + 1] == "task1"
         assert "--limit" in cmd

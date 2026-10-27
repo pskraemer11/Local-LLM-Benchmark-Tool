@@ -11,9 +11,11 @@ The repository uses versioned Git hooks through `core.hooksPath=.githooks`.
 - `pre-push`: checks outgoing author/committer metadata and commit messages for
   prohibited email domains, and added text for domains and profile paths in
   every outgoing commit (including merge-resolution diffs), then runs the
-  complete `pre_review_checks.ps1` gate without skip switches plus the blocking
-  focused mypy scope used by CI. Its review artifacts are temporary because the
-  commit already exists when pre-push runs.
+  complete pytest suite. It subsequently runs `pre_review_checks.ps1` with
+  `-SkipPytest` to avoid a duplicate suite run, plus `-NoArtifacts` and
+  `-NoTranscript`, and finally the blocking focused mypy scope used by CI.
+  Its review artifacts are temporary because the commit already exists when
+  pre-push runs.
 
 The extensionless files are Git hook entry points. They delegate to the
 PowerShell helpers in this directory for Windows compatibility.

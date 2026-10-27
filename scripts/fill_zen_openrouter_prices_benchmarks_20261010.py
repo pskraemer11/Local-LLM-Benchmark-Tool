@@ -1,19 +1,20 @@
 from __future__ import annotations
 
-import copy
 import json
 import os
 import re
 import shutil
 import urllib.request
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import openpyxl
 from openpyxl.comments import Comment
 
+if TYPE_CHECKING:
+    from openpyxl.worksheet.worksheet import Worksheet
 from update_price_benchmark_workbook_20261010 import zen_prices
-
 
 WORKBOOK = Path(os.environ.get("PRICE_WORKBOOK") or Path.home() / "Documents" / "Computer+Handy" / "AI-Grundsatz_u_Prompting" / "Preise (Online)" / "Preisvergleich OpenCode Go+Zen, Marktplätze_Arbeitskopie_20261010.xlsx")
 PRE_EDIT_BACKUP = WORKBOOK.with_name(WORKBOOK.stem + ".before_fill_20261010.xlsx")
@@ -128,7 +129,7 @@ def zen_key(name: str) -> str:
     return norm(base)
 
 
-def update_zen(ws, aa_rows: list[dict], aa_meta: dict) -> dict[str, int]:
+def update_zen(ws: Worksheet, aa_rows: list[dict], aa_meta: dict) -> dict[str, int]:
     lookup = aa_lookup(aa_rows)
     # Make the available AA composites explicit; the old headings mixed
     # different benchmark families and made an unverified value misleading.
@@ -143,7 +144,7 @@ def update_zen(ws, aa_rows: list[dict], aa_meta: dict) -> dict[str, int]:
         ws.cell(6, col).value = value
     ws["A2"] = ZEN_DOCS
     ws["M2"] = "Stand:"
-    ws["N2"] = datetime.now(timezone.utc).date()
+    ws["N2"] = datetime.now(UTC).date()
     ws["N2"].number_format = "yyyy-mm-dd"
     for col in range(2, 6):
         ws.cell(6, col).comment = Comment(
@@ -167,7 +168,7 @@ def update_zen(ws, aa_rows: list[dict], aa_meta: dict) -> dict[str, int]:
             for col in range(2, 6):
                 ws.cell(row, col).value = "unverified"
         else:
-            for col, value in zip(range(2, 6), prices):
+            for col, value in zip(range(2, 6), prices, strict=False):
                 ws.cell(row, col).value = value
             filled_prices += 1
         for col in range(7, 12):
@@ -198,7 +199,7 @@ def update_zen(ws, aa_rows: list[dict], aa_meta: dict) -> dict[str, int]:
     return {"prices": filled_prices, "coding": filled_coding, "agentic": filled_agentic}
 
 
-def update_comparison(ws, or_models: list[dict]) -> dict[str, int]:
+def update_comparison(ws: Worksheet, or_models: list[dict]) -> dict[str, int]:
     by_id = {str(model.get("id")): model for model in or_models if model.get("id")}
     filled = 0
     exact_ids = 0
@@ -208,7 +209,7 @@ def update_comparison(ws, or_models: list[dict]) -> dict[str, int]:
         if not model:
             continue
         values = or_price(model)
-        for col, value in zip(range(7, 11), values):
+        for col, value in zip(range(7, 11), values, strict=False):
             ws.cell(row, col).value = value
         ws.cell(row, 18).value = model_id
         ws.cell(row, 19).value = "OpenRouter exact model ID"
@@ -216,7 +217,7 @@ def update_comparison(ws, or_models: list[dict]) -> dict[str, int]:
         ws.cell(row, 21).value = "OpenRouter public catalog; exact base-model ID; no :batch variant."
         filled += 1
         exact_ids += 1
-    ws["A1"] = "Stand: 2026-10-10 – Vergleich OpenCode Zen und OpenRouter"
+    ws["A1"] = "Stand: 2026-10-10 - Vergleich OpenCode Zen und OpenRouter"
     ws["A3"] = "AA-Filter: exakte Varianten mit Artificial Analysis Intelligence Index > 40; fehlende oder nicht vergleichbare Preise/Benchmarks bleiben unverified/leer."
     for col in range(7, 11):
         ws.cell(4, col).comment = Comment(f"Quelle: OpenRouter public model catalog, {OR_MODELS}; USD je 1 Mio. Tokens; Abruf 2026-10-10.", "Codex")

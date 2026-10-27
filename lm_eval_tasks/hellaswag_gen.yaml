@@ -13,7 +13,8 @@ doc_to_text: |
   C. {{ endings[2] }}
   D. {{ endings[3] }}
 
-  Answer with just the letter of the best ending (A, B, C or D).
+  Choose the best ending. Return exactly one uppercase letter: A, B, C, or D.
+  Do not include an explanation, punctuation, or any other text.
 doc_to_target: "{{ 'ABCD'[label | int] }}"
 generation_kwargs:
   until:

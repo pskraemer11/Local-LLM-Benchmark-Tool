@@ -467,7 +467,11 @@ def _run_lms_ls() -> list[dict[str, Any]]:
     except Exception as e:
         print(f"[WARN] Server-Start fehlgeschlagen: {e}")
 
-    print("[WARN] lms ls auch nach Server-Start fehlgeschlagen")
+    print(
+        "[WARN] lms ls auch nach Server-Start fehlgeschlagen. Die "
+        "Registry-Synchronisation laeuft ohne LM-Studio-Inventar weiter; "
+        "lokale GGUF-Pfade werden direkt vom Dateisystem gescannt."
+    )
     return []
 
 
@@ -1034,6 +1038,60 @@ def _resolve_local_companion(reference: str) -> Path | None:
     return result.path if result.is_unique else None
 
 
+def _companion_file_exists(reference: str) -> bool:
+    """Return whether a companion reference names an existing file.
+
+    A reference may be a path or a logical name. Only a concrete existing
+    file proves that a companion is present; an unresolvable name does not.
+    """
+    if not reference:
+        return False
+    candidate = Path(reference)
+    try:
+        if candidate.is_file():
+            return True
+    except OSError:
+        return False
+    resolved = _resolve_local_companion(reference)
+    return resolved is not None and Path(resolved).is_file()
+
+
+def _drop_unresolvable_companion_profile(
+    entry: dict[str, Any],
+    local: dict[str, Any],
+    main_path: str,
+) -> int:
+    """Remove a speculative profile whose separate companion has no file.
+
+    A profile with ``mode: separate`` needs a companion GGUF next to the
+    main model. When that file is missing, the profile cannot reach
+    llama-server and only blocks the model. The speculative decoding is
+    dropped; the model then runs without it.
+    """
+    local_llama = local.get("llama_cpp")
+    if not isinstance(local_llama, dict):
+        return 0
+    profile = local_llama.get("speculative")
+    if not isinstance(profile, dict):
+        return 0
+    if profile.get("mode") != "separate" or profile.get("type") != "mtp":
+        return 0
+    role = profile.get("companion_role") or "mtp"
+    companions = local.get("companions")
+    companion_path = companions.get(role) if isinstance(companions, dict) else None
+    if isinstance(companion_path, str) and companion_path.strip():
+        if Path(companion_path).is_file():
+            return 0
+    del local_llama["speculative"]
+    if isinstance(companions, dict) and role in companions:
+        del companions[role]
+    print(
+        f"  [FIX] {entry.get('publisher', '')}: verwaistes {role}-Profil entfernt "
+        "(keine Companion-Datei vorhanden); das Modell laeuft ohne Speculative Decoding."
+    )
+    return 1
+
+
 def _materialize_local_bindings(inventory: RegistryInventory) -> int:
     """Persist exact local bundle paths and llama.cpp speculative settings.
 
@@ -1070,6 +1128,12 @@ def _materialize_local_bindings(inventory: RegistryInventory) -> int:
 
         bindings = [binding for binding in link.runtime_bindings if binding.config_path is not None]
         if len(bindings) != 1:
+            # Without a live LM Studio config the speculative profile has no
+            # source to be re-derived from. A profile that requires a separate
+            # companion but names no resolvable file is stale and would block
+            # every runtime for this model, so it is removed here.
+            if _drop_unresolvable_companion_profile(entry, local, main_path):
+                changed += 1
             continue
         binding = bindings[0]
         config_path = str(binding.config_path)
@@ -1148,6 +1212,18 @@ def _materialize_local_bindings(inventory: RegistryInventory) -> int:
                         f"  [WARN] {registry_key}: erforderliche {role}-Companion-Datei "
                         "konnte nicht eindeutig und kompatibel aufgeloest werden"
                     )
+                    # A required companion whose file does not exist at all
+                    # cannot reach llama-server. The unusable profile is
+                    # removed so the model runs without speculative decoding.
+                    # A file that exists but fails the identity check stays a
+                    # blocking finding: that needs a human decision.
+                    if not _companion_file_exists(reference):
+                        print(
+                            f"  [FIX] {registry_key}: unauflösbares {role}-Profil entfernt; "
+                            "das Modell laeuft ohne Speculative Decoding."
+                        )
+                        normalized = {}
+                        local_speculative = {}
             companions = local.get("companions")
             if isinstance(companions, dict):
                 # Remove obsolete bundle links after a mode/type switch. Do
@@ -1917,8 +1993,15 @@ def build_llama_argument_manifest(
             warning=warnings.append,
         )
         request_defaults: dict[str, Any] = {}
-        sampling = benchmark_runtime.get("sampling")
-        if isinstance(sampling, dict):
+        # The request defaults carry the benchmark sampling policy, not the
+        # Registry research history. The researched per-model values stay
+        # visible in the Registry itself.
+        sampling = {
+            key: value
+            for key, value in runtime.items()
+            if key in {"temperature", "top_p", "top_k", "min_p"}
+        }
+        if sampling:
             request_defaults["sampling"] = sampling
         for field in ("reasoning", "reasoning_format"):
             value = runtime.get(field, benchmark_runtime.get(field))

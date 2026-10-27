@@ -6,12 +6,15 @@ import json
 import os
 import shutil
 import urllib.request
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import openpyxl
-from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
+if TYPE_CHECKING:
+    from openpyxl.cell.cell import Cell
+from openpyxl.styles import Alignment, Font, PatternFill
 
 SOURCE = Path.home() / "Documents" / "Computer+Handy" / "AI-Grundsatz_u_Prompting" / "Preise (Online)" / "Preisvergleich OpenCode Go+Zen, Marktplätze.xlsx"
 RUN_DATE = "2026-10-10"
@@ -54,7 +57,7 @@ def fetch_aa() -> tuple[list[dict], dict, bytes]:
     meta = {
         "source_url": "https://artificialanalysis.ai/api/v2/language/models/free",
         "documentation_url": "https://artificialanalysis.ai/data-api/docs#getLanguageModelsFree",
-        "retrieved_at_utc": datetime.now(timezone.utc).isoformat(),
+        "retrieved_at_utc": datetime.now(UTC).isoformat(),
         "tier": pages[0].get("tier"),
         "intelligence_index_version": pages[0].get("intelligence_index_version"),
         "pages": len(pages),
@@ -81,7 +84,7 @@ def norm(value: str) -> str:
     return "".join(ch for ch in value.lower() if ch.isalnum())
 
 
-def score(row: dict, field: str):
+def score(row: dict, field: str) -> float | int | str | None:
     return (row.get("evaluations") or {}).get(field)
 
 
@@ -174,7 +177,7 @@ def zen_prices() -> dict[str, tuple[float | str | None, float | str | None, floa
     }
 
 
-def copy_style(source_cell, target_cell) -> None:
+def copy_style(source_cell: Cell, target_cell: Cell) -> None:
     if source_cell.has_style:
         target_cell._style = copy.copy(source_cell._style)
     if source_cell.number_format:
@@ -200,7 +203,7 @@ def rebuild_comparison(wb: openpyxl.Workbook, aa_rows: list[dict], or_models: li
     for idx, width in enumerate(widths, 1):
         ws.column_dimensions[openpyxl.utils.get_column_letter(idx)].width = width
     ws.sheet_view.showGridLines = False
-    ws["A1"] = f"Stand: {RUN_DATE} – Vergleich OpenCode Zen und OpenRouter"
+    ws["A1"] = f"Stand: {RUN_DATE} - Vergleich OpenCode Zen und OpenRouter"
     ws["A2"] = "Nur die Anbieter OpenCode Zen und OpenRouter sind enthalten. Go, Together AI, DeepInfra und OpenAI direkt wurden aus dieser Übersicht entfernt."
     ws["A3"] = "AA-Filter: exakte Varianten mit Artificial Analysis Intelligence Index > 40; fehlende Preise oder Benchmarks bleiben unverified/leer."
     ws["A4"] = "Model / exakte Variante"
@@ -272,7 +275,7 @@ def rebuild_comparison(wb: openpyxl.Workbook, aa_rows: list[dict], or_models: li
         ws.cell(row_idx, 6).value = weighted_formula(row_idx, "B")
         ws.cell(row_idx, 11).value = weighted_formula(row_idx, "G")
         for col in range(1, 22):
-            copy_style(template.cell(4 if col > 1 else 4, min(col, template.max_column)), ws.cell(row_idx, col))
+            copy_style(template.cell(4, min(col, template.max_column)), ws.cell(row_idx, col))
             ws.cell(row_idx, col).alignment = Alignment(vertical="top", wrap_text=col in (1, 17, 18, 19, 20, 21))
         for col in (2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14):
             ws.cell(row_idx, col).number_format = "0.0000"

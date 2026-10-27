@@ -380,7 +380,7 @@ With 100+ models or SS=100, the system becomes noticeably slower:
 
 - Line 17 lists `lm_eval (ARC, HellaSwag, TruthfulQA, MathQA, MMLU-Pro)` — **MMLU-Pro has been removed**, should be updated
 - Line 17 lists `MathQA` — **replaced by MATH-500** (see `run_benchmarks.py:178`)
-- Lines 39-40 GitHub URL `pskraer11/llm-benchmark-suite` — does this repo exist? Not verifiable, but matches local `git remote -v` data
+- Lines 39-40 GitHub URL `SyntheticUser/llm-benchmark-suite` — does this repo exist? Not verifiable, but matches local `git remote -v` data
 - Lines 61-63 shows `--benchmarks DS1000,CoderEval --sample-size 10` — works with v13
 - Lines 65-67 shows `python consolidate_results_v12.py --bootstrap` — **`--bootstrap` was removed in v13** (line 144 of thinking_config.md confirms), must be updated
 - Lines 73-80 CLI options table is accurate

@@ -144,8 +144,11 @@ def test_muse_blueprint_limits_reach_lms_and_request_kwargs(tmp_path, monkeypatc
     monkeypatch.setattr(bc, "_TEMPLATE_ROOT", tmp_path)
     monkeypatch.setattr(bc, "_lms_generation_config", lambda _: {})
     request_policy = bc.get_model_config(key)
-    assert request_policy["max_tokens"] == 8192
-    assert reasoning_request_kwargs(request_policy) == {"reasoning_strength": "low"}
+    # The blueprint still writes its own limits into the LM Studio config.
+    # The request policy follows the benchmark policy instead: 4096 tokens
+    # and the medium reasoning level.
+    assert request_policy["max_tokens"] == 4096
+    assert reasoning_request_kwargs(request_policy) == {"reasoning_strength": "medium"}
 
 
 def test_preset_keeps_disabled_speculation_and_explicit_template(tmp_path, monkeypatch):

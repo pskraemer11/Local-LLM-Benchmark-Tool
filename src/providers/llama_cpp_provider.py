@@ -23,7 +23,11 @@ from utils.terminal import info, warn
 from .base import HttpProvider, ProviderCapabilities
 from .llama_cpp_args import build_server_command
 
+#: The optional second argument selects the benchmark class whose sampling
+#: policy applies. Loaders that predate the category concept keep the
+#: single-argument signature and are called without it.
 RuntimeLoader = Callable[[str], Mapping[str, Any] | None]
+CategoryRuntimeLoader = Callable[[str, str], Mapping[str, Any] | None]
 ProcessFactory = Callable[..., Any]
 
 _DEFAULT_EXECUTABLE = Path(r"C:\Program Files\llama.cpp\llama-server.exe")
@@ -125,6 +129,7 @@ class LlamaCppProvider(HttpProvider):
         runtime_loader: RuntimeLoader | None = None,
         process_factory: ProcessFactory | None = None,
         controller: _ServerController | None = None,
+        benchmark_category: str | None = None,
     ) -> None:
         auth_token = os.environ.get("LMS_OpenAI_AUTH_TOKEN") or os.environ.get("LMS_OPENAI_AUTH_TOKEN")
         headers = {"Authorization": f"Bearer {auth_token}"} if auth_token else None
@@ -132,6 +137,11 @@ class LlamaCppProvider(HttpProvider):
         self._resolver = LocalModelResolver(model_root, registry_loader=registry_loader)
         self._executable = Path(executable or os.environ.get("LLAMA_CPP_SERVER_EXE") or _DEFAULT_EXECUTABLE)
         self._runtime_loader = runtime_loader
+        # The native server is started once per model, before the benchmark
+        # loop knows which class runs first. The sampling flags it receives are
+        # therefore the server-side fallback; every request carries its own
+        # class-specific values and overrides them.
+        self._benchmark_category = benchmark_category
         self._controller = controller or _controller_for(self.base_url)
         if process_factory is not None:
             self._controller._process_factory = process_factory
@@ -202,8 +212,30 @@ class LlamaCppProvider(HttpProvider):
             return False
         return isinstance(self.request_json("/models", timeout=1), dict)
 
+    def set_benchmark_category(self, category: str | None) -> None:
+        """Set the benchmark class used for the server-side sampling default."""
+        self._benchmark_category = category.strip() if isinstance(category, str) and category.strip() else None
+
+    def _runtime_values(self, model_identifier: str) -> dict[str, Any]:
+        """Resolve the runtime mapping for one model.
+
+        The loader may accept the benchmark class as a second argument. The
+        class has to reach the Registry resolution because the sampling values
+        are derived from it; passing it afterwards would leave the loader's
+        own class values in place.
+        """
+        if self._runtime_loader is None:
+            return {}
+        if self._benchmark_category:
+            try:
+                resolved = self._runtime_loader(model_identifier, self._benchmark_category)
+            except TypeError:
+                resolved = self._runtime_loader(model_identifier)
+            return dict(resolved or {})
+        return dict(self._runtime_loader(model_identifier) or {})
+
     def _command(self, model_identifier: str, model_path: Path) -> list[str]:
-        runtime = dict(self._runtime_loader(model_identifier) or {}) if self._runtime_loader else {}
+        runtime = self._runtime_values(model_identifier)
         return build_server_command(
             self._executable,
             model_path,

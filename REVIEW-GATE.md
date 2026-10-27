@@ -125,7 +125,7 @@ Datum, Commit-Hash):
 
 ````text
 Du bist der Review-Agent für das lokale LLM-Benchmark-Projekt
-(C:\Users\pskra\Python-Projekte\Benchmarks).
+($HOME\Python-Projekte\Benchmarks).
 Führe einen Code-Review der Änderungen seit <COMMIT-HASH> durch (git log / git diff).
 
 Vorgehen:
@@ -169,8 +169,10 @@ git config core.hooksPath .githooks
   Secret-Muster, sensible Dateitypen, Ruff, Python-Syntax, YAML/JSON sowie
   Registry-Änderungen und fokussierte Registry-Tests.
 - `commit-msg` prüft Conventional-Commit-Präfix, Subject-Länge und Secrets.
-- `pre-push` führt die vollständige lokale Gate-Suite ohne Skip-Schalter aus
-  und prüft anschließend den fokussierten mypy-Scope blockierend. Die dabei
+- `pre-push` führt zuerst die vollständige pytest-Suite aus und startet danach
+  `pre_review_checks.ps1` mit `-SkipPytest`, damit die Suite nicht zweimal
+  läuft; `-NoArtifacts` und `-NoTranscript` halten die Push-Ausführung sauber.
+  Anschließend wird der fokussierte mypy-Scope blockierend geprüft. Die dabei
   erzeugten Artefakte werden temporär geschrieben, da der Commit bereits
   erstellt ist.
 

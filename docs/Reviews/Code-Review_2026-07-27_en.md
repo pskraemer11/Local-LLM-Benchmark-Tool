@@ -243,7 +243,7 @@ Effort for modification/improvement. **Phase 1-4 of p11 (Type Hints, Boolean Pre
 
 | Sub-characteristic | Rating | Finding                                                         |
 | ------------------ | -----: | --------------------------------------------------------------- |
-| Adaptability       | [6/10] | Hardcoded `127.0.0.1:1234` and `C:\Users\pskra\.lmstudio` paths |
+| Adaptability       | [6/10] | Hardcoded `127.0.0.1:1234` and `$HOME\.lmstudio` paths |
 | Installability     | 9/10   | `pyproject.toml` + `requirements-dev.txt`                       |
 | Conformance        | 7/10   | Python ≥3.11; OpenAI-compatible + LM Studio-specific            |
 | Replaceability     | 7/10   | LM Studio only; adapter layer in `model_manager.py`             |

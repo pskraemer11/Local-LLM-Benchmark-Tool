@@ -3,23 +3,23 @@
   "repo_notes": [
     {
       "content": "Local benchmark suite for LLMs (German project, English code). Goal: reproducible local benchmarks on an NVIDIA RTX 5060 Ti with 16 GB VRAM, finding the Pareto frontier of parameter count, GGUF quantization, KV-cache/context settings and parallel execution. Python 3.12 is the supported runtime. Since v13.0.6 all production Python modules live in src/; document src/, tests/, docs/ and the versioned workflow files, while treating unrelated root-level legacy scripts as non-canonical.",
-      "author": "pskraemer11"
+      "author": "SyntheticUser"
     },
     {
       "content": "Runtime configuration is data-driven: data/model_registry.yaml is the SSOT database for benchmark metadata and provider-neutral runtime policy (quantization, benchmark context, sampling, reasoning, blueprint and template policy); docs/blueprint_definitions.yaml defines prompt blueprints and docs/Jinja-Chat-Templates contains explicit templates. GGUF headers are the source of truth for immutable technical facts such as architecture and native context limits. LM Studio JSON files are backend-local artifacts, never the global source of truth. registry_tool.py commands sync/compare/validate/rm and validate --ci are the main maintenance entrypoints.",
-      "author": "pskraemer11"
+      "author": "SyntheticUser"
     },
     {
       "content": "Key workflow: discover local GGUFs and provider models, resolve them against model_registry.yaml, read GGUF headers for technical identity, then run registry_tool.py sync/validate and a selected benchmark run-spec. The shared BLACKLIST excludes embeddings, OCR, vision-only, whisper and other unsupported auxiliary models; companion files such as MTP drafters, mmproj and importance matrices are not standalone benchmark models.",
-      "author": "pskraemer11"
+      "author": "SyntheticUser"
     },
     {
       "content": "Current architecture to document explicitly: Benchmark Runner depends on provider-neutral InferenceClient (chat/completions/models), ModelManager (list/load/unload/current) and ModelRegistry (metadata, sampling, reasoning, quantization and context). Providers include LM Studio, TabbyAPI, generic OpenAI-compatible endpoints, authenticated Unsloth Studio and a runner-managed Unsloth llama-server process. The runner must not depend on LM Studio for generic inference.",
-      "author": "pskraemer11"
+      "author": "SyntheticUser"
     },
     {
       "content": "Testing and delivery: tests live under tests/ and run with Python 3.12 via pytest. validate --ci is a headless registry check without LM Studio, local hub state or local GGUF inventory. Versioned .githooks/ provide staged pre-commit checks, conventional commit-msg validation and a complete pre-push review gate; CI and Review workflows independently repeat the relevant checks with UTF-8 output and a focused mypy scope.",
-      "author": "pskraemer11"
+      "author": "SyntheticUser"
     }
   ],
   "pages": [
@@ -30,7 +30,7 @@
     },
     {
       "title": "Getting Started & Installation",
-      "purpose": "Clone github.com/pskraemer11/Local-LLM-Benchmark-Tool, install Python 3.12 dependencies, then select a backend through LLM_PROVIDER. LM Studio >=1.4.1 with its REST/OpenAI API is one supported provider; TabbyAPI, OpenAI-compatible endpoints and the local Unsloth llama-server provider are alternatives. Explain that local GGUF discovery and registry validation are separate from inference-server selection.",
+      "purpose": "Clone github.com/SyntheticUser/Local-LLM-Benchmark-Tool, install Python 3.12 dependencies, then select a backend through LLM_PROVIDER. LM Studio >=1.4.1 with its REST/OpenAI API is one supported provider; TabbyAPI, OpenAI-compatible endpoints and the local Unsloth llama-server provider are alternatives. Explain that local GGUF discovery and registry validation are separate from inference-server selection.",
       "parent": "Overview"
     },
     {

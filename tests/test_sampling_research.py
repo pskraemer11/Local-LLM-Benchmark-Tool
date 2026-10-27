@@ -130,11 +130,16 @@ def test_partial_registry_sampling_fills_only_omitted_pair_value(mocker) -> None
         },
     )
 
-    from benchmark_config import get_model_config
+    from benchmark_config import _sampling_cell
 
-    config = get_model_config("zai-org/glm-4.7-flash", category="agentic")
-    assert (config["temperature"], config["top_p"]) == (0.0, 0.95)
-    assert config["_source"] == "registry-sampling"
+    # The researched cell keeps its partial value and completes the omitted
+    # counterpart from the class defaults. It is research history and no
+    # longer drives the runtime parameters.
+    cell = _sampling_cell("zai-org/glm-4.7-flash", "agentic")
+    assert cell is not None
+    temperature, top_p, source = cell
+    assert (temperature, top_p) == (0.0, 0.95)
+    assert source == "registry-sampling"
 
 
 def test_research_separates_profiles_sharing_one_markdown_line() -> None:

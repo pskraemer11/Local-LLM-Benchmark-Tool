@@ -1969,38 +1969,63 @@ def run_task(task: dict[str, Any], task_type: str, model_identifier: str | None 
 
 # Thinking-Modelle (enable_thinking=True) neigen dazu, statt Code eine
 # Erklaerung auszugeben ("No code generated" - beobachtet 2026-07-31 bei
-# DeepSeek R1 Distill Qwen 14B). Haertung: finale Antwort = NUR Code in
-# einem ```python-Block, Erklaerungen gehoeren in die Thinking-Phase.
-_THINKING_CODE_ONLY_SUFFIX = (
-    "\n\nIMPORTANT: You may reason during your thinking phase, but your FINAL "
-    "answer must contain ONLY the complete Python code inside a single "
-    "```python code block. No explanations, no prose, no commentary."
+# DeepSeek R1 Distill Qwen 14B). Die Haertung steckt jetzt in EINER
+# Formatregel: genau ein Python-Codeblock, nichts ausserhalb. Der frueher
+# getrennte Thinking-Zusatz ("You may reason during your thinking phase...")
+# erzeugte eine zweite, konkurrierende Ausgabeform ("nur Code" plus
+# spaeter "nur Code in einem Block") und damit Mehrdeutigkeit.
+#
+# Rewrite-Vorgabe aus dem Review vom 19.10.2026: eine klare Formatregel, der
+# tatsaechliche Einfuegepunkt des Tasks und die erwartete Aufgabenform.
+_CODE_OUTPUT_RULE = (
+    "Return exactly one Python code block containing the complete solution. "
+    "Put no explanation or other text outside the block."
 )
 
 
 def _make_codereval_prompt(prompt: str, entry_point: str, code_only: bool = False) -> str:
-    """Build the CoderEval instruction: function completion with code-only suffix."""
-    full = "Complete the following Python function. Output only the function code, no additional text.\n\n" + prompt
+    """Build the CoderEval instruction: function completion with one output rule.
+
+    ``code_only`` keeps the single-format contract explicit for thinking
+    models; the wording itself no longer changes, because a second rule would
+    contradict the first one.
+    """
+    parts = [
+        "Complete the Python function below.",
+        "Return exactly one Python code block containing the complete function, "
+        "including its required signature. Put no explanation or other text outside "
+        "the block. Preserve the task's required interface and use the provided "
+        "context and tests as constraints.",
+    ]
     if entry_point:
-        full += f"\n\nCreate the function `{entry_point}`."
-    if code_only:
-        full += _THINKING_CODE_ONLY_SUFFIX
-    return full
+        parts.append(f"Required function name: {entry_point}")
+    parts.append("Task:")
+    parts.append(prompt)
+    return "\n\n".join(parts)
 
 
 def _make_datascience_prompt(prompt: str, entry_point: str, code_only: bool = False) -> str:
-    """Build the DS1000-style instruction: complete the code with code-only suffix."""
-    full = (
-        "Complete the following Python code. Only output the code, no additional text.\n"
-        "Return the missing solution, do not repeat the provided imports or input setup, "
-        "and define the output variable(s) requested by the task.\n\n"
-        + prompt
-    )
+    """Build the DS1000-style instruction: complete the code with one output rule.
+
+    The task decides whether a function is expected. The instruction therefore
+    only names ``entry_point`` as a requirement when the task actually asks for
+    that function; otherwise the solution may be statements or variables.
+    """
+    parts = [
+        "Solve the task using the supplied code context.",
+        "Return exactly one Python code block containing only the missing solution "
+        "code. Put no explanation outside the block. Reuse the provided imports, "
+        "setup, and variables; do not repeat them. Produce the outputs and interface "
+        "requested by the task.",
+    ]
     if entry_point:
-        full += f"\n\nCreate the function `{entry_point}`."
-    if code_only:
-        full += _THINKING_CODE_ONLY_SUFFIX
-    return full
+        parts.append(
+            f"Define `{entry_point}` only when the task's expected interface requires "
+            "that function; otherwise return the statements or variables the task requests."
+        )
+    parts.append("Task:")
+    parts.append(prompt)
+    return "\n\n".join(parts)
 
 
 def _extract_setup_code(task: dict[str, Any], prompt: str, reference_code: str) -> str:

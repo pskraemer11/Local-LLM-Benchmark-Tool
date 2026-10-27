@@ -229,7 +229,7 @@ Proxy for LM-Eval Native API endpoint:
 
 | Sub-characteristic | Rating | Finding                                                         |
 | ------------------ | -----: | --------------------------------------------------------------- |
-| Adaptability       | 6/10   | Hardcoded `127.0.0.1:1234` and `C:\Users\pskra\.lmstudio` paths |
+| Adaptability       | 6/10   | Hardcoded `127.0.0.1:1234` and `$HOME\.lmstudio` paths |
 | Installability     | 9/10   | `pyproject.toml` + `requirements-dev.txt`; CI/CD installs       |
 | Conformance        | 7/10   | Python ≥3.11; OpenAI-compatible + LM Studio-specific            |
 | Replaceability     | 7/10   | LM Studio only; adapter layer in `model_manager.py`             |
@@ -243,7 +243,7 @@ Proxy for LM-Eval Native API endpoint:
 - **`run_benchmarks.py:1002`**: hardcoded `"--base-url", "http://127.0.0.1:1234/v1"`
 - **LM Studio only**: no vLLM/Ollama/TGI fallback
 - **Windows patches in DS1000 framework** not documented for Linux
-- **Hardcoded user paths**: `C:\Users\pskra` in multiple configurations
+- **Hardcoded user paths**: `$HOME` in multiple configurations
 
 ---
 

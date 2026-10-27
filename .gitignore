@@ -5,17 +5,13 @@
 *.egg-info/
 __pycache__/
 .pytest_cache/
-.mypycache/
+.mypy_cache/
 
 # Benchmark-Daten (zu gross fuer Git)
 simple_evals/
 ergebnisse/
 logs/
 runs/
-data/
-!data/
-data/*
-!data/blueprint_definitions.yaml
 !tests/data/
 human_eval_plus/
 
@@ -50,6 +46,7 @@ opencode.json
 benchmark-dirs.txt
 *.sqlite
 data/model_registry.yaml
+data/model_registry.yaml.bak-*
 
 # OpenCode
 .opencode/
@@ -77,14 +74,9 @@ prompt_inventory.csv
 *.swp
 *.lnk
 .pytest-temp/
+.pytest-temp*/
 .pytest-temp-local/
-.pytest-run-*/
-.pytest-push-*/
-.pytest-tmp-registry-*/
-.pytest-temp-20260925/
-.pytest-temp-codex-provider-20260925-02/
-.pytest-tmp-current/
-.pytest-tmp-path-migration/
+pytest/artifacts/
 .sidecar-test-escalated-20260925/
 .sidecar-test-tmp-20260925-b/
 

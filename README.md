@@ -198,8 +198,9 @@ transfer are defined in the [field ownership and synchronization rules](<docs/Ar
 
 Local GGUF discovery uses the following order by default:
 
-1. `D:\LLM-Modelle\models` as the primary model root;
-2. `C:\Users\<user>\.lmstudio\models` as a compatibility fallback.
+1. `D:\LLM-Modelle\Llama-GGUF` as the primary model root;
+2. `D:\LLM-Modelle\models` as an alternate layout;
+3. `C:\Users\<user>\.lmstudio\models` as a compatibility fallback.
 
 The fallback also covers installations that still expose the old location or
 use a Windows Junction.  The resolver canonicalizes paths and keeps the
@@ -607,16 +608,16 @@ py -3.12 .\src\run_benchmarks.py --run-spec .\run.example.yaml
 The project deliberately separates benchmark policy from backend-local
 runtime artifacts.
 
-| Data                   | Location                                                       | Role                                                 |
-| ---------------------- | -------------------------------------------------------------- | ---------------------------------------------------- |
-| Model registry         | data\model_registry.yaml                                    | Benchmark policy and provider-neutral model metadata |
-| Blueprint definitions  | data\blueprint_definitions.yaml                             | System-prompt assembly rules                         |
-| Jinja templates        | docs\Jinja-Chat-Templates\                                  | Explicit chat-template overrides                     |
-| GGUF files             | `D:\LLM-Modelle\models` (legacy `~\.lmstudio\models` fallback) | Immutable model/header facts                         |
-| LM Studio config JSONs | LM Studio internal config directory                            | Backend-local runtime artifacts and drift evidence   |
-| Benchmark datasets     | simple_evals\, lm-eval, EvalPlus, tool-eval-bench              | Tasks and scenarios                                  |
-| Run specifications     | local run*.yaml files                                          | Reproducible run selections                          |
-| Results                | ergebnisse\                                                    | Per-task CSVs, summaries, logs, and reports          |
+| Data                   | Location                                                           | Role                                                 |
+| ---------------------- | ------------------------------------------------------------------ | ---------------------------------------------------- |
+| Model registry         | data\model_registry.yaml                                           | Benchmark policy and provider-neutral model metadata |
+| Blueprint definitions  | data\blueprint_definitions.yaml                                    | System-prompt assembly rules                         |
+| Jinja templates        | docs\Jinja-Chat-Templates\                                         | Explicit chat-template overrides                     |
+| GGUF files             | `D:\LLM-Modelle\Llama-GGUF` (legacy `~\.lmstudio\models` fallback) | Immutable model/header facts                         |
+| LM Studio config JSONs | LM Studio internal config directory                                | Backend-local runtime artifacts and drift evidence   |
+| Benchmark datasets     | simple_evals\, lm-eval, EvalPlus, tool-eval-bench                  | Tasks and scenarios                                  |
+| Run specifications     | local run*.yaml files                                              | Reproducible run selections                          |
+| Results                | ergebnisse\                                                        | Per-task CSVs, summaries, logs, and reports          |
 
 `data/model_registry.yaml` is the machine-local SSOT database for model identity,
 benchmark policy and runtime parameters. It is maintained by the Registry tool
@@ -753,7 +754,8 @@ Benchmarks/
 │   ├── custom_benchmark.py      DS1000 and CoderEval implementation
 │   ├── csv_writer.py            Uniform result output
 │   └── consolidate_results.py   Weighted summaries and comparisons
-├── tests/                       Pytest suite
+├── tests/                       Existing Pytest suite
+├── pytest/                      Newer Pytest sources; artifacts ignored
 ├── data/
 │   ├── model_registry.yaml
 │   └── blueprint_definitions.yaml
@@ -767,6 +769,10 @@ Benchmarks/
 ~~~
 
 ## Validation and development
+
+New tests belong under `pytest/`; the existing suite remains under `tests/`.
+`pyproject.toml` collects both locations, while `pytest/artifacts/` stays
+ignored and is excluded from test recursion.
 
 Run focused checks after changing Registry or launcher code:
 

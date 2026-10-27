@@ -38,6 +38,14 @@ PARAMETER_BINDINGS: tuple[ParameterBinding, ...] = (
     ParameterBinding("flash_attn", None, "--flash-attn", "enum"),
     ParameterBinding("cont_batching", None, "--cont-batching", "bool_flag"),
     ParameterBinding("jinja", None, "--jinja", "bool_flag"),
+    # Sampling-Defaults des nativen llama.cpp-Servers. Ohne diese Flags
+    # verwendet llama-server seine eigenen Defaults (temp 0.80, top-k 40,
+    # top-p 0.95, min-p 0.05), die nicht der Registry-Policy entsprechen.
+    # CLI-Parameter ueberschreiben die globale config.ini des Servers.
+    ParameterBinding("temperature", None, "--temp", "ratio"),
+    ParameterBinding("top_p", None, "--top-p", "ratio"),
+    ParameterBinding("top_k", None, "--top-k", "positive_int"),
+    ParameterBinding("min_p", None, "--min-p", "ratio"),
 )
 
 _BY_REGISTRY_FIELD = {binding.registry_field: binding for binding in PARAMETER_BINDINGS}
@@ -66,11 +74,16 @@ def config_sync_fields(*, context_only: bool = False, experts_only: bool = False
 
 
 def llama_cpp_value_bindings() -> tuple[ParameterBinding, ...]:
-    """Return bindings represented by direct llama.cpp value flags."""
+    """Return bindings represented by direct llama.cpp value flags.
+
+    ``ratio`` covers the sampling ratios (temperature, top_p, min_p). The
+    ``offload`` binding also uses that kind but has no llama.cpp flag, so the
+    flag check keeps it out of this set.
+    """
     return tuple(
         binding
         for binding in PARAMETER_BINDINGS
         if binding.llama_cpp_flag is not None
-        and binding.value_kind in {"positive_int", "integer", "string"}
+        and binding.value_kind in {"positive_int", "integer", "string", "ratio"}
         and binding.registry_field not in {"context_length", "experts"}
     )

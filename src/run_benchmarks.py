@@ -118,6 +118,7 @@ from model_manager import (
     is_model_ready,
     load_model,
     parse_selection,
+    set_benchmark_category,
     unload_all,
 )
 from runtime_policy import reasoning_request_kwargs, resolve_context_length, resolve_template
@@ -461,6 +462,10 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
 
 LMEVAL_TASKS_DIR = os.path.join(PROJECT_ROOT, "lm_eval_tasks")
+# The project runner registers the local chat-completions backend before
+# lm-eval starts. The backend keeps the ineffective task fields
+# (`do_sample`, `max_gen_toks`) out of the request.
+LMEVAL_RUNNER = os.path.join(SRC_DIR, "lmeval_runner.py")
 
 # ── Script References ──────────────────────────────────────
 # Custom benchmark script (renamed from custom_benchmark_v13.py).
@@ -835,6 +840,30 @@ def _evaluation_summary(model_identifier: str, category: str) -> str:
     return f"[CFG] {', '.join(parts)} (Quelle: {src})"
 
 
+#: Request fields that the chat-completions backend does not act on.
+#: ``do_sample`` is popped before the payload is built and never reaches the
+#: server, so a task YAML that sets it cannot make a run deterministic. It is
+#: removed here so that the effective request stays readable. ``max_gen_toks``
+#: is the task's own token limit; sending it next to ``max_tokens`` sends two
+#: contradicting limits and the server applies ``max_tokens``.
+INEFFECTIVE_GENERATION_PARAMETERS = frozenset({"do_sample", "max_gen_toks"})
+
+
+def _effective_generation_parameters(evaluation_parameters: dict[str, Any]) -> dict[str, Any]:
+    """Return the generation parameters that actually reach the server.
+
+    The task YAML keeps its own contract (``until``, ``max_gen_toks``,
+    ``do_sample``). lm-eval merges the CLI ``--gen_kwargs`` into it key by key,
+    so fields that the local backend ignores would otherwise travel with the
+    request and suggest a determinism that does not exist.
+    """
+    return {
+        key: value
+        for key, value in evaluation_parameters.items()
+        if value is not None and key not in INEFFECTIVE_GENERATION_PARAMETERS
+    }
+
+
 def _get_evaluation_parameters(model_identifier: str, bench_name: str = "") -> dict[str, Any]:
     """Returns LM-Eval parameters from benchmark_config.get_model_config().
 
@@ -924,12 +953,15 @@ def _build_lmeval_cmd(
     # Generation params go to --generation_parameters (overrides YAML generation_parameters via merge)
     generation_parameters_keys = {"max_tokens", "max_thinking_tokens", "temperature", "top_p", "top_k", "min_p", "presence_penalty", "repetition_penalty",
                        "until", "chat_template_kwargs", "reasoning", "reasoning_effort"}
-    generation_parameters = {k: v for k, v in evaluation_parameters.items()
-                  if k in generation_parameters_keys and v is not None}
+    generation_parameters = {
+        k: v
+        for k, v in _effective_generation_parameters(evaluation_parameters).items()
+        if k in generation_parameters_keys
+    }
     model_args = json.dumps(model_settings, ensure_ascii=False)
     cmd = [
-        sys.executable, "-m", "lm_eval",
-        "--model", "local-chat-completions",
+        sys.executable, LMEVAL_RUNNER,
+        "--model", "benchmarks-chat-completions",
         "--model_args", model_args,
         "--tasks", subset_task,
         "--limit", str(per_limit),
@@ -1464,7 +1496,7 @@ def run_evalplus(
 
 
 # ── Pipeline 3/4: LM-Eval (ARC, HellaSwag, TruthfulQA, MATH-500, BBH) ─
-# Uses lm_eval --model local-chat-completions as subprocess.
+# Uses the project runner with its own chat-completions backend as subprocess.
 # For MMLU-Pro there is a separate modified function (see below),
 # which stratifies the benchmark across 14 subset tasks.
 # Returns: dict with pipeline="lmeval", score (0-1).
@@ -1571,13 +1603,16 @@ def run_lmeval(
     # Gen_kwargs keys that should override YAML generation_kwargs per request.
     generation_parameters_keys = {"max_tokens", "max_thinking_tokens", "temperature", "top_p", "top_k", "min_p", "presence_penalty", "repetition_penalty",
                        "until", "chat_template_kwargs", "reasoning", "reasoning_effort"}
-    generation_parameters = {k: v for k, v in evaluation_parameters.items()
-                  if k in generation_parameters_keys and v is not None}
+    generation_parameters = {
+        k: v
+        for k, v in _effective_generation_parameters(evaluation_parameters).items()
+        if k in generation_parameters_keys
+    }
     print(f"  {_evaluation_summary(model_identifier, _derive_category(bench['name']))}")
     model_args = json.dumps(model_settings, ensure_ascii=False)
     cmd = [
-        sys.executable, "-m", "lm_eval",
-        "--model", "local-chat-completions",
+        sys.executable, LMEVAL_RUNNER,
+        "--model", "benchmarks-chat-completions",
         "--model_args", model_args,
         "--tasks", task_name,
         "--limit", str(limit),
@@ -2303,8 +2338,20 @@ def _check_registry_for_model(model_identifier: str, model_display: str) -> bool
         return False
 
 
-def _load_model(model_info: AvailableModelInfo, model_load_key: str, args: Any) -> str | None:
-    """Modell laden + API-Ready prüfen. Gibt api_model zurück oder None (skip)."""
+def _load_model(
+    model_info: AvailableModelInfo,
+    model_load_key: str,
+    args: Any,
+    category: str | None = None,
+) -> str | None:
+    """Modell laden + API-Ready prüfen. Gibt api_model zurück oder None (skip).
+
+    ``category`` selects the benchmark class whose sampling policy the native
+    llama.cpp server receives as start parameters. The server is started once
+    per model, so the value is a server-side fallback that every request
+    overrides with its own class-specific values.
+    """
+    set_benchmark_category(category)
     loaded = get_current_loaded_model()
     api_model = None
 
@@ -2403,7 +2450,12 @@ def _run_benchmarks_for_model(
             print("  [INFO] Unloading/reloading model between benchmarks...")
             unload_all()
             time.sleep(2)
-            api_model = _load_model(model_info, model_load_key, args)
+            api_model = _load_model(
+                model_info,
+                model_load_key,
+                args,
+                _derive_category(bench["name"]),
+            )
             if api_model is None:
                 if expected_ids is not None:
                     raise RuntimeError(f"could not reload model before manifest benchmark {bench['name']}")
@@ -2553,7 +2605,11 @@ def main() -> None:
             print("  * MoE model (detected)")
         print(f"{'=' * 60}")
 
-        api_model = _load_model(model_info, model_load_key, args)
+        # The native llama.cpp server is started once per model. Its sampling
+        # start parameters follow the first benchmark's class and act as the
+        # server-side fallback; each request sends its own class values.
+        first_category = _derive_category(benchmarks[0]["name"]) if benchmarks else None
+        api_model = _load_model(model_info, model_load_key, args, first_category)
         if api_model is None:
             print("  [ERROR] Loading failed. Skipping.")
             if comparison_manifest is not None:

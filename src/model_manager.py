@@ -84,6 +84,12 @@ def _configured_api_base() -> str:
 API_BASE = _configured_api_base()
 # REST API base (without /v1 suffix) for model management endpoints
 _REST_API_BASE = API_BASE.rsplit("/v1", 1)[0] if API_BASE.endswith("/v1") else API_BASE
+# LM Studio's own endpoint. The Registry maintenance and the LM Studio
+# inventory always talk to LM Studio, even when the active inference provider
+# is llama.cpp on a different port. Without a separate base the readiness
+# check would probe the llama.cpp port and report the LM Studio server as
+# "not started" even though it is running.
+LMSTUDIO_API_BASE = os.environ.get("LMSTUDIO_API_BASE") or "http://127.0.0.1:1234/v1"
 TIMEOUT_CLI = 30
 TIMEOUT_HTTP = 120
 TIMEOUT_MODEL_READY = 120
@@ -190,6 +196,7 @@ def _create_provider() -> Any:
             executable=os.environ.get("LLAMA_CPP_SERVER_EXE"),
             registry_loader=_load_registry_data,
             runtime_loader=_llama_cpp_runtime_overrides,
+            benchmark_category=os.environ.get("BENCHMARK_CATEGORY") or None,
         )
     return LMStudioProvider(
         API_BASE,
@@ -277,9 +284,22 @@ def _unsloth_server_runtime_overrides(model_identifier: str) -> dict[str, Any]:
     return cast("dict[str, Any]", _registry_view().provider_runtime(model_identifier, "unsloth_server"))
 
 
-def _llama_cpp_runtime_overrides(model_identifier: str) -> dict[str, Any]:
-    """Map Registry values to direct llama-server arguments."""
-    return cast("dict[str, Any]", _registry_view().provider_runtime(model_identifier, "llama_cpp"))
+def _llama_cpp_runtime_overrides(
+    model_identifier: str,
+    category: str | None = None,
+) -> dict[str, Any]:
+    """Map Registry values to direct llama-server arguments.
+
+    The sampling values come from the benchmark policy, not from the Registry
+    ``sampling`` block: that block keeps the per-model research history and
+    no longer decides the runtime parameters. The server is started once per
+    model, so its sampling flags are the fallback that every request
+    overrides with its own class-specific values.
+    """
+    return cast(
+        "dict[str, Any]",
+        _registry_view().provider_runtime(model_identifier, "llama_cpp", category=category),
+    )
 
 
 def _lmstudio_runtime_overrides(model_identifier: str) -> dict[str, Any]:
@@ -524,10 +544,15 @@ def parse_selection(choice: str, max_val: int) -> list[int] | None:
 
 
 def _is_lmstudio_running() -> bool:
-    """Compatibility adapter for LM Studio server startup and discovery."""
+    """Compatibility adapter for LM Studio server startup and discovery.
+
+    The check always targets LM Studio's own endpoint. In a llama.cpp
+    deployment ``API_BASE`` points at the llama.cpp port, and probing that
+    port would never observe the LM Studio server.
+    """
     from providers.lmstudio_provider import LMStudioProvider
 
-    return cast("bool", LMStudioProvider(API_BASE).ensure_server())
+    return cast("bool", LMStudioProvider(LMSTUDIO_API_BASE).ensure_server())
 
 
 # Code-Review 2026-07-18 §6.1: defensive model_identifier validation.
@@ -555,6 +580,21 @@ def _validate_model_identifier(model_identifier: str) -> str:
             f"Allowed: alphanumeric, '.', '_', '/', '-', '@', ':', '+', '=', '#', '?'; max 256 chars."
         )
     return model_identifier
+
+
+def set_benchmark_category(category: str | None) -> None:
+    """Set the benchmark class whose sampling policy the server should use.
+
+    The native llama.cpp server is started once per model and receives the
+    sampling values as start parameters. The class is known only when the
+    benchmark is about to run, so the launcher sets it before the load. Every
+    request still carries its own class-specific values and overrides the
+    server-side fallback.
+    """
+    provider = get_provider()
+    setter = getattr(provider, "set_benchmark_category", None)
+    if callable(setter):
+        setter(category)
 
 
 def load_model(model_identifier: str, gpu_offload: float | None = None) -> tuple[bool, str | None]:

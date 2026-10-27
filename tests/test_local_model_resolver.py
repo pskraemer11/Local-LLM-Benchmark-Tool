@@ -23,14 +23,39 @@ def _touch(path: Path) -> None:
 
 
 def test_llama_arg_models_dir_is_the_highest_priority_root(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("GGUF_MODEL_ROOT", str(tmp_path / "legacy"))
-    monkeypatch.setenv("LLAMA_ARG_MODELS_DIR", str(tmp_path / "llama-models"))
+    legacy = tmp_path / "legacy"
+    llama_models = tmp_path / "llama-models"
+    legacy.mkdir()
+    llama_models.mkdir()
+    monkeypatch.setenv("GGUF_MODEL_ROOT", str(legacy))
+    monkeypatch.setenv("LLAMA_ARG_MODELS_DIR", str(llama_models))
 
     roots = model_paths.configured_gguf_roots()
     resolver = LocalModelResolver()
 
-    assert roots == (tmp_path / "llama-models",)
+    assert roots == (llama_models,)
     assert resolver.model_roots == roots
+
+
+def test_missing_environment_root_does_not_hide_the_local_collection(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """A stale override must not make the Registry scan find nothing.
+
+    The environment override used to point at a directory that no longer
+    existed. Silently using it produced an empty GGUF inventory, which read
+    like "no models installed" instead of "the configured path is wrong".
+    """
+    monkeypatch.setenv("LLAMA_ARG_MODELS_DIR", str(tmp_path / "gone"))
+    monkeypatch.delenv("GGUF_MODEL_ROOT", raising=False)
+    monkeypatch.delenv("UNSLOTH_MODEL_ROOT", raising=False)
+    monkeypatch.delenv("LMSTUDIO_MODELS_DIR", raising=False)
+
+    roots = model_paths.configured_gguf_roots()
+
+    assert tmp_path / "gone" not in roots
+    assert model_paths.PRIMARY_GGUF_ROOT in roots
+    assert model_paths.ALTERNATE_GGUF_ROOT in roots
 
 
 def test_resolver_reuses_central_blacklist_and_support_file_filter(tmp_path: Path) -> None:
@@ -249,6 +274,7 @@ def test_default_roots_use_primary_then_legacy_fallback(
     monkeypatch.delenv("UNSLOTH_MODEL_ROOT", raising=False)
     monkeypatch.delenv("LMSTUDIO_MODELS_DIR", raising=False)
     monkeypatch.setattr(model_paths, "PRIMARY_GGUF_ROOT", primary)
+    monkeypatch.setattr(model_paths, "ALTERNATE_GGUF_ROOT", tmp_path / "alternate")
     monkeypatch.setattr(model_paths, "LEGACY_GGUF_ROOT", legacy)
 
     primary_model = primary / "vendor" / "model" / "model-Q4_K_M.gguf"
@@ -259,7 +285,7 @@ def test_default_roots_use_primary_then_legacy_fallback(
     candidates = LocalModelResolver().candidates()
 
     assert {candidate.path for candidate in candidates} == {primary_model, fallback_only}
-    assert LocalModelResolver().model_roots == (primary, legacy)
+    assert LocalModelResolver().model_roots == (primary, tmp_path / "alternate", legacy)
 
 
 def test_primary_root_wins_for_duplicate_model_identity(
@@ -303,6 +329,7 @@ def test_neutral_environment_root_overrides_default_roots(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     override = tmp_path / "configured"
+    override.mkdir()
     monkeypatch.setenv("GGUF_MODEL_ROOT", str(override))
     monkeypatch.setenv("UNSLOTH_MODEL_ROOT", str(tmp_path / "older-unsloth"))
     monkeypatch.setenv("LMSTUDIO_MODELS_DIR", str(tmp_path / "older-lmstudio"))

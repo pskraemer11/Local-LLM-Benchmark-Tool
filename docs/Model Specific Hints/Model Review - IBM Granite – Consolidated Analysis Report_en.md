@@ -2,7 +2,7 @@
 
 **Task/Prompt:
 Repeat this research (previously on Gemma-4) on system prompts, chat templates, config and yaml files using the chat history from
-"C:\Users\pskra\Python-Projekte\Benchmarks\Doku-intern\Konsolidierte_Compaction-Chronik_20260615-20260713.md" for the Granite models.
+"$HOME\Python-Projekte\Benchmarks\Doku-intern\Konsolidierte_Compaction-Chronik_20260615-20260713.md" for the Granite models.
 Cross-reference the data from the three ~\.lmstudio folders for .\models, .\hub and .internal\user-concrete-model-default-config as well as
 the files in the docs folder with the entries in model_registry.yaml.
 
@@ -66,7 +66,7 @@ This same-value result is justified by an explicit manufacturer statement; it is
 
 ### Local LM Studio configuration
 
-The associated configuration is `C:\Users\pskra\.lmstudio\.internal\user-concrete-model-default-config\mradermacher\granite-4.2-30b-i1-GGUF\granite-4.2-30b.i1-IQ3_M.gguf.json`.
+The associated configuration is `$HOME\.lmstudio\.internal\user-concrete-model-default-config\mradermacher\granite-4.2-30b-i1-GGUF\granite-4.2-30b.i1-IQ3_M.gguf.json`.
 
 | Setting           | Local value                     | Review assessment                                   |
 | ----------------- | ------------------------------- | --------------------------------------------------- |

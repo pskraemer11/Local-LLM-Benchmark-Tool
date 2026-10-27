@@ -863,6 +863,63 @@ At runtime the launcher resolves:
 The old pattern of reading arbitrary GUI temperature values during a
 benchmark is intentionally not used.
 
+### 4.1 Sampling policy (since 2026-10-19)
+
+The runtime sampling values come from a fixed per-class policy, not from the
+per-model research. `src/sampling_policy.py` is the single source:
+
+| Class            | `temperature` | `top_p` | `top_k` | `min_p` |
+| ---------------- | ------------: | ------: | ------: | ------: |
+| `coding`         |         0.6   |    0.95 |      20 |     0.0 |
+| `math`           |         0.7   |    0.95 |      20 |     0.0 |
+| `knowledge`      |         0.6   |    0.95 |      20 |     0.0 |
+| `agentic`        |         0.6   |    0.95 |      20 |     0.0 |
+| narrow instruct  |         0.5   |    0.95 |      20 |     0.0 |
+
+Reasoning runs use `medium` as the reasoning level, a 4096-token response
+budget and a 2048-token thinking budget. The reasoning level is only sent
+when the selected chat template understands the corresponding control.
+
+The Registry `sampling` block keeps the per-model research history (values,
+provenance, sources) and stays readable, but it no longer decides the
+runtime. Two reasons: the research only produced usable values for about
+30 percent of the models, and greedy decoding is actively harmful for the
+strongly quantized models that the 16 GB VRAM setup forces. Qwen3 explicitly
+warns against greedy decoding ("performance degradation and endless
+repetitions"), DeepSeek-R1 recommends 0.5-0.7 "to prevent endless
+repetitions or incoherent outputs". See
+[docs/Benchmark-Sampling-Policy_en.md](Benchmark-Sampling-Policy_en.md).
+
+The native llama.cpp server receives the sampling values as start parameters
+(`--temp`, `--top-p`, `--top-k`, `--min-p`). Without them the server falls
+back to its own defaults (temp 0.80, top-k 40, top-p 0.95, min-p 0.05) or to
+the global `config.ini`. Command-line parameters take precedence over that
+file. The server starts once per model, so its values are the fallback; every
+request carries its own class-specific values.
+
+The GGUF chat template is the authoritative source for the template. The
+server only injects a tool schema when it receives `--chat-template-file`,
+so the template is extracted from the GGUF metadata into the machine-local
+cache under `data/chat_templates/`. The file name carries a content hash, so
+an updated upstream template never reuses a stale file. A versioned copy
+under `docs/Jinja-Chat-Templates/` is only used for models that deliberately
+patch their template through `template_policy: explicit_file`.
+
+The GGUF discovery must not depend on LM Studio. The scan reads the model
+volume directly; an environment override that points at a missing directory
+is reported and ignored instead of hiding the local collection. When LM
+Studio does not answer, the server is started through `lms server start` or
+`llmster.exe`, and the readiness check always targets LM Studio's own port
+rather than the port of the active inference provider. A server that demands
+authentication is reported as such.
+
+The LM-Eval path uses a project backend (`src/lmeval_backend.py`,
+registered by `src/lmeval_runner.py`). It removes the task fields `do_sample`
+and `max_gen_toks` from the request: the backend pops `do_sample` before
+building the payload, and `max_tokens` supersedes `max_gen_toks`. The task
+YAML keeps both because lm-eval uses `max_gen_toks` for its internal context
+budget.
+
 ## 5. Prompt and blueprint architecture
 
 `data/blueprint_definitions.yaml` is the source of truth for system-prompt
@@ -896,6 +953,15 @@ runtime-artifact repair.
 
 This separation prevents a routine Registry maintenance run from deleting or
 replacing a GUI system prompt, chat template, or KV-cache setting.
+
+The interactive blueprint path and the benchmark request path are separate
+outputs and are judged separately. A blueprint change is therefore not
+automatically a change to the benchmark prompts, and it is no reason to
+expect a score change. The `gptoss_reasoning_level` module used to render
+`Reasoning: medium` for all three levels, so the selection had no effect at
+all; it now renders `high`, `medium` and `low` and acts as a cost/latency
+lever for interactive use. The benchmark policy owns the reasoning level of
+the benchmark run and a blueprint may not lower it.
 
 ## 6. run_benchmarks.py architecture
 

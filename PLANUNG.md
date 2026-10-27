@@ -4,10 +4,7 @@ Status: 2026-09-29. Prioritaet: Registry-Verträge, reproduzierbare Backend-Abna
 
 ## Benutzerupdates und Runtime-Nachreview vom 29.09.2026
 
-- [x] Elf neue Modelle synchronisieren, acht tatsächlich gelöschte Modelle einschließlich jrell archivieren.
-- [x] Millies spezielle Quant-Identität aus Publisher-Fork und tatsächlichen Tensor-Typen auflösen; @?-Migration und anschließenden Sync/JSON-Import testen.
 - [x] Byteshape-Qwen3.8 ohne Drafter erhalten; explizite Helper-Policy vor GUI-Überschreibungen schützen.
-- [x] Gemma-REAP126/MTP und Muse/DSpark durch vorhandene konkrete LM-Studio-Läufe belegen; keine neuen GPU-/Load-Aufrufe.
 - [x] Muse-Reasoning und Gesamtbudget bis in Blueprint, Template, JSON und Request-Ausgaben prüfen; absolute Deadline und terminale Retry-Grenze korrigieren.
 - [x] 54 aktuell gebundene JSON-Systemprompts sowie Preset mit 57 Modellabschnitten prüfen; manuelle/globale Preset-Abschnitte erhalten. Neu gewählte Expertenwerte 18/32 importieren und zwei fehlende GPT-OSS-Harmony-Templates ergänzen.
 - [x] Neue Codeverträge unabhängig nachprüfen: LMS-Load-Policy und typstrenge Aliaswerte korrigiert.
@@ -376,6 +373,13 @@ Agentic-Benchmarks bleiben vorerst bei den vorhandenen Inspect-AI-Tools und dem 
   `@mini` fuer `mudler/gemma-4-26b-a4b-it-apex` in die Registry uebernehmen;
   die anschliessende Registry-Validierung meldete keine Blocker oder Hinweise.
 
+- [ ] MoE-Experten-Synchronisation (27.10.2026): LM Studio und die JSON-Config
+  von `google/gemma-4-26b-a4b-it-qat@q4_0` enthalten `numExperts=36`, aber
+  `sync-from-configs --write-experts` / `sync --import-lms-settings` uebernimmt
+  den Wert derzeit nicht zuverlaessig in `data/model_registry.yaml`; die  Config ist derzeit nicht eindeutig der aktiven Inventur zugeordnet. Bis zur
+  spaeteren Sync-Fix wurde der lokale, ignorierte Registry-Eintrag direkt mit
+  `experts: 36` ergaenzt. Offener Punkt: Zuordnung und Importpfad pruefen.
+
 ### Provider-Architektur und Backend-Migration
 
 #### Neue Backend-Migrationsplanung: direkter llama.cpp-Runner
@@ -446,7 +450,7 @@ Für Windows gilt dabei eine wichtige Trennung: `config.ini` wird von llama.cpp
 automatisch als globale Vorgabe aus dem System-/Benutzer-Konfigurationspfad
 geladen; CLI-Argumente und `LLAMA_ARG_*`-Umgebungsvariablen überschreiben diese
 Vorgaben. Die portable Router-Datei unter
-`C:\Users\pskra\.config\llama.cpp\preset.ini` wird dagegen explizit über
+`$HOME\.config\llama.cpp\preset.ini` wird dagegen explizit über
 `LLAMA_ARG_MODELS_PRESET` beziehungsweise `--models-preset` ausgewählt. Sie
 enthält `[*]` für gemeinsame Router-Defaults und benannte Modellsektionen.
 Die Benutzer-Variable muss auf die Datei selbst, nicht nur auf ihren Ordner,
@@ -461,8 +465,8 @@ Am 21.09.2026 wurden drei `llama.exe`-Fundstellen aufgelöst:
 | Pfad | Status | Nachweis/Rolle |
 | --- | --- | --- |
 | `C:\Program Files\llama.cpp` | bevorzugter Produktionspfad | Build 10964; enthält `ggml-cuda.dll`, `llama-server.exe`, `llama-cli.exe` und Hilfsprogramme. |
-| `C:\Users\pskra\AppData\Local\Microsoft\WindowsApps\llama.exe` | entfernt | Vom Benutzer gelöscht; nicht Bestandteil der Migration und nicht als Produktionspfad vorgesehen. |
-| `C:\Users\pskra\AppData\Local\Microsoft\WinGet\Packages\ggml.llamacpp_Microsoft.Winget.Source_8wekyb3d8bbwe` | entfernt | WinGet-Paket `ggml.llamacpp`, Installer `llama-b11046-bin-win-vulkan-x64.zip`, enthielt `ggml-vulkan.dll`. |
+| `$HOME\AppData\Local\Microsoft\WindowsApps\llama.exe` | entfernt | Vom Benutzer gelöscht; nicht Bestandteil der Migration und nicht als Produktionspfad vorgesehen. |
+| `$HOME\AppData\Local\Microsoft\WinGet\Packages\ggml.llamacpp_Microsoft.Winget.Source_8wekyb3d8bbwe` | entfernt | WinGet-Paket `ggml.llamacpp`, Installer `llama-b11046-bin-win-vulkan-x64.zip`, enthielt `ggml-vulkan.dll`. |
 
 Die Vulkan-Variante wurde über den zuständigen Paketmanager entfernt:
 
@@ -724,7 +728,7 @@ Wert muss konfigurierbar bleiben.
 
 ##### Ausgeschlossene WindowsApps-Installation
 
-Die frühere `C:\Users\pskra\AppData\Local\Microsoft\WindowsApps\llama.exe`
+Die frühere `$HOME\AppData\Local\Microsoft\WindowsApps\llama.exe`
 war eine separate GUI-/Router-Installation mit ungeklärter Modell- und
 Lifecycle-Verantwortung. Sie wurde vor Beginn dieser Migration gelöscht und
 ist damit kein Backend, kein Fallback und kein Testziel. Produktiv bleibt
@@ -1038,7 +1042,7 @@ und Integrationsaenderung erneut ausgefuehrt.
 ## Verifikation vor Commit
 
 ```powershell
-py -3.12 -m pytest tests\test_task_manifest.py tests\test_sandbox_worker.py tests\test_custom_benchmark_io.py -q --basetemp=.pytest-temp
+py -3.12 -m pytest tests\test_task_manifest.py tests\test_sandbox_worker.py tests\test_custom_benchmark_io.py -q --basetemp=pytest\artifacts\manual
 py -3.12 -m ruff check src\task_manifest.py src\prepare_task_manifests.py src\sandbox_worker.py tests\test_task_manifest.py tests\test_sandbox_worker.py
 py -3.12 -m py_compile src\task_manifest.py src\prepare_task_manifests.py src\sandbox_worker.py
 py -3.12 src\registry_tool.py validate --ci
@@ -1068,9 +1072,11 @@ GPU-, Lade- und Generierungsläufe bleiben gemäß Benutzerentscheidung ausgesch
 
 ## Prompt-, Modell- und Sampling-Empfehlungen (Review 19.10.2026)
 
-Status: Empfehlungen aus einer statischen Sichtung von Runner, Task-YAMLs und
-Blueprints. Dieser Abschnitt ändert noch keine Laufzeitkonfiguration und enthält
-keine gemessenen Qualitäts-, Kosten- oder Latenzergebnisse. Zahlen zu
+Status: Punkte 1 bis 5 sind seit 19.10.2026 umgesetzt; Punkt 6 (kleine
+Evaluation) ist offen. Die Sampling-Policy ist in
+`docs/Benchmark-Sampling-Policy_en.md` dokumentiert, die Modellkandidaten in
+`docs/Model-Kandidaten-Benchmark_en.md`. Dieser Abschnitt enthält weiterhin
+**keine gemessenen** Qualitäts-, Kosten- oder Latenzergebnisse. Zahlen zu
 Geschwindigkeit und Modellwahl sind Hypothesen für den unten beschriebenen
 Vergleich. Die historische DS1000/Qwen-Beobachtung bleibt ein technischer
 Einzelfall und keine Qualitätsbaseline.
@@ -1265,12 +1271,32 @@ vorgeschlagenen Kandidaten sind vor einem Lauf dort auf vollständige
 Identität und Profilstatus zu prüfen. Die aktuellen Registryzeilen sind
 maschinenlokal und damit keine versionierte Quellreferenz.
 
-- `ibm-granite/granite-4.0-h-tiny@q8_0`: kleines Instruct-Kontrollmodell für
-  kurze Coding- und Wissensaufgaben.
+Die ursprünglich vorgeschlagenen Kandidaten
+`ibm-granite/granite-4.0-h-tiny@q8_0` und `unsloth/glm-4.7-flash@q3_k_s` sind
+**verworfen**: sie haben die händischen LM-Studio-Tests nicht bestanden. Ein
+Benchmarklauf würde dort Fehlverhalten messen, nicht Modellqualität.
+
+Aktuelle Kandidaten, abgeleitet aus den im LM-Studio-Interface angehefteten
+Modellen (Auge = Vision, Hammer = agentic Tool-Use, Gehirn = Reasoning). Die
+vollständige Liste mit Prüfkriterien und lokalem Verfügbarkeitsstand steht in
+`docs/Model-Kandidaten-Benchmark_en.md`:
+
+- `qwen/qwen2.5-coder-14b-instruct@q5_k_m`: instruct-Kontrollmodell für die
+  Coding-Klasse (14B, kein Vision/Tool-Use/Thinking).
 - `unsloth/phi-4@q5_k_m`: Reasoning-Challenger für Mathematik und Aufgaben,
-  bei denen mehrere Denkschritte die Erfolgsrate beeinflussen können.
-- `unsloth/glm-4.7-flash@q3_k_s`: Agentic-Challenger erst nach bestätigter
-  Tool-Call-Kompatibilität des konkreten GGUF-/Serverpfads.
+  bei denen mehrere Denkschritte die Erfolgsrate beeinflussen können (15B).
+- `lmstudio-community/bonsai-27b@q1_0` und
+  `prism-ml/ternary-bonsai-27b@q2_g64`: Agentic-Challenger, beide stark
+  quantisiert und damit im Bereich der beobachteten Wiederholungsschleifen.
+  Erfordert bestätigte Tool-Call-Kompatibilität des konkreten GGUF-/Serverpfads.
+- `unsloth/gemma-4-12b-it-qat@q4_k_xl` und
+  `unsloth/gemma-4-26b-a4b-it@iq3_xxs`: Vollausstattung (Vision, agentic,
+  Reasoning).
+
+`ibm-granite/granite-4.2-8b@q6_k` und `zai-org/glm-4.6v-flash@q6_k` haben ein
+abweichendes Profil (keine beziehungsweise nur Vision-Fähigkeit) und ersetzen
+keinen der Klassen-Kandidaten; sie können die jeweilige Klasse vertreten,
+aber keine der fünf Benchmarkklassen.
 
 Eine kleinere oder schnellere Variante dürfte bei einfachen
 Multiple-Choice-Aufgaben ausreichend sein; das ist eine zu messende
@@ -1288,17 +1314,18 @@ Beleg für lokale llama.cpp-Parameter:
 
 #### Task-by-task guidance (Empfehlungen je Aufgabe)
 
-| Aufgabe   | Prompt und effektive Einstellungen                                                                                         | Modellkandidat                              | Abwägung                                                                                               |
-| --------- | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| Coding    | Signatur und fehlende Lösung benennen; `0.2/1.0`, bis `4096` Tokens als Ausgangsprofil; Thinking nur gezielt.              | Granite Tiny als Instruct-Kontrolle.        | Kleines Instruct-Modell als Kontrollpunkt; Latenz- und Tokenvorteil erst messen.                       |
-| Math      | MATH-500 verlangt `do_sample=false`, `temperature=0.0`; Taskvorgabe vor Kategorie-Override schützen.                       | Phi-4 als gesonderter Reasoning-Challenger. | Gleiche Samplingbedingungen für Scorevergleich; ein notwendiger Modellsonderfall separat kennzeichnen. |
-| Knowledge | Bei Multiple Choice genau `A`–`D`; HellaSwag-YAMLs deterministische Werte erhalten.                                        | Granite Tiny als Instruct-Kontrolle.        | Kurzes Format kann Tokens sparen; Mehrverbrauch durch Reasoning nur mit Qualitätsgewinn.               |
-| Agentic   | Toolschema, erlaubte Aktionen und finales Antwortformat präzisieren; Reasoning und Tokenbudget nur bei Support aktivieren. | GLM-4.7-Flash nach Tool-Call-Prüfung.       | Stärkeres Modell kann Planung verbessern; Qualitäts- und Laufzeitwirkung muss der Lauf zeigen.         |
+| Aufgabe   | Prompt und effektive Einstellungen                                                                                         | Modellkandidat                               | Abwägung                                                                                                          |
+| --------- | -------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Coding    | Signatur und fehlende Lösung benennen; `0.6/0.95`, bis `4096` Tokens als Ausgangsprofil; Thinking nur gezielt.             | Gemma-4-12B, Ternary-Bonsai-27B, Qwen3.8-27B | Alle drei sind Thinking-Modelle; der Kontrollpunkt ist der Vergleich untereinander.                               |
+| Math      | `0.7/0.95`; die Taskvorgabe `do_sample=false` wird nicht durchgesetzt, weil das Backend sie ohnehin ignoriert.             | Gemma-4-12B, Ternary-Bonsai-27B, Qwen3.8-27B | Gleiche Samplingbedingungen für Scorevergleich; ein notwendiger Modellsonderfall separat kennzeichnen.            |
+| Knowledge | Bei Multiple Choice genau `A`–`D`; `0.6/0.95` nach Klassen-Policy.                                                         | Gemma-4-12B, Ternary-Bonsai-27B, Qwen3.8-27B | Kurzes Format kann Tokens sparen; Mehrverbrauch durch Reasoning nur mit Qualitätsgewinn.                          |
+| Agentic   | Toolschema, erlaubte Aktionen und finales Antwortformat präzisieren; Reasoning und Tokenbudget nur bei Support aktivieren. | Gemma-4-12B, Ternary-Bonsai-27B, Qwen3.8-27B | Tool-Call ist für alle drei gemessen; der Server braucht `--chat-template-file` mit der extrahierten Jinja-Datei. |
 
-Die Temperatur-/Tokenprofile in dieser Tabelle sind Ausgangspunkte, keine
-unveränderlichen Modellvorgaben. Registrywerte, explizite Taskverträge und
-Backendunterstützung müssen gemeinsam in den effektiven Parametern sichtbar
-sein. Für ein Thinking-Modell keine Samplingregel aus einer anderen
+Die Temperatur-/Tokenprofile in dieser Tabelle sind seit 19.10.2026 die
+verbindliche Klassen-Policy aus `docs/Benchmark-Sampling-Policy_en.md`, keine
+Ausgangspunkte mehr. Registry-Sampling und GUI-Werte überschreiben sie nicht
+mehr; die recherchierten Werte bleiben als Historie im `sampling`-Block
+erhalten. Für ein Thinking-Modell keine Samplingregel aus einer anderen
 Modellfamilie übernehmen, ohne dessen dokumentierte Anforderungen zu prüfen.
 
 #### Vorschlag für die kleine Evaluation
@@ -1308,13 +1335,39 @@ festen Aufgaben durchführen. Sie schätzt Qualitäts- und Laufzeitunterschiede;
 bei nur fünf Aufgaben pro Dataset ist sie keine belastbare allgemeine
 Qualitätsbaseline.
 
-Die vorhandenen Vergleichsmanifeste zeigen die Mechanik für stabile,
-gehashte Taskauswahl (`src/comparison_manifest.py:122-159` und
-`src/prepare_comparison_manifest.py:13-22`). Für den hier vorgeschlagenen
-Mix aus Coding, Math, Knowledge und Agentic ist ein eigenes, eingefrorenes
-Manifest nötig; die vorhandene Vier-Pipeline-Auswahl deckt MATH-500 und
-HellaSwag nicht ab. Die bisherigen technischen und historischen
-Scoreeinschränkungen sind in `PLANUNG.md:914-979` dokumentiert.
+**Was ein Manifest-Builder ist:** Ein Manifest friert die Aufgaben-IDs
+eines Laufs ein und prüft sie gegen den tatsächlichen Lauf. Ohne Manifest
+wählt jede Pipeline ihre Aufgaben selbst - über `random.sample(seed)`,
+`--limit` oder ein Sortierverfahren. Ein Lauf mit `--limit 5` nimmt dann
+zwar fünf Aufgaben, aber nicht **dieselben** fünf wie ein späterer Lauf mit
+anderem Seed oder nach einer Dataset-Änderung. Ein Vergleich von Varianten A
+bis D ist nur dann gepaart, wenn alle Varianten **exakt dieselben**
+Aufgaben-IDs mit **exakt demselben** Prompt, Harness und Seed bearbeiten.
+Der Builder schreibt diese IDs samt Hash der Quelldatei fest; der Launcher
+vergleicht sie vor dem Lauf und bricht bei Abweichung ab.
+
+**Warum die vorhandene Vier-Pipeline-Auswahl nicht reicht:** Das
+Vergleichsmanifest (`src/comparison_manifest.py`) fixiert genau **ein**
+Benchmark je Pipeline: DS1000 (custom), HumanEval+ (evalplus),
+ARC-Challenge (lmeval) und Agentic (agentic). Es ist ein bewusster
+Vier-Pipeline-Nachweis („eine Pipeline, eine Aufgabe, gleicher Vertrag"), keine
+Klassen-Auswahl. Für den hier vorgeschlagenen Mix aus Coding, Math,
+Knowledge und Agentic braucht es eine andere Auswahl:
+
+- **Math:** die LM-Eval-Pipeline im Manifest ist auf `arc_challenge_chat`
+  festgelegt. MATH-500 (`minerva_math500`) kommt dort nicht vor.
+- **Knowledge:** HellaSwag (`hellaswag_gen`) kommt nicht vor; vertreten ist
+  nur ARC-Challenge.
+- **Die LM-Eval-Auswahl ist zudem positional:** `select_lmeval_doc_ids()`
+  liefert `doc:0 ... doc:N`, also die *ersten* N Dokumente in
+  Dokumentreihenfolge. Das ist fuer ARC-Challenge unproblematisch, fuer
+  MATH-500 aber eine denkbar schlechte Auswahl: die ersten N Datensaetze
+  eines Algebra-Testsets sind keine repraesentative Stichprobe. Eine
+  frozen Auswahl braucht dort eine stratified Auswahl, wie sie
+  `custom_benchmark.subsample_tasks` fuer DS1000 bereits macht.
+
+Die bisherigen technischen und historischen Scoreeinschränkungen sind in
+`PLANUNG.md:914-979` dokumentiert.
 
 1. Je fünf feste Aufgaben aus DS1000, CoderEval, MATH-500, HellaSwag und dem
    Agentic-Dataset wählen (insgesamt 25 Taskinstanzen). IDs und Quelldateien

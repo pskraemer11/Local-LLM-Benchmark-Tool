@@ -12,24 +12,43 @@ Thinking is controlled on three levels:
     Populated automatically from GGUF `tokenizer.chat_template` (Source of Truth for architecture) via `registry_tool.py fill-reasoning` (part of the `sync` pipeline).
     Existing values are **never overwritten** (`skipped_has`) — manual corrections persist.
     
-2. **`get_model_config()`** (`benchmark_config.py`): Temperature/top_p and optional top_k/min_p come from
-    the **Registry `sampling:` field (SSOT)** when present, otherwise from the category/thinking defaults.
-    Web-researched and manually reviewed entries may contain a separate `thinking` profile. LM Studio JSON
-    values remain runtime artifacts; Registry sampling wins for confirmed Registry fields. Used by both
-    pipelines (custom via `custom_benchmark.py`, lm_eval via `run_benchmarks.py:_get_evaluation_parameters`).
+2. **`get_model_config()`** (`benchmark_config.py`): Temperature/top_p/top_k/min_p come from the
+    **fixed class policy** in `src/sampling_policy.py`. The Registry `sampling:` field keeps the per-model
+    research history and stays readable, but it no longer decides the runtime values. LM Studio JSON values
+    remain runtime artifacts. Used by both pipelines (custom via `custom_benchmark.py`, lm_eval via
+    `run_benchmarks.py:_get_evaluation_parameters`).
     
 3. **`--thinking` CLI flag**: Forces `enable_thinking=True` for models matching `REASONING_PATTERNS`.
 
-### Priority chain in `get_model_config()` (verified 13.08. against code)
+### Priority chain in `get_model_config()` (verified 19.10.2026 against code)
 
 ```
-1. Registry `sampling:` block (model_registry.yaml, SSOT)      (temperature/top_p/optional top_k/min_p per category)
-2. BENCHMARK_THINKING_DEFAULTS (0.6/0.95) in --thinking run,
-   else BENCHMARK_CATEGORY_DEFAULTS[category]
-3. LM Studio JSON-Config (operation.fields)                    (runtime fallback: top_k/min_p/enable_thinking/reasoning_effort)
-4. --thinking flag + REASONING_PATTERNS                        (force enable_thinking=True)
-Result contains _source ("registry-sampling" | "thinking-default" | "category-default") for display.
+1. BENCHMARK_CATEGORY_DEFAULTS[category] / BENCHMARK_THINKING_DEFAULTS
+   (src/sampling_policy.py)                                     (temperature/top_p/top_k/min_p per class)
+2. --thinking flag + REASONING_PATTERNS                        (force enable_thinking=True)
+3. Blueprint `benchmark_runtime`                               (max_thinking_tokens only, capped by the policy)
+4. LM Studio JSON-Config (operation.fields)                    (presence_penalty/repetition_penalty/enable_thinking/reasoning_effort)
+Result contains _source ("thinking-default" | "category-default") for display.
 ```
+
+The Registry `sampling:` block is **no longer** part of this chain. It keeps
+the per-model research history (values, provenance, sources) and stays
+readable in `model_registry.yaml`, but it no longer decides the runtime
+parameters. The researched values covered only about 30 percent of the
+models with usable results, and greedy decoding is actively harmful for the
+strongly quantized models that the local 16 GB VRAM setup forces. See
+[docs/Benchmark-Sampling-Policy_en.md](Benchmark-Sampling-Policy_en.md).
+
+### Reasoning level and budgets
+
+The reasoning level is `medium` for every benchmark run. It is a runtime and
+cost decision, not a quality claim: the higher levels multiply the run time
+without improving the comparison between models. The response budget is 4096
+tokens, the thinking budget 2048 tokens. The level is only sent when the
+selected chat template understands the corresponding control - Gemma-4 knows
+only `enable_thinking`, GPT-OSS uses `reasoning_effort`, and the Muse template
+uses `reasoning_strength`. A blueprint may not lower the level; it governs
+the interactive path, not the benchmark run.
 
 ### Sampling research boundary
 

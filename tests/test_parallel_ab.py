@@ -56,7 +56,7 @@ class TestBuildPrompts:
     def test_returns_expected_sample_size(self):
         prompts = build_prompts(5, "ds1000")
         assert len(prompts) == 5
-        assert all(p.startswith("Complete the following Python code.") for p in prompts)
+        assert all(p.startswith("Solve the task using the supplied code context.") for p in prompts)
 
     def test_seeded_sampling_is_reproducible(self):
         a = build_prompts(5, "ds1000")

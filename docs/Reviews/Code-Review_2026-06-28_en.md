@@ -159,4 +159,4 @@ consolidate_results_v9.py
 ---
 
 *Review created from code analysis of the 5 core scripts + 6 helper scripts.*
-*All paths relative to `C:\Users\pskra\Python-Projekte\Benchmarks\`.*
+*All paths relative to `$HOME\Python-Projekte\Benchmarks\`.*
