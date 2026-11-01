@@ -1,0 +1,28 @@
+# Static check of the workflow files themselves.
+#
+# The project tests do not cover .github/workflows: a file can parse as YAML
+# and still fail on GitHub, e.g. when a function like hashFiles is used where
+# the context table forbids it (jobs.<job_id>.if). actionlint checks exactly
+# those expression contexts, action inputs and runner labels. The pinned
+# Docker image ships shellcheck and pyflakes, so the run: blocks are checked
+# too. 1.7.12 is the current release and matches the local installation;
+# bump deliberately, not by accident. Checkout is SHA-pinned like the other
+# workflows in this repository.
+name: actionlint
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check workflow files
+        uses: docker://rhysd/actionlint:1.7.12
+        with:
+          args: -color

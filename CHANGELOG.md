@@ -6,6 +6,11 @@ Versionierung nach [Semantic Versioning](https://semver.org/lang/de/).
 
 Zentrales Änderungslog für das Local-LLM-Benchmark-Tool. Neueste Einträge zuerst.
 
+## actionlint-Workflow für `.github/workflows` (01.11.2026)
+
+- **CI:** Neuer Workflow `actionlint.yml` prüft die Workflow-Dateien selbst mit `docker://rhysd/actionlint:1.7.12` (bringt shellcheck und pyflakes mit) bei push und pull_request; Checkout SHA-pinned wie im restlichen Repo (v7.0.1).
+- **VERIFY:** Lokal `actionlint` über alle Workflow-Dateien: 0 Befunde.
+
 ## Privacy-, Testpfad- und Review-Gate-Aktualisierung (27.10.2026)
 
 - **privacy:** Konkrete Windows-Profilpfade in getrackten Textdateien durch `$HOME` ersetzt; nicht-pfadbezogene Beispielkontaktdaten durch synthetische Platzhalter ersetzt. Der getrackte Scan meldet 0 Profilpfade, 0 verbotene E-Mail-Domains und 0 Secret-Muster.

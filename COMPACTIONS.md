@@ -2473,3 +2473,22 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 - `docs/Benchmark-Sampling-Policy_en.md`, `docs/Model-Kandidaten-Benchmark_en.md`: Entscheidung, Belege und Kandidaten.
 - `CHANGELOG.md`: Dateiweise Aenderungen; siehe Abschnitt "Benchmark-Sampling-Policy" vom 19.10.2026.
 - `data/model_registry.yaml.bak-before-pathfix-20261020_141712`: Registry-Backup vor dem Root-Fix.
+
+============== Compaction 01.11.2026 / 17:06 ==============
+## Objective
+- **Current:** actionlint als statischen Check der GitHub-Actions-Dateien in die CI einbauen.
+- **Completed:** `.github/workflows/actionlint.yml` angelegt, CHANGELOG-Abschnitt ergänzt, dieser Block.
+
+## Important Details
+- **Why:** Die Projekttests prüfen `.github/workflows` nicht — eine Datei kann als YAML parsen und auf GitHub trotzdem scheitern (Kontext-Regeln wie `hashFiles` nur auf Step-Ebene). actionlint prüft genau diese Ausdruckskontexte, Action-Inputs und Runner-Labels.
+- **Pin:** `docker://rhysd/actionlint:1.7.12` — offizielles Image, enthält shellcheck und pyflakes; läuft auf dem GitHub-Runner, lokal kein Container nötig. checkout SHA-pinned v7.0.1 wie im restlichen Repo.
+- **Baseline:** Alle vorhandenen Workflows vor der Änderung actionlint-frei (exit 0).
+
+## Work State
+### Completed
+- Workflow + CHANGELOG + dieser Block; lokal `actionlint` über den Workflow-Ordner: 0 Befunde.
+### Blocked
+- Push durch den Nutzer; der CI-Beweis entsteht mit dem ersten Lauf.
+
+## Relevant Files
+- `.github/workflows/actionlint.yml`, `CHANGELOG.md`
