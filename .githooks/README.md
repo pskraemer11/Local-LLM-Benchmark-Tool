@@ -36,3 +36,19 @@ identities, commit messages, or added text. Portable variables such as `$HOME`
 and explicit placeholders are allowed. CI runs the same history-aware check over
 each base-to-head range. Push checks inspect only commits newly reachable through
 the refs being pushed; they do not rewrite or audit already-published history.
+
+## Bring-Schuld zum Projekt "automatisierter Benchmark-Abgleich"
+
+- `post-commit`: Nach jedem Commit auf `main` in diesem Repository wird der Submodul-Pointer im
+  Projekt `automatisierter Benchmark-Abgleich` (`external/benchmarks`) auf den neuen `main`-Stand
+  gehoben und dort committet. Das Verbraucherprojekt laedt die gemeinsame Identitaets- und
+  Inventarlogik (`src/model_identity.py`, `src/benchmark_config.py` und Nachbarn) in gepinnter Form
+  und muss nichts selbst nachziehen.
+- Der Hook ist nie blockierend: Fehler werden nach `%LOCALAPPDATA%\OpenAI\Codex\benchmark-abgleich-submodule.log`
+  protokolliert, der Commit laeuft weiter. Ohne Verbraucherprojekt, auf einem anderen Branch oder
+  bei bereits aktuellem Pointer passiert nichts.
+- Der Pfad zum Verbraucherprojekt ist ueber die Umgebungsvariable `BENCHMARK_ABGLEICH_REPO` anpassbar.
+- Hinweis: `data/model_registry.yaml` ist im Arbeitsbaum des Verbraucherprojekts weiterhin nicht
+  enthalten, weil die Datei konkrete Nutzerpfade enthaelt und damit vom Privacy-Gate nicht
+  versioniert werden darf. Der Code laedt sie optional zur Laufzeit; fuer `get_quant()` wirkt dann
+  der Quantisierungs-Fallback.
