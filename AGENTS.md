@@ -1,13 +1,6 @@
 # AGENTS.md - Kontext für Agenten – Benchmarks-Projekt
 Actual year: 2026
-Last change: 29th Sept 2026
-
-**Cover what matters**
- - Project overview
- - Build and test commands
- - Code style guidelines
- - Testing instructions
- - Security considerations
+Last change: 6th Nov 2026
 
 ## Umgebung
 
@@ -22,7 +15,8 @@ Last change: 29th Sept 2026
 **Shell:** PowerShell 7+ (`pwsh`). Nicht bash.
 **Python:** Python 3.12.
 -  Der Launcher (`run_benchmarks.py`) startet Benchmarks in einem Subprozess mit `sys.executable`.
--  lint, test, und typecheck aktualisierte Dateien.
+-  Lint, Tests und Typechecks richten sich nach `pyproject.toml` und den Gates
+   unter `.githooks/`; für den vollständigen Ablauf deren README verwenden.
 -  Systemweites Python hat inspect-ai ebenfalls installiert (OpenStack-oslo-Stack wurde dafür entfernt), ist aber nicht erste Wahl.
 
 **Windows-Kompatibilität ist Pflicht:**
@@ -60,7 +54,7 @@ Last change: 29th Sept 2026
 - Pytest-Artefakte gehören unter `pytest/artifacts/`; keine neuen `.pytest-*`-Ordner im Projektstamm anlegen.
 - Vor Commit: Ruff-Cleanliness für geänderte `src/`-Dateien sicherstellen.
 - `utils/` ist fremder Code und bleibt untracked.
-- Review: verwende `engineering:code-review` und das zentrale Review-Gate
+- Review: verwende den installierten Skill `code-review` und das zentrale Review-Gate
   `$HOME\.agents\references\gates\review.md`. Die verbindliche
   projektspezifische Anwendung ist in `REVIEW-GATE.md` beschrieben.
 
@@ -82,25 +76,13 @@ Last change: 29th Sept 2026
 - Die vollständige lokale Suite und GitHub Actions bleiben unabhängige zweite und dritte Schutzebenen;
     ein lokaler Hook ersetzt keine CI-Prüfung.
 
-## Gemeinsame Agenten-Skills
+## Benchmarkauswertung und Skills
 
-- Zentrale, agentenagnostische Skills liegen unter `$HOME\.agents\skills\`.
-- Die Hardware- und Backend-Fakten stehen zentral in `$HOME\.agents\skills\local-llm-runner\SKILL.md`; nicht in weiteren Projektdateien duplizieren.
-- Für lokale Modell- und Backend-Aufgaben zuerst `local-llm-runner` lesen.
+- Für lokale Modell- und Backend-Fakten gilt `$HOME/.agents/skills/local-llm-runner/SKILL.md`; Registry- und Laufparameter dieses Projekts bleiben in `data/model_registry.yaml` maßgeblich.
+- Bei einer Analyse von Benchmark-Ergebnissen passende installierte Skills wie `validate-data`, `analyze-data-quality`, `visualize-data` oder `metric-diagnostics` nutzen. Skill-Namen sind nicht mit Harness-Namespace-Präfixen zu versehen.
 
-- Für technische Benchmarkdaten `data-analytics:validate-data`, `data-analytics:analyze-data-quality`, `data-analytics:visualize-data`, `data-analytics:jupyter-notebooks`, `data-analytics:metric-diagnostics` und `mcp__stats_compass` verwenden.
-- Für Reviews und Änderungen `engineering:code-review`, `engineering:debug`, `engineering:testing-strategy`, `codex-engineering-guardrails:code-verification` und `codex-security:security-diff-scan` berücksichtigen.
+## Testlayout
 
-## Tests
-
-Neue Tests liegen in Unterordnern unter `pytest/` und werden bei mehreren Bereichen nach Domäne gegliedert, zum Beispiel `pytest/unit/` oder `pytest/integration/`.
-Laufartefakte gehören ausschließlich nach `pytest/artifacts/`; dieser Pfad ist ignoriert.
-Kein `pytest/__init__.py` anlegen, damit das installierte Pytest-Paket nicht verdeckt wird.
-Verhaltensänderungen erhalten einen fokussierten Test oder einen deterministischen Smoke-Test mit Exitcode und beobachtbarem Ergebnis.
-Windows-Pfade, Prozessaufrufe und MCP-Protokolle werden gegen die reale Zielumgebung geprüft.
-
-## Sicherheit
-
-Keine API-Schlüssel, Tokens, Passwörter, personenbezogenen Daten oder konkreten Umgebungswerte in Dateien, Logs oder Tool-Ausgaben übernehmen.
-Geheimnisse ausschließlich aus Umgebungsvariablen lesen und maskieren.
-Vor Änderungen den Diff prüfen, fremde lokale Änderungen erhalten und wichtige Konfigurationen oder Dokumente vorher sichern.
+- `pyproject.toml` konfiguriert die Testquellen unter `tests/` und `pytest/`; neue Tests dort nach Domäne gliedern.
+- Laufartefakte gehören ausschließlich nach `pytest/artifacts/`; kein `pytest/__init__.py` anlegen.
+- Der vollständige Prüfablauf und die einmalige Einrichtung der Hooks stehen in `.githooks/README.md`.

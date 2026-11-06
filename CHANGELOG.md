@@ -933,3 +933,9 @@ Die Hooks erzeugen CHANGELOG-Eintraege nicht automatisch; dieser Eintrag dokumen
 - **STRUCTURE:** 15 lose `.pytest*`-Ordner aus dem Projektstamm wurden nach `pytest/artifacts/` verschoben. Die 58 Testdateien unter `tests/` und deren Fixture-/Importpfade blieben unverändert.
 - **CONFIG:** `.gitignore`, Ruff- und Mypy-Ausschlüsse schützen jetzt gezielt `pytest/artifacts/`; manuelle Läufe verwenden `--basetemp=pytest\artifacts\manual`.
 - **DOCS:** `pytest/README.md` und `AGENTS.md` dokumentieren die Trennung zwischen `tests/` als Testquelle und `pytest/artifacts/` als ignorierte Laufausgabe.
+
+## Agentenregeln auf Projektdelta reduziert (06.11.2026)
+
+- **DOCS:** `AGENTS.md` enthält nur noch projektspezifische Umgebungs-, Test-, Hook- und Sicherheitsregeln; allgemeine Arbeitsregeln stehen in `$HOME/AGENTS.md`. Der doppelte `## Sicherheit`-Block im Submodul-Checkout entfällt.
+- **SUBMODULE:** `automatisierter Benchmark-Abgleich/external/benchmarks` wird über die Bring-Schuld auf denselben Stand wie das Haupt-Repo gehoben.
+- **VERIFY:** Beide Fassungen sind inhaltlich identisch; die reine Dokumentationsänderung benötigt keinen Testlauf.

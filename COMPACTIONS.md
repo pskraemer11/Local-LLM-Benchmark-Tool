@@ -2492,3 +2492,29 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 
 ## Relevant Files
 - `.github/workflows/actionlint.yml`, `CHANGELOG.md`
+
+============== Compaction 06.11.2026 / 16:58 ==============
+## Objective
+- **Current:** Die Projektdatei `AGENTS.md` auf konkrete Umgebungs-, Test-, Hook- und Sicherheitsregeln reduzieren; allgemeine Arbeitsregeln bleiben in `$HOME/AGENTS.md`.
+- **Completed:** `AGENTS.md` bereinigt, den doppelten `## Sicherheit`-Block im Submodul-Checkout entfernt, CHANGELOG und dieser Block ergänzt.
+
+## Important Details
+- **Trennung:** `$HOME/AGENTS.md` ist die kanonische globale Ebene; diese Datei enthält nur noch projektspezifische Regeln. Der Submodul-Checkout `automatisierter Benchmark-Abgleich/external/benchmarks` ist eine Verbraucherkopie und muss denselben Stand wie `Benchmarks/AGENTS.md` haben.
+- **Submodul:** Die Bereinigung wird im Benchmarks-Repo committet. Der `post-commit`-Hook hebt den Pointer im Elternprojekt automatisch auf den neuen `main`-Stand; der Eltern-Pointer ist erst nach einem Push des Benchmarks-Commits für andere Klone auflösbar.
+- **Sicherung:** Die frühere Fassung liegt unter `AI+IDE-Hints/staging/agents-md-backups/2026-11-06-162620/Benchmarks-AGENTS.md`; die Submodul-Fassung unter `Benchmarks-submodule-AGENTS.md`.
+
+## Work State
+### Completed
+- `AGENTS.md` in Haupt-Repo und Submodul-Checkout angeglichen; `CHANGELOG.md` und dieser Block.
+### Active
+- Commit dieses Stands; der Push bleibt beim Nutzer.
+### Blocked
+- (keine)
+
+## Next Move
+1. Diesen Commit pushen, bevor der Eltern-Pointer weiterverwendet wird.
+2. Danach den Parent-Commit aus der Bring-Schuld prüfen.
+
+## Relevant Files
+- `AGENTS.md`, `CHANGELOG.md`, `COMPACTIONS.md`
+- `automatisierter Benchmark-Abgleich/external/benchmarks/AGENTS.md`
