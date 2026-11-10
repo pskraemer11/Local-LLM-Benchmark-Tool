@@ -6,6 +6,11 @@ Versionierung nach [Semantic Versioning](https://semver.org/lang/de/).
 
 Zentrales Änderungslog für das Local-LLM-Benchmark-Tool. Neueste Einträge zuerst.
 
+## Lizenzwechsel GPLv3 -> MIT (10.11.2026)
+
+- **license:** `GPL_v3_LICENSE.txt` entfernt und durch `LICENSE` ersetzt (MIT, Copyright (c) 2026 pskraemer11); `NOTICE.md` dokumentiert den Stichtag, den GPLv3-Bestand vor diesem Datum und die Kompatibilitaet mit den MIT-lizenzierten Frameworks `inspect_ai` und `inspect_evals`.
+- **docs:** Kein GPL-Hinweis mehr in `pyproject.toml` oder `README.md` vorhanden; die Lizenzsektion des README verweist weiterhin allgemein auf die Lizenzdateien.
+
 ## actionlint-Workflow für `.github/workflows` (01.11.2026)
 
 - **CI:** Neuer Workflow `actionlint.yml` prüft die Workflow-Dateien selbst mit `docker://rhysd/actionlint:1.7.12` (bringt shellcheck und pyflakes mit) bei push und pull_request; Checkout SHA-pinned wie im restlichen Repo (v7.0.1).
