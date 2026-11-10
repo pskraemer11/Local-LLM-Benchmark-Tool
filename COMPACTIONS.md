@@ -2518,3 +2518,47 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 ## Relevant Files
 - `AGENTS.md`, `CHANGELOG.md`, `COMPACTIONS.md`
 - `automatisierter Benchmark-Abgleich/external/benchmarks/AGENTS.md`
+
+============== Compaction 10.11.2026 / 21:25 ================
+## Objective
+- **Current:** Das Benchmarks-Projekt ist von GPLv3 auf MIT umgestellt und der
+  Lizenz-Commit `750973e8` ist gepusht (`a4248420..750973e8`, `main -> main`).
+- **Completed:** `GPL_v3_LICENSE.txt` durch `LICENSE` (MIT, Copyright 2026
+  pskraemer11) ersetzt, `NOTICE.md` mit dem Stichtag der Umstellung angelegt,
+  CHANGELOG-Eintrag ergänzt.
+
+## Important Details
+- **Warum MIT:** `inspect_ai` und `inspect_evals` sind ebenfalls MIT. Das
+  Nachbarprojekt Inspect-Evals übernimmt aus Benchmarks Code (Modell-Identität,
+  Auswahl-Syntax) und Daten (`data/model_registry.yaml`). Unter GPLv3 wäre die
+  Weitergabe an dieses Vorhaben eingeschränkt; mit MIT sind beide Seiten
+  konsistent. inspect_evals selbst bleibt unangetastet (nur Import).
+- **Historie:** Die Umstellung gilt ab diesem Commit. Ältere Commits stehen
+  weiterhin unter GPLv3 - das ist bei einem privaten Repository unkritisch,
+  aber beim Weiterveröffentlichen zu beachten.
+- **Push-Checks bestanden:** 1683 Tests grün, 8 übersprungen; Registry-Validierung
+  0 blockierende Probleme; ruff 0 Probleme; GGUF-Abgleich 0 Abweichungen bei 35
+  Einträgen. Meldungen waren durchweg advisory: 4 Identitäts-Hinweise
+  (`publisherless_identity_ambiguity`), 23 LM-Studio-Configs mit
+  `numParallelSessions != 4`, 41 mypy-Fehler (nur informativ) und ein
+  `lms ls`-Timeout, der auf den Dateisystem-Scan zurückfiel.
+- **Bring-Schuld:** Der `post-commit`-Hook hat den Pointer im Verbraucherprojekt
+  `automatisierter Benchmark-Abgleich` auf `750973e8` gehoben (`61d3ae6`). Das
+  Verbraucherprojekt hat kein Remote, der Zeiger bleibt lokal.
+
+## Work State
+### Completed
+- Lizenzumstellung, `NOTICE.md`, CHANGELOG-Eintrag, Push nach `origin/main`.
+### Active
+- Dieser Doku-Commit; der Push bleibt beim Nutzer.
+### Blocked
+- (keine)
+
+## Next Move
+1. Den neuen Commit pushen, dann den Parent-Pointer im Verbraucherprojekt prüfen.
+2. `C:\Program Files\Llama.cpp.b11177` (Sicherung des alten llama.cpp-Builds)
+   löschen, sobald b12242 bestätigt ist.
+
+## Relevant Files
+- `LICENSE`, `NOTICE.md`, `CHANGELOG.md`, `COMPACTIONS.md`
+- `automatisierter Benchmark-Abgleich/external/benchmarks` (Submodul-Checkout)
