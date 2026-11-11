@@ -2562,3 +2562,55 @@ Compaction-Blöcke werden hier fortlaufend hinten angehängt (Anlass-bezogen ode
 ## Relevant Files
 - `LICENSE`, `NOTICE.md`, `CHANGELOG.md`, `COMPACTIONS.md`
 - `automatisierter Benchmark-Abgleich/external/benchmarks` (Submodul-Checkout)
+
+============== Compaction 11.11.2026 / 10:44 ================
+## Objective
+- **Current:** Die vorbereiteten Aenderungen (explizite lms-Aufloesung,
+  Benchmark-Parallelitaet 3, No-Op-Push-Fix) sind dokumentiert und als Commit
+  auf `main` abgelegt; der Push bleibt beim Nutzer.
+- **Completed:** CHANGELOG-Eintrag, dieser Block, Projektstatus-Update; Gates
+  gruen: `ruff check . --no-fix` 0 Befunde, `python -m pytest -q` 1686
+  bestanden und 8 uebersprungen (inkl. `tests/test_lms_resolution.py`).
+
+## Important Details
+- **Decisions:** Von 4 LM-Studio-Slots bleibt einer fuer den
+  permission-guard-Reviewer frei: die Laufzeit nutzt 3 Worker
+  (`numParallelSessions=3`), `_NP_POLICY` bleibt 4, weil die Kontextberechnung
+  weiter 4 Slots KV-Budget einplant - genau der reservierte Reviewer-Slot.
+  `lms.exe` wird explizit aufgeloest, weil der PATH-Treffer das
+  llmster-Daemon-Bundle ist, das ohne Antwort haengt. Ein leerer
+  pre-push-stdin (No-Op-Push) blockiert nicht mehr.
+- **Commit-Umfang:** Nur die 15 vorbereiteten Dateien; `.gitignore` (M) und
+  `.gitattributes` (untracked) bleiben uncommitted. Das .gitignore-Diff nimmt
+  `data/model_registry.yaml` aus der Ignore-Liste - die Registry bleibt
+  trotzdem uncommitted; ob "ignoriert & lokal" weiter gilt, ist offen.
+- **Nachbarprojekt:** Die llama.cpp-Serie (b12242, 8 Modelle) ist in
+  Inspect-Evals fertig: "Batch fertig: 8 Modelle, 0 mit Fehlern". rnj-1 und
+  Falcon3-10B haben korrekt nur 7 Tasks (kein mmproj, `mathvista` planmaessig
+  uebersprungen).
+
+## Work State
+### Completed
+- Doku ergaenzt und Commit erstellt; alle Gates gruen.
+### Active
+- (keine)
+### Blocked
+- Push durch den Nutzer.
+
+## Next Move
+1. Commit pushen; danach den Parent-Pointer im Verbraucherprojekt pruefen.
+2. Inspect-Evals: Ergebnisse der Serie konsolidieren (logs/eval rekursiv
+   einlesen) und alte Temperatur-1.0-Laeufe (logs/archiv) nicht mischen.
+3. Entscheiden: bleibt `data/model_registry.yaml` ignoriert & lokal, oder ist
+   die .gitignore-Aenderung die neue Policy?
+
+## Relevant Files
+- `src/registry_tool.py`, `src/privacy_gate.py`: lms-Aufloesung, No-Op-Push-Fix
+- `src/run_benchmarks.py`, `src/custom_benchmark.py`,
+  `src/providers/llama_cpp_provider.py`, `src/field_owner.py`,
+  `pre_review_checks.ps1`, `docs/Developer-Docs/LM-Studio-API-References.md`,
+  `tests/`: np 4 -> 3 inkl. Erwartungen
+- `CHANGELOG.md`, `COMPACTIONS.md`, `Projektstatus.md`: Doku
+
+## Important Context
+- Generelle Arbeitsregeln in `$HOME/AGENTS.md`; Projektregeln in `AGENTS.md`.

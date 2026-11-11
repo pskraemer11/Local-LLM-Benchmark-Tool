@@ -2751,7 +2751,7 @@ def _run_model_loop(models: list[dict[str, Any]], benchmarks: list[dict[str, Any
                 res, avg_s, avg_l, avg_t, cs = benchmark_model(
                     model_info, tasks, tt, bench["name"], monitor,
                     is_quiet_mode=non_interactive,
-                    num_parallel=1 if sample_size <= 5 else 4,
+                    num_parallel=1 if sample_size <= 5 else 3,
                 )
             except Exception as e:
                 error(f"Benchmark {bench['name']} completely failed: {e}")

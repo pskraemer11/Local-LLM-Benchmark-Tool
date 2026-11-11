@@ -270,8 +270,8 @@ if (-not (Test-Path -LiteralPath $changelog)) {
     }
 }
 
-# LM Studio runtime-config check: numParallelSessions should remain 4
-# (benchmark num_parallel is a separate launcher policy).
+# LM Studio runtime-config check: numParallelSessions should remain 3
+# (3 Benchmark-Slots; der vierte Slot bleibt fuer den permission-guard-Reviewer).
 $cfgRoot = Join-Path $env:USERPROFILE ".lmstudio\.internal\user-concrete-model-default-config"
 $npWarnings = 0
 if (Test-Path $cfgRoot) {
@@ -281,8 +281,8 @@ if (Test-Path $cfgRoot) {
             $data = Get-Content $_.FullName -Raw | ConvertFrom-Json
             $loadFields = $data.load.fields
             foreach ($f in $loadFields) {
-                if ($f.key -eq "llm.load.numParallelSessions" -and $f.value -ne 4) {
-                    Write-Host "  [WARN] np=$($f.value) (nicht 4): $($_.Name)" -ForegroundColor Yellow
+                if ($f.key -eq "llm.load.numParallelSessions" -and $f.value -ne 3) {
+                    Write-Host "  [WARN] np=$($f.value) (nicht 3): $($_.Name)" -ForegroundColor Yellow
                     $npWarnings++
                 }
             }
@@ -290,9 +290,9 @@ if (Test-Path $cfgRoot) {
     }
 }
 if ($npWarnings -eq 0) {
-    Write-Host "  LM Studio runtime-config numParallelSessions: Alle Configs haben 4." -ForegroundColor Green
+    Write-Host "  LM Studio runtime-config numParallelSessions: Alle Configs haben 3." -ForegroundColor Green
 } else {
-    Write-Host "  [WARN] $npWarnings Configs mit numParallelSessions!=4 gefunden (sollten auf 4 gesetzt werden)." -ForegroundColor Yellow
+    Write-Host "  [WARN] $npWarnings Configs mit numParallelSessions!=3 gefunden (sollten auf 3 gesetzt werden)." -ForegroundColor Yellow
     $warnings++
 }
 

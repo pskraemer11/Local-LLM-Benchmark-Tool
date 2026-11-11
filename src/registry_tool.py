@@ -443,27 +443,90 @@ def load_lms_json(path: str | Path) -> list[Any]:
     return data
 
 
-def _run_lms_ls() -> list[dict[str, Any]]:
-    try:
-        r = subprocess.run(["lms", "ls", "--json"], capture_output=True, text=True, timeout=15)
-        if r.returncode == 0:
-            data = json.loads(r.stdout)
-            return data if isinstance(data, list) else list(data.values())
-        stderr = r.stderr.strip()
-    except FileNotFoundError:
-        stderr = "lms.exe not found"
-    except subprocess.TimeoutExpired:
-        stderr = "lms ls timed out"
+def _lms_executables() -> list[Path]:
+    """Return the lms.exe binaries to try, most reliable first.
 
-    print(f"[INFO] lms ls fehlgeschlagen ({stderr}) - versuche Server-Start...")
+    Measured on this machine (10.11.2026):
+
+    - ``~\\.lmstudio\\bin\\lms.exe`` (and the application CLI below
+      ``%LOCALAPPDATA%``) answer even when the LM Studio application is not
+      running.
+    - The llmster daemon bundle that the PATH resolves to
+      (``~\\.lmstudio\\llmster\\<version>\\.bundle\\lms.exe``) speaks an
+      incompatible RPC protocol and hangs without an answer.
+
+    The PATH copy is therefore the last resort; the sibling project's
+    ``automation/list-models.ps1`` measured the same behaviour.
+    """
+    home = Path.home()
+    candidates: list[Path] = [
+        Path(os.environ.get("LOCALAPPDATA", ""))
+        / "Programs"
+        / "LM Studio"
+        / "resources"
+        / "app"
+        / ".webpack"
+        / "lms.exe",
+        home / ".lmstudio" / "bin" / "lms.exe",
+    ]
+    llmster_root = home / ".lmstudio" / "llmster"
+    if llmster_root.is_dir():
+        for bundle in sorted(llmster_root.glob("*/.bundle/lms.exe"), reverse=True):
+            if bundle.parent.parent.name == "bootstrap-staging":
+                continue
+            candidates.append(bundle)
+    which = shutil.which("lms")
+    if which:
+        candidates.append(Path(which))
+
+    unique: list[Path] = []
+    for candidate in candidates:
+        if candidate.is_file() and candidate not in unique:
+            unique.append(candidate)
+    return unique
+
+
+def _lms_ls_json(binary: Path, timeout: int) -> tuple[list[dict[str, Any]] | None, str]:
+    """Run ``lms ls --json`` with one binary and return the parsed rows."""
+    try:
+        result = subprocess.run(
+            [str(binary), "ls", "--json"], capture_output=True, text=True, timeout=timeout
+        )
+    except FileNotFoundError:
+        return None, "lms.exe not found"
+    except subprocess.TimeoutExpired:
+        return None, f"{binary.name} timed out"
+    if result.returncode != 0:
+        return None, result.stderr.strip() or f"{binary.name} exited with {result.returncode}"
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None, f"{binary.name} returned invalid JSON"
+    if isinstance(data, list):
+        return [row for row in data if isinstance(row, dict)], ""
+    if isinstance(data, dict):
+        return [row for row in data.values() if isinstance(row, dict)], ""
+    return None, f"{binary.name} returned an unexpected payload"
+
+
+def _run_lms_ls() -> list[dict[str, Any]]:
+    last_error = "no lms.exe found"
+    for binary in _lms_executables():
+        rows, error = _lms_ls_json(binary, timeout=30)
+        if rows is not None:
+            return rows
+        last_error = error
+        print(f"[INFO] {binary} nicht verwendbar ({error})")
+
+    print(f"[INFO] lms ls fehlgeschlagen ({last_error}) - versuche Server-Start...")
     try:
         from model_manager import _is_lmstudio_running
 
         if _is_lmstudio_running():
-            r = subprocess.run(["lms", "ls", "--json"], capture_output=True, text=True, timeout=15)
-            if r.returncode == 0:
-                data = json.loads(r.stdout)
-                return data if isinstance(data, list) else list(data.values())
+            for binary in _lms_executables():
+                rows, _error = _lms_ls_json(binary, timeout=30)
+                if rows is not None:
+                    return rows
     except Exception as e:
         print(f"[WARN] Server-Start fehlgeschlagen: {e}")
 
@@ -1371,8 +1434,10 @@ def cmd_fmt() -> None:
 # ── fill-ctx command ───────────────────────────────────────────────
 
 
-# Feste Benchmark-Policy: np=1 bei SampleSize <= 5, sonst 4.
-# Die Kontextberechnung rechnet mit der Standard-Benchmark-Konfiguration (np=4).
+# Feste Benchmark-Policy: die Laufzeit nutzt np=1 bei SampleSize <= 5, sonst 3
+# (ein LM-Studio-Slot bleibt fuer den permission-guard-Reviewer frei). Die
+# Kontextberechnung plant weiterhin 4 Slots KV-Budget: das ist genau der
+# reservierte Slot des Reviewers und haelt den Kontext je Slot konservativ.
 _NP_POLICY = 4
 
 
@@ -2742,8 +2807,8 @@ def _compute_ukv(
 ) -> tuple[bool, int]:
     """Compute optimal useUnifiedKvCache and context_length based on VRAM budget.
 
-    Seit 13.08.: num_parallel ist eine feste Benchmark-Policy (SS<=5 → 1, sonst 4),
-    kein Registry-Feld. Vom verfügbaren Speicher, der Kontextlänge und der
+    Seit 13.08.: num_parallel ist eine feste Benchmark-Policy (SS<=5 → 1, sonst 3,
+    ein Slot bleibt fuer den permission-guard-Reviewer frei), kein Registry-Feld. Vom verfügbaren Speicher, der Kontextlänge und der
     KV-Quantisierung abhängig ist nur UKV — nicht np. Die Kontextberechnung
     geht daher von der Standard-Benchmark-Konfiguration (np=_NP_POLICY) aus.
 

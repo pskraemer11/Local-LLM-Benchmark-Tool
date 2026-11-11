@@ -6,6 +6,32 @@ Versionierung nach [Semantic Versioning](https://semver.org/lang/de/).
 
 Zentrales Änderungslog für das Local-LLM-Benchmark-Tool. Neueste Einträge zuerst.
 
+## lms-Aufloesung, Benchmark-Parallelitaet 3 und No-Op-Push-Fix (11.11.2026)
+
+- **fix:** `src/registry_tool.py` loest `lms.exe` explizit auf statt ueber den
+  PATH: zuerst die App-CLI unter `%LOCALAPPDATA%\Programs\LM Studio` und
+  `$HOME\.lmstudio\bin\lms.exe`, dann llmster-Bundles unter
+  `$HOME\.lmstudio\llmster`, zuletzt der PATH-Treffer. Gemessen am
+  10.11.2026: das PATH-Bundle (llmster-Daemon) spricht ein inkompatibles
+  RPC-Protokoll und bleibt ohne Antwort haengen; jeder Kandidat wird einzeln
+  mit 30 s Timeout geprueft.
+- **policy:** Benchmark-Parallelitaet bei SampleSize > 5 von 4 auf 3 Worker
+  gesenkt (`src/run_benchmarks.py`, `src/custom_benchmark.py`,
+  `src/providers/llama_cpp_provider.py` inkl. Warntext). Der vierte
+  LM-Studio-Slot bleibt fuer den permission-guard-Reviewer reserviert.
+  `_NP_POLICY` bleibt 4: die Kontextberechnung plant weiterhin 4 Slots
+  KV-Budget - genau den reservierten Reviewer-Slot.
+- **fix:** `src/privacy_gate.py` blockiert nicht mehr, wenn Git den
+  pre-push-Hook bei einem No-Op-Push mit leerem stdin aufruft; dann erscheint
+  "Nothing to push" statt einer Blockade.
+- **tests:** `tests/test_run_benchmarks.py`, `tests/test_provider_architecture.py`
+  und `tests/test_assemble_blueprint.py` auf np=3 angepasst; neu
+  `tests/test_lms_resolution.py` mit 3 Tests zur Kandidaten-Aufloesung.
+- **docs/hooks:** np-Erwartung 4 -> 3 in `src/field_owner.py`,
+  `pre_review_checks.ps1` und `docs/Developer-Docs/LM-Studio-API-References.md`.
+- **VERIFY:** `ruff check . --no-fix` 0 Befunde; `python -m pytest -q`
+  1686 bestanden, 8 uebersprungen.
+
 ## Lizenzwechsel GPLv3 -> MIT (10.11.2026)
 
 - **license:** `GPL_v3_LICENSE.txt` entfernt und durch `LICENSE` ersetzt (MIT, Copyright (c) 2026 pskraemer11); `NOTICE.md` dokumentiert den Stichtag, den GPLv3-Bestand vor diesem Datum und die Kompatibilitaet mit den MIT-lizenzierten Frameworks `inspect_ai` und `inspect_evals`.

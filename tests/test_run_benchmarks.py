@@ -264,9 +264,9 @@ class TestModelHelpers:
         assert _resolve_num_parallel(1) == 1
         assert _resolve_num_parallel(5) == 1
 
-    def test_num_parallel_uses_four_workers_above_small_sample_threshold(self):
-        assert _resolve_num_parallel(6) == 4
-        assert _resolve_num_parallel(20) == 4
+    def test_num_parallel_uses_three_workers_above_small_sample_threshold(self):
+        assert _resolve_num_parallel(6) == 3
+        assert _resolve_num_parallel(20) == 3
 
     def test_num_parallel_respects_provider_capability(self):
         context = MagicMock()
@@ -276,7 +276,7 @@ class TestModelHelpers:
     def test_num_parallel_ignores_invalid_provider_capability(self):
         context = MagicMock()
         context.capabilities.max_parallel = 0
-        assert _resolve_num_parallel(20, context) == 4
+        assert _resolve_num_parallel(20, context) == 3
 
     def test_model_short_name_basic(self):
         assert _model_short_name("plain-model") == "plain-model"

@@ -117,7 +117,7 @@ class LlamaCppProvider(HttpProvider):
         can_report_current_model=True,
         supports_chat_completions=True,
         supports_completions=True,
-        max_parallel=4,
+        max_parallel=3,
     )
 
     def __init__(
@@ -161,7 +161,7 @@ class LlamaCppProvider(HttpProvider):
                     max_parallel=max(1, int(max_parallel)),
                 )
             except ValueError:
-                    warn(f"Ungültiges LLAMA_CPP_MAX_PARALLEL={max_parallel!r}; verwende 4.")
+                    warn(f"Ungültiges LLAMA_CPP_MAX_PARALLEL={max_parallel!r}; verwende 3.")
 
     def list_models(
         self,

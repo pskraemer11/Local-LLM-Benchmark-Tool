@@ -41,7 +41,7 @@ def test_provider_factory_selects_direct_llama_cpp_provider(monkeypatch: pytest.
     assert provider.base_url == "http://127.0.0.1:18080/v1"
     assert provider.capabilities.can_load_models is True
     assert provider.capabilities.can_unload_models is True
-    assert provider.capabilities.max_parallel == 4
+    assert provider.capabilities.max_parallel == 3
 
 
 def test_direct_llama_cpp_uses_local_auth_token(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -61,7 +61,7 @@ def test_provider_context_owns_client_endpoint_and_capabilities(monkeypatch: pyt
     assert context.name == "llama_cpp"
     assert context.base_url == "http://127.0.0.1:18083/v1"
     assert context.client is model_manager.get_provider()
-    assert context.capabilities.max_parallel == 4
+    assert context.capabilities.max_parallel == 3
 
 
 def test_provider_specific_api_base_aliases(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -33,7 +33,7 @@ Collected: 2026-08-11.
 
 ### Key Finding
 
-**`load_config.parallel`** — The actual number of parallel slots used by LM Studio (e.g., 4). This is determined by the JSON config file's `numParallelSessions` value, not by the API payload. In the benchmark suite, the canonical value is derived from `model_registry.yaml` + GGUF metadata and mirrored into LM Studio runtime artifacts when needed.
+**`load_config.parallel`** — The actual number of parallel slots used by LM Studio (e.g., 3). This is determined by the JSON config file's `numParallelSessions` value, not by the API payload. The benchmark uses three of the four slots; the fourth stays free for the permission-guard reviewer.
 
 ---
 
@@ -141,7 +141,7 @@ The following parameters are **exclusively** set via LM Studio JSON config files
   },
   "load": {
     "fields": [
-      {"key": "llm.load.numParallelSessions", "value": 4},
+      {"key": "llm.load.numParallelSessions", "value": 3},
       {"key": "llm.load.useUnifiedKvCache", "value": true},
       {"key": "llm.load.contextLength", "value": 32768},
       {"key": "llm.load.llama.kCacheQuantizationType", "value": {"checked": true, "value": "q5_1"}},

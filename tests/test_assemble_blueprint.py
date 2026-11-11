@@ -387,7 +387,7 @@ class TestReadLmsConfigsCaching:
                         "fields": [
                             {"key": "llm.load.contextLength", "value": 131072},
                             {"key": "llm.load.useUnifiedKvCache", "value": True},
-                            {"key": "llm.load.numParallelSessions", "value": 4},
+                            {"key": "llm.load.numParallelSessions", "value": 3},
                         ]
                     },
                 }
@@ -401,7 +401,7 @@ class TestReadLmsConfigsCaching:
         assert config["sampling"] == {"temperature": 0.7, "top_k": 40, "top_p": 0.95}
         assert config["context_length"] == 131072
         assert config["use_unified_kv"] is True
-        assert config["num_parallel"] == 4
+        assert config["num_parallel"] == 3
 
     def test_reads_speculative_mtp_and_drafter_fields_as_bundle_runtime(self, tmp_path):
         cfg_dir = tmp_path / "user-concrete-model-default-config" / "unsloth" / "gemma-4"

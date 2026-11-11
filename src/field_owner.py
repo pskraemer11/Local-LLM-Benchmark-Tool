@@ -13,7 +13,8 @@ auto_fix=True nur bei unveraenderlichen Quellen (gguf): Abweichungen werden
 automatisch aus der Quelle in die Registry geschrieben.
 
 Wichtige Felder:
-  - num_parallel: KEIN Registry-Feld mehr (feste Policy: SS<=5 -> 1, sonst 4)
+  - num_parallel: KEIN Registry-Feld mehr (feste Policy: SS<=5 -> 1, sonst 3;
+    ein LM-Studio-Slot bleibt fuer den permission-guard-Reviewer frei)
   - useUnifiedKvCache: Formel (>= 12 GB -> True) + Ausnahmen
     (gemma-4, kimi-linear, gpt-oss -> immer True, vertragen keine KV-Quant)
   - context_length: Registry-SSOT (Benchmark-Wert, <= GGUF-Native-Max)

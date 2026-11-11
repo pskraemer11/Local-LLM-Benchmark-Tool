@@ -612,10 +612,11 @@ def _resolve_num_parallel(sample_size: int, provider_context: ProviderContext | 
 
     ``num_parallel`` is a fixed benchmark policy, not a Registry field.
     Small runs use one client worker because setup overhead dominates; larger
-    runs use four workers.  The selected provider may lower that request when
-    it advertises a smaller safe concurrency limit.
+    runs use three workers, so that one of the four LM Studio slots stays free
+    for the permission-guard reviewer. The selected provider may lower that
+    request when it advertises a smaller safe concurrency limit.
     """
-    desired = 1 if sample_size <= 5 else 4
+    desired = 1 if sample_size <= 5 else 3
     capabilities = (
         provider_context.capabilities
         if provider_context is not None

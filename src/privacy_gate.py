@@ -166,7 +166,15 @@ def _check_outgoing_content(commits: Sequence[str]) -> None:
 
 
 def check_before_push(push_input: bytes) -> None:
-    """Check identities, commit messages, and added content for every pushed ref."""
+    """Check identities, commit messages, and added content for every pushed ref.
+
+    Git also runs the pre-push hook when there is nothing to push; then stdin
+    is empty. Nothing is published in that case, so the check is skipped
+    instead of blocking an already synchronised branch.
+    """
+    if not push_input.strip():
+        print("[PRIVACY GATE] Nothing to push; no outgoing commits to check.")
+        return
     updates = _parse_push_updates(push_input)
     commits = _outgoing_commits(updates)
     _check_outgoing_identities_and_messages(commits)
