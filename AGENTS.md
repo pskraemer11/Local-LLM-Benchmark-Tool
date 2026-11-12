@@ -72,7 +72,7 @@ Last change: 6th Nov 2026
     mit `-SkipPytest` (keine doppelte Ausführung), `-NoArtifacts` und `-NoTranscript`
     sowie anschließend den fokussierten blockierenden mypy-Scope;
     die dabei erzeugten Artefakte bleiben temporär, weil der Commit beim Pre-Push bereits erstellt ist.
-- `--no-verify` ist nur für dokumentierte Notfälle zulässig; die übersprungenen Prüfungen müssen vor dem Push manuell nachgeholt werden.
+- `--no-verify` nur mit ausdrücklicher Freigabe im Auftrag; übersprungene Prüfungen danach nachholen.
 - Die vollständige lokale Suite und GitHub Actions bleiben unabhängige zweite und dritte Schutzebenen;
     ein lokaler Hook ersetzt keine CI-Prüfung.
 
