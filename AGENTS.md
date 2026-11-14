@@ -51,6 +51,7 @@ Last change: 6th Nov 2026
   CHANGELOG = „was", Compaction = „warum/next". Nur per Write/Edit-Tool schreiben.
 
 - Lint/Typecheck: `ruff check` (config: `pyproject.toml`; ANN-Regeln aktiv).
+- Hook-Skripte und Gate-Konfigurationen müssen LF haben; nach Werkzeugläufen `grep` auf CR prüfen.
 - Pytest-Artefakte gehören unter `pytest/artifacts/`; keine neuen `.pytest-*`-Ordner im Projektstamm anlegen.
 - Vor Commit: Ruff-Cleanliness für geänderte `src/`-Dateien sicherstellen.
 - `utils/` ist fremder Code und bleibt untracked.
