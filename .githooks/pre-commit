@@ -1,6 +1,238 @@
-#!/bin/sh
-set -eu
+#!/usr/bin/env bash
+# ---------------------------------------------------------------------------
+# pre-commit — Secret-Scan (gitleaks) + Privacy-Guard
+#
+# Vorlage:  ~/.agents/references/githooks/pre-commit
+# Aktivierung im Repo:
+#   cp ~/.agents/references/githooks/pre-commit .githooks/
+#   git config core.hooksPath .githooks
+#
+# Notausstieg nur bei dokumentiertem Notfall: git commit --no-verify
+# ---------------------------------------------------------------------------
+set -u
 
-repo_root="$(git rev-parse --show-toplevel)"
-exec pwsh -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass \
-  -File "$repo_root/.githooks/pre_commit.ps1" "$@"
+# --- 1) Secret-Scan auf den gestagten Aenderungen --------------------------
+# Adressen werden aus der Ausgabe entfernt: gitleaks zeigt sonst die
+# Autor-/Committer-E-Mail an und verletzt damit die Privacy-Regel.
+_sanitize() {
+  sed -E 's/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+[.][A-Za-z]{2,}/<adresse-entfernt>/g'
+}
+
+GITLEAKS_BIN="${GITLEAKS_BIN:-gitleaks}"
+if ! command -v "$GITLEAKS_BIN" >/dev/null 2>&1; then
+  for cand in \
+    "${LOCALAPPDATA:-$HOME/AppData/Local}/Microsoft/WinGet/Links/gitleaks.exe" \
+    "$HOME/AppData/Local/Microsoft/WinGet/Links/gitleaks.exe"
+  do
+    if [ -x "$cand" ]; then GITLEAKS_BIN="$cand"; break; fi
+  done
+fi
+
+if command -v "$GITLEAKS_BIN" >/dev/null 2>&1; then
+  set +e
+  _out=$("$GITLEAKS_BIN" git --staged --redact --no-banner --no-color --exit-code 1 -v 2>&1)
+  _rc=$?
+  set -e
+  if [ "$_rc" -ne 0 ]; then
+    echo "" >&2
+    echo "COMMIT BLOCKIERT - gitleaks hat ein moegliches Secret gefunden." >&2
+    printf '%s\n' "$_out" | _sanitize | sed -n '1,40p' | sed 's/^/  /' >&2
+    echo "" >&2
+    echo "  Naechster Schritt: Details mit 'gitleaks git --staged -v' pruefen." >&2
+    echo "  Echter Treffer: Secret entfernen und rotieren." >&2
+    echo "  Fehlalarm: Fingerprint in .gitleaksignore oder Zeile mit 'gitleaks:allow'." >&2
+    exit 1
+  fi
+else
+  echo "pre-commit: gitleaks nicht gefunden - Secret-Scan uebersprungen." >&2
+  echo "  Installation: winget install Gitleaks.Gitleaks" >&2
+fi
+
+# --- 2) Privacy-Guard: verbotene E-Mail-Domains ----------------------------
+# Die Muster werden zur Laufzeit zusammengesetzt, damit diese Datei die
+# Domains nicht im Klartext enthaelt (sonst blockiert sie sich selbst).
+_cc='de'
+_names='posteo|online|e-mail'
+# Nur echte Adressen (mit @). Eine reine Domain-Nennung - etwa in einer
+# gescrapten URL wie www.firma-online.de - ist kein Adressleck.
+_pat="[A-Za-z0-9._%+-]+@(${_names})[.]${_cc}"
+
+_violations=""
+while IFS= read -r -d '' _file; do
+  [ -f "$_file" ] || continue
+  if git diff --cached -U0 --diff-filter=ACMR -- "$_file" \
+       | grep -E '^\+' | grep -vE '^\+\+\+' | grep -Eiq "$_pat"; then
+    _violations="${_violations}    ${_file}"$'\n'
+  fi
+done < <(git diff --cached --name-only -z --diff-filter=ACMR)
+
+if [ -n "$_violations" ]; then
+  echo "" >&2
+  echo "COMMIT BLOCKIERT - verbotene E-Mail-Domain in einer hinzugefuegten Zeile." >&2
+  printf '%s' "$_violations" >&2
+  echo "  Die Adresse selbst wird absichtlich nicht ausgegeben." >&2
+  exit 1
+fi
+
+# --- 3) Skill-Urteilsdatei (Bring-Schuld des Skill-Repos, 05.11.2026) ------
+# Nur im Skill-Repo vorhanden: dort liegen references/scripts/skill-verdicts.mjs
+# und skill-reviews/verdicts.json. Sind Skill-Dateien gestaged, wird die
+# Urteilsdatei aus dem Arbeitsbaum neu berechnet und mitgestaged.
+#
+# Zwei Faelle werden abgelehnt, weil die Datei sonst einen Stand beschriebe,
+# der nicht im Commit ist: nicht versionierte Python-Dateien unter skills/ und
+# Python-Aenderungen, die noch nicht gestaged sind. Andere Dateitypen gehen
+# nicht in die Hashes ein und blockieren deshalb nicht.
+#
+# Eine Freigabe bleibt nur bei unveraenderten Hashes bestehen; sonst faellt
+# der Eintrag sichtbar auf "ask" zurueck (Zeile "zurueckgesetzt").
+_verdicts_tool="references/scripts/skill-verdicts.mjs"
+_verdicts_db="skill-reviews/verdicts.json"
+if [ -f "$_verdicts_tool" ] && [ -f "$_verdicts_db" ] \
+   && git diff --cached --name-only --diff-filter=ACMRD -- skills/ | grep -q .; then
+  if ! command -v node >/dev/null 2>&1; then
+    echo "" >&2
+    echo "COMMIT BLOCKIERT - node fehlt, Urteilsdatei kann nicht geprueft werden." >&2
+    exit 1
+  fi
+
+  _untracked=$(git ls-files --others --exclude-standard -- skills/ | grep -E '[.]py$' | head -n 5)
+  if [ -n "$_untracked" ]; then
+    echo "" >&2
+    echo "COMMIT BLOCKIERT - nicht versionierte Python-Dateien unter skills/." >&2
+    printf '%s\n' "$_untracked" | sed 's/^/  /' >&2
+    echo "  Sie gehoeren nicht zum Commit, wuerden aber in die Hashes eingehen." >&2
+    echo "  Naechster Schritt: git add skills/ oder die Dateien ignorieren." >&2
+    exit 1
+  fi
+
+  _unstaged=$(git diff --name-only -- skills/ | grep -E '[.]py$' | head -n 5)
+  if [ -n "$_unstaged" ]; then
+    echo "" >&2
+    echo "COMMIT BLOCKIERT - Python-Aenderungen unter skills/ sind nicht vollstaendig gestaged." >&2
+    printf '%s\n' "$_unstaged" | sed 's/^/  /' >&2
+    echo "  Die Urteilsdatei wuerde sonst einen Stand beschreiben, der nicht im Commit ist." >&2
+    echo "  Naechster Schritt: git add skills/" >&2
+    exit 1
+  fi
+
+  node "$_verdicts_tool" --refresh --skills skills --out "$_verdicts_db" --write
+  if [ $? -ne 0 ]; then
+    echo "" >&2
+    echo "COMMIT BLOCKIERT - Urteilsdatei konnte nicht aktualisiert werden." >&2
+    exit 1
+  fi
+  git add "$_verdicts_db"
+fi
+
+# --- 3b) Projektlokaler Zusatz (optional) ----------------------------------
+# Die Datei ist projektspezifisch und nicht Teil dieser Vorlage. Sie laeuft
+# nach den gemeinsamen Pruefungen und vor dem Test-Gate, damit erzeugte
+# Dateien noch in denselben Commit wandern koennen.
+if [ -f .githooks/pre-commit.local ]; then
+  . .githooks/pre-commit.local || exit 1
+fi
+
+# --- 4) Test-Gate (optional, pro Repo konfiguriert) -------------------------
+# Gesteuert ueber .githooks/test-gate.conf im Repo, ein Schluessel=Wert je
+# Zeile ('#' beginnt einen Kommentar):
+#
+#   prefixes=src/ tests/ contrib/ scripts/
+#   python=.venv/Scripts/python.exe
+#   lint=uvx ruff check .
+#   test={python} -m pytest -q
+#
+# Fehlt die Datei, ist das Gate aus; die Vorlage bleibt sprachneutral.
+# Die Praefix-Pruefung entscheidet nur, OB Lint und Tests laufen, nie WELCHE:
+# die Testmenge bleibt vollstaendig und kann deshalb keinen Fehler verdecken.
+# Details: ~/.agents/references/githooks/README.md, Abschnitt "Test-Gate".
+_gate_mode="staged"
+_gate_label="COMMIT"
+_gate_conf=".githooks/test-gate.conf"
+if [ "${GITHOOKS_TEST_GATE:-1}" = "0" ]; then
+  echo "Test-Gate: GITHOOKS_TEST_GATE=0 - uebersprungen."
+elif [ -f "$_gate_conf" ]; then
+  # CRLF macht das Gate still: der letzte Wert endet auf \r, das Praefix passt
+  # nicht mehr und der Testbefehl heisst "...\r". Dann lieber abbrechen.
+  # case statt grep: die Git-Bash-Grep findet ein CR in der Datei nicht.
+  _gate_head="$(cat "$_gate_conf")"
+  case "$_gate_head" in
+    *$'\r'*)
+      echo "" >&2
+      echo "${_gate_label} BLOCKIERT - $_gate_conf enthaelt CRLF-Zeilenenden." >&2
+      echo "  Das Gate wuerde still ueberspringen oder einen Befehl mit '\\r' starten." >&2
+      echo "  Fix: Datei auf LF umstellen (Editor; .gitattributes: .githooks/* text eol=lf)." >&2
+      exit 1
+      ;;
+  esac
+  unset _gate_head
+  set +e
+  _gate_prefixes=""
+  _gate_python=""
+  _gate_lint=""
+  _gate_test=""
+  while IFS= read -r _line; do
+    case "$_line" in ''|'#'*) continue ;; esac
+    _key=${_line%%=*}
+    _val=${_line#*=}
+    case "$_key" in
+      prefixes) _gate_prefixes="$_val" ;;
+      python)   _gate_python="$_val" ;;
+      lint)     _gate_lint="$_val" ;;
+      test)     _gate_test="$_val" ;;
+    esac
+  done < "$_gate_conf"
+
+  if [ -z "$_gate_python" ] || [ ! -x "$_gate_python" ]; then
+    _gate_python=$(command -v python || command -v python3 || true)
+  fi
+
+  case "$_gate_lint $_gate_test" in
+    *'{python}'*)
+      if [ -z "$_gate_python" ]; then
+        echo "" >&2
+        echo "${_gate_label} BLOCKIERT - kein Python-Interpreter gefunden." >&2
+        echo "  Erwartet: python im PATH oder python= in $_gate_conf." >&2
+        exit 1
+      fi
+      ;;
+  esac
+
+  _gate_lint=${_gate_lint//\{python\}/$_gate_python}
+  _gate_test=${_gate_test//\{python\}/$_gate_python}
+
+  _gate_needed=0
+  if [ "$_gate_mode" = "all" ]; then
+    _gate_needed=1
+  else
+    while IFS= read -r -d '' _file; do
+      for _p in $_gate_prefixes; do
+        case "$_file" in "$_p"*) _gate_needed=1; break ;; esac
+      done
+      [ "$_gate_needed" -eq 1 ] && break
+    done < <(git diff --cached --name-only -z --diff-filter=ACMR)
+  fi
+
+  if [ "$_gate_needed" -eq 0 ]; then
+    echo "Test-Gate: keine passenden Pfade gestaged - uebersprungen."
+  elif [ -z "$_gate_lint" ] && [ -z "$_gate_test" ]; then
+    echo "Test-Gate: weder lint noch test konfiguriert - uebersprungen." >&2
+  else
+    _gate_failed=0
+    for _cmd in "$_gate_lint" "$_gate_test"; do
+      [ -n "$_cmd" ] || continue
+      echo "Test-Gate: $_cmd"
+      sh -c "$_cmd"
+      [ $? -eq 0 ] || _gate_failed=1
+    done
+    if [ "$_gate_failed" -ne 0 ]; then
+      echo "" >&2
+      echo "${_gate_label} BLOCKIERT - Test-Gate fehlgeschlagen." >&2
+      echo "  Konfiguration: $_gate_conf" >&2
+      echo "  Notausstieg nur bei dokumentiertem Notfall: --no-verify" >&2
+      exit 1
+    fi
+  fi
+fi
+
+exit 0
